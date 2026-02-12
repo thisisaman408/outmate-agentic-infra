@@ -33,6 +33,7 @@ class ExploriumService:
 
     @staticmethod
     def _map_filters(frontend_filters: Dict[str, Any]) -> Dict[str, Any]:
+        print(f">>> [ExploriumService] _map_filters called with: {frontend_filters}", flush=True)
         mapped: Dict[str, Any] = {}
 
         def values_of(key: str) -> Optional[List[str]]:
@@ -51,22 +52,22 @@ class ExploriumService:
                 s = s.lower()
             return [s]
 
-        # Whitelist only filters allowed by the Fetch Businesses endpoint
-        # Other identifiers (name/domain) are supported via the Match endpoint
+        # Whitelist only filters allowed by Fetch Businesses endpoint
+        # Other identifiers (name/domain) are supported via Match endpoint
         mapping = {
             "business_id": "business_id",
             "country_code": "country_code",
             "company_size": "company_size",
             "google_category": "google_category",
             "naics_category": "naics_category",
-            "name": "name",
-            "company_name": "name",
             "website": "domain",
             "domain": "domain",
+            "employee_count": "company_size",  # Map frontend employee_count to company_size
+            "industry": "google_category",     # Map frontend industry to google_category
         }
 
         # Enforce single category filter (Explorium requirement)
-        category_keys = ["google_category", "naics_category", "categories"]
+        category_keys = ["google_category", "naics_category", "categories", "industry"]
         chosen_category: Optional[str] = None
         for ck in category_keys:
             if values_of(ck):
@@ -78,8 +79,47 @@ class ExploriumService:
                 continue
             vals = values_of(src)
             if vals:
-                mapped[dst] = {"values": vals}
+                # Special handling for employee_count range
+                if src == "employee_count" and len(vals) == 1 and isinstance(vals[0], str):
+                    # Convert range like "50-200" to appropriate company_size
+                    range_str = vals[0]
+                    if "-" in range_str:
+                        min_val, max_val = map(int, range_str.split("-"))
+                        if max_val <= 10:
+                            mapped[dst] = {"values": ["1-10"]}
+                        elif max_val <= 50:
+                            mapped[dst] = {"values": ["11-50"]}
+                        elif max_val <= 200:
+                            mapped[dst] = {"values": ["51-200"]}
+                        elif max_val <= 500:
+                            mapped[dst] = {"values": ["201-500"]}
+                        elif max_val <= 1000:
+                            mapped[dst] = {"values": ["501-1000"]}
+                        elif max_val <= 5000:
+                            mapped[dst] = {"values": ["1001-5000"]}
+                        else:
+                            mapped[dst] = {"values": ["5001-10000", "10001+"]}
+                    else:
+                        # Single value
+                        single_val = int(range_str)
+                        if single_val <= 10:
+                            mapped[dst] = {"values": ["1-10"]}
+                        elif single_val <= 50:
+                            mapped[dst] = {"values": ["11-50"]}
+                        elif single_val <= 200:
+                            mapped[dst] = {"values": ["51-200"]}
+                        elif single_val <= 500:
+                            mapped[dst] = {"values": ["201-500"]}
+                        elif single_val <= 1000:
+                            mapped[dst] = {"values": ["501-1000"]}
+                        elif single_val <= 5000:
+                            mapped[dst] = {"values": ["1001-5000"]}
+                        else:
+                            mapped[dst] = {"values": ["5001-10000", "10001+"]}
+                else:
+                    mapped[dst] = {"values": vals}
 
+        print(f">>> [ExploriumService] _map_filters returning: {mapped}", flush=True)
         return mapped
 
     async def fetch_businesses(
@@ -90,6 +130,7 @@ class ExploriumService:
         page: int = 1,
         mode: str = "full",
     ) -> Dict[str, Any]:
+        mapped_filters = self._map_filters(frontend_filters)
         payload = {
             "request_context": {},
             "mode": mode,
@@ -97,8 +138,9 @@ class ExploriumService:
             "page_size": page_size,
             "page": page,
             "exclude": [],
-            "filters": self._map_filters(frontend_filters),
+            "filters": mapped_filters,
         }
+        print(f">>> [ExploriumService] fetch_businesses payload: {payload}", flush=True)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/businesses",
@@ -118,21 +160,25 @@ class ExploriumService:
                 )
             return resp.json()
 
-    async def search_companies(self, filters: Dict[str, Any], limit: int = 25) -> Dict[str, Any]:
+    async def search_companies(self, filters: Dict[str, Any], limit: int = 3) -> Dict[str, Any]:
         """
         Unified search method for companies using Explorium.
         Handles both high-precision match (if domain/name present) and broad fetch.
+        Implements taxonomy-aware fallbacks for industry filters based on Explorium docs.
         """
         domain = filters.get("domain") or filters.get("website")
         name = filters.get("name") or filters.get("company_name")
         companies = []
 
+        print(f">>> [ExploriumService] search_companies called with filters: {filters}", flush=True)
+        print(f">>> [ExploriumService] Extracted domain: {domain}, name: {name}", flush=True)
+
         if domain or name:
             try:
                 inputs = [{"name": name, "domain": domain}]
-                logger.info(f"Attempting Explorium match with: {inputs}")
+                print(f">>> [ExploriumService] Attempting Explorium match with: {inputs}", flush=True)
                 match_res = await self.match_businesses(inputs)
-                logger.info(f"Explorium match response status: {match_res.keys() if isinstance(match_res, dict) else type(match_res)}")
+                print(f">>> [ExploriumService] Explorium match response status: {match_res.keys() if isinstance(match_res, dict) else type(match_res)}", flush=True)
                 
                 # Handle both 'matched_businesses' and 'matches' response formats
                 matched = match_res.get("matched_businesses") or []
@@ -145,38 +191,200 @@ class ExploriumService:
                         elif isinstance(m, dict) and m.get("business_id"):
                             matched.append(m)
                 
-                logger.info(f"Resolved {len(matched)} candidate matches")
+                print(f">>> [ExploriumService] Resolved {len(matched)} candidate matches", flush=True)
+                # Rank/filter by query name similarity to avoid noisy mega-brands on name-only queries
+                try:
+                    qname = (name or "").strip()
+                    import re
+                    def _norm(s: str) -> str:
+                        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                    ranked: list[tuple[float, dict, str]] = []
+                    for m in (matched or []):
+                        cand = m
+                        if isinstance(m, dict) and m.get("business") and isinstance(m.get("business"), dict):
+                            cand = m.get("business")
+                        cand_name = str((cand or {}).get("name") or (cand or {}).get("business_name") or "").strip()
+                        cand_domain = str((cand or {}).get("domain") or (cand or {}).get("website_domain") or "").strip()
+                        an = _norm(qname)
+                        bn = _norm(cand_name)
+                        dn = _norm(cand_domain.split(".")[0]) if cand_domain else ""
+                        score = 0.0
+                        if an and bn:
+                            if an == bn:
+                                score = 1.0
+                            elif an in bn or bn in an:
+                                score = 0.85
+                        if an and dn:
+                            if an == dn:
+                                score = max(score, 0.95)
+                            elif an in dn or dn in an:
+                                score = max(score, 0.8)
+                        ranked.append((score, m, cand_domain))
+                    ranked.sort(key=lambda x: x[0], reverse=True)
+                    THRESH = 0.8 if qname else 0.0
+                    filtered = [m for (sc, m, d) in ranked if sc >= THRESH]
+                    if filtered:
+                        matched = filtered
+                    elif qname:
+                        # As a safety, drop obvious mega-brands when only a name was provided and similarity is low
+                        MEGA = {"google.com","amazon.com","linkedin.com","facebook.com","meta.com","microsoft.com","apple.com","youtube.com","instagram.com","twitter.com","x.com"}
+                        matched = [m for (sc, m, d) in ranked if str(d).lower() not in MEGA]
+                except Exception as _e:
+                    print(f">>> [ExploriumService] Name ranking skipped due to error: {_e}", flush=True)
                 for item in matched[:limit]:
-                    bid = item.get("business_id")
+                    # Handle different match response structures
+                    bid = None
+                    if isinstance(item, dict):
+                        # Direct business_id
+                        bid = item.get("business_id")
+                        # Nested structure: {'input': {...}, 'business_id': '...'}
+                        if not bid and 'business_id' in item:
+                            bid = item['business_id']
+                    
                     if not bid: 
-                        logger.warning(f"No business_id found in matched item: {item.keys()}")
+                        print(f">>> [ExploriumService] No business_id found in matched item: {item.keys()}", flush=True)
                         continue
                     try:
                         # Fetch full profile for matched ID
-                        logger.info(f"Fetching full profile for business_id: {bid}")
+                        print(f">>> [ExploriumService] Fetching full profile for business_id: {bid}", flush=True)
                         raw = await self.fetch_businesses({"business_id": bid}, size=1, page_size=1, page=1, mode="full")
                         data_list = raw.get("data") or []
-                        logger.info(f"Fetched {len(data_list)} records for bid: {bid}")
-                        companies.extend([self.normalize_company(x) for x in data_list])
+                        print(f">>> [ExploriumService] Fetched {len(data_list)} records for bid: {bid}", flush=True)
+                        normed = [self.normalize_company(x) for x in data_list]
+                        if name:
+                            for c in normed:
+                                c["__query_name"] = name
+                        companies.extend(normed)
                     except Exception as e:
-                        logger.error(f"Error fetching profile for bid {bid}: {e}")
+                        print(f">>> [ExploriumService] Error fetching profile for bid {bid}: {e}", flush=True)
             except Exception as e:
-                logger.error(f"Explorium match failed: {e}")
+                print(f">>> [ExploriumService] Explorium match failed: {e}", flush=True)
         
         # If no companies from match or no domain/name, fallback to broad fetch
         if not companies:
-            logger.info("No companies found via match, falling back to fetch_businesses")
+            print(f">>> [ExploriumService] No companies found via match, falling back to fetch_businesses", flush=True)
             try:
                 raw = await self.fetch_businesses(filters, size=limit, page_size=limit, page=1, mode="full")
                 data_list = raw.get("data") or []
-                logger.info(f"Explorium fetch returned {len(data_list)} records")
+                print(f">>> [ExploriumService] Explorium fetch returned {len(data_list)} records", flush=True)
                 companies = [self.normalize_company(item) for item in data_list]
+                if name:
+                    for c in companies:
+                        c["__query_name"] = name
+
+                # Fallback 1: broaden industry taxonomy if zero results
+                if len(companies) == 0:
+                    ind_vals = filters.get("industry")
+                    if ind_vals:
+                        broadened = self._broaden_industries(ind_vals)
+                        if broadened:
+                            print(f">>> [ExploriumService] Zero results. Retrying with broadened industry terms: {broadened}", flush=True)
+                            broaden_filters = dict(filters)
+                            broaden_filters["industry"] = broadened
+                            raw2 = await self.fetch_businesses(broaden_filters, size=limit, page_size=limit, page=1, mode="full")
+                            data_list2 = raw2.get("data") or []
+                            print(f">>> [ExploriumService] Explorium fetch (broadened) returned {len(data_list2)} records", flush=True)
+                            companies = [self.normalize_company(item) for item in data_list2]
+                            if name:
+                                for c in companies:
+                                    c["__query_name"] = name
+
+                # Fallback 2: drop industry constraint entirely if still zero
+                if len(companies) == 0 and filters.get("industry") is not None:
+                    drop_filters = dict(filters)
+                    try:
+                        del drop_filters["industry"]
+                    except KeyError:
+                        pass
+                    print(f">>> [ExploriumService] Still zero. Retrying without industry filter.", flush=True)
+                    raw3 = await self.fetch_businesses(drop_filters, size=limit, page_size=limit, page=1, mode="full")
+                    data_list3 = raw3.get("data") or []
+                    print(f">>> [ExploriumService] Explorium fetch (no industry) returned {len(data_list3)} records", flush=True)
+                    companies = [self.normalize_company(item) for item in data_list3]
+                    if name:
+                        for c in companies:
+                            c["__query_name"] = name
+                
+                # If searching for a specific company name but got no results, give a helpful message
+                if name and len(companies) == 0:
+                    print(f">>> [ExploriumService] No companies found for specific name: {name}", flush=True)
             except Exception as e:
-                logger.error(f"Explorium fetch failed: {e}")
+                print(f">>> [ExploriumService] Explorium fetch failed: {e}", flush=True)
+        # Final guard: for name-only queries (no domain), filter normalized companies by similarity and exclude mega-brands
+        try:
+            if name and not domain and companies:
+                import re
+                def _norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                an = _norm(name)
+                MEGA = {"google.com","amazon.com","linkedin.com","facebook.com","meta.com","microsoft.com","apple.com","youtube.com","instagram.com","twitter.com","x.com"}
+                scored = []
+                for c in companies:
+                    cname = str(c.get("name") or "")
+                    cdomain = str(c.get("domain") or "")
+                    bn = _norm(cname)
+                    dn = _norm(cdomain.split(".")[0]) if cdomain else ""
+                    sc = 0.0
+                    if an and bn:
+                        if an == bn: sc = 1.0
+                        elif an in bn or bn in an: sc = 0.85
+                    if an and dn:
+                        if an == dn: sc = max(sc, 0.95)
+                        elif an in dn or dn in an: sc = max(sc, 0.8)
+                    scored.append((sc, c))
+                # keep only high similarity
+                filtered = [c for (sc,c) in scored if sc >= 0.8]
+                if filtered:
+                    companies = filtered
+                else:
+                    # exclude mega-brands if no similar match
+                    companies = [c for c in companies if str(c.get("domain","")) not in MEGA]
+        except Exception as _e:
+            print(f">>> [ExploriumService] Final name-only filtering skipped due to error: {_e}", flush=True)
+
         return {
             "companies": companies[:limit],
             "total": len(companies)
         }
+
+    def _broaden_industries(self, values: Any) -> List[str]:
+        """
+        Based on Explorium docs (firmographics expose linkedin_industry_category and naics),
+        broaden LinkedIn-like labels to generic categories that are more likely to match provider taxonomies.
+        Heuristics:
+        - Normalize separators (and/&)
+        - If term contains 'manufacturing', include 'Manufacturing'
+        - If contains 'food' and 'beverage', include 'Food', 'Beverage', 'Food & Beverage'
+        - Always include the original cleaned value variants
+        """
+        def norm(s: str) -> str:
+            return " ".join(s.replace("&", "and").split()).strip()
+        arr = values if isinstance(values, list) else [values]
+        out: List[str] = []
+        for v in arr:
+            if not v:
+                continue
+            s = str(v)
+            low = s.lower()
+            # base variants
+            base = {s.strip()}
+            if "&" in s or " and " in low:
+                base.add(s.replace("&", "and"))
+                base.add(s.replace("and", "&"))
+            # specific expansions
+            if "manufacturing" in low:
+                base.add("Manufacturing")
+            if "food" in low and "beverage" in low:
+                base.update({"Food", "Beverage", "Food & Beverage", "Food and Beverage"})
+            out.extend(list(base))
+        # de-duplicate while preserving order
+        seen = set()
+        uniq = []
+        for x in out:
+            if x not in seen:
+                uniq.append(x)
+                seen.add(x)
+        return uniq
 
     async def enrich_company_fully(self, company: Dict[str, Any]) -> Dict[str, Any]:
         """

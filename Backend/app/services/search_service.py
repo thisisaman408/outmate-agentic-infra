@@ -176,6 +176,21 @@ class SearchService:
     async def _enrich_company_from_contactout(self, company: Dict[str, Any], service: ContactOutService):
         domain = company.get("domain")
         if not domain: return
+        # Guard: if original query was a pure name and similarity to domain is low, skip mega-brand enrichment
+        try:
+            qname = (company.get("__query_name") or "").strip()
+            if qname and domain:
+                import re
+                def _norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                an = _norm(qname)
+                dn = _norm(str(domain).split(".")[0])
+                MEGA = {"google","amazon","linkedin","facebook","meta","microsoft","apple","youtube","instagram","twitter","x"}
+                if dn in MEGA and an not in {dn} and an not in dn and dn not in an:
+                    print(f">>> [SearchService] Skipping ContactOut enrichment for mega-brand domain {domain} (query={qname})", flush=True)
+                    return
+        except Exception:
+            pass
         try:
             co_data = await service.enrich_companies_by_domain([domain])
             co_norm = service.normalize_company_enrichment(co_data.get("companies", {}))
@@ -394,16 +409,19 @@ class SearchService:
         parts = [p for p in [n.get("headquarters_city"), n.get("headquarters_state"), n.get("headquarters_country")] if p]
         return ", ".join(parts) if parts else (n.get("location") or "N/A")
 
-    async def search_companies_explorium(self, filters: Dict[str, Any], limit: int = 25) -> Dict[str, Any]:
+    async def search_companies_explorium(self, filters: Dict[str, Any], limit: int = 3) -> Dict[str, Any]:
         """
         Search companies using Explorium API + ContactOut enrichment.
         This replaces the Crustdata-based search to avoid 401 errors.
         """
+        print("!!! SEARCH SERVICE SEARCH_COMPANIES_EXPLORIUM CALLED !!!", flush=True)
+        print(f">>> [SearchService] search_companies_explorium called with filters: {filters}, limit: {limit}", flush=True)
         try:
             explorium = ExploriumService()
             
             # Call Explorium API
             result = await explorium.search_companies(filters, limit)
+            print(f">>> [SearchService] Explorium returned {len(result.get('companies', []))} companies", flush=True)
             
             if not result or not result.get("companies"):
                 return {"companies": [], "sources_used": ["explorium"]}

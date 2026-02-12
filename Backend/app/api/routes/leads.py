@@ -1,6 +1,6 @@
 """
 Leads API Routes - FIXED & OPTIMIZED VERSION
-- Returns up to 25 companies
+- Returns up to 3 companies
 - Charges credits based on actual results returned
 - Skips user/credit check if no user_id
 """
@@ -182,7 +182,7 @@ async def search_companies(
     """
     Main company search endpoint
     - Uses In-DB search with transformed filters
-    - Returns up to 25 companies
+    - Returns up to 3 companies
     - Safe page handling & filter logging
     """
     try:
@@ -195,8 +195,8 @@ async def search_companies(
         is_valid, errors = FilterMappingService.validate_filters(filters_dict)
         # Construct options for SearchService
         options = {
-            "limit": request.options.get("limit", 25) if request.options else 25,
-            "prefetch_limit": max(request.options.get("limit", 25) if request.options else 25, 10), # Prefetch more for post-filtering
+            "limit": request.options.get("limit", 3) if request.options else 3,
+            "prefetch_limit": max(request.options.get("limit", 3) if request.options else 3, 10), # Prefetch more for post-filtering
             "enrich": True, # FORCE ENRICHMENT for Real-time + ContactOut
             "post_filters": FilterMappingService.extract_post_filters(filters_dict)
         }
@@ -258,7 +258,7 @@ async def search_companies(
                     error={"code": "INVALID_USER_ID", "message": f"Invalid user ID: {request.user_id}"}
                 )
 
-        required_credits = 25  # Allow up to 25 results
+        required_credits = 3  # Allow up to 3 results
         if user_id is None:
             print(">>> No user_id - skipping credit check (unauthenticated)", flush=True)
             has_credits = True

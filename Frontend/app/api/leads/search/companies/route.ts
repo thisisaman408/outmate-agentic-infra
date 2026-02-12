@@ -3,6 +3,8 @@ import { companyService } from '@/lib/database/services'
 
 export async function POST(request: NextRequest) {
   try {
+    const url = new URL(request.url)
+    const demo = url.searchParams.get('demo') === 'true'
     const body = await request.json()
     // Use hardcoded backend URL to avoid undefined issues
     const backendUrl = 'http://localhost:8000'
@@ -24,6 +26,15 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       console.error('Backend error:', responseData)
+      if (demo) {
+        // Fallback demo data if backend fails and demo=true
+        const demoCompanies = [
+          { id: '1', name: 'Acme Corp', domain: 'acme.com', industry: 'Software', employee_count_exact: 500, revenue_exact: 120000000, company_type: 'Private', headquarters_country: 'USA', headquarters_state: 'CA', headquarters_city: 'San Francisco', linkedin_url: 'https://www.linkedin.com/company/acme', technologies: ['React', 'Node.js'], logo_url: 'https://logo.clearbit.com/acme.com' },
+          { id: '2', name: 'Globex Inc', domain: 'globex.com', industry: 'Manufacturing', employee_count_exact: 2000, revenue_exact: 450000000, company_type: 'Public', headquarters_country: 'USA', headquarters_state: 'NY', headquarters_city: 'New York', linkedin_url: 'https://www.linkedin.com/company/globex', technologies: ['SAP', 'AWS'], logo_url: 'https://logo.clearbit.com/globex.com' },
+          { id: '3', name: 'Initech', domain: 'initech.com', industry: 'IT Services', employee_count_exact: 800, revenue_exact: 90000000, company_type: 'Private', headquarters_country: 'USA', headquarters_state: 'TX', headquarters_city: 'Austin', linkedin_url: 'https://www.linkedin.com/company/initech', technologies: ['Kubernetes', 'Python'], logo_url: 'https://logo.clearbit.com/initech.com' }
+        ]
+        return NextResponse.json({ success: true, data: { companies: demoCompanies, total_count: demoCompanies.length } })
+      }
       return NextResponse.json(
         { success: false, error: responseData?.error || { message: 'Search failed' } },
         { status: response.status }
@@ -53,6 +64,18 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('API proxy error:', error)
+    // If demo=true, still return demo records to show something
+    try {
+      const url = new URL(request.url)
+      const demo = url.searchParams.get('demo') === 'true'
+      if (demo) {
+        const demoCompanies = [
+          { id: '1', name: 'Acme Corp', domain: 'acme.com', industry: 'Software', employee_count_exact: 500, revenue_exact: 120000000, company_type: 'Private', headquarters_country: 'USA', headquarters_state: 'CA', headquarters_city: 'San Francisco', linkedin_url: 'https://www.linkedin.com/company/acme', technologies: ['React', 'Node.js'], logo_url: 'https://logo.clearbit.com/acme.com' },
+          { id: '2', name: 'Globex Inc', domain: 'globex.com', industry: 'Manufacturing', employee_count_exact: 2000, revenue_exact: 450000000, company_type: 'Public', headquarters_country: 'USA', headquarters_state: 'NY', headquarters_city: 'New York', linkedin_url: 'https://www.linkedin.com/company/globex', technologies: ['SAP', 'AWS'], logo_url: 'https://logo.clearbit.com/globex.com' }
+        ]
+        return NextResponse.json({ success: true, data: { companies: demoCompanies, total_count: demoCompanies.length } })
+      }
+    } catch {}
     return NextResponse.json(
       { success: false, error: { message: 'Internal server error' } },
       { status: 500 }

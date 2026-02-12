@@ -94,7 +94,7 @@ export default function CompanyEnrichmentPage() {
 
       const data = await response.json()
       
-      // Handle different response formats
+      // Handle different response formats from Crustdata
       if (Array.isArray(data)) {
         setResults(data)
       } else if (data.status === 'enriching' || data.status === 'not_found') {

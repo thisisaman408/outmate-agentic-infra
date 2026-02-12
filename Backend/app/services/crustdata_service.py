@@ -10,7 +10,6 @@ import re
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
 def _extract_domain(website: str) -> str:
     """
     Pull a clean domain out of a website URL.
@@ -171,19 +170,21 @@ class CrustdataService:
         company_id: Optional[str] = None,
         fields: Optional[str] = None,
         enrich_realtime: bool = False,
-        exact_match: bool = False
+        exact_match: bool = True  # Changed from False to True
     ) -> Dict[str, Any]:
         """Company Enrichment API - Retrieve detailed profile."""
+        print(f">>> CRUSTDATA ENRICH_COMPANY CALLED: domain={domain}, name={name}, fields={fields}", flush=True)
         try:
             # Replicates doc's "previous default behavior" fields, but sanitized.
             if not fields:
                 fields = (
                     "headcount,competitors,funding_and_investment,g2,gartner,glassdoor,"
                     "job_openings,linkedin_followers,news_articles,producthunt,seo,taxonomy,"
-                    "web_traffic,decision_makers,founders,cxos,all_office_addresses"
+                    "web_traffic,decision_makers,founders,cxos,all_office_addresses,location"
                 )
 
             safe_fields = self._sanitize_enrichment_fields(fields)
+            print(f">>> CRUSTDATA SAFE_FIELDS: {safe_fields}", flush=True)
             params = {
                 "enrich_realtime": str(enrich_realtime).lower(),
                 "exact_match": str(exact_match).lower(),

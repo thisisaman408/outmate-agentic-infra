@@ -40,8 +40,12 @@ export default function HistoryPage() {
 
     // Restore a search
     const handleRestore = (item: SearchHistoryItem) => {
-        // Navigate to prospects page with history ID
-        router.push(`/leads/prospects?historyId=${item.id}`)
+        // Navigate to the correct page with history ID
+        if (item.type === 'companies' || item.route?.includes('/leads/companies')) {
+            router.push(`/leads/companies/search?historyId=${item.id}`)
+        } else {
+            router.push(`/leads/prospects?historyId=${item.id}`)
+        }
     }
 
     // Delete a single history item

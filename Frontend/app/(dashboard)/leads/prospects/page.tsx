@@ -32,6 +32,67 @@ export default function ProspectsPage() {
     })
     const [error, setError] = useState<string | null>(null)
 
+    // Export functionality
+    const handleExport = async () => {
+        if (profiles.length === 0) {
+            toast({
+                title: "No Data to Export",
+                description: "Please search for prospects first before exporting.",
+                variant: "destructive"
+            })
+            return
+        }
+
+        try {
+            // Create CSV content with proper typing
+            const headers = [
+                'Name', 'First Name', 'Last Name', 'Region', 'Headline', 
+                'Summary', 'Skills', 'LinkedIn URL', 'Emails', 'Connections'
+            ]
+            
+            const csvRows = profiles.map((profile: ProspectProfile) => [
+                profile.name || '',
+                profile.first_name || '',
+                profile.last_name || '',
+                profile.region || '',
+                profile.headline || '',
+                profile.summary || '',
+                (profile.skills || []).join('; '),
+                profile.linkedin_profile_url || '',
+                (profile.emails || []).join('; '),
+                profile.num_of_connections?.toString() || ''
+            ])
+            
+            const csvContent = [
+                headers.join(','),
+                ...csvRows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n')
+
+            // Create and download CSV file
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = `prospects_${new Date().toISOString().split('T')[0]}.csv`
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+
+            toast({
+                title: "Export Successful",
+                description: `Exported ${profiles.length} prospects to CSV file.`,
+            })
+        } catch (error) {
+            console.error('Export error:', error)
+            toast({
+                title: "Export Failed",
+                description: "Failed to export prospects. Please try again.",
+                variant: "destructive"
+            })
+        }
+    }
+
     // Restore search from history if historyId is in URL params
     useEffect(() => {
         const historyId = searchParams.get('historyId')
@@ -235,7 +296,7 @@ export default function ProspectsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                             {profiles.length > 0 && (
-                                <Button variant="outline" className="gap-2 bg-background">
+                                <Button variant="outline" className="gap-2 bg-background" onClick={handleExport}>
                                     <Download className="h-4 w-4" />
                                     Export
                                 </Button>

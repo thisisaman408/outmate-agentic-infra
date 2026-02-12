@@ -28,14 +28,31 @@ import { useToast } from "@/hooks/use-toast"
 
 interface FilterSidebarProps {
     onSearch?: (results: Lead[], loading: boolean, searched: boolean, filters: Record<string, any>) => void
+    initialFilters?: Record<string, any>
+    autoSearchOnMount?: boolean
 }
 
-export function FilterSidebar({ onSearch }: FilterSidebarProps) {
+export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = false }: FilterSidebarProps) {
     const { toast } = useToast()
     const [pinnedFilterIds, setPinnedFilterIds] = React.useState<string[]>(PINNED_FILTERS_DEFAULT)
     const [showAllFilters, setShowAllFilters] = React.useState(false)
-    const [filters, setFilters] = React.useState<Record<string, any>>({})
+    const [filters, setFilters] = React.useState<Record<string, any>>(initialFilters || {})
     const [isSearching, setIsSearching] = React.useState(false)
+
+    React.useEffect(() => {
+        // When initialFilters change (restore), set them
+        if (initialFilters) {
+            setFilters(initialFilters)
+        }
+    }, [initialFilters])
+
+    React.useEffect(() => {
+        if (autoSearchOnMount) {
+            // Trigger search automatically on mount/restore
+            handleSearch().catch(() => {})
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoSearchOnMount])
 
     const handleFilterChange = (id: string, value: any) => {
         setFilters(prev => ({
@@ -99,7 +116,7 @@ export function FilterSidebar({ onSearch }: FilterSidebarProps) {
         try {
             console.log('🔍 Searching with filters:', transformedFilters)
 
-            const response = await fetch(`/api/leads/search/companies?demo=true`, {
+            const response = await fetch(`/api/leads/search/companies`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -254,7 +271,7 @@ export function FilterSidebar({ onSearch }: FilterSidebarProps) {
                     <Button
                         className="w-full justify-center bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg"
                         onClick={handleSearch}
-                        disabled={isSearching || Object.keys(filters).length === 0}
+                        disabled={isSearching}
                     >
                         {isSearching ? (
                             <>

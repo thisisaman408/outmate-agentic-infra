@@ -6,168 +6,100 @@ import { initializeDatabase } from './schema'
 export class CompanyService {
   private pool = getDatabasePool()
   private redis = getRedisClient()
+  private companyColumns: Set<string> | null = null
+  private hasRawJson: boolean = false
 
   // Initialize database schema
   async initialize(): Promise<boolean> {
     return await initializeDatabase(this.pool)
   }
 
-  // Store or update company data
+  private async ensureCompanyColumns(): Promise<void> {
+    if (this.companyColumns) return
+    const sql = `
+      SELECT column_name, data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'companies'
+    `
+    const res = await this.pool.query(sql)
+    const cols = new Set<string>()
+    let hasRaw = false
+    for (const row of res.rows) {
+      const col = String(row.column_name)
+      cols.add(col)
+      if (col === 'raw' && (row.data_type === 'json' || row.data_type === 'jsonb')) {
+        hasRaw = true
+      }
+    }
+    this.companyColumns = cols
+    this.hasRawJson = hasRaw
+  }
+
+  // Store or update company data (schema-aware)
   async upsertCompany(companyData: any): Promise<any> {
     try {
+      await this.ensureCompanyColumns()
+      if (!this.companyColumns) throw new Error('companies table metadata not available')
+      if (!this.companyColumns.has('domain')) throw new Error("companies table missing required 'domain' column")
+
+      // Build column/value lists by intersecting payload with existing columns
+      const payload: Record<string, any> = { ...companyData }
+
+      // Normalize arrays/objects to JSON strings for safety where types are unknown
+      const normalize = (v: any) => {
+        if (v === undefined) return null
+        if (Array.isArray(v) || typeof v === 'object') return JSON.stringify(v)
+        return v
+      }
+
+      const insertCols: string[] = []
+      const values: any[] = []
+
+      // Always include domain
+      insertCols.push('domain')
+      values.push(payload.domain || null)
+
+      // Add other known columns from payload
+      for (const key of Object.keys(payload)) {
+        if (key === 'domain') continue
+        if (this.companyColumns.has(key)) {
+          insertCols.push(key)
+          values.push(normalize(payload[key]))
+        }
+      }
+
+      // Optionally include raw json snapshot
+      if (this.hasRawJson && !insertCols.includes('raw')) {
+        insertCols.push('raw')
+        values.push(JSON.stringify(companyData))
+      }
+
+      // Build parameter placeholders
+      const placeholders = insertCols.map((_, i) => `${i + 1}`)
+
+      // Build update set list excluding the conflict key 'domain'
+      const updateSet = insertCols
+        .filter(c => c !== 'domain')
+        .map(c => `${c} = EXCLUDED.${c}`)
+        .join(', ')
+
       const query = `
-        INSERT INTO companies (
-          domain, name, website, logo_url, description, industry, sub_industry,
-          linkedin_industry_category, company_type, founded_year, employee_count_exact,
-          employee_count_range, revenue_exact, revenue_range, funding_stage,
-          funding_total, last_funding_date, has_recent_funding, headquarters_country,
-          headquarters_state, headquarters_city, street, zip_code, locations,
-          headquarters_address, location_display, phone, email, personal_email,
-          work_email, linkedin_url, twitter_url, facebook_url, instagram_url,
-          follower_count, technologies, is_tech_heavy, employee_growth_6m,
-          employee_growth_12m, employee_growth_6m_percent, employee_growth_12m_percent,
-          growth_category, job_openings_count, web_traffic, seo_score,
-          decision_makers_count, locations_distribution_count, acquisition_status,
-          data_quality_score, provider_source, enriched, ticker, stock_symbol,
-          naics, naics_description, sic_code, sic_code_description, last_enriched_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-          $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-          $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
-          $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58
-        )
-        ON CONFLICT (domain) DO UPDATE SET
-          name = EXCLUDED.name,
-          website = EXCLUDED.website,
-          logo_url = EXCLUDED.logo_url,
-          description = EXCLUDED.description,
-          industry = EXCLUDED.industry,
-          sub_industry = EXCLUDED.sub_industry,
-          linkedin_industry_category = EXCLUDED.linkedin_industry_category,
-          company_type = EXCLUDED.company_type,
-          founded_year = EXCLUDED.founded_year,
-          employee_count_exact = EXCLUDED.employee_count_exact,
-          employee_count_range = EXCLUDED.employee_count_range,
-          revenue_exact = EXCLUDED.revenue_exact,
-          revenue_range = EXCLUDED.revenue_range,
-          funding_stage = EXCLUDED.funding_stage,
-          funding_total = EXCLUDED.funding_total,
-          last_funding_date = EXCLUDED.last_funding_date,
-          has_recent_funding = EXCLUDED.has_recent_funding,
-          headquarters_country = EXCLUDED.headquarters_country,
-          headquarters_state = EXCLUDED.headquarters_state,
-          headquarters_city = EXCLUDED.headquarters_city,
-          street = EXCLUDED.street,
-          zip_code = EXCLUDED.zip_code,
-          locations = EXCLUDED.locations,
-          headquarters_address = EXCLUDED.headquarters_address,
-          location_display = EXCLUDED.location_display,
-          phone = EXCLUDED.phone,
-          email = EXCLUDED.email,
-          personal_email = EXCLUDED.personal_email,
-          work_email = EXCLUDED.work_email,
-          linkedin_url = EXCLUDED.linkedin_url,
-          twitter_url = EXCLUDED.twitter_url,
-          facebook_url = EXCLUDED.facebook_url,
-          instagram_url = EXCLUDED.instagram_url,
-          follower_count = EXCLUDED.follower_count,
-          technologies = EXCLUDED.technologies,
-          is_tech_heavy = EXCLUDED.is_tech_heavy,
-          employee_growth_6m = EXCLUDED.employee_growth_6m,
-          employee_growth_12m = EXCLUDED.employee_growth_12m,
-          employee_growth_6m_percent = EXCLUDED.employee_growth_6m_percent,
-          employee_growth_12m_percent = EXCLUDED.employee_growth_12m_percent,
-          growth_category = EXCLUDED.growth_category,
-          job_openings_count = EXCLUDED.job_openings_count,
-          web_traffic = EXCLUDED.web_traffic,
-          seo_score = EXCLUDED.seo_score,
-          decision_makers_count = EXCLUDED.decision_makers_count,
-          locations_distribution_count = EXCLUDED.locations_distribution_count,
-          acquisition_status = EXCLUDED.acquisition_status,
-          data_quality_score = EXCLUDED.data_quality_score,
-          provider_source = EXCLUDED.provider_source,
-          enriched = EXCLUDED.enriched,
-          ticker = EXCLUDED.ticker,
-          stock_symbol = EXCLUDED.stock_symbol,
-          naics = EXCLUDED.naics,
-          naics_description = EXCLUDED.naics_description,
-          sic_code = EXCLUDED.sic_code,
-          sic_code_description = EXCLUDED.sic_code_description,
-          last_enriched_at = EXCLUDED.last_enriched_at
+        INSERT INTO companies (${insertCols.join(', ')})
+        VALUES (${placeholders.join(', ')})
+        ON CONFLICT (domain) DO UPDATE SET ${updateSet}
         RETURNING *
       `
 
-      const values = [
-        companyData.domain,
-        companyData.name,
-        companyData.website,
-        companyData.logo_url,
-        companyData.description,
-        companyData.industry,
-        companyData.sub_industry,
-        companyData.linkedin_industry_category,
-        companyData.company_type,
-        companyData.founded_year,
-        companyData.employee_count_exact,
-        companyData.employee_count_range,
-        companyData.revenue_exact,
-        companyData.revenue_range,
-        companyData.funding_stage,
-        companyData.funding_total,
-        companyData.last_funding_date,
-        companyData.has_recent_funding,
-        companyData.headquarters_country,
-        companyData.headquarters_state,
-        companyData.headquarters_city,
-        companyData.street,
-        companyData.zip_code,
-        JSON.stringify(companyData.locations || []),
-        companyData.headquarters_address,
-        companyData.location_display,
-        companyData.phone,
-        companyData.email,
-        companyData.personal_email,
-        companyData.work_email,
-        companyData.linkedin_url,
-        companyData.twitter_url,
-        companyData.facebook_url,
-        companyData.instagram_url,
-        companyData.follower_count,
-        JSON.stringify(companyData.technologies || []),
-        companyData.is_tech_heavy,
-        companyData.employee_growth_6m,
-        companyData.employee_growth_12m,
-        companyData.employee_growth_6m_percent,
-        companyData.employee_growth_12m_percent,
-        companyData.growth_category,
-        companyData.job_openings_count,
-        companyData.web_traffic,
-        companyData.seo_score,
-        companyData.decision_makers_count,
-        companyData.locations_distribution_count,
-        companyData.acquisition_status,
-        companyData.data_quality_score,
-        companyData.provider_source,
-        companyData.enriched || true,
-        companyData.ticker,
-        companyData.stock_symbol,
-        companyData.naics,
-        companyData.naics_description,
-        companyData.sic_code,
-        companyData.sic_code_description,
-        new Date()
-      ]
-
       const result = await this.pool.query(query, values)
-      
+
       // Cache in Redis for quick access (if Redis is available)
       try {
         await this.redis.setex(`company:${companyData.domain}`, 3600, JSON.stringify(result.rows[0]))
       } catch (redisError) {
         console.warn('Redis caching failed, continuing without cache:', redisError)
       }
-      
-      console.log(`Company ${companyData.domain} stored/updated in database`)
+
+      console.log(`Company ${companyData.domain} stored/updated in database (schema-aware)`) 
       return result.rows[0]
     } catch (error) {
       console.error('Error upserting company:', error)

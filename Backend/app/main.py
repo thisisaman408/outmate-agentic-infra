@@ -16,7 +16,6 @@ from app.db.models.user import User
 from app.core.redis import RedisManager
 
 from app.api.routes import leads
-from app.api.routes import test
 from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
 

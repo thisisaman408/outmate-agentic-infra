@@ -3,19 +3,20 @@
  * Manages search history using localStorage for testing purposes
  */
 
-import { ProspectProfile, ProspectSearchFilters } from "@/lib/services/prospectService"
-
 export interface SearchHistoryItem {
     id: string
     timestamp: number
-    filters: ProspectSearchFilters
-    results: ProspectProfile[]
+    type: 'prospects' | 'companies'
+    route: string
+    filters: Record<string, any>
+    results: any[]
     totalCount: number
     nextCursor: string | null
     filterSummary: string
 }
 
-const STORAGE_KEY = "prospect_search_history"
+const STORAGE_KEY_LEGACY = "prospect_search_history"
+const STORAGE_KEY = "search_history"
 const MAX_HISTORY_ITEMS = 50
 
 /**
@@ -25,11 +26,36 @@ export function getSearchHistory(): SearchHistoryItem[] {
     if (typeof window === "undefined") return []
 
     try {
+        // Load new storage
         const stored = localStorage.getItem(STORAGE_KEY)
-        if (!stored) return []
+        let history: SearchHistoryItem[] = stored ? JSON.parse(stored) as SearchHistoryItem[] : []
 
-        const history = JSON.parse(stored) as SearchHistoryItem[]
-        return history.sort((a, b) => b.timestamp - a.timestamp) // Most recent first
+        // Migrate legacy prospect-only history if present
+        const legacy = localStorage.getItem(STORAGE_KEY_LEGACY)
+        if (legacy) {
+            try {
+                const legacyItems = JSON.parse(legacy) as any[]
+                const migrated: SearchHistoryItem[] = legacyItems.map((it) => ({
+                    id: it.id,
+                    timestamp: it.timestamp,
+                    type: 'prospects',
+                    route: '/leads/prospects',
+                    filters: it.filters || {},
+                    results: it.results || [],
+                    totalCount: it.totalCount || (it.results?.length || 0),
+                    nextCursor: it.nextCursor ?? null,
+                    filterSummary: it.filterSummary || 'Prospects search'
+                }))
+                history = [...migrated, ...history]
+                // Clear legacy to avoid duplicates after first migration
+                localStorage.removeItem(STORAGE_KEY_LEGACY)
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+            } catch (e) {
+                console.warn('Failed to migrate legacy prospect history', e)
+            }
+        }
+
+        return history.sort((a, b) => b.timestamp - a.timestamp)
     } catch (error) {
         console.error("Failed to load search history:", error)
         return []
@@ -40,10 +66,12 @@ export function getSearchHistory(): SearchHistoryItem[] {
  * Save a new search to history
  */
 export function saveSearchToHistory(
-    filters: ProspectSearchFilters,
-    results: ProspectProfile[],
+    filters: Record<string, any>,
+    results: any[],
     totalCount: number,
-    nextCursor: string | null
+    nextCursor: string | null,
+    type: 'prospects' | 'companies' = 'prospects',
+    route: string = type === 'companies' ? '/leads/companies/search' : '/leads/prospects'
 ): string {
     if (typeof window === "undefined") return ""
 
@@ -51,12 +79,14 @@ export function saveSearchToHistory(
         const history = getSearchHistory()
 
         // Create filter summary
-        const filterSummary = createFilterSummary(filters)
+        const filterSummary = createFilterSummaryGeneric(filters, type)
 
         // Create new history item
         const newItem: SearchHistoryItem = {
             id: `search_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             timestamp: Date.now(),
+            type,
+            route,
             filters,
             results,
             totalCount,
@@ -119,43 +149,34 @@ export function clearSearchHistory(): void {
 /**
  * Create a human-readable summary of filters
  */
-function createFilterSummary(filters: ProspectSearchFilters): string {
+function createFilterSummaryGeneric(filters: Record<string, any>, type: 'prospects' | 'companies'): string {
     const parts: string[] = []
 
-    if (filters.current_title && filters.current_title.length > 0) {
-        parts.push(filters.current_title.slice(0, 2).join(", "))
-        if (filters.current_title.length > 2) {
-            parts[parts.length - 1] += ` +${filters.current_title.length - 2}`
+    if (type === 'prospects') {
+        const titles = filters.current_title as string[] | undefined
+        if (titles?.length) {
+            parts.push(titles.slice(0, 2).join(", ") + (titles.length > 2 ? ` +${titles.length - 2}` : ''))
         }
-    }
-
-    if (filters.keyword) {
-        parts.push(`"${filters.keyword}"`)
-    }
-
-    if (filters.location && filters.location.length > 0) {
-        parts.push(filters.location.slice(0, 1).join(", "))
-        if (filters.location.length > 1) {
-            parts[parts.length - 1] += ` +${filters.location.length - 1}`
+        if (filters.keyword) parts.push(`"${filters.keyword}"`)
+        const loc = filters.location as string[] | undefined
+        if (loc?.length) parts.push(loc[0] + (loc.length > 1 ? ` +${loc.length - 1}` : ''))
+        const ind = filters.industry as string[] | undefined
+        if (ind?.length) parts.push(ind[0])
+        const funcs = filters.functions as string[] | undefined
+        if (funcs?.length) parts.push(funcs[0])
+        if (filters.seniority_level?.length) {
+            const operator = filters.seniority_level_operator === 'not_in' ? 'NOT ' : ''
+            parts.push(`${operator}${filters.seniority_level[0]}`)
         }
+        return parts.length ? parts.join(' • ') : 'All Prospects'
     }
 
-    if (filters.industry && filters.industry.length > 0) {
-        parts.push(filters.industry.slice(0, 1).join(", "))
-    }
-
-    if (filters.functions && filters.functions.length > 0) {
-        parts.push(filters.functions.slice(0, 1).join(", "))
-    }
-
-    if (filters.seniority_level && filters.seniority_level.length > 0) {
-        const operator = filters.seniority_level_operator === "not_in" ? "NOT " : ""
-        parts.push(`${operator}${filters.seniority_level.slice(0, 1).join(", ")}`)
-    }
-
-    if (parts.length === 0) {
-        return "All Prospects"
-    }
-
-    return parts.join(" • ")
+    // companies
+    if (filters.name) parts.push(filters.name)
+    if (filters.domain) parts.push(filters.domain)
+    const ind = filters.industry as string[] | undefined
+    if (ind?.length) parts.push(ind[0])
+    const emp = filters.employee_count as string[] | undefined
+    if (emp?.length) parts.push(emp.join(', '))
+    return parts.length ? parts.join(' • ') : 'All Companies'
 }
