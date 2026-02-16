@@ -193,7 +193,33 @@ class SearchService:
             pass
         try:
             co_data = await service.enrich_companies_by_domain([domain])
-            co_norm = service.normalize_company_enrichment(co_data.get("companies", {}))
+            co_norm: Dict[str, Any] = {}
+            companies_payload = co_data.get("companies", {})
+
+            # ContactOut may return:
+            # 1) dict: {"domain.com": {...}}
+            # 2) list: [{"domain.com": {...}}, ...]
+            # 3) sample data with unrelated domain key
+            if isinstance(companies_payload, dict):
+                if domain in companies_payload and isinstance(companies_payload.get(domain), dict):
+                    co_norm = service.normalize_company_enrichment({domain: companies_payload.get(domain)})
+                elif companies_payload:
+                    first_key = next(iter(companies_payload.keys()))
+                    co_norm = service.normalize_company_enrichment({first_key: companies_payload.get(first_key)})
+            elif isinstance(companies_payload, list) and companies_payload:
+                matched = None
+                for item in companies_payload:
+                    if isinstance(item, dict) and domain in item:
+                        matched = {domain: item.get(domain)}
+                        break
+                if matched is None:
+                    first_item = next((x for x in companies_payload if isinstance(x, dict) and len(x) > 0), None)
+                    if first_item:
+                        first_key = next(iter(first_item.keys()))
+                        matched = {first_key: first_item.get(first_key)}
+                if matched:
+                    co_norm = service.normalize_company_enrichment(matched)
+
                 # Surgical merge: only update if value is present in enrichment
             merged_keys = []
             for k, v in co_norm.items():
@@ -211,6 +237,10 @@ class SearchService:
         try:
             dm_data = await service.get_decision_makers(domain=domain)
             profiles = dm_data.get("profiles", [])
+            if isinstance(profiles, dict):
+                profiles = list(profiles.values())
+            if not isinstance(profiles, list):
+                profiles = []
             company["decision_makers"] = [service.normalize_decision_maker(p) for p in profiles]
         except Exception as e:
             logger.warning(f"Decision makers fetch failed for {domain}: {e}")
@@ -420,7 +450,8 @@ class SearchService:
             explorium = ExploriumService()
             
             # Call Explorium API
-            result = await explorium.search_companies(filters, limit)
+            # For NLP-driven search, keep provider query strict to mapped filters.
+            result = await explorium.search_companies(filters, limit, strict_filters=True)
             print(f">>> [SearchService] Explorium returned {len(result.get('companies', []))} companies", flush=True)
             
             if not result or not result.get("companies"):
@@ -430,6 +461,92 @@ class SearchService:
             
             # Enrich with ContactOut data
             await self._comprehensive_enrichment(companies)
+
+            # STRICT: Enforce location filter to prevent broader geographic results
+            location_filters = filters.get("location")
+            if location_filters:
+                if not isinstance(location_filters, list):
+                    location_filters = [location_filters]
+                companies = [
+                    c for c in companies
+                    if self._company_matches_location(c, location_filters)
+                ]
+                print(
+                    f">>> [SearchService] STRICT Location filter applied: {location_filters}, remaining={len(companies)}",
+                    flush=True
+                )
+
+            # STRICT: Enforce industry filter to prevent broader industry results
+            industry_filters = filters.get("industry")
+            if industry_filters:
+                if not isinstance(industry_filters, list):
+                    industry_filters = [industry_filters]
+                industry_filters = [str(i).strip().lower() for i in industry_filters if str(i).strip()]
+                if industry_filters:
+                    before_industry = len(companies)
+                    filtered_by_industry = [
+                        c for c in companies
+                        if self._company_matches_industry(c, industry_filters)
+                    ]
+                    # STRICT: If industry filtering produces zero results, 
+                    # it means the provider returned irrelevant companies.
+                    # Return empty results rather than broadening the search.
+                    if len(filtered_by_industry) > 0:
+                        companies = filtered_by_industry
+                        print(
+                            f">>> [SearchService] STRICT Industry filter applied: {industry_filters}, {before_industry} -> {len(companies)}",
+                            flush=True
+                        )
+                    else:
+                        print(
+                            f">>> [SearchService] STRICT Industry filter: No matches found for {industry_filters}. Returning empty results to prevent broader search.",
+                            flush=True
+                        )
+                        return {"companies": [], "sources_used": ["explorium", "contactout"]}
+
+            # STRICT: Enforce keyword intent relevance (e.g., B2B / SaaS) to avoid generic mega-brand matches.
+            keyword_filters = filters.get("keywords")
+            if keyword_filters:
+                if not isinstance(keyword_filters, list):
+                    keyword_filters = [keyword_filters]
+                keyword_filters = [str(k).strip() for k in keyword_filters if str(k).strip()]
+                if keyword_filters:
+                    before_kw = len(companies)
+                    filtered_by_kw = [
+                        c for c in companies
+                        if self._company_matches_keyword_intent(c, keyword_filters)
+                    ]
+                    # STRICT: If keyword filtering produces zero results,
+                    # return empty rather than broadening the search
+                    if len(filtered_by_kw) > 0:
+                        companies = filtered_by_kw
+                        print(
+                            f">>> [SearchService] STRICT Keyword intent filter applied: {keyword_filters}, {before_kw} -> {len(companies)}",
+                            flush=True
+                        )
+                    else:
+                        print(
+                            f">>> [SearchService] STRICT Keyword intent filter: No matches found for {keyword_filters}. Returning empty results to prevent broader search.",
+                            flush=True
+                        )
+                        return {"companies": [], "sources_used": ["explorium", "contactout"]}
+
+            # STRICT: Filter out mega-brands for B2B SaaS searches
+            has_b2b_query = any(k in {"b2b", "business to business", "saas", "software as a service"} for k in (keyword_filters or []))
+            if has_b2b_query:
+                before_mega = len(companies)
+                companies = [c for c in companies if not self._company_is_mega_brand(c)]
+                if len(companies) > 0:
+                    print(
+                        f">>> [SearchService] STRICT Mega-brand filter applied for B2B query, {before_mega} -> {len(companies)}",
+                        flush=True
+                    )
+                else:
+                    print(
+                        f">>> [SearchService] STRICT Mega-brand filter: All companies filtered out for B2B query. Returning empty results.",
+                        flush=True
+                    )
+                    return {"companies": [], "sources_used": ["explorium", "contactout"]}
             
             return {
                 "companies": companies,
@@ -439,3 +556,198 @@ class SearchService:
         except Exception as e:
             logger.error(f"Explorium search failed: {e}")
             return {"companies": [], "sources_used": []}
+
+    @staticmethod
+    def _company_matches_industry(company: Dict[str, Any], industries: List[str]) -> bool:
+        """
+        Strict industry matching to prevent broader industry results.
+        Only returns True if the company matches the specified industry exactly.
+        """
+        if not industries:
+            return True
+            
+        company_industry = str(company.get("industry", "") or "").strip().lower()
+        if not company_industry:
+            return False
+
+        # Normalize industry names for comparison
+        industry_aliases = {
+            "software development": ["software", "saas", "b2b saas", "b2b software", "business software"],
+            "b2b": ["b2b", "business to business"],
+            "financial services": ["finance", "fintech", "banking"],
+            "healthcare": ["healthcare", "healthtech"],
+            "marketing and advertising": ["marketing", "advertising", "martech"],
+            "e-commerce": ["ecommerce", "e-commerce"],
+        }
+
+        for target_industry in industries:
+            target_lower = target_industry.lower()
+            
+            # Direct match
+            if target_lower == company_industry:
+                return True
+                
+            # Alias match
+            for canonical, aliases in industry_aliases.items():
+                if target_lower == canonical or target_lower in aliases:
+                    if company_industry == canonical or company_industry in aliases:
+                        return True
+        
+        return False
+
+    @staticmethod
+    def _company_matches_location(company: Dict[str, Any], locations: List[Any]) -> bool:
+        """
+        Best-effort location guard for Explorium results.
+        Matches against normalized country/state/city/location fields.
+        """
+        normalized_targets: List[str] = []
+        country_alias = {
+            "usa": "united states",
+            "us": "united states",
+            "u.s.": "united states",
+            "united states of america": "united states",
+            "uk": "united kingdom",
+            "u.k.": "united kingdom",
+        }
+        region_alias_tokens = {
+            "north america": ["north america", "united states", "canada", "mexico", "us", "usa"],
+            "latin america": ["latin america", "south america", "central america", "brazil", "argentina", "chile", "colombia", "mexico"],
+            "europe": ["europe", "united kingdom", "uk", "germany", "france", "spain", "italy", "netherlands", "sweden", "poland"],
+            "apac": ["apac", "asia pacific", "australia", "new zealand", "singapore", "japan", "india", "china", "south korea"],
+            "asia": ["asia", "india", "china", "japan", "singapore", "south korea", "indonesia", "malaysia", "thailand"],
+            "middle east": ["middle east", "uae", "saudi arabia", "qatar", "israel"],
+            "africa": ["africa", "south africa", "nigeria", "kenya", "egypt"],
+            "global": ["global", "worldwide", "international"],
+        }
+
+        for loc in locations or []:
+            if loc is None:
+                continue
+            s = str(loc).strip().lower()
+            if not s:
+                continue
+            mapped = country_alias.get(s, s)
+            normalized_targets.append(mapped)
+            if mapped in region_alias_tokens:
+                normalized_targets.extend(region_alias_tokens[mapped])
+
+        if not normalized_targets:
+            return True
+
+        # Deduplicate tokens and drop very-short ambiguous ones.
+        normalized_targets = list({t for t in normalized_targets if len(t.strip()) >= 3})
+
+        hay_fields = [
+            company.get("headquarters_country"),
+            company.get("headquarters_state"),
+            company.get("headquarters_city"),
+            company.get("location"),
+            company.get("location_display"),
+            company.get("headquarters_address"),
+        ]
+        haystack = " | ".join([str(v).lower() for v in hay_fields if v is not None])
+        if not haystack:
+            return False
+
+        return any(target in haystack for target in normalized_targets)
+
+    @staticmethod
+    def _company_matches_keyword_intent(company: Dict[str, Any], keywords: List[str]) -> bool:
+        """
+        Best-effort semantic guard for keyword intent.
+        Prevents obvious false positives for prompts like "B2B SaaS companies".
+        """
+        kws = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
+        if not kws:
+            return True
+
+        text_parts = [
+            company.get("name"),
+            company.get("description"),
+            company.get("industry"),
+            company.get("sic_code_description"),
+            company.get("naics"),
+            company.get("headquarters_address"),
+        ]
+        # Include list fields
+        text_parts.extend(company.get("specialties") or [])
+        text_parts.extend(company.get("technologies") or [])
+        blob = " | ".join([str(x).lower() for x in text_parts if x is not None])
+
+        if not blob:
+            return False
+
+        has_b2b_query = any(k in {"b2b", "business to business"} for k in kws)
+        has_saas_query = any(k in {"saas", "software as a service"} for k in kws)
+
+        if has_saas_query:
+            saas_positive = [
+                "saas",
+                "software as a service",
+                "cloud software",
+                "enterprise software",
+                "software platform",
+                "crm platform",
+                "software development",
+                "business software",
+            ]
+            if not any(token in blob for token in saas_positive):
+                return False
+
+        if has_b2b_query:
+            b2b_positive = [
+                "b2b",
+                "enterprise",
+                "for businesses",
+                "business customers",
+                "business software",
+                "for enterprise customers",
+                "business to business",
+            ]
+            b2b_negative = [
+                "retail sale of consumer products",
+                "serves consumers",
+                "consumer products",
+                "for consumers",
+                "marketplace for consumers",
+                "b2c",
+                "consumer",
+            ]
+            if any(token in blob for token in b2b_negative):
+                return False
+            if not any(token in blob for token in b2b_positive):
+                return False
+
+        # Generic keyword contains fallback for all other keywords
+        generic_keywords = [k for k in kws if k not in {"b2b", "business to business", "saas", "software as a service"}]
+        if generic_keywords and not any(k in blob for k in generic_keywords):
+            return False
+
+        return True
+
+    @staticmethod
+    def _company_is_mega_brand(company: Dict[str, Any]) -> bool:
+        """
+        Identify mega-brands that should be filtered out for B2B SaaS searches.
+        """
+        company_name = str(company.get("name", "") or "").lower().strip()
+        mega_brands = {
+            "google", "amazon", "meta", "facebook", "microsoft", "apple", 
+            "alphabet", "netflix", "tesla", "nvidia", "alphabet inc", "amazon.com",
+            "meta platforms", "microsoft corporation", "apple inc", "alphabet inc.",
+            "amazon.com inc", "meta platforms inc", "microsoft corp", "apple corp"
+        }
+        
+        # Check if company name matches any mega-brand
+        if company_name in mega_brands:
+            return True
+            
+        # Check if domain is a mega-brand
+        domain = str(company.get("domain", "") or "").lower().strip()
+        if domain:
+            domain_base = domain.split(".")[0]
+            if domain_base in mega_brands:
+                return True
+                
+        return False

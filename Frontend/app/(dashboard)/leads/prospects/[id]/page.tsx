@@ -21,6 +21,7 @@ import {
     Users,
     Loader2,
     Mail,
+    Phone,
 } from "lucide-react"
 import type { ProspectProfile } from "@/lib/services/prospectService"
 import { getInitials, formatDate, calculateDuration } from "@/lib/services/prospectService"
@@ -33,8 +34,38 @@ export default function ProspectProfilePage() {
 
     // Email enrichment state
     const [enrichedEmail, setEnrichedEmail] = useState<string | null>(null)
+    const [enrichedPhone, setEnrichedPhone] = useState<string | null>(null)
+    const [emailRevealed, setEmailRevealed] = useState(false)
+    const [phoneRevealed, setPhoneRevealed] = useState(false)
     const [isEnrichingEmail, setIsEnrichingEmail] = useState(false)
     const [emailError, setEmailError] = useState<string | null>(null)
+    const [phoneError, setPhoneError] = useState<string | null>(null)
+
+    const sanitizeEmails = (values: any[]): string[] =>
+        values
+            .filter((v) => typeof v === "string" && v.includes("@"))
+            .map((v) => (v as string).trim())
+            .filter((v) => {
+                const low = v.toLowerCase()
+                const [localPart = "", domainPart = ""] = low.split("@")
+                if (!low) return false
+                if (low.endsWith("@example.com") || low.includes("test@")) return false
+                if (/^email\d+$/.test(localPart)) return false
+                if (/^(test|demo|sample)\d*$/.test(localPart)) return false
+                if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
+                return true
+            })
+
+    const sanitizePhones = (values: any[]): string[] =>
+        values
+            .filter((v) => typeof v === "string" && v.trim().length > 0)
+            .map((v) => (v as string).trim())
+            .filter((v) => {
+                const low = v.toLowerCase()
+                if (low.includes("phone number")) return false
+                const digits = v.replace(/\D/g, "")
+                return digits.length >= 6
+            })
 
     useEffect(() => {
         // Get profile from localStorage (where we'll store search results)
@@ -43,7 +74,7 @@ export default function ProspectProfilePage() {
             const profiles: ProspectProfile[] = JSON.parse(storedProfiles)
             // Support both In-DB API (person_id) and Realtime API (linkedin_profile_urn)
             const found = profiles.find((p) =>
-                String(p.person_id || p.linkedin_profile_urn) === params.id
+                String((p as any).person_id || (p as any).prospect_id || (p as any).linkedin_profile_urn) === params.id
             )
             setProfile(found || null)
         }
@@ -51,52 +82,100 @@ export default function ProspectProfilePage() {
         // Check if email already enriched (cached)
         const cachedEmail = localStorage.getItem(`email_${params.id}`)
         if (cachedEmail) {
-            setEnrichedEmail(cachedEmail)
+            const safe = sanitizeEmails([cachedEmail])
+            if (safe.length > 0) setEnrichedEmail(safe[0])
+        }
+        const cachedPhone = localStorage.getItem(`phone_${params.id}`)
+        if (cachedPhone) {
+            const safe = sanitizePhones([cachedPhone])
+            if (safe.length > 0) setEnrichedPhone(safe[0])
         }
 
         setIsLoading(false)
     }, [params.id])
 
-    // Handle email enrichment
-    const handleRevealEmail = async () => {
-        if (!profile || enrichedEmail) return // Already revealed or no profile
+    // Fetch contact enrichment fallback via ContactOut
+    const fetchContactFallback = async () => {
+        if (!profile) return { emails: [] as string[], phones: [] as string[] }
 
         setIsEnrichingEmail(true)
         setEmailError(null)
+        setPhoneError(null)
 
         try {
             const response = await fetch(
-                `/api/prospects/${profile.person_id}/enrich/email`,
+                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        linkedin_url: profile.flagship_profile_url
+                        linkedin_url: profile.flagship_profile_url || profile.linkedin_profile_url
                     })
                 }
             )
 
             if (!response.ok) {
-                const errorData = await response.json()
-                throw new Error(errorData.detail?.message || 'Failed to enrich email')
+                throw new Error('Failed to reveal contact')
             }
 
             const data = await response.json()
-
-            if (data.success && data.business_email && data.business_email.length > 0) {
-                const email = data.business_email[0]
-                setEnrichedEmail(email)
-
-                // Store in localStorage to prevent duplicate calls
-                localStorage.setItem(`email_${params.id}`, email)
-            } else {
-                setEmailError('No email found for this profile')
-            }
+            const emails = sanitizeEmails(Array.isArray(data?.emails) ? data.emails : [])
+            const phones = sanitizePhones(Array.isArray(data?.phones) ? data.phones : [])
+            return { emails, phones }
         } catch (error: any) {
-            console.error('Email enrichment error:', error)
-            setEmailError(error.message || 'Unable to retrieve email')
+            console.error('Contact enrichment error:', error)
+            throw error
         } finally {
             setIsEnrichingEmail(false)
+        }
+    }
+
+    const handleRevealEmail = async () => {
+        if (!profile) return
+        setEmailRevealed(true)
+        setEmailError(null)
+        if (enrichedEmail) return
+        try {
+            const localEmails = sanitizeEmails(Array.isArray((profile as any).emails) ? (profile as any).emails : [])
+            if (localEmails.length > 0) {
+                setEnrichedEmail(localEmails[0])
+                return
+            }
+            const { emails } = await fetchContactFallback()
+            if (emails.length > 0) {
+                setEnrichedEmail(emails[0])
+                localStorage.setItem(`email_${params.id}`, emails[0])
+            } else {
+                setEmailError("Email not Available")
+            }
+        } catch {
+            setEmailError("Email not Available")
+        }
+    }
+
+    const handleRevealPhone = async () => {
+        if (!profile) return
+        setPhoneRevealed(true)
+        setPhoneError(null)
+        if (enrichedPhone) return
+        try {
+            const localPhones = sanitizePhones([
+                ...((Array.isArray((profile as any).phones) ? (profile as any).phones : [])),
+                (profile as any).phone,
+            ])
+            if (localPhones.length > 0) {
+                setEnrichedPhone(localPhones[0])
+                return
+            }
+            const { phones } = await fetchContactFallback()
+            if (phones.length > 0) {
+                setEnrichedPhone(phones[0])
+                localStorage.setItem(`phone_${params.id}`, phones[0])
+            } else {
+                setPhoneError("Phone not Available")
+            }
+        } catch {
+            setPhoneError("Phone not Available")
         }
     }
 
@@ -192,7 +271,7 @@ export default function ProspectProfilePage() {
                                             <Button
                                                 variant={enrichedEmail ? "default" : "outline"}
                                                 onClick={handleRevealEmail}
-                                                disabled={isEnrichingEmail || !!enrichedEmail}
+                                                disabled={isEnrichingEmail}
                                                 className="gap-2"
                                             >
                                                 {isEnrichingEmail ? (
@@ -205,10 +284,43 @@ export default function ProspectProfilePage() {
                                                         <Mail className="h-4 w-4" />
                                                         {enrichedEmail}
                                                     </>
+                                                ) : emailRevealed ? (
+                                                    <>
+                                                        <Mail className="h-4 w-4" />
+                                                        Email not Available
+                                                    </>
                                                 ) : (
                                                     <>
                                                         <Mail className="h-4 w-4" />
                                                         View Email
+                                                    </>
+                                                )}
+                                            </Button>
+                                            <Button
+                                                variant={enrichedPhone ? "default" : "outline"}
+                                                onClick={handleRevealPhone}
+                                                disabled={isEnrichingEmail}
+                                                className="gap-2"
+                                            >
+                                                {isEnrichingEmail ? (
+                                                    <>
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        Revealing...
+                                                    </>
+                                                ) : enrichedPhone ? (
+                                                    <>
+                                                        <Phone className="h-4 w-4" />
+                                                        {enrichedPhone}
+                                                    </>
+                                                ) : phoneRevealed ? (
+                                                    <>
+                                                        <Phone className="h-4 w-4" />
+                                                        Phone not Available
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Phone className="h-4 w-4" />
+                                                        View Phone
                                                     </>
                                                 )}
                                             </Button>
@@ -218,6 +330,11 @@ export default function ProspectProfilePage() {
                                         {emailError && (
                                             <p className="text-sm text-destructive mt-2">
                                                 {emailError}
+                                            </p>
+                                        )}
+                                        {phoneError && (
+                                            <p className="text-sm text-destructive mt-2">
+                                                {phoneError}
                                             </p>
                                         )}
                                     </div>

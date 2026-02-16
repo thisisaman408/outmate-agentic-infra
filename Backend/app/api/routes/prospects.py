@@ -23,6 +23,7 @@ from app.schemas.prospect_filters import (
 from app.services.crustdata.prospect_search_service import ProspectSearchService
 from app.services.crustdata.enrichment_service import PersonEnrichmentService
 from app.services.crustdata.base_crustdata_client import CrustDataAPIError
+from app.services.contactout_service import ContactOutService
 from app.core.config import settings
 from pydantic import BaseModel, Field
 
@@ -331,6 +332,15 @@ class EnrichEmailRequest(BaseModel):
     )
 
 
+class ContactRevealRequest(BaseModel):
+    """Request schema for revealing contact info via ContactOut fallback"""
+    linkedin_url: str = Field(
+        ...,
+        description="Full LinkedIn profile URL",
+        example="https://www.linkedin.com/in/example-profile/"
+    )
+
+
 @router.post(
     "/{person_id}/enrich/email",
     status_code=status.HTTP_200_OK,
@@ -483,7 +493,60 @@ async def get_prospects_info():
         "version": settings.APP_VERSION,
         "endpoints": {
             "search": "/api/prospects/search (POST)",
-            "health": "/api/prospects/health (GET)"
+            "health": "/api/prospects/health (GET)",
+            "reveal_contact": "/api/prospects/reveal-contact (POST)"
         },
         "documentation": "/docs"
     }
+
+
+@router.post(
+    "/reveal-contact",
+    status_code=status.HTTP_200_OK,
+    summary="Reveal prospect contact info via ContactOut fallback",
+    description="""
+    Fetches phone/email for a prospect using ContactOut `people/linkedin` endpoint.
+    Intended for click-to-reveal UX in prospect tables.
+    """
+)
+async def reveal_contact_info(request: ContactRevealRequest):
+    try:
+        linkedin_url = (request.linkedin_url or "").strip()
+        if not linkedin_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="linkedin_url is required"
+            )
+
+        service = ContactOutService()
+        result = await service.reveal_contact_info(
+            linkedin_url=linkedin_url,
+            include_phone=True
+        )
+
+        profile = result.get("profile") or {}
+        emails = profile.get("email") or profile.get("emails") or []
+        phones = profile.get("phone") or profile.get("phones") or []
+
+        if isinstance(emails, str):
+            emails = [emails]
+        if isinstance(phones, str):
+            phones = [phones]
+
+        emails = [e for e in emails if isinstance(e, str) and e.strip()]
+        phones = [p for p in phones if isinstance(p, str) and p.strip()]
+
+        return {
+            "success": True,
+            "linkedin_url": linkedin_url,
+            "emails": emails,
+            "phones": phones,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Contact reveal fallback failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch contact info"
+        )

@@ -67,7 +67,14 @@ async def identify_company(payload: Dict[str, Any]):
 
     except Exception as e:
         logger.error("Crustdata identify error: %s", str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Crustdata identify failed: {str(e)}")
+        msg = f"Crustdata identify failed: {str(e)}"
+        # Graceful fallback when identify API is unavailable for the account.
+        # Frontend identification page expects a list; return empty list instead of 500.
+        if "No Crustdata identify endpoint variant succeeded" in msg:
+            return []
+        if "ReadTimeout" in msg or "ConnectTimeout" in msg:
+            raise HTTPException(status_code=504, detail=msg)
+        raise HTTPException(status_code=500, detail=msg)
 
 
 @router.get("/enrich")
@@ -113,7 +120,11 @@ async def enrich_company(
 
     except Exception as e:
         logger.error("Crustdata enrich error: %s", str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Crustdata enrich failed: {str(e)}")
+        msg = f"Crustdata enrich failed: {str(e)}"
+        # Graceful response expected by enrichment UI.
+        if any(t in msg for t in ["ReadTimeout", "ConnectTimeout", "ConnectError", "getaddrinfo failed"]):
+            return {"status": "not_found", "message": "Enrichment service timed out. Try again or request fewer fields."}
+        raise HTTPException(status_code=500, detail=msg)
 
 
 @router.post("/company/search")

@@ -3,6 +3,7 @@ import httpx
 import os
 import json
 import logging
+import asyncio
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 from datetime import datetime
@@ -150,16 +151,94 @@ class CrustdataService:
             if company_id:
                 payload["query_company_id"] = company_id
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/screener/identify",
-                    headers=self._get_headers(),
-                    json=payload
-                )
-                response.raise_for_status()
-                return response.json()
+            # Some Crustdata environments are strict about trailing slash or
+            # endpoint aliasing. Try known variants before failing.
+            endpoint_candidates = [
+                f"{self.base_url}/screener/identify",
+                f"{self.base_url}/screener/identify/",
+                f"{self.base_url}/api/screener/identify",
+                f"{self.base_url}/api/screener/identify/",
+            ]
+
+            # Use explicit timeout buckets to avoid hanging sockets while still
+            # allowing slower read responses from upstream.
+            timeout = httpx.Timeout(
+                connect=min(10.0, float(self.timeout)),
+                read=float(self.timeout),
+                write=min(10.0, float(self.timeout)),
+                pool=min(10.0, float(self.timeout)),
+            )
+
+            last_error: Optional[Exception] = None
+            attempt_errors: List[str] = []
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                for endpoint in endpoint_candidates:
+                    try:
+                        response = await client.post(
+                            endpoint,
+                            headers=self._get_headers(),
+                            json=payload
+                        )
+                        response.raise_for_status()
+                        return response.json()
+                    except httpx.HTTPStatusError as e:
+                        last_error = e
+                        attempt_errors.append(f"{endpoint} -> HTTP {e.response.status_code if e.response is not None else 'unknown'}")
+                        # Only try the next endpoint variant for 404.
+                        if e.response is not None and e.response.status_code == 404:
+                            continue
+                        raise
+                    except (httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                        last_error = e
+                        attempt_errors.append(f"{endpoint} -> {e.__class__.__name__}")
+                        # Timeout on one variant does not imply all variants fail.
+                        continue
+                    except httpx.RequestError as e:
+                        last_error = e
+                        attempt_errors.append(f"{endpoint} -> {e.__class__.__name__}")
+                        continue
+
+            if last_error:
+                # Fallback for accounts where identify endpoint is unavailable.
+                # Derive a best-effort match using enrichment so downstream
+                # flows can continue instead of returning 500.
+                only_404 = len(attempt_errors) > 0 and all("HTTP 404" in msg for msg in attempt_errors)
+                if only_404 and (website or name or linkedin_url or company_id):
+                    try:
+                        candidate_domain = _extract_domain(website or "") or (website or "").strip()
+                        enriched = await self.enrich_company(
+                            domain=candidate_domain or None,
+                            name=name,
+                            linkedin_url=linkedin_url,
+                            company_id=company_id,
+                            exact_match=True,
+                            enrich_realtime=False,
+                        )
+
+                        company_obj: Optional[Dict[str, Any]] = None
+                        if isinstance(enriched, dict) and isinstance(enriched.get("companies"), list) and enriched["companies"]:
+                            company_obj = enriched["companies"][0]
+                        elif isinstance(enriched, dict) and enriched:
+                            company_obj = enriched
+
+                        if company_obj:
+                            return [{
+                                "company_id": company_obj.get("company_id") or company_obj.get("id"),
+                                "company_name": company_obj.get("company_name") or company_obj.get("name"),
+                                "company_website": company_obj.get("company_website") or company_obj.get("company_website_url") or company_obj.get("website"),
+                                "linkedin_profile_url": company_obj.get("linkedin_profile_url") or company_obj.get("company_linkedin_url") or company_obj.get("linkedin_url"),
+                                "is_full_domain_match": bool(candidate_domain),
+                            }]
+                    except Exception as fallback_err:
+                        attempt_errors.append(f"fallback_enrich -> {fallback_err.__class__.__name__}: {str(fallback_err)}")
+
+                raise Exception(
+                    "No Crustdata identify endpoint variant succeeded. "
+                    + "; ".join(attempt_errors)
+                ) from last_error
+            raise Exception("No Crustdata identify endpoint candidates succeeded")
         except Exception as e:
-            raise Exception(f"Company identification failed: {str(e)}")
+            raise Exception(f"Company identification failed: {e!r}")
 
     # 2. Enrichment API - GET /screener/company
     async def enrich_company(
@@ -189,49 +268,142 @@ class CrustdataService:
                 "enrich_realtime": str(enrich_realtime).lower(),
                 "exact_match": str(exact_match).lower(),
             }
-            if safe_fields:
-                params["fields"] = safe_fields
             if domain:
                 # Pass company_domain as-is - let httpx handle the encoding properly
                 params["company_domain"] = domain
+            if name:
+                params["company_name"] = name
+            if linkedin_url:
+                params["company_linkedin_url"] = linkedin_url
+            if company_id:
+                params["company_id"] = company_id
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Keep enrichment fast: short bounded timeout per attempt.
+            timeout = httpx.Timeout(
+                connect=min(5.0, float(self.timeout)),
+                read=min(8.0, float(self.timeout)),
+                write=min(5.0, float(self.timeout)),
+                pool=min(5.0, float(self.timeout)),
+            )
+            hard_attempt_timeout = min(10.0, float(self.timeout))
+
+            field_candidates: List[Optional[str]] = []
+            if safe_fields:
+                # If user explicitly requested fields, try once with those fields.
+                field_candidates.append(safe_fields)
+            else:
+                # Fast default payload when no fields are requested.
+                field_candidates.append("headcount,web_traffic,funding_and_investment")
+            # One lightweight fallback only.
+            field_candidates.append("headcount")
+            # De-dupe while preserving order
+            deduped: List[Optional[str]] = []
+            for f in field_candidates:
+                if f not in deduped:
+                    deduped.append(f)
+            field_candidates = deduped
+
+            last_error: Optional[Exception] = None
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 headers = self._get_headers()
-                print(f">>> Crustdata request headers: {json.dumps(self._masked_headers(headers))} params: {params}", flush=True)
-                try:
-                    response = await client.get(
-                        f"{self.base_url}/screener/company",
-                        headers=headers,
-                        params=params
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                except httpx.HTTPStatusError as e:
-                    # If we received 401, try an alternative Authorization header format
-                    if e.response is not None and e.response.status_code == 401 and self.api_key:
-                        alt_headers = headers.copy()
-                        alt_headers["Authorization"] = f"Bearer {self.api_key}"
-                        print(
-                            f">>> Crustdata 401 received, retrying with alt headers: {json.dumps(self._masked_headers(alt_headers))}",
-                            flush=True,
-                        )
-                        retry = await client.get(
-                            f"{self.base_url}/screener/company",
-                            headers=alt_headers,
-                            params=params,
-                        )
-                        print(f">>> Crustdata retry status: {retry.status_code}", flush=True)
-                        retry.raise_for_status()
-                        data = retry.json()
+                for field_set in field_candidates:
+                    params_attempt = dict(params)
+                    if field_set:
+                        params_attempt["fields"] = field_set
                     else:
-                        raise
+                        params_attempt.pop("fields", None)
 
-                # Handle bulk response format (array of companies)
-                if isinstance(data, list):
-                    return {"companies": data}
-                return data
+                    print(
+                        f">>> Crustdata request headers: {json.dumps(self._masked_headers(headers))} params: {params_attempt}",
+                        flush=True,
+                    )
+                    try:
+                        response = await asyncio.wait_for(
+                            client.get(
+                                f"{self.base_url}/screener/company",
+                                headers=headers,
+                                params=params_attempt
+                            ),
+                            timeout=hard_attempt_timeout,
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        # Handle bulk response format (array of companies)
+                        if isinstance(data, list):
+                            return {"companies": data}
+                        return data
+                    except httpx.HTTPStatusError as e:
+                        last_error = e
+                        # If 401, retry once with Bearer for same field set.
+                        if e.response is not None and e.response.status_code == 401 and self.api_key:
+                            alt_headers = headers.copy()
+                            alt_headers["Authorization"] = f"Bearer {self.api_key}"
+                            print(
+                                f">>> Crustdata 401 received, retrying with alt headers: {json.dumps(self._masked_headers(alt_headers))}",
+                                flush=True,
+                            )
+                            retry = await asyncio.wait_for(
+                                client.get(
+                                    f"{self.base_url}/screener/company",
+                                    headers=alt_headers,
+                                    params=params_attempt,
+                                ),
+                                timeout=hard_attempt_timeout,
+                            )
+                            print(f">>> Crustdata retry status: {retry.status_code}", flush=True)
+                            retry.raise_for_status()
+                            data = retry.json()
+                            if isinstance(data, list):
+                                return {"companies": data}
+                            return data
+                        # On 400 with heavy fields, try lighter field sets.
+                        if e.response is not None and e.response.status_code == 400:
+                            continue
+                        raise
+                    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
+                        last_error = e
+                        continue
+                    except asyncio.TimeoutError as e:
+                        last_error = httpx.ReadTimeout("hard timeout")
+                        continue
+
+            if last_error:
+                # Fast fallback: return identification data shape when enrichment
+                # endpoint is slow/unavailable.
+                if isinstance(last_error, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError)) and (domain or name or linkedin_url or company_id):
+                    try:
+                        identify_matches = await self.identify_company(
+                            name=name,
+                            website=domain,
+                            linkedin_url=linkedin_url,
+                            company_id=company_id,
+                            exact_match=exact_match,
+                            count=1,
+                        )
+                        if isinstance(identify_matches, list) and identify_matches:
+                            m = identify_matches[0] if isinstance(identify_matches[0], dict) else {}
+                            return {
+                                "company_id": m.get("company_id"),
+                                "company_name": m.get("company_name") or m.get("linkedin_profile_name"),
+                                "company_website_domain": m.get("company_website_domain"),
+                                "company_website_url": m.get("company_website"),
+                                "company_linkedin_url": m.get("linkedin_profile_url"),
+                                "linkedin_profile_name": m.get("linkedin_profile_name"),
+                                "employee_count_range": m.get("employee_count_range"),
+                                "linkedin_headcount": m.get("linkedin_headcount"),
+                                "estimated_revenue_lower_bound_usd": m.get("estimated_revenue_lower_bound_usd"),
+                                "estimated_revenue_upper_bound_usd": m.get("estimated_revenue_upper_bound_usd"),
+                                "hq_country": m.get("hq_country"),
+                                "headquarters": m.get("headquarters"),
+                                "linkedin_industries": m.get("linkedin_industries") or [],
+                                "linkedin_logo_url": m.get("linkedin_logo_url"),
+                            }
+                    except Exception:
+                        pass
+                raise last_error
+            raise Exception("No enrichment attempt succeeded")
         except Exception as e:
-            raise Exception(f"Company enrichment failed: {str(e)}")
+            raise Exception(f"Company enrichment failed: {e!r}")
 
     async def enrich_companies_by_domain(
         self,

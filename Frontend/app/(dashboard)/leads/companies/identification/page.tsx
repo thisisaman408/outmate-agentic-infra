@@ -47,6 +47,7 @@ export default function CompanyIdentificationPage() {
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<IdentificationResult[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [searched, setSearched] = useState(false)
   
   // Form states
   const [companyName, setCompanyName] = useState("")
@@ -61,6 +62,7 @@ export default function CompanyIdentificationPage() {
     setLoading(true)
     setError(null)
     setResults([])
+    setSearched(true)
 
     try {
       const requestBody: any = {
@@ -93,7 +95,23 @@ export default function CompanyIdentificationPage() {
       }
 
       const data = await response.json()
-      setResults(data || [])
+      const normalizedResults = Array.isArray(data)
+        ? data.filter((item: any) => {
+            if (!item || typeof item !== "object") return false
+            return Boolean(
+              item.company_name ||
+              item.company_website_domain ||
+              item.company_website ||
+              item.linkedin_profile_url ||
+              item.company_id
+            )
+          })
+        : []
+
+      setResults(normalizedResults as IdentificationResult[])
+      if (normalizedResults.length === 0) {
+        setError("No results found")
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -254,7 +272,7 @@ export default function CompanyIdentificationPage() {
               {results.length === 0 && !loading && (
                 <div className="text-center py-12 text-muted-foreground">
                   <Building2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No results yet. Try searching for a company.</p>
+                  <p>{searched ? "No results found." : "No results yet. Try searching for a company."}</p>
                 </div>
               )}
 
@@ -320,7 +338,7 @@ export default function CompanyIdentificationPage() {
                               )}
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              {result.linkedin_industries.slice(0, 3).map((industry) => (
+                              {(Array.isArray(result.linkedin_industries) ? result.linkedin_industries : []).slice(0, 3).map((industry) => (
                                 <Badge key={industry} variant="outline" className="text-xs">
                                   {industry}
                                 </Badge>

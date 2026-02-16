@@ -4,8 +4,74 @@ from fastapi import APIRouter, HTTPException
 from app.services.explorium_service import ExploriumService
 from app.services.contactout_service import ContactOutService
 from app.services.crustdata_service import CrustdataService
+from app.services.nlp_service import NLPService
+from app.services.advanced_nlp_service import AdvancedNLPService
+from app.services.crustdata.prospect_search_service import ProspectSearchService
 
 router = APIRouter(tags=["explorium"])
+_advanced_nlp_service: AdvancedNLPService | None = None
+
+
+def get_advanced_nlp_service() -> AdvancedNLPService:
+    global _advanced_nlp_service
+    if _advanced_nlp_service is None:
+        _advanced_nlp_service = AdvancedNLPService()
+    return _advanced_nlp_service
+
+@router.post("/search")
+async def natural_language_search(payload: Dict[str, Any]):
+    """
+    Natural language search endpoint with NLP categorization and filter extraction.
+    Uses OpenRouter for intelligent query processing.
+    """
+    try:
+        query = payload.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        print(f">>> [NLP Search] Processing query: '{query}'", flush=True)
+        
+        # Reuse one NLP service instance to avoid repeated model loads
+        advanced_nlp_service = get_advanced_nlp_service()
+        
+        print(f">>> [Advanced NLP] Processing query: '{query}'", flush=True)
+        print(f">>> [Advanced NLP] API Key present: {bool(advanced_nlp_service.openrouter_api_key)}", flush=True)
+        
+        # Process query using LangGraph workflow
+        nlp_result = await advanced_nlp_service.process_query(query)
+        
+        intent = nlp_result.get("intent", "company")
+        filters = nlp_result.get("filters", {})
+        confidence = nlp_result.get("confidence", 0)
+        
+        print(f">>> [NLP] Intent: {intent}, Filters: {filters}, Confidence: {confidence}%", flush=True)
+
+        # Use results already fetched by AdvancedNLPService to avoid duplicate provider calls.
+        service_results = nlp_result.get("service_results") or {}
+        results = service_results.get("results", []) if isinstance(service_results, dict) else []
+        total_count = service_results.get("total_count", len(results)) if isinstance(service_results, dict) else len(results)
+        
+        print(f">>> [NLP] Found {len(results)} results using {intent} search", flush=True)
+        
+        return {
+            "success": True,
+            "results": {
+                "data": results,
+                "total_results": total_count
+            },
+            "intent": intent,
+            "nlp_analysis": {
+                "categorized_intent": intent,
+                "extracted_filters": filters,
+                "confidence": confidence
+            }
+        }
+        
+    except HTTPException as e:
+        return {"success": False, "error": {"message": str(e.detail)}}
+    except Exception as e:
+        print(f">>> [NLP Search] Error: {str(e)}", flush=True)
+        return {"success": False, "error": {"message": f"NLP search failed: {str(e)}"}}
 
 @router.post("/company/search")
 async def search_company(payload: Dict[str, Any]):

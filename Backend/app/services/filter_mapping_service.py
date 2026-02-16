@@ -32,14 +32,28 @@ COUNTRY_REGION_MAP = {
 }
 
 INDUSTRY_MAP = {
-    "software": "Software Development",
+    # B2B SaaS specific mappings - Keep these specific to avoid broad matches
+    "b2b": "B2B",
+    "b2b saas": "B2B SaaS",
+    "b2b software": "B2B Software",
+    "business software": "Business Software",
     "saas": "SaaS",
+    "software": "Software",
+    "software development": "Software Development",
     "technology": "Technology",
     "banking": "Banking",
     "finance": "Financial Services",
+    "financial services": "Financial Services",
     "healthcare": "Healthcare",
     "retail": "Retail",
     "ecommerce": "E-Commerce",
+    "e-commerce": "E-Commerce",
+    "marketing": "Marketing and Advertising",
+    "advertising": "Marketing and Advertising",
+    "martech": "Marketing and Advertising",
+    "fintech": "Financial Services",
+    "healthtech": "Healthcare",
+    "edtech": "Education",
 }
 
 

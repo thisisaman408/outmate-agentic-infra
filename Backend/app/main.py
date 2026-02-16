@@ -3,6 +3,8 @@ Main FastAPI application
 Production-grade setup with logging, CORS, and organized routes
 """
 
+import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +12,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
+
+# Load environment variables from .env file
+load_dotenv()
+
+from app.db.vector_setup import setup_vector_database
 
 from app.db.deps import get_db
 from app.db.models.user import User
@@ -114,18 +121,20 @@ app.include_router(explorium_routes.router, prefix="/api/explorium", tags=["expl
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event handler"""
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    """Initialize services on startup"""
+    logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
+    # Initialize Redis connection
+    RedisManager.connect()
+    logger.info("Redis connection established")
+    
+    # Initialize Vector Database
     try:
-        # Connect to Redis
-        RedisManager.connect()
-        logger.info("Redis connection established")
+        await setup_vector_database()
+        logger.info("Vector database initialized")
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
-        # Don't crash the app if Redis is unavailable
-        # The app can still function without cache
+        logger.error(f"Vector database setup failed: {e}")
     
     logger.info("Application startup complete")
 
@@ -191,5 +200,29 @@ def health(db: Session = Depends(get_db)):
             "status": db_status,
             "users": user_count
         }
+    }
+
+@app.get("/v1/models")
+def openai_models():
+    """
+    OpenAI-compatible models endpoint for compatibility with tools expecting OpenAI API.
+    Returns a mock response to prevent 404 errors from monitoring services.
+    """
+    return {
+        "data": [
+            {
+                "id": "anthropic/claude-sonnet-4-5",
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "anthropic"
+            },
+            {
+                "id": "anthropic/claude-sonnet-4",
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "anthropic"
+            }
+        ],
+        "object": "list"
     }
 

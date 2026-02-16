@@ -7,38 +7,228 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Eye, Linkedin, Mail, MoreVertical, Loader2 } from "lucide-react"
+import { Eye, Linkedin, Loader2, Lock } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ProspectProfile } from "@/lib/services/prospectService"
 import { getInitials } from "@/lib/services/prospectService"
 
 interface ProspectsResultsTableProps {
-    profiles: ProspectProfile[]
+    profiles?: ProspectProfile[]
+    data?: ProspectProfile[]
     isLoading?: boolean
     totalCount?: number
     hasMore?: boolean
     onLoadMore?: () => void
     isLoadingMore?: boolean
+    enableContactReveal?: boolean
 }
 
 export function ProspectsResultsTable({
     profiles,
+    data,
     isLoading,
     totalCount = 0,
     hasMore = false,
     onLoadMore,
     isLoadingMore = false,
+    enableContactReveal = false,
 }: ProspectsResultsTableProps) {
+    // Support both 'profiles' and 'data' props for compatibility
+    const actualProfiles = profiles || data || []
+    
     const router = useRouter()
     const [searchTerm, setSearchTerm] = useState("")
+    const [revealedEmail, setRevealedEmail] = useState<Record<string, boolean>>({})
+    const [revealedPhone, setRevealedPhone] = useState<Record<string, boolean>>({})
+    const [contactCache, setContactCache] = useState<Record<string, { emails: string[]; phones: string[]; loading?: boolean }>>({})
+    const asText = (value: unknown) => (typeof value === "string" ? value : "")
+    const parseYears = (value: unknown): number => {
+        if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value)
+        if (typeof value === "string" && value.trim()) {
+            const raw = value.trim().toLowerCase()
+            const match = raw.match(/(\d+(\.\d+)?)/)
+            const num = Number(match?.[1] ?? "")
+            if (Number.isFinite(num)) return Math.max(0, num)
+        }
+        return 0
+    }
+    const formatExperienceFromYears = (years: number): string => {
+        if (!Number.isFinite(years) || years <= 0) return "N/A"
+        const rounded = Math.floor(years)
+        return rounded <= 1 ? "1 year" : `${rounded} years`
+    }
+    const getExperienceLabel = (profile: ProspectProfile): string => {
+        const raw = ((profile as any).raw_data && typeof (profile as any).raw_data === "object")
+            ? (profile as any).raw_data
+            : (((profile as any).rawData && typeof (profile as any).rawData === "object") ? (profile as any).rawData : {})
+
+        const directLabel = asText((profile as any).years_of_experience || raw?.years_of_experience).trim()
+        if (directLabel && directLabel.toLowerCase() !== "n/a") return directLabel
+
+        const directRaw = parseYears((profile as any).years_of_experience_raw ?? raw?.years_of_experience_raw)
+        if (directRaw > 0) return formatExperienceFromYears(directRaw)
+
+        const employers = [
+            ...(Array.isArray((profile as any).current_employers) ? (profile as any).current_employers : []),
+            ...(Array.isArray((profile as any).past_employers) ? (profile as any).past_employers : []),
+            ...(Array.isArray((profile as any).employer) ? (profile as any).employer : []),
+            ...(Array.isArray((profile as any).all_employers) ? (profile as any).all_employers : []),
+            ...(Array.isArray(raw?.current_employers) ? raw.current_employers : []),
+            ...(Array.isArray(raw?.past_employers) ? raw.past_employers : []),
+            ...(Array.isArray(raw?.employer) ? raw.employer : []),
+            ...(Array.isArray(raw?.all_employers) ? raw.all_employers : []),
+        ]
+        let total = 0
+        for (const emp of employers) {
+            const rawYears = parseYears(emp?.years_at_company_raw)
+            if (rawYears > 0) {
+                total += rawYears
+                continue
+            }
+            const labelYears = parseYears(emp?.years_at_company)
+            if (labelYears > 0) total += labelYears
+        }
+        return formatExperienceFromYears(total)
+    }
+    const getStableId = (profile: ProspectProfile, idx: number): string => {
+        return String(
+            (profile as any).person_id ||
+            (profile as any).linkedin_profile_urn ||
+            profile.linkedin_profile_url ||
+            profile.flagship_profile_url ||
+            `${asText(profile.name) || "Unknown"}-${idx}`
+        )
+    }
+    const getExistingEmails = (profile: any): string[] => {
+        const sanitizeEmails = (values: any[]): string[] =>
+            values
+                .filter((v) => typeof v === "string" && v.includes("@"))
+                .map((v) => (v as string).trim())
+                .filter((v) => {
+                    const low = v.toLowerCase()
+                    if (!v) return false
+                    // Hide obvious demo/sample placeholders.
+                    const [localPart = "", domainPart = ""] = low.split("@")
+                    if (low.endsWith("@example.com") || low.includes("test@")) return false
+                    if (/^email\d+$/.test(localPart)) return false
+                    if (/^(test|demo|sample)\d*$/.test(localPart)) return false
+                    if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
+                    return true
+                })
+
+        const raw = (profile?.raw_data && typeof profile.raw_data === "object")
+            ? profile.raw_data
+            : ((profile?.rawData && typeof profile.rawData === "object") ? profile.rawData : {})
+        const candidates: any[] = [
+            ...(Array.isArray(profile?.emails) ? profile.emails : []),
+            profile?.email,
+            profile?.work_email,
+            profile?.personal_email,
+            ...(Array.isArray(profile?.contact_info?.emails) ? profile.contact_info.emails : []),
+            ...(Array.isArray(profile?.contact_info?.work_emails) ? profile.contact_info.work_emails : []),
+            ...(Array.isArray(profile?.contact_info?.personal_emails) ? profile.contact_info.personal_emails : []),
+            ...(Array.isArray(raw?.emails) ? raw.emails : []),
+            raw?.email,
+            raw?.work_email,
+            raw?.personal_email,
+        ]
+        return sanitizeEmails(candidates)
+    }
+    const getExistingPhones = (profile: any): string[] => {
+        const sanitizePhones = (values: any[]): string[] =>
+            values
+                .filter((v) => typeof v === "string" && v.trim().length > 0)
+                .map((v) => (v as string).trim())
+                .filter((v) => {
+                    const low = v.toLowerCase()
+                    if (!v) return false
+                    // Hide obvious demo/sample placeholders.
+                    if (low.includes("phone number")) return false
+                    // Must contain at least 6 digits to be considered real.
+                    const digits = v.replace(/\D/g, "")
+                    return digits.length >= 6
+                })
+
+        const raw = (profile?.raw_data && typeof profile.raw_data === "object")
+            ? profile.raw_data
+            : ((profile?.rawData && typeof profile.rawData === "object") ? profile.rawData : {})
+        const candidates: any[] = [
+            ...(Array.isArray(profile?.phones) ? profile.phones : []),
+            profile?.phone,
+            ...(Array.isArray(profile?.contact_info?.phones) ? profile.contact_info.phones : []),
+            ...(Array.isArray(raw?.phones) ? raw.phones : []),
+            raw?.phone,
+        ]
+        return sanitizePhones(candidates)
+    }
+    const revealContact = async (rowId: string, profile: ProspectProfile) => {
+        const sanitizeEmails = (values: any[]): string[] =>
+            values
+                .filter((v) => typeof v === "string" && v.includes("@"))
+                .map((v) => (v as string).trim())
+                .filter((v) => {
+                    const low = v.toLowerCase()
+                    if (!v) return false
+                    const [localPart = "", domainPart = ""] = low.split("@")
+                    if (low.endsWith("@example.com") || low.includes("test@")) return false
+                    if (/^email\d+$/.test(localPart)) return false
+                    if (/^(test|demo|sample)\d*$/.test(localPart)) return false
+                    if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
+                    return true
+                })
+        const sanitizePhones = (values: any[]): string[] =>
+            values
+                .filter((v) => typeof v === "string" && v.trim().length > 0)
+                .map((v) => (v as string).trim())
+                .filter((v) => {
+                    const low = v.toLowerCase()
+                    if (low.includes("phone number")) return false
+                    const digits = v.replace(/\D/g, "")
+                    return digits.length >= 6
+                })
+
+        const existingEmails = getExistingEmails(profile as any)
+        const existingPhones = getExistingPhones(profile as any)
+        if (existingEmails.length > 0 || existingPhones.length > 0) {
+            setContactCache((prev) => ({ ...prev, [rowId]: { emails: existingEmails, phones: existingPhones } }))
+            return
+        }
+
+        if (!enableContactReveal) return
+        const linkedinUrl = profile.flagship_profile_url || profile.linkedin_profile_url
+        if (!linkedinUrl) return
+
+        setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: true } }))
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ linkedin_url: linkedinUrl }),
+            })
+            if (!response.ok) throw new Error("Failed to reveal contact")
+            const payload = await response.json()
+            const safeEmails = sanitizeEmails(Array.isArray(payload?.emails) ? payload.emails : [])
+            const safePhones = sanitizePhones(Array.isArray(payload?.phones) ? payload.phones : [])
+            setContactCache((prev) => ({
+                ...prev,
+                [rowId]: {
+                    emails: safeEmails,
+                    phones: safePhones,
+                    loading: false,
+                },
+            }))
+        } catch {
+            setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: false } }))
+        }
+    }
 
     // Filter profiles by search term
-    const filteredProfiles = profiles.filter((profile) => {
+    const filteredProfiles = actualProfiles.filter((profile) => {
         const searchLower = searchTerm.toLowerCase()
         return (
-            profile.name.toLowerCase().includes(searchLower) ||
-            profile.headline.toLowerCase().includes(searchLower) ||
-            profile.region.toLowerCase().includes(searchLower) ||
+            asText(profile.name).toLowerCase().includes(searchLower) ||
+            asText(profile.headline).toLowerCase().includes(searchLower) ||
+            asText(profile.region).toLowerCase().includes(searchLower) ||
             (profile.current_employers?.[0]?.name || "").toLowerCase().includes(searchLower)
         )
     })
@@ -67,7 +257,7 @@ export function ProspectsResultsTable({
     }
 
     // Empty state
-    if (profiles.length === 0) {
+    if (actualProfiles.length === 0) {
         return (
             <Card>
                 <CardHeader>
@@ -111,28 +301,40 @@ export function ProspectsResultsTable({
                                 <TableHead className="w-[200px]">Company</TableHead>
                                 <TableHead className="w-[150px]">Location</TableHead>
                                 <TableHead className="w-[120px]">Experience</TableHead>
+                                {enableContactReveal && <TableHead className="w-[200px]">Email</TableHead>}
+                                {enableContactReveal && <TableHead className="w-[160px]">Phone</TableHead>}
                                 <TableHead className="w-[100px] text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredProfiles.map((prospect) => {
+                            {filteredProfiles.map((prospect, idx) => {
                                 // Support both In-DB API (current_employers) and Realtime API (employer)
                                 const currentEmployer = prospect.current_employers?.[0] ||
                                     (prospect.employer as any)?.[0]
-                                const initials = getInitials(prospect.name)
+                                const displayName = asText(prospect.name) || "Unknown"
+                                const initials = getInitials(displayName)
+                                const stableId = getStableId(prospect, idx)
+                                const rowKey = `${stableId}-${idx}`
+                                const isEmailRevealed = Boolean(revealedEmail[rowKey])
+                                const isPhoneRevealed = Boolean(revealedPhone[rowKey])
+                                const cache = contactCache[rowKey]
+                                const localEmails = getExistingEmails(prospect as any)
+                                const localPhones = getExistingPhones(prospect as any)
+                                const emails = (cache?.emails && cache.emails.length > 0) ? cache.emails : localEmails
+                                const phones = (cache?.phones && cache.phones.length > 0) ? cache.phones : localPhones
 
                                 return (
                                     <TableRow
-                                        key={prospect.person_id || prospect.linkedin_profile_urn}
+                                        key={rowKey}
                                         className="cursor-pointer hover:bg-muted/50 transition-colors"
-                                        onClick={() => handleProfileClick(prospect.person_id || prospect.linkedin_profile_urn)}
+                                        onClick={() => handleProfileClick(stableId as any)}
                                     >
                                         {/* Profile Image */}
                                         <TableCell>
                                             <Avatar className="h-10 w-10">
                                                 <AvatarImage
                                                     src={prospect.profile_picture_url || ""}
-                                                    alt={prospect.name}
+                                                    alt={displayName}
                                                 />
                                                 <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                                                     {initials}
@@ -144,10 +346,10 @@ export function ProspectsResultsTable({
                                         <TableCell>
                                             <div className="flex flex-col">
                                                 <span className="font-medium text-sm truncate max-w-[200px] text-foreground">
-                                                    {prospect.name}
+                                                    {displayName}
                                                 </span>
                                                 <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                                    {prospect.num_of_connections.toLocaleString()} connections
+                                                    {(Number(prospect.num_of_connections) || 0).toLocaleString()} connections
                                                 </span>
                                             </div>
                                         </TableCell>
@@ -188,9 +390,59 @@ export function ProspectsResultsTable({
                                         {/* Experience */}
                                         <TableCell>
                                             <Badge variant="outline" className="font-normal">
-                                                {prospect.years_of_experience}
+                                                {getExperienceLabel(prospect)}
                                             </Badge>
                                         </TableCell>
+
+                                        {enableContactReveal && (
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                {!isEmailRevealed ? (
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        className="h-7 text-[11px]"
+                                                        onClick={async () => {
+                                                            setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
+                                                            await revealContact(rowKey, prospect)
+                                                        }}
+                                                    >
+                                                        <Lock className="h-3 w-3 mr-1" />
+                                                        Tap to Reveal
+                                                    </Button>
+                                                ) : cache?.loading ? (
+                                                    <span className="text-xs text-muted-foreground">Loading...</span>
+                                                ) : emails.length > 0 ? (
+                                                    <span className="text-xs break-all">{emails[0]}</span>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">Email not Available</span>
+                                                )}
+                                            </TableCell>
+                                        )}
+
+                                        {enableContactReveal && (
+                                            <TableCell onClick={(e) => e.stopPropagation()}>
+                                                {!isPhoneRevealed ? (
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        className="h-7 text-[11px]"
+                                                        onClick={async () => {
+                                                            setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
+                                                            await revealContact(rowKey, prospect)
+                                                        }}
+                                                    >
+                                                        <Lock className="h-3 w-3 mr-1" />
+                                                        Tap to Reveal
+                                                    </Button>
+                                                ) : cache?.loading ? (
+                                                    <span className="text-xs text-muted-foreground">Loading...</span>
+                                                ) : phones.length > 0 ? (
+                                                    <span className="text-xs">{phones[0]}</span>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">Phone not Available</span>
+                                                )}
+                                            </TableCell>
+                                        )}
 
                                         {/* Actions */}
                                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -199,7 +451,7 @@ export function ProspectsResultsTable({
                                                     variant="ghost"
                                                     size="icon"
                                                     className="h-8 w-8"
-                                                    onClick={() => handleProfileClick(prospect.person_id || prospect.linkedin_profile_urn)}
+                                                    onClick={() => handleProfileClick(stableId as any)}
                                                 >
                                                     <Eye className="h-4 w-4" />
                                                     <span className="sr-only">View Profile</span>

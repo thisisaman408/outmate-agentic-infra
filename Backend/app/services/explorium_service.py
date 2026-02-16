@@ -36,6 +36,31 @@ class ExploriumService:
         print(f">>> [ExploriumService] _map_filters called with: {frontend_filters}", flush=True)
         mapped: Dict[str, Any] = {}
 
+        country_name_to_code = {
+            "united states": "us",
+            "usa": "us",
+            "us": "us",
+            "canada": "ca",
+            "mexico": "mx",
+            "united kingdom": "gb",
+            "uk": "gb",
+            "germany": "de",
+            "france": "fr",
+            "spain": "es",
+            "italy": "it",
+            "netherlands": "nl",
+            "australia": "au",
+            "new zealand": "nz",
+            "india": "in",
+            "singapore": "sg",
+            "japan": "jp",
+        }
+        region_to_codes = {
+            "north america": ["us", "ca", "mx"],
+            "europe": ["gb", "de", "fr", "es", "it", "nl"],
+            "apac": ["au", "nz", "in", "sg", "jp"],
+        }
+
         def values_of(key: str) -> Optional[List[str]]:
             v = frontend_filters.get(key)
             if v is None:
@@ -52,6 +77,124 @@ class ExploriumService:
                 s = s.lower()
             return [s]
 
+        def normalize_linkedin_categories(vals: List[str]) -> List[str]:
+            # Explorium business filters generally align better with LinkedIn category strings.
+            alias = {
+                "software": "software development",
+                "saas": "software development",
+                "technology": "technology, information and internet",
+                "tech": "technology, information and internet",
+                "fintech": "financial services",
+            }
+            normalized = []
+            for v in vals:
+                k = str(v).strip().lower()
+                if not k:
+                    continue
+                normalized.append(alias.get(k, k))
+            # If we have a specific software signal, drop generic technology bucket.
+            has_software = any(x in {"software development"} for x in normalized)
+            if has_software:
+                normalized = [x for x in normalized if x not in {"technology, information and internet"}]
+            # Dedup preserving order
+            seen = set()
+            out = []
+            for n in normalized:
+                if n in seen:
+                    continue
+                seen.add(n)
+                out.append(n)
+            return out
+
+        def normalize_website_keywords(vals: List[str]) -> List[str]:
+            # Keep only compact high-signal terms for strict query mode.
+            terms = []
+            for raw in vals:
+                s = str(raw).strip().lower()
+                if not s:
+                    continue
+                if "saas" in s:
+                    terms.append("saas")
+                if "b2b" in s or "business to business" in s:
+                    terms.append("b2b")
+                # keep single-token keywords too
+                if " " not in s and len(s) >= 3:
+                    terms.append(s)
+            # Prefer saas first
+            ordered = []
+            for t in ["saas", "b2b"]:
+                if t in terms and t not in ordered:
+                    ordered.append(t)
+            for t in terms:
+                if t not in ordered:
+                    ordered.append(t)
+            return ordered[:3]
+
+        def normalize_company_size_values(vals: List[str]) -> List[str]:
+            """
+            Convert free-form numeric ranges to Explorium enum buckets.
+            Supported buckets:
+            1-10, 11-50, 51-200, 201-500, 501-1000, 1001-5000, 5001-10000, 10001+
+            """
+            allowed = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"]
+            bounds = [
+                (1, 10, "1-10"),
+                (11, 50, "11-50"),
+                (51, 200, "51-200"),
+                (201, 500, "201-500"),
+                (501, 1000, "501-1000"),
+                (1001, 5000, "1001-5000"),
+                (5001, 10000, "5001-10000"),
+                (10001, 10**12, "10001+"),
+            ]
+
+            def parse_min_max(raw: str) -> Optional[tuple[int, int]]:
+                s = str(raw).strip().lower()
+                if not s:
+                    return None
+                if s in [a.lower() for a in allowed]:
+                    if s == "10001+":
+                        return (10001, 10**12)
+                    if "-" in s:
+                        lo, hi = s.split("-", 1)
+                        return (int(lo), int(hi))
+                # Handle "200-1000", "200 to 1000", "200 – 1000", etc.
+                s = s.replace("–", "-").replace("—", "-")
+                s = s.replace(" to ", "-")
+                if s.endswith("+"):
+                    num = "".join(ch for ch in s if ch.isdigit())
+                    if num:
+                        n = int(num)
+                        return (n, 10**12)
+                if "-" in s:
+                    left, right = s.split("-", 1)
+                    lnum = "".join(ch for ch in left if ch.isdigit())
+                    rnum = "".join(ch for ch in right if ch.isdigit())
+                    if lnum and rnum:
+                        lo, hi = int(lnum), int(rnum)
+                        if lo > hi:
+                            lo, hi = hi, lo
+                        return (lo, hi)
+                # Single number
+                digits = "".join(ch for ch in s if ch.isdigit())
+                if digits:
+                    n = int(digits)
+                    return (n, n)
+                return None
+
+            out: List[str] = []
+            for raw in vals:
+                mm = parse_min_max(raw)
+                if mm is None:
+                    continue
+                req_lo, req_hi = mm
+                for lo, hi, label in bounds:
+                    # overlap
+                    if not (req_hi < lo or req_lo > hi):
+                        if label not in out:
+                            out.append(label)
+            return out
+
         # Whitelist only filters allowed by Fetch Businesses endpoint
         # Other identifiers (name/domain) are supported via Match endpoint
         mapping = {
@@ -59,15 +202,17 @@ class ExploriumService:
             "country_code": "country_code",
             "company_size": "company_size",
             "google_category": "google_category",
+            "linkedin_category": "linkedin_category",
             "naics_category": "naics_category",
             "website": "domain",
             "domain": "domain",
             "employee_count": "company_size",  # Map frontend employee_count to company_size
-            "industry": "google_category",     # Map frontend industry to google_category
+            "industry": "linkedin_category",   # Map frontend industry to linkedin_category
+            "keywords": "website_keywords",
         }
 
         # Enforce single category filter (Explorium requirement)
-        category_keys = ["google_category", "naics_category", "categories", "industry"]
+        category_keys = ["google_category", "linkedin_category", "naics_category", "categories", "industry"]
         chosen_category: Optional[str] = None
         for ck in category_keys:
             if values_of(ck):
@@ -79,45 +224,40 @@ class ExploriumService:
                 continue
             vals = values_of(src)
             if vals:
-                # Special handling for employee_count range
-                if src == "employee_count" and len(vals) == 1 and isinstance(vals[0], str):
-                    # Convert range like "50-200" to appropriate company_size
-                    range_str = vals[0]
-                    if "-" in range_str:
-                        min_val, max_val = map(int, range_str.split("-"))
-                        if max_val <= 10:
-                            mapped[dst] = {"values": ["1-10"]}
-                        elif max_val <= 50:
-                            mapped[dst] = {"values": ["11-50"]}
-                        elif max_val <= 200:
-                            mapped[dst] = {"values": ["51-200"]}
-                        elif max_val <= 500:
-                            mapped[dst] = {"values": ["201-500"]}
-                        elif max_val <= 1000:
-                            mapped[dst] = {"values": ["501-1000"]}
-                        elif max_val <= 5000:
-                            mapped[dst] = {"values": ["1001-5000"]}
-                        else:
-                            mapped[dst] = {"values": ["5001-10000", "10001+"]}
-                    else:
-                        # Single value
-                        single_val = int(range_str)
-                        if single_val <= 10:
-                            mapped[dst] = {"values": ["1-10"]}
-                        elif single_val <= 50:
-                            mapped[dst] = {"values": ["11-50"]}
-                        elif single_val <= 200:
-                            mapped[dst] = {"values": ["51-200"]}
-                        elif single_val <= 500:
-                            mapped[dst] = {"values": ["201-500"]}
-                        elif single_val <= 1000:
-                            mapped[dst] = {"values": ["501-1000"]}
-                        elif single_val <= 5000:
-                            mapped[dst] = {"values": ["1001-5000"]}
-                        else:
-                            mapped[dst] = {"values": ["5001-10000", "10001+"]}
+                if dst == "linkedin_category":
+                    vals = normalize_linkedin_categories(vals)
+                    if not vals:
+                        continue
+                if dst == "website_keywords":
+                    vals = normalize_website_keywords(vals)
+                    if not vals:
+                        continue
+                # Normalize employee/company size ranges to valid Explorium enum values.
+                if dst == "company_size":
+                    norm_sizes = normalize_company_size_values(vals)
+                    if not norm_sizes:
+                        continue
+                    mapped[dst] = {"values": norm_sizes}
                 else:
                     mapped[dst] = {"values": vals}
+
+        # Map generic location filters to country_code when possible.
+        loc_vals = values_of("location")
+        if loc_vals and "country_code" not in mapped:
+            codes: List[str] = []
+            for raw in loc_vals:
+                v = str(raw).strip().lower()
+                if not v:
+                    continue
+                if v in region_to_codes:
+                    codes.extend(region_to_codes[v])
+                elif v in country_name_to_code:
+                    codes.append(country_name_to_code[v])
+                elif len(v) in (2, 3) and v.isalpha():
+                    codes.append(v[:2])
+            dedup_codes = sorted(list({c.lower() for c in codes if c}))
+            if dedup_codes:
+                mapped["country_code"] = {"values": dedup_codes}
 
         print(f">>> [ExploriumService] _map_filters returning: {mapped}", flush=True)
         return mapped
@@ -160,7 +300,7 @@ class ExploriumService:
                 )
             return resp.json()
 
-    async def search_companies(self, filters: Dict[str, Any], limit: int = 3) -> Dict[str, Any]:
+    async def search_companies(self, filters: Dict[str, Any], limit: int = 3, strict_filters: bool = False) -> Dict[str, Any]:
         """
         Unified search method for companies using Explorium.
         Handles both high-precision match (if domain/name present) and broad fetch.
@@ -273,7 +413,7 @@ class ExploriumService:
                         c["__query_name"] = name
 
                 # Fallback 1: broaden industry taxonomy if zero results
-                if len(companies) == 0:
+                if len(companies) == 0 and not strict_filters:
                     ind_vals = filters.get("industry")
                     if ind_vals:
                         broadened = self._broaden_industries(ind_vals)
@@ -290,7 +430,7 @@ class ExploriumService:
                                     c["__query_name"] = name
 
                 # Fallback 2: drop industry constraint entirely if still zero
-                if len(companies) == 0 and filters.get("industry") is not None:
+                if len(companies) == 0 and filters.get("industry") is not None and not strict_filters:
                     drop_filters = dict(filters)
                     try:
                         del drop_filters["industry"]
@@ -310,6 +450,9 @@ class ExploriumService:
                     print(f">>> [ExploriumService] No companies found for specific name: {name}", flush=True)
             except Exception as e:
                 print(f">>> [ExploriumService] Explorium fetch failed: {e}", flush=True)
+
+        if strict_filters and not companies:
+            print(">>> [ExploriumService] strict_filters enabled; returning zero without broadening.", flush=True)
         # Final guard: for name-only queries (no domain), filter normalized companies by similarity and exclude mega-brands
         try:
             if name and not domain and companies:

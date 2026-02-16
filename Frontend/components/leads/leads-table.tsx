@@ -1,17 +1,16 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Eye, Mail, MoreVertical } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Eye, Mail } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Lead } from "@/lib/api/leads"
 import { Skeleton } from "@/components/ui/skeleton"
-import { leadsApi } from "@/lib/api/leads"
 import { useToast } from "@/hooks/use-toast"
 
 interface LeadsTableProps {
@@ -20,8 +19,9 @@ interface LeadsTableProps {
   onLeadsChange?: () => void
 }
 
-export function LeadsTable({ leads, isLoading, onLeadsChange }: LeadsTableProps) {
+export function LeadsTable({ leads, isLoading, onLeadsChange: _onLeadsChange }: LeadsTableProps) {
   const { toast } = useToast()
+  const router = useRouter()
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
 
@@ -36,23 +36,6 @@ export function LeadsTable({ leads, isLoading, onLeadsChange }: LeadsTableProps)
     return matchesSearch && matchesStatus
   })
 
-  const handleStatusChange = async (leadId: string, newStatus: Lead["status"]) => {
-    try {
-      await leadsApi.updateLeadStatus(leadId, newStatus)
-      toast({
-        title: "Success",
-        description: "Lead status updated successfully",
-      })
-      onLeadsChange?.()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update lead status",
-        variant: "destructive",
-      })
-    }
-  }
-
   const getStatusColor = (status: Lead["status"]) => {
     switch (status) {
       case "new":
@@ -66,6 +49,98 @@ export function LeadsTable({ leads, isLoading, onLeadsChange }: LeadsTableProps)
       default:
         return "default"
     }
+  }
+
+  const getLinkedinHref = (lead: Lead): string | null => {
+    if (!lead.linkedin) return null
+    const raw = lead.linkedin.trim()
+    if (!raw) return null
+    return raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`
+  }
+
+  const getEmailHref = (lead: Lead): string | null => {
+    const email = (lead.email || "").trim()
+    if (!email || email === "N/A") return null
+    return email.includes("@") ? `mailto:${email}` : null
+  }
+
+  const resolveLeadEmail = (lead: Lead): string | null => {
+    const direct = (lead.email || "").trim()
+    if (direct && direct !== "N/A" && direct.includes("@")) return direct
+
+    const anyLead = lead as any
+    const candidates: string[] = []
+    const pushIfString = (v: unknown) => {
+      if (typeof v === "string" && v.trim()) candidates.push(v.trim())
+    }
+
+    if (Array.isArray(anyLead.emailCandidates)) {
+      anyLead.emailCandidates.forEach((v: unknown) => pushIfString(v))
+    }
+    pushIfString(anyLead.work_email)
+    pushIfString(anyLead.business_email)
+    pushIfString(anyLead.personal_email)
+
+    const raw = anyLead.rawData || {}
+    pushIfString(raw.email)
+    pushIfString(raw.work_email)
+    pushIfString(raw.business_email)
+    pushIfString(raw.personal_email)
+    if (Array.isArray(raw.emails)) raw.emails.forEach((v: unknown) => pushIfString(v))
+    if (Array.isArray(raw.work_emails)) raw.work_emails.forEach((v: unknown) => pushIfString(v))
+    if (Array.isArray(raw.personal_emails)) raw.personal_emails.forEach((v: unknown) => pushIfString(v))
+    if (Array.isArray(raw.contact_info?.emails)) raw.contact_info.emails.forEach((v: unknown) => pushIfString(v))
+    if (Array.isArray(raw.contact_info?.work_emails)) raw.contact_info.work_emails.forEach((v: unknown) => pushIfString(v))
+    if (Array.isArray(raw.contact_info?.personal_emails)) raw.contact_info.personal_emails.forEach((v: unknown) => pushIfString(v))
+
+    const explicit = candidates.find((v) => /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(v))
+    if (explicit) return explicit
+
+    // Final fallback: recursively scan lead payload for any email-looking string.
+    const visited = new Set<unknown>()
+    const foundFromDeepScan: string[] = []
+    const scan = (node: unknown) => {
+      if (!node || visited.has(node)) return
+      if (typeof node === "string") {
+        const m = node.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+        if (m) foundFromDeepScan.push(m[0])
+        return
+      }
+      if (Array.isArray(node)) {
+        visited.add(node)
+        node.forEach((x) => scan(x))
+        return
+      }
+      if (typeof node === "object") {
+        visited.add(node)
+        Object.values(node as Record<string, unknown>).forEach((x) => scan(x))
+      }
+    }
+    scan(anyLead)
+
+    return foundFromDeepScan.find(Boolean) || null
+  }
+
+  const handleMailClick = (lead: Lead) => {
+    const email = resolveLeadEmail(lead)
+    if (email) {
+      toast({
+        title: "Email",
+        description: email,
+      })
+      return
+    }
+    toast({
+      title: "Email",
+      description: "Email not Avavilable for this profile.",
+      variant: "destructive",
+    })
+  }
+
+  const getProspectProfilePath = (lead: Lead): string | null => {
+    const id = (lead.id || "").trim()
+    if (!id || id.startsWith("lead-")) return null
+    return `/leads/prospects/${encodeURIComponent(id)}`
   }
 
   if (isLoading) {
@@ -140,9 +215,13 @@ export function LeadsTable({ leads, isLoading, onLeadsChange }: LeadsTableProps)
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="text-sm font-medium truncate max-w-[230px]">{lead.contactName}</span>
-                        <span className="text-xs text-muted-foreground truncate max-w-[230px]">{lead.title}</span>
+                        {lead.title && lead.title !== "N/A" && lead.title !== "Unknown Title" && (
+                          <span className="text-xs text-muted-foreground truncate max-w-[230px]">{lead.title}</span>
+                        )}
                         <div className="flex items-center gap-1 mt-1">
-                          <span className="text-xs text-muted-foreground truncate">{lead.email}</span>
+                          {lead.email && lead.email !== "N/A" && (
+                            <span className="text-xs text-muted-foreground truncate">{lead.email}</span>
+                          )}
                           {lead.linkedin && (
                             <a href={`https://${lead.linkedin}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700">
                               <span className="sr-only">LinkedIn</span>
@@ -169,30 +248,22 @@ export function LeadsTable({ leads, isLoading, onLeadsChange }: LeadsTableProps)
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon">
+                        {getProspectProfilePath(lead) ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => router.push(getProspectProfilePath(lead)!)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" size="icon" disabled>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" onClick={() => handleMailClick(lead)}>
                           <Mail className="h-4 w-4" />
                         </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleStatusChange(lead.id, "contacted")}>
-                              Mark as Contacted
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleStatusChange(lead.id, "qualified")}>
-                              Mark as Qualified
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleStatusChange(lead.id, "unqualified")}>
-                              Mark as Unqualified
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
