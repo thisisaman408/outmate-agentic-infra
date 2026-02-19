@@ -1,0 +1,710 @@
+"""
+Signal Detection Service - Uses Crustdata and Explorium APIs to detect signals for companies/prospects
+
+For Prospects (data_source="crustdata"): 
+    Uses Crustdata People APIs to detect signals about the PERSON:
+    - People Enrichment API - get skills, job history, current role
+    - LinkedIn Posts by Person API - get recent posts and activity
+    - Recent job changes detection
+
+For Companies (data_source="explorium"): 
+    Uses Explorium APIs to detect signals about the COMPANY:
+    - Business Challenges API - get growth, hiring, tech challenges
+    - LinkedIn Posts API - get company activity
+    - Company enrichment data analysis
+"""
+
+import os
+import httpx
+from typing import Dict, Any, List, Optional
+import logging
+
+from app.core.config import settings
+from app.services.crustdata_service import CrustdataService
+from app.services.explorium_service import ExploriumService
+
+logger = logging.getLogger(__name__)
+
+
+class SignalDetectionService:
+    def __init__(self):
+        self.crustdata = CrustdataService()
+        self.explorium = ExploriumService()
+    
+    async def detect_signals(
+        self, 
+        companies: List[Dict[str, Any]], 
+        prospect_query: str = "",
+        data_source: str | List[str] = "explorium"  # Accept string or list: "explorium" for companies, "crustdata" for prospects
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect signals for companies using Crustdata and Explorium APIs.
+        
+        For Prospects (data_source includes "crustdata"):
+        - Uses Crustdata LinkedIn posts keyword search
+        - Uses Crustdata company enrichment
+        
+        For Companies (data_source includes "explorium"):
+        - Uses Explorium business challenges
+        - Uses Explorium LinkedIn posts
+        
+        Signals include:
+        - Recent funding
+        - Hiring trends (job openings)
+        - Technology adoption
+        - Growth indicators
+        - Recent news/events
+        - Expansion signals
+        """
+        if not companies:
+            return []
+        
+        signals = []
+        
+        # Normalize data_source to list
+        sources = []
+        if isinstance(data_source, str):
+            sources = [data_source]
+        elif isinstance(data_source, list):
+            sources = data_source
+        else:
+            sources = ["explorium"]  # default
+        
+        try:
+            # Determine which source to use based on intent
+            # For prospects: use crustdata, for companies: use explorium
+            if "crustdata" in sources:
+                # Use Crustdata for prospects
+                signals = await self._detect_signals_crustdata(companies, prospect_query)
+            elif "explorium" in sources:
+                # Use Explorium for companies
+                signals = await self._detect_signals_explorium(companies, prospect_query)
+            else:
+                # Default fallback
+                signals = await self._detect_signals_explorium(companies, prospect_query)
+                
+        except Exception as e:
+            print(f">>> [Signals] Signal detection failed: {e}", flush=True)
+        
+        # If API calls fail or return empty, use fallback
+        if not signals:
+            return self._fallback_signal_detection(companies)
+        
+        return signals
+    
+    async def _detect_signals_crustdata(
+        self,
+        companies: List[Dict[str, Any]],
+        prospect_query: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect signals using Crustdata APIs for prospects (people).
+        
+        Uses Crustdata's People APIs to get person-level signals:
+        - People Enrichment API
+        - LinkedIn Posts by Person API
+        - Recent job changes
+        
+        This detects signals about the PERSON, not their company.
+        """
+        signals = []
+        
+        for prospect in companies[:10]:  # Limit to 10 prospects
+            # Get person information
+            person_name = prospect.get("name", "") or prospect.get("full_name", "")
+            first_name = prospect.get("first_name", "")
+            last_name = prospect.get("last_name", "")
+            linkedin_url = prospect.get("linkedin_url", "") or prospect.get("linkedin_profile_url", "")
+            email = prospect.get("email", "")
+            job_title = prospect.get("job_title", "") or prospect.get("title", "")
+            company_name = prospect.get("company_name", "") or prospect.get("company", "")
+            company_domain = prospect.get("company_domain", "") or prospect.get("domain", "")
+            
+            if not person_name and not linkedin_url:
+                continue
+            
+            person_signals = []
+            
+            try:
+                # 1. Get person enrichment from Crustdata if we have LinkedIn URL or email
+                if linkedin_url or email:
+                    enrichment_params = {}
+                    if linkedin_url:
+                        enrichment_params["linkedin_profile_url"] = linkedin_url
+                    if email:
+                        enrichment_params["business_email"] = email
+                    
+                    # Call Crustdata person enrichment API
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        try:
+                            response = await client.get(
+                                f"{self.crustdata.base_url}/screener/person/enrich",
+                                headers=self.crustdata._get_headers(),
+                                params=enrichment_params
+                            )
+                            
+                            if response.status_code == 200:
+                                enrichment_data = response.json()
+                                if enrichment_data and len(enrichment_data) > 0:
+                                    person_data = enrichment_data[0]
+                                    
+                                    # Check for recent job changes
+                                    current_employers = person_data.get("current_employers", [])
+                                    past_employers = person_data.get("past_employers", [])
+                                    
+                                    if current_employers:
+                                        current = current_employers[0] if isinstance(current_employers, list) else current_employers
+                                        current_title = current.get("employee_title", "") or current.get("title", "")
+                                        current_company = current.get("employer_name", "") or current.get("company_name", "")
+                                        
+                                        # Check if recently joined (new hire signal)
+                                        start_date = current.get("start_date", "")
+                                        if start_date:
+                                            from datetime import datetime, timedelta
+                                            try:
+                                                # Try parsing the date
+                                                if "T" in start_date:
+                                                    start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                                                else:
+                                                    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                                                
+                                                days_since = (datetime.now() - start_dt).days
+                                                if days_since < 90:  # Joined in last 3 months
+                                                    person_signals.append({
+                                                        "type": "new_job",
+                                                        "description": f"Recently joined {current_company} as {current_title}",
+                                                        "urgency": "high"
+                                                    })
+                                            except:
+                                                pass
+                                        
+                                        # Current role info
+                                        if current_title:
+                                            person_signals.append({
+                                                "type": "current_role",
+                                                "description": f"Working as {current_title} at {current_company}",
+                                                "urgency": "low"
+                                            })
+                                    
+                                    # Check skills for technology signals
+                                    skills = person_data.get("skills", [])
+                                    if skills:
+                                        skills_str = " ".join([s.lower() for s in skills if isinstance(s, str)])
+                                        ai_skills = ["ai", "machine learning", "artificial intelligence", "llm", "gpt", "nlp", "deep learning"]
+                                        if any(s in skills_str for s in ai_skills):
+                                            person_signals.append({
+                                                "type": "ai_expertise",
+                                                "description": "Has AI/ML expertise",
+                                                "urgency": "medium"
+                                            })
+                                        
+                                        # Cloud skills
+                                        cloud_skills = ["aws", "azure", "gcp", "google cloud", "kubernetes", "docker"]
+                                        if any(s in skills_str for s in cloud_skills):
+                                            person_signals.append({
+                                                "type": "cloud_expertise",
+                                                "description": "Has cloud infrastructure expertise",
+                                                "urgency": "medium"
+                                            })
+                                        
+                                        # Data skills
+                                        data_skills = ["python", "sql", "data science", "analytics", "tableau", "spark"]
+                                        if any(s in skills_str for s in data_skills):
+                                            person_signals.append({
+                                                "type": "data_expertise",
+                                                "description": "Has data analytics expertise",
+                                                "urgency": "medium"
+                                            })
+                        except Exception as e:
+                            print(f">>> [Signals] Person enrichment error: {e}", flush=True)
+                
+                # 2. Get LinkedIn posts for the person
+                if linkedin_url:
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        try:
+                            # Extract profile slug from LinkedIn URL
+                            profile_slug = linkedin_url.split("/in/")[-1].split("?")[0] if "/in/" in linkedin_url else linkedin_url
+                            
+                            response = await client.get(
+                                f"{self.crustdata.base_url}/screener/linkedin_posts",
+                                headers=self.crustdata._get_headers(),
+                                params={
+                                    "person_linkedin_url": linkedin_url,
+                                    "limit": 5
+                                }
+                            )
+                            
+                            if response.status_code == 200:
+                                posts_data = response.json()
+                                posts = posts_data.get("posts", [])
+                                
+                                for post in posts:
+                                    text = post.get("text", "").lower()
+                                    
+                                    # Check for job change announcements
+                                    if any(word in text for word in ["excited to join", "new role", "new position", "happy to announce"]):
+                                        person_signals.append({
+                                            "type": "career_update",
+                                            "description": "Recently announced career update on LinkedIn",
+                                            "urgency": "high"
+                                        })
+                                    
+                                    # Check for hiring/recruitment posts
+                                    if any(word in text for word in ["hiring", "job opening", "join my team", "looking for"]):
+                                        person_signals.append({
+                                            "type": "hiring_signal",
+                                            "description": "Posting about job openings - may have budget for tools",
+                                            "urgency": "high"
+                                        })
+                                    
+                                    # Check for product launches
+                                    if any(word in text for word in ["launch", "announcing", "released", "new feature"]):
+                                        person_signals.append({
+                                            "type": "product_update",
+                                            "description": "Recently launched something",
+                                            "urgency": "medium"
+                                        })
+                                    
+                                    # Check for thought leadership
+                                    if any(word in text for word in ["thoughts on", "opinion", "analysis", "insights"]):
+                                        person_signals.append({
+                                            "type": "thought_leader",
+                                            "description": "Active LinkedIn content creator",
+                                            "urgency": "low"
+                                        })
+                        except Exception as e:
+                            print(f">>> [Signals] Person posts error: {e}", flush=True)
+                
+                # 3. Also check company-level signals as secondary info
+                if company_domain:
+                    try:
+                        enrichment = await self.crustdata.enrich_company(
+                            domain=company_domain,
+                            fields="headcount,job_openings"
+                        )
+                        
+                        if enrichment:
+                            job_data = enrichment.get("job_openings", {})
+                            if job_data:
+                                openings = job_data.get("openings", 0)
+                                if openings and openings > 50:
+                                    person_signals.append({
+                                        "type": "company_hiring",
+                                        "description": f"Company is rapidly hiring ({openings} openings)",
+                                        "urgency": "medium"
+                                    })
+                    except:
+                        pass
+                
+            except Exception as e:
+                print(f">>> [Signals] Crustdata API error for {person_name}: {e}", flush=True)
+            
+            # Add prospect with signals
+            if person_signals:
+                # Deduplicate signals
+                seen_types = set()
+                unique_signals = []
+                for s in person_signals:
+                    if s["type"] not in seen_types:
+                        seen_types.add(s["type"])
+                        unique_signals.append(s)
+                
+                signals.append({
+                    "person_name": person_name,
+                    "linkedin_url": linkedin_url,
+                    "job_title": job_title,
+                    "company": company_name,
+                    "signals": unique_signals,
+                    "personalization_tips": self._generate_person_personalization_tips(unique_signals, job_title)
+                })
+            else:
+                # Add default signal if no signals found
+                signals.append({
+                    "person_name": person_name,
+                    "linkedin_url": linkedin_url,
+                    "job_title": job_title,
+                    "company": company_name,
+                    "signals": [{
+                        "type": "prospecting_target",
+                        "description": f"{job_title} at {company_name}" if job_title and company_name else "Potential prospect for outreach",
+                        "urgency": "low"
+                    }],
+                    "personalization_tips": "Focus on value proposition relevant to their role and company"
+                })
+        
+        return signals
+    
+    def _generate_person_personalization_tips(self, signals: List[Dict[str, Any]], job_title: str = "") -> str:
+        """Generate outreach tips based on detected person signals"""
+        signal_types = [s.get("type", "") for s in signals]
+        
+        tips = []
+        
+        if "new_job" in signal_types or "career_update" in signal_types:
+            tips.append("Congratulate them on their new role")
+        
+        if "hiring_signal" in signal_types:
+            tips.append("They may have budget - offer solutions for their hiring needs")
+        
+        if "ai_expertise" in signal_types:
+            tips.append("Position AI-native solutions - they'll understand the value")
+        
+        if "cloud_expertise" in signal_types:
+            tips.append("Focus on cloud-based solutions")
+        
+        if "data_expertise" in signal_types:
+            tips.append("Lead with data-driven insights and analytics")
+        
+        if "thought_leader" in signal_types:
+            tips.append("Engage with their content before pitching")
+        
+        if "product_update" in signal_types:
+            tips.append("Reference their recent launch in your approach")
+        
+        if not tips:
+            # Customize based on job title
+            if job_title:
+                if any(word in job_title.lower() for word in ["ceo", "founder", "cto", "vp"]):
+                    tips.append("Focus on strategic value and ROI")
+                elif any(word in job_title.lower() for word in ["engineer", "developer", "tech"]):
+                    tips.append("Focus on technical benefits and integration")
+                elif any(word in job_title.lower() for word in ["sales", "revenue"]):
+                    tips.append("Focus on revenue impact")
+                else:
+                    tips.append("Personalize based on their role")
+            else:
+                tips.append("Focus on core value proposition")
+        
+        return " | ".join(tips)
+    
+    async def _detect_signals_explorium(
+        self,
+        companies: List[Dict[str, Any]],
+        prospect_query: str
+    ) -> List[Dict[str, Any]]:
+        """Detect signals using Explorium APIs for companies"""
+        signals = []
+        
+        for company in companies[:10]:  # Limit to 10 companies
+            company_name = company.get("name", "")
+            domain = company.get("domain", "")
+            industry = company.get("industry", "")
+            
+            if not company_name and not domain:
+                continue
+            
+            company_signals = []
+            
+            try:
+                # 1. Get business challenges from Explorium
+                # First we need to match the business to get a business_id
+                if domain or company_name:
+                    match_result = await self.explorium.match_businesses([{
+                        "domain": domain,
+                        "name": company_name
+                    }])
+                    
+                    matched = match_result.get("matched_businesses") or match_result.get("matches") or []
+                    if matched:
+                        business_id = matched[0].get("business_id")
+                        
+                        if business_id:
+                            # 2. Get business challenges
+                            try:
+                                challenges = await self.explorium.enrich_business_challenges(business_id)
+                                challenges_data = challenges.get("data", {})
+                                
+                                if challenges_data:
+                                    # Look for challenge categories that indicate signals
+                                    challenge_categories = challenges_data.get("challenge_categories", [])
+                                    
+                                    if challenge_categories:
+                                        for cat in challenge_categories[:3]:  # Top 3 challenges
+                                            category_name = cat.get("category", "")
+                                            
+                                            # Map challenges to signal types
+                                            if any(word in category_name.lower() for word in ["growth", "scale", "expand"]):
+                                                company_signals.append({
+                                                    "type": "growth_challenge",
+                                                    "description": f"Challenge: {category_name} - may need solutions",
+                                                    "urgency": "high"
+                                                })
+                                            elif any(word in category_name.lower() for word in ["hiring", "talent", "recruit"]):
+                                                company_signals.append({
+                                                    "type": "talent_challenge",
+                                                    "description": f"Challenge: {category_name} - talent solutions needed",
+                                                    "urgency": "high"
+                                                })
+                                            elif any(word in category_name.lower() for word in ["technology", "tech", "digital"]):
+                                                company_signals.append({
+                                                    "type": "tech_challenge",
+                                                    "description": f"Challenge: {category_name} - tech solutions opportunity",
+                                                    "urgency": "medium"
+                                                })
+                            except Exception as e:
+                                print(f">>> [Signals] Explorium challenges error: {e}", flush=True)
+                            
+                            # 3. Get LinkedIn posts from Explorium
+                            try:
+                                posts_result = await self.explorium.enrich_linkedin_posts(business_id)
+                                posts_data = posts_result.get("data", {})
+                                
+                                if posts_data:
+                                    recent_posts = posts_data.get("recent_posts", [])
+                                    for post in recent_posts[:3]:
+                                        post_text = post.get("text", "").lower()
+                                        
+                                        if any(word in post_text for word in ["raised", "funding", "series"]):
+                                            company_signals.append({
+                                                "type": "recent_funding",
+                                                "description": "Funding news in recent LinkedIn post",
+                                                "urgency": "high"
+                                            })
+                                        elif any(word in post_text for word in ["hiring", "join team"]):
+                                            company_signals.append({
+                                                "type": "hiring_surge",
+                                                "description": "Hiring activity mentioned in LinkedIn",
+                                                "urgency": "high"
+                                            })
+                            except Exception as e:
+                                print(f">>> [Signals] Explorium posts error: {e}", flush=True)
+                
+                # 4. Check company data we already have
+                if company.get("funding_stage"):
+                    company_signals.append({
+                        "type": "recent_funding",
+                        "description": f"Funding stage: {company.get('funding_stage')}",
+                        "urgency": "medium"
+                    })
+                
+                if company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent"):
+                    growth = company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent")
+                    if growth and growth > 15:
+                        company_signals.append({
+                            "type": "rapid_growth",
+                            "description": f"Strong employee growth ({growth}%)",
+                            "urgency": "high"
+                        })
+                
+                if company.get("job_openings_count"):
+                    openings = company.get("job_openings_count")
+                    if openings > 20:
+                        company_signals.append({
+                            "type": "hiring_surge",
+                            "description": f"Active hiring ({openings} open positions)",
+                            "urgency": "high"
+                        })
+                
+                tech = company.get("technologies", [])
+                if tech and isinstance(tech, list) and len(tech) > 0:
+                    tech_str = " ".join([str(t).lower() for t in tech])
+                    if any(t in tech_str for t in ["ai", "machine learning", "artificial intelligence"]):
+                        company_signals.append({
+                            "type": "ai_adoption",
+                            "description": "AI/ML technology user",
+                            "urgency": "medium"
+                        })
+                
+            except Exception as e:
+                print(f">>> [Signals] Explorium API error for {company_name}: {e}", flush=True)
+            
+            # Add company with signals
+            if company_signals:
+                # Deduplicate signals
+                seen_types = set()
+                unique_signals = []
+                for s in company_signals:
+                    if s["type"] not in seen_types:
+                        seen_types.add(s["type"])
+                        unique_signals.append(s)
+                
+                signals.append({
+                    "company_name": company_name,
+                    "domain": domain,
+                    "signals": unique_signals,
+                    "personalization_tips": self._generate_personalization_tips(unique_signals)
+                })
+            else:
+                # Add default signal if no signals found
+                signals.append({
+                    "company_name": company_name,
+                    "domain": domain,
+                    "signals": [{
+                        "type": "prospecting_target",
+                        "description": f"Active in {industry} industry" if industry else "Potential target for outreach",
+                        "urgency": "low"
+                    }],
+                    "personalization_tips": "Focus on core value proposition and industry-specific solutions"
+                })
+        
+        return signals
+    
+    def _create_company_summary(self, company: Dict[str, Any]) -> str:
+        """Create a brief summary of a company for analysis"""
+        name = company.get("name", "Unknown")
+        domain = company.get("domain", "")
+        industry = company.get("industry", "")
+        size = company.get("employee_count_range", company.get("employee_count_exact", ""))
+        funding = company.get("funding_stage", "")
+        tech = company.get("technologies", [])
+        
+        summary_parts = [f"{name} ({domain})"]
+        if industry:
+            summary_parts.append(f"Industry: {industry}")
+        if size:
+            summary_parts.append(f"Size: {size}")
+        if funding:
+            summary_parts.append(f"Funding: {funding}")
+        if tech and isinstance(tech, list) and len(tech) > 0:
+            summary_parts.append(f"Tech: {', '.join(tech[:5])}")
+        
+        return ", ".join(summary_parts)
+    
+    def _fallback_signal_detection(
+        self, 
+        companies: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Rule-based signal detection when API is unavailable"""
+        signals = []
+        
+        for company in companies[:20]:
+            company_signals = []
+            company_name = company.get("name", "Unknown")
+            domain = company.get("domain", "")
+            industry = company.get("industry", "")
+            
+            # Check for funding signals
+            if company.get("funding_stage"):
+                stage = company.get("funding_stage", "").lower()
+                if stage in ["series a", "series b", "series c", "series d"]:
+                    company_signals.append({
+                        "type": "recent_funding",
+                        "description": f"Recent {stage} funding stage - likely scaling operations",
+                        "urgency": "high"
+                    })
+                elif stage == "seed":
+                    company_signals.append({
+                        "type": "early_stage",
+                        "description": "Seed stage - may be open to sales tools",
+                        "urgency": "medium"
+                    })
+            
+            # Check for growth signals
+            if company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent"):
+                growth = company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent")
+                if growth and growth > 20:
+                    company_signals.append({
+                        "type": "rapid_growth",
+                        "description": f"Strong employee growth ({growth}%) - likely expanding",
+                        "urgency": "high"
+                    })
+            
+            # Check for tech signals
+            tech = company.get("technologies", [])
+            if tech and isinstance(tech, list) and len(tech) > 0:
+                tech_str = " ".join([str(t).lower() for t in tech])
+                ai_tech = ["ai", "machine learning", "artificial intelligence", "llm", "gpt", "chatgpt"]
+                cloud_tech = ["aws", "azure", "gcp", "cloud"]
+                
+                if any(t in tech_str for t in ai_tech):
+                    company_signals.append({
+                        "type": "ai_adoption",
+                        "description": "AI/ML technology user - modern tech stack",
+                        "urgency": "medium"
+                    })
+                if any(t in tech_str for t in cloud_tech):
+                    company_signals.append({
+                        "type": "cloud_native",
+                        "description": "Cloud infrastructure user - tech-forward company",
+                        "urgency": "low"
+                    })
+            
+            # Check for job openings
+            if company.get("job_openings_count"):
+                openings = company.get("job_openings_count")
+                if openings and openings > 50:
+                    company_signals.append({
+                        "type": "hiring_surge",
+                        "description": f"Active hiring ({openings} open positions)",
+                        "urgency": "high"
+                    })
+            
+            # Check for recent funding amount
+            if company.get("funding_total") and company.get("funding_total") > 1000000:
+                amount = company.get("funding_total")
+                company_signals.append({
+                    "type": "well_funded",
+                    "description": f"Strong funding (${amount/1000000:.1f}M raised)",
+                    "urgency": "medium"
+                })
+            
+            # Check employee count for company size signal
+            emp_exact = company.get("employee_count_exact", 0)
+            emp_range = company.get("employee_count_range", "")
+            if emp_exact and emp_exact > 0:
+                if emp_exact < 50:
+                    company_signals.append({
+                        "type": "small_business",
+                        "description": f"Small company ({emp_exact} employees) - agile decision making",
+                        "urgency": "medium"
+                    })
+                elif emp_exact > 500:
+                    company_signals.append({
+                        "type": "enterprise",
+                        "description": f"Large company ({emp_exact}+ employees) - established buyer",
+                        "urgency": "low"
+                    })
+            
+            # If no signals found, create a basic signal based on industry
+            if not company_signals and industry:
+                company_signals.append({
+                    "type": "industry_target",
+                    "description": f"Active in {industry} industry",
+                    "urgency": "low"
+                })
+            
+            # Always add a company even if no signals (for demo purposes)
+            if company_signals:
+                signals.append({
+                    "company_name": company_name,
+                    "domain": domain,
+                    "signals": company_signals,
+                    "personalization_tips": self._generate_personalization_tips(company_signals)
+                })
+            else:
+                # Add company with a default signal if nothing else
+                signals.append({
+                    "company_name": company_name,
+                    "domain": domain,
+                    "signals": [{
+                        "type": "prospecting_target",
+                        "description": "Potential target for outreach",
+                        "urgency": "low"
+                    }],
+                    "personalization_tips": "Focus on core value proposition and industry-specific solutions"
+                })
+        
+        return signals
+    
+    def _generate_personalization_tips(self, signals: List[Dict[str, Any]]) -> str:
+        """Generate outreach tips based on detected signals"""
+        signal_types = [s.get("type", "") for s in signals]
+        
+        tips = []
+        
+        if "recent_funding" in signal_types or "well_funded" in signal_types:
+            tips.append("Reference their recent funding round and suggest solutions for scaling")
+        
+        if "rapid_growth" in signal_types or "hiring_surge" in signal_types:
+            tips.append("Mention their growth - offer solutions for managing scale")
+        
+        if "ai_adoption" in signal_types:
+            tips.append("Reference their tech-forward approach - position as an AI-native solution")
+        
+        if "early_stage" in signal_types:
+            tips.append("Be first to market - offer flexible pricing for startups")
+        
+        if not tips:
+            tips.append("Focus on core value proposition and case studies")
+        
+        return " | ".join(tips)

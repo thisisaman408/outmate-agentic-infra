@@ -12,8 +12,9 @@ from fastapi import HTTPException
 import httpx
 
 # LangChain imports
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import PGVector
+# LangChain Community imports
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import PGVector
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
@@ -264,16 +265,20 @@ class AdvancedNLPService:
           }}
         }}
 
-        Rules:
-        - If query is irrelevant/non-business/non-searchable, set is_relevant=false, confidence <= 40, and empty filters.
+        Rules for Intent:
+        - If the query mentions finding PEOPLE, ROLES, TITLES, PROFESSIONALS, or "DECISION MAKERS", use intent="prospect".
+        - If the query focuses on finding COMPANIES, AGENCIES, FIRMS, or businesses, BUT NOT specific roles or people, use intent="company".
+        - Example: "Find Marketing decision makers at digital agencies" MUST BE intent="prospect".
+        - Example: "Find digital agencies in Texas" MUST BE intent="company".
+
+        Rules for Filters:
         - Remove command phrases from titles (e.g., "find me", "show me", "get me").
-        - For prospect queries, extract clean role titles in current_title (e.g., "VP of Sales", "Marketing Manager").
+        - For prospect searches, extract role titles into current_title (e.g., "Marketing Manager", "VP").
         - Map industry terms SPECIFICALLY:
           - "b2b saas" -> ["Software Development"]
           - "saas" -> ["Software Development"]
-          - "b2b" -> ["Software Development"]
-          - "business software" -> ["Software Development"]
-          - "enterprise software" -> ["Software Development"]
+          - "digital agencies" -> ["Advertising Services", "Marketing Services"]
+          - "agencies" -> ["Advertising Services", "Marketing Services"]
           - "tech" -> ["Software Development"]
           - "fintech" -> ["Financial Services"]
           - "software" -> ["Software Development"]
@@ -282,6 +287,7 @@ class AdvancedNLPService:
           - "usa/us/u.s." -> ["United States"]
           - "america" -> ["United States"]
         - For B2B SaaS queries, add company_size filter: ["1-1000", "11-50", "51-200", "201-500"] to exclude mega-corporations
+        - If "1 to 50 employees" is mentioned, use company_size: ["1-10", "11-50"].
         - Add keywords to be more specific: ["b2b", "software", "saas", "subscription", "business"]
         - Keep only the five allowed filter keys above.
         - If unknown, return empty arrays for that filter key.
@@ -296,7 +302,7 @@ class AdvancedNLPService:
         }
         
         payload = {
-            "model": "anthropic/claude-sonnet-4.5",
+            "model": "anthropic/claude-3.5-haiku",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "max_tokens": 500,
@@ -313,6 +319,7 @@ class AdvancedNLPService:
                 if response.status_code == 200:
                     result = response.json()
                     content = result["choices"][0]["message"]["content"]
+                    print(f">>> [Advanced NLP] Raw LLM Response: {content}", flush=True)
                     
                     # Extract JSON from response
                     parsed = self._try_parse_json(content)
@@ -514,11 +521,14 @@ class AdvancedNLPService:
         }
     
     async def process_query(self, query: str) -> Dict[str, Any]:
-        """Process query using complete LangGraph workflow and redirect to existing pages"""
+        """Process query using consolidated analysis and redirect to appropriate service"""
         try:
+            # 1) Use consolidate analyze_query for all metadata (intent, filters, relevance)
+            # This avoids redundant calls and ensures all guardrails are applied.
             analysis_result = await self.analyze_query(query)
+            
             intent = analysis_result.get("intent", "company")
-            merged_filters = analysis_result.get("filters", {})
+            filters = analysis_result.get("filters", {})
             confidence = analysis_result.get("confidence", 0)
             is_relevant = analysis_result.get("is_relevant", True)
             reason = analysis_result.get("reason", "")
@@ -530,34 +540,22 @@ class AdvancedNLPService:
                     "filters": {},
                     "confidence": confidence,
                     "is_relevant": False,
-                    "reason": reason or "Query is not relevant for company/prospect search.",
+                    "reason": reason or "Query is not relevant for search.",
                     "similar_queries": similar_queries,
                     "processing_method": "langgraph_workflow",
-                    "service_results": {"service": None, "results": [], "total_count": 0, "next_cursor": None},
                     "results": {"data": [], "total_results": 0}
                 }
                 print(f">>> [Advanced NLP] Final result (irrelevant): {final_result}", flush=True)
                 return final_result
             
-            # Run only categorization and filter extraction steps
-            categorization_result = await self._categorize_with_openrouter(query)
-            filter_result = await self._extract_filters_with_langchain(query)
-            similar_queries = await self._find_similar_queries_vector(query)
+            # 2) Call existing service based on intent using the merged & enhanced filters
+            service_result = await self.call_existing_service(intent, filters)
             
-            # Enhance filters with autocomplete for better accuracy
-            enhanced_filters = await self._enhance_filters_with_autocomplete(filter_result)
-            
-            # Call existing service based on intent
-            service_result = await self.call_existing_service(
-                categorization_result.get("intent", "company"),
-                enhanced_filters
-            )
-            
-            # Synthesize final response with service results
+            # 3) Synthesize final response
             final_result = {
-                "intent": categorization_result.get("intent", "company"),
-                "filters": enhanced_filters,
-                "confidence": categorization_result.get("confidence", 0),
+                "intent": intent,
+                "filters": filters,
+                "confidence": confidence,
                 "similar_queries": similar_queries,
                 "processing_method": "langgraph_workflow",
                 "service_results": service_result,
@@ -567,7 +565,7 @@ class AdvancedNLPService:
                 }
             }
             
-            print(f">>> [Advanced NLP] Final result: {final_result}", flush=True)
+            print(f">>> [Advanced NLP] Final result ({intent}): {len(final_result['results']['data'])} results found", flush=True)
             return final_result
             
         except Exception as e:
@@ -593,26 +591,41 @@ class AdvancedNLPService:
         model_filters = categorization_result.get("filters") or {}
         if isinstance(model_filters, dict):
             merged_filters.update(model_filters)
+            
+        # Fallback to internal extraction for missing keys
         for k, v in filter_result.items():
-            if k not in merged_filters:
+            if k not in merged_filters or not merged_filters[k]:
                 merged_filters[k] = v
 
         model_intent = categorization_result.get("intent")
         confidence = categorization_result.get("confidence", 0) or 0
         is_relevant = bool(categorization_result.get("is_relevant", True))
         reason = categorization_result.get("reason", "")
+        
+        # Determine intent (LLM result preferred if confident)
         if model_intent in ("prospect", "company") and float(confidence) >= 60:
             intent = model_intent
         else:
             intent = self._infer_intent_from_query(query)
 
-        # Guardrail: person-title filters always imply prospect intent.
-        if merged_filters.get("current_title"):
+        # Guardrail: presence of person roles/titles ALWAYS force prospect intent
+        prospect_indicators = ["current_title", "seniority_level", "job_function", "name"]
+        if any(merged_filters.get(key) for key in prospect_indicators):
+            print(f">>> [Advanced NLP] Person filters detected. Overriding intent to 'prospect'", flush=True)
             intent = "prospect"
+            
+        # One last check on raw query text for "prospect" intent keywords
+        prospect_keywords = ["decision maker", "people", "person", "contact", "email", "phone"]
+        if any(kw in query.lower() for kw in prospect_keywords):
+            print(f">>> [Advanced NLP] Prospect keywords detected in query. Overriding intent to 'prospect'", flush=True)
+            intent = "prospect"
+
+        # 4) Final step: Enhance filters with autocomplete lookup
+        enhanced_filters = await self._enhance_filters_with_autocomplete(merged_filters)
 
         return {
             "intent": intent,
-            "filters": merged_filters,
+            "filters": enhanced_filters,
             "confidence": confidence,
             "is_relevant": is_relevant,
             "reason": reason,
@@ -748,20 +761,24 @@ class AdvancedNLPService:
                         raise HTTPException(status_code=500, detail="Prospects service error")
             
             elif service_info["service"] == "companies":
-                # Call companies API with properly mapped filters
+                # Call companies API with actual extracted filters
+                # The companies search endpoint transforms these to Explorium/ContactOut format
                 payload = {
-                    "industries": ["Software Development"],  # Force specific industry
-                    "locations": ["United States", "Canada", "Mexico"],  # Force North America
-                    "employees": ["1-1000", "11-50", "51-200"],  # Force smaller companies only
-                    "categories": ["SaaS", "Software"],  # Force SaaS categories
-                    "company_types": ["Private"],  # Exclude public mega-corporations
-                    "limit": 3
+                    "filters": {
+                        "industry": filters.get("industry") or [],
+                        "location": filters.get("location") or [],
+                        "employee_count": filters.get("company_size") or [],
+                        "keywords": filters.get("keywords") or []
+                    },
+                    "options": {
+                        "limit": 3,
+                        "enrich": True
+                    }
                 }
                 
                 print(f">>> [Advanced NLP] Companies API payload: {payload}", flush=True)
-                print(f">>> [Advanced NLP] Original filters: {filters}", flush=True)
                 
-                async with httpx.AsyncClient(timeout=30) as client:
+                async with httpx.AsyncClient(timeout=60) as client:
                     response = await client.post(
                         service_info["api_url"],
                         json=payload,
@@ -770,15 +787,20 @@ class AdvancedNLPService:
                     
                     if response.status_code == 200:
                         result = response.json()
-                        companies = result.get("data", {}).get("companies", [])
+                        company_data = result.get("data", {})
+                        companies = company_data.get("companies", [])
                         print(f">>> [Advanced NLP] Companies service returned {len(companies)} results", flush=True)
                         return {
                             "service": "companies",
                             "results": companies,
-                            "total_count": result.get("data", {}).get("total_count", len(companies))
+                            "total_count": company_data.get("total_count", len(companies))
                         }
                     else:
-                        raise HTTPException(status_code=500, detail="Companies service error")
+                        error_detail = response.text
+                        try:
+                            error_detail = response.json().get("detail", response.text)
+                        except: pass
+                        raise HTTPException(status_code=500, detail=f"Companies service error: {error_detail}")
                         
         except Exception as e:
             print(f">>> [Advanced NLP] Service call failed: {e}", flush=True)

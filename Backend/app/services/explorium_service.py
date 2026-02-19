@@ -79,23 +79,30 @@ class ExploriumService:
 
         def normalize_linkedin_categories(vals: List[str]) -> List[str]:
             # Explorium business filters generally align better with LinkedIn category strings.
+            # Map single user terms to multiple relevant LinkedIn categories to broaden search.
             alias = {
-                "software": "software development",
-                "saas": "software development",
-                "technology": "technology, information and internet",
-                "tech": "technology, information and internet",
-                "fintech": "financial services",
+                "software": ["software development", "technology, information and internet", "computer software"],
+                "saas": ["software development", "technology, information and internet"],
+                "technology": ["technology, information and internet", "information technology"],
+                "tech": ["technology, information and internet"],
+                "fintech": ["financial services", "banking"],
+                "healthcare": ["healthcare", "biotechnology", "pharmaceuticals"],
+                "consulting": ["management consulting", "professional services"],
             }
             normalized = []
             for v in vals:
                 k = str(v).strip().lower()
                 if not k:
                     continue
-                normalized.append(alias.get(k, k))
+                # Get the mapping or use the original value as a single-element list
+                mapped_vals = alias.get(k, [k])
+                normalized.extend(mapped_vals)
+
             # If we have a specific software signal, drop generic technology bucket.
-            has_software = any(x in {"software development"} for x in normalized)
+            has_software = any(x in {"software development", "computer software"} for x in normalized)
             if has_software:
                 normalized = [x for x in normalized if x not in {"technology, information and internet"}]
+            
             # Dedup preserving order
             seen = set()
             out = []
@@ -207,12 +214,12 @@ class ExploriumService:
             "website": "domain",
             "domain": "domain",
             "employee_count": "company_size",  # Map frontend employee_count to company_size
-            "industry": "linkedin_category",   # Map frontend industry to linkedin_category
+            "industry": "google_category",
             "keywords": "website_keywords",
         }
 
         # Enforce single category filter (Explorium requirement)
-        category_keys = ["google_category", "linkedin_category", "naics_category", "categories", "industry"]
+        category_keys = ["google_category", "linkedin_category", "naics_category"]
         chosen_category: Optional[str] = None
         for ck in category_keys:
             if values_of(ck):
@@ -288,13 +295,21 @@ class ExploriumService:
                 json=payload,
             )
             if resp.status_code >= 400:
-                # bubble up API error details
                 try:
                     data = resp.json()
                 except Exception:
                     data = {"message": resp.text}
+                
+                # Robustly extract error message
+                error_msg = data
+                if isinstance(data, dict):
+                    error_msg = data.get("message") or data.get("detail") or data
+                elif isinstance(data, list):
+                    error_msg = data
+                
+                print(f">>> [ExploriumService] API Error {resp.status_code}: {error_msg}", flush=True)
                 raise httpx.HTTPStatusError(
-                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    f"{resp.status_code} {resp.reason_phrase}: {error_msg}",
                     request=resp.request,
                     response=resp,
                 )
@@ -407,6 +422,8 @@ class ExploriumService:
                 raw = await self.fetch_businesses(filters, size=limit, page_size=limit, page=1, mode="full")
                 data_list = raw.get("data") or []
                 print(f">>> [ExploriumService] Explorium fetch returned {len(data_list)} records", flush=True)
+                if len(data_list) > 0:
+                    print(f">>> [ExploriumService] Sample raw record: {data_list[0]}", flush=True)
                 companies = [self.normalize_company(item) for item in data_list]
                 if name:
                     for c in companies:
@@ -515,6 +532,10 @@ class ExploriumService:
                 base.add(s.replace("&", "and"))
                 base.add(s.replace("and", "&"))
             # specific expansions
+            if "software" in low or "saas" in low:
+                base.update({"software development", "technology, information and internet", "computer software"})
+            if "tech" in low:
+                base.update({"technology, information and internet", "information technology"})
             if "manufacturing" in low:
                 base.add("Manufacturing")
             if "food" in low and "beverage" in low:
@@ -792,9 +813,13 @@ class ExploriumService:
             return resp.json()
 
     async def enrich_financial_indicators(self, business_id: str) -> Dict[str, Any]:
+        from datetime import datetime
         payload = {
             "business_id": business_id,
-            "parameters": {},
+            "parameters": {
+                # Try ISO format for Explorium Pydantic validation
+                "date": datetime.now().isoformat()
+            },
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
@@ -854,11 +879,30 @@ class ExploriumService:
         description = raw.get("business_description") or raw.get("description") or ""
 
         industry = (
-            raw.get("naics_description")
+            raw.get("linkedin_category")
+            or raw.get("linkedin_industry_category")
+            or raw.get("naics_description")
             or raw.get("sic_code_description")
             or raw.get("primary_industry")
             or raw.get("industry")
         )
+        # Canonical industry normalization for user-friendly display and reliable filtering
+        if industry:
+            ind_low = str(industry).lower()
+            if any(x in ind_low for x in ["software", "computer programming", "computer systems design", "computer related services", "saas"]):
+                industry = "Software"
+            elif any(x in ind_low for x in ["finance", "banking", "fintech", "investment"]):
+                industry = "Financial Services"
+            elif any(x in ind_low for x in ["healthcare", "medical", "hospital", "pharma", "biotechnology"]):
+                industry = "Healthcare"
+            elif any(x in ind_low for x in ["marketing", "advertising", "martech", "public relations"]):
+                industry = "Marketing and Advertising"
+            elif any(x in ind_low for x in ["ecommerce", "e-commerce", "retail", "online shop"]):
+                industry = "E-commerce"
+            elif any(x in ind_low for x in ["consulting", "professional services", "business consulting"]):
+                industry = "Consulting"
+            elif any(x in ind_low for x in ["information technology", "it services", "it consulting"]):
+                industry = "Information Technology"
         
         employee_range = (
             raw.get("employee_count_range") 

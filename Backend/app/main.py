@@ -25,6 +25,9 @@ from app.core.redis import RedisManager
 from app.api.routes import leads
 from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
+from app.api.routes import signals
+from app.api.routes import campaigns
+from app.api.routes import chat
 
 # Register routers
 
@@ -118,6 +121,12 @@ app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
 app.include_router(contactout_routes.router, prefix="/api/contactout", tags=["contactout"])
 app.include_router(crustdata_routes.router, prefix="/api/crustdata", tags=["crustdata"])
 app.include_router(explorium_routes.router, prefix="/api/explorium", tags=["explorium"])
+app.include_router(signals.router, prefix="/api/signals", tags=["signals"])
+logger.info("Signals router registered")
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
+logger.info("Campaigns router registered")
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+logger.info("Chat router registered")
 
 @app.on_event("startup")
 async def startup_event():

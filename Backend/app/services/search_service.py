@@ -450,8 +450,22 @@ class SearchService:
             explorium = ExploriumService()
             
             # Call Explorium API
-            # For NLP-driven search, keep provider query strict to mapped filters.
-            result = await explorium.search_companies(filters, limit, strict_filters=True)
+            # Relax strict_filters to allow internal broadening
+            
+            # Use higher internal limit if specific location filters (state, city) are present
+            # to ensure we have enough results after strict post-filtering
+            internal_limit = limit
+            loc_filters = filters.get("location") or []
+            if isinstance(loc_filters, str): loc_filters = [loc_filters]
+            
+            # Simple heuristic: if location is more than just a country name (e.g. "Austin, TX")
+            # or if multiple locations are specified, fetch more samples
+            has_granular_location = any("," in str(l) for l in loc_filters) or len(loc_filters) > 1
+            if has_granular_location:
+                internal_limit = max(limit * 3, 10)
+                print(f">>> [SearchService] Granular location detected. Increasing prefetch limit: {limit} -> {internal_limit}", flush=True)
+
+            result = await explorium.search_companies(filters, internal_limit, strict_filters=False)
             print(f">>> [SearchService] Explorium returned {len(result.get('companies', []))} companies", flush=True)
             
             if not result or not result.get("companies"):
@@ -475,7 +489,6 @@ class SearchService:
                     f">>> [SearchService] STRICT Location filter applied: {location_filters}, remaining={len(companies)}",
                     flush=True
                 )
-
             # STRICT: Enforce industry filter to prevent broader industry results
             industry_filters = filters.get("industry")
             if industry_filters:
@@ -488,21 +501,17 @@ class SearchService:
                         c for c in companies
                         if self._company_matches_industry(c, industry_filters)
                     ]
-                    # STRICT: If industry filtering produces zero results, 
-                    # it means the provider returned irrelevant companies.
-                    # Return empty results rather than broadening the search.
                     if len(filtered_by_industry) > 0:
                         companies = filtered_by_industry
                         print(
-                            f">>> [SearchService] STRICT Industry filter applied: {industry_filters}, {before_industry} -> {len(companies)}",
+                            f">>> [SearchService] Industry filter applied: {industry_filters}, {before_industry} -> {len(companies)}",
                             flush=True
                         )
                     else:
                         print(
-                            f">>> [SearchService] STRICT Industry filter: No matches found for {industry_filters}. Returning empty results to prevent broader search.",
+                            f">>> [SearchService] Post-filter: No exact industry matches for {industry_filters}. Allowing broadened results.",
                             flush=True
                         )
-                        return {"companies": [], "sources_used": ["explorium", "contactout"]}
 
             # STRICT: Enforce keyword intent relevance (e.g., B2B / SaaS) to avoid generic mega-brand matches.
             keyword_filters = filters.get("keywords")
@@ -516,8 +525,9 @@ class SearchService:
                         c for c in companies
                         if self._company_matches_keyword_intent(c, keyword_filters)
                     ]
-                    # STRICT: If keyword filtering produces zero results,
-                    # return empty rather than broadening the search
+                    # If keyword filtering produces zero results,
+                    # it means the provider returned irrelevant companies.
+                    # Return empty results rather than broadening the search.
                     if len(filtered_by_kw) > 0:
                         companies = filtered_by_kw
                         print(
@@ -526,27 +536,32 @@ class SearchService:
                         )
                     else:
                         print(
-                            f">>> [SearchService] STRICT Keyword intent filter: No matches found for {keyword_filters}. Returning empty results to prevent broader search.",
+                            f">>> [SearchService] Post-filter: No exact keyword matches for {keyword_filters}. Allowing broadened results.",
                             flush=True
                         )
-                        return {"companies": [], "sources_used": ["explorium", "contactout"]}
 
-            # STRICT: Filter out mega-brands for B2B SaaS searches
-            has_b2b_query = any(k in {"b2b", "business to business", "saas", "software as a service"} for k in (keyword_filters or []))
-            if has_b2b_query:
+            # STRICT: Filter out mega-brands for B2B/SaaS searches
+            # Use a more robust check for B2B/SaaS keywords (handle combined strings like "B2B SaaS")
+            b2b_saas_keywords = {"b2b", "business to business", "saas", "software as a service"}
+            has_intent_filter = any(
+                any(token in k.lower() for token in b2b_saas_keywords)
+                for k in (keyword_filters or [])
+            )
+            
+            if has_intent_filter:
                 before_mega = len(companies)
                 companies = [c for c in companies if not self._company_is_mega_brand(c)]
-                if len(companies) > 0:
+                if len(companies) < before_mega:
                     print(
-                        f">>> [SearchService] STRICT Mega-brand filter applied for B2B query, {before_mega} -> {len(companies)}",
+                        f">>> [SearchService] STRICT Mega-brand filter applied: {before_mega} -> {len(companies)}",
                         flush=True
                     )
-                else:
-                    print(
-                        f">>> [SearchService] STRICT Mega-brand filter: All companies filtered out for B2B query. Returning empty results.",
-                        flush=True
-                    )
+                
+                # If after mega-brand filtering we have nothing, it indicates a bad batch from provider
+                if not companies:
+                    print(">>> [SearchService] All results were mega-brands for B2B query. Returning empty.", flush=True)
                     return {"companies": [], "sources_used": ["explorium", "contactout"]}
+
             
             return {
                 "companies": companies,
@@ -561,7 +576,7 @@ class SearchService:
     def _company_matches_industry(company: Dict[str, Any], industries: List[str]) -> bool:
         """
         Strict industry matching to prevent broader industry results.
-        Only returns True if the company matches the specified industry exactly.
+        Returns True if the company matches any of the specified industries or their aliases.
         """
         if not industries:
             return True
@@ -570,28 +585,54 @@ class SearchService:
         if not company_industry:
             return False
 
+        # Debug: Log values being compared
+        print(f"DEBUG: Comparing company industry '{company_industry}' against targets {industries}")
+
         # Normalize industry names for comparison
         industry_aliases = {
-            "software development": ["software", "saas", "b2b saas", "b2b software", "business software"],
-            "b2b": ["b2b", "business to business"],
-            "financial services": ["finance", "fintech", "banking"],
-            "healthcare": ["healthcare", "healthtech"],
-            "marketing and advertising": ["marketing", "advertising", "martech"],
-            "e-commerce": ["ecommerce", "e-commerce"],
+            "software development": [
+                "software", "saas", "b2b saas", "b2b software", "business software", 
+                "technology", "tech", "computer software", "computer programming",
+                "computer related services", "computer systems design", "information technology"
+            ],
+            "financial services": ["finance", "fintech", "banking", "financial", "investment banking", "investment management"],
+            "healthcare": ["healthcare", "healthtech", "medical", "biotechnology", "hospitals", "pharmaceuticals", "life sciences"],
+            "marketing and advertising": ["marketing", "advertising", "martech", "pr", "public relations", "media", "digital marketing"],
+            "e-commerce": ["ecommerce", "e-commerce", "retail", "online shop", "consumer goods", "direct-to-consumer"],
+            "information technology": [
+                "it", "information tech", "info tech", "it services", "software", 
+                "computer software", "it services and it consulting", "computer related services"
+            ],
+            "consulting": ["management consulting", "business consulting", "strategy", "professional services"],
         }
 
+        # Remove common suffixes that clutter NAICS/SIC strings
+        clean_company_industry = company_industry.replace(", nec", "").replace(" (nec)", "").strip()
+
         for target_industry in industries:
-            target_lower = target_industry.lower()
+            target_lower = target_industry.lower().strip()
             
-            # Direct match
-            if target_lower == company_industry:
+            # 1. Direct equality (with cleaned string)
+            if target_lower == clean_company_industry or target_lower == company_industry:
                 return True
                 
-            # Alias match
+            # 2. Substring match
+            if target_lower in clean_company_industry or clean_company_industry in target_lower:
+                return True
+                
+            # 3. Alias match
             for canonical, aliases in industry_aliases.items():
                 if target_lower == canonical or target_lower in aliases:
-                    if company_industry == canonical or company_industry in aliases:
+                    # Match if company industry (cleaned) is in aliases
+                    if clean_company_industry == canonical or clean_company_industry in aliases:
                         return True
+                    # Also permit if canonical exists in company_industry
+                    if canonical in clean_company_industry:
+                        return True
+                    # Also permit if any alias exists as a substring in company_industry
+                    for alias in aliases:
+                        if alias in clean_company_industry:
+                            return True
         
         return False
 
@@ -650,7 +691,19 @@ class SearchService:
         if not haystack:
             return False
 
-        return any(target in haystack for target in normalized_targets)
+        import re
+        for target in normalized_targets:
+            # Use word boundaries for short tokens to avoid matching "us" in "Industrial" or "USA" in "rUSA"
+            if len(target) <= 3:
+                pattern = rf"\b{re.escape(target)}\b"
+                if re.search(pattern, haystack, re.IGNORECASE):
+                    return True
+            else:
+                if target in haystack:
+                    return True
+
+        return False
+
 
     @staticmethod
     def _company_matches_keyword_intent(company: Dict[str, Any], keywords: List[str]) -> bool:

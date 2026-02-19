@@ -296,67 +296,8 @@ async def search_companies(
         print(f">>> DEBUG: Comprehensive search returned: {result}", flush=True)
         print(f">>> DEBUG: result keys: {list(result.keys()) if result else 'None'}", flush=True)
         
-        # Apply strict filtering to prevent broader search results
-        if result and result.get("companies"):
-            companies = result["companies"]
-            
-            # Apply strict industry filtering
-            industry_filters = explorium_filters.get("industry")
-            if industry_filters:
-                if not isinstance(industry_filters, list):
-                    industry_filters = [industry_filters]
-                industry_filters = [str(i).strip().lower() for i in industry_filters if str(i).strip()]
-                if industry_filters:
-                    before_industry = len(companies)
-                    filtered_by_industry = [
-                        c for c in companies
-                        if search_service._company_matches_industry(c, industry_filters)
-                    ]
-                    if len(filtered_by_industry) > 0:
-                        companies = filtered_by_industry
-                        print(f">>> STRICT Industry filter applied: {industry_filters}, {before_industry} -> {len(companies)}", flush=True)
-                    else:
-                        print(f">>> STRICT Industry filter: No matches found for {industry_filters}. Returning empty results.", flush=True)
-                        return LeadSearchResponse(
-                            success=True,
-                            data={"companies": [], "total_count": 0, "page": 1, "total_pages": 0}
-                        )
-            
-            # Apply strict keyword filtering
-            keyword_filters = explorium_filters.get("keywords")
-            if keyword_filters:
-                if not isinstance(keyword_filters, list):
-                    keyword_filters = [keyword_filters]
-                keyword_filters = [str(k).strip() for k in keyword_filters if str(k).strip()]
-                if keyword_filters:
-                    before_kw = len(companies)
-                    filtered_by_kw = [
-                        c for c in companies
-                        if search_service._company_matches_keyword_intent(c, keyword_filters)
-                    ]
-                    if len(filtered_by_kw) > 0:
-                        companies = filtered_by_kw
-                        print(f">>> STRICT Keyword filter applied: {keyword_filters}, {before_kw} -> {len(companies)}", flush=True)
-                    else:
-                        print(f">>> STRICT Keyword filter: No matches found for {keyword_filters}. Returning empty results.", flush=True)
-                        return LeadSearchResponse(
-                            success=True,
-                            data={"companies": [], "total_count": 0, "page": 1, "total_pages": 0}
-                        )
-            
-            # Apply strict location filtering
-            location_filters = explorium_filters.get("location")
-            if location_filters:
-                if not isinstance(location_filters, list):
-                    location_filters = [location_filters]
-                companies = [
-                    c for c in companies
-                    if search_service._company_matches_location(c, location_filters)
-                ]
-                print(f">>> STRICT Location filter applied: {location_filters}, remaining={len(companies)}", flush=True)
-            
-            # Update result with filtered companies
-            result["companies"] = companies
+        # Search processing - essential guards are handled within SearchService
+        companies = result.get("companies", [])
 
         if not result or not result.get("companies"):
             print(">>> No companies found in result.", flush=True)

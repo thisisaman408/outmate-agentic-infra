@@ -14,6 +14,7 @@ It provides a clean REST API interface with proper:
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 import logging
+import asyncio
 
 from app.schemas.prospect_filters import (
     ProspectSearchRequest,
@@ -41,6 +42,10 @@ router = APIRouter(
         429: {
             "model": ProspectSearchErrorResponse,  
             "description": "Too Many Requests - Rate limit exceeded"
+        },
+        405: {
+            "model": ProspectSearchErrorResponse,
+            "description": "Method Not Allowed"
         },
         500: {
             "model": ProspectSearchErrorResponse,
@@ -149,9 +154,6 @@ async def search_prospects(request: ProspectSearchRequest):
                 "first_name": request.first_name,
                 "last_name": request.last_name,
                 "profile_languages": request.profile_languages,
-                "first_name": request.first_name,
-                "last_name": request.last_name,
-                "profile_languages": request.profile_languages,
                 "company": request.company,
                 "employees": request.employees,
                 "limit": request.limit,
@@ -170,7 +172,6 @@ async def search_prospects(request: ProspectSearchRequest):
                 "has_location": bool(request.location),
                 "has_industry": bool(request.industry),
                 "has_keyword": bool(request.keyword),
-                "has_name": bool(request.name or request.first_name or request.last_name),
                 "has_name": bool(request.name or request.first_name or request.last_name),
                 "has_profile_languages": bool(request.profile_languages),
                 "has_company": bool(request.company),
@@ -205,19 +206,64 @@ async def search_prospects(request: ProspectSearchRequest):
             limit=request.limit,
             cursor=request.cursor
         )
+
+        profiles = result.get("profiles", [])
+        
+        # Add ContactOut enrichment for top profiles to meet "Crustdata + ContactOut" constraint
+        # Enrich only top 3 results per request to balance richness vs latency
+        if profiles and settings.CONTACTOUT_API_KEY:
+            try:
+                contactout = ContactOutService()
+                enrichment_count = min(len(profiles), 3)
+                print(f">>> [Prospects API] Enriching top {enrichment_count} profiles with ContactOut", flush=True)
+                
+                async def enrich_profile(profile):
+                    li_url = profile.get("linkedin_url") or profile.get("linkedin_profile_url")
+                    if not li_url:
+                        return
+                    
+                    try:
+                        # Use get_decision_makers for detailed person data
+                        # This provides better headlines, seniority, job function etc.
+                        co_data = await contactout.get_decision_makers(linkedin_url=li_url)
+                        co_profiles = co_data.get("profiles", [])
+                        
+                        if isinstance(co_profiles, dict):
+                            co_profiles = list(co_profiles.values())
+                            
+                        if co_profiles and isinstance(co_profiles, list):
+                            co_p = co_profiles[0]
+                            co_norm = contactout.normalize_decision_maker(co_p)
+                            
+                            # Surgical merge of useful fields
+                            for k, v in co_norm.items():
+                                if v and v not in (None, "", [], {}, 0, "N/A"):
+                                    #headline, seniority, job_function, profile_picture_url provide better context
+                                    if k in ["headline", "seniority", "job_function", "profile_picture_url"]:
+                                        profile[k] = v
+                            
+                            profile["contactout_enriched"] = True
+                            profile["contact_availability"] = co_norm.get("contact_availability", {})
+                    except Exception as e:
+                        logger.warning(f"ContactOut enrichment failed for {li_url}: {e}")
+
+                await asyncio.gather(*[enrich_profile(p) for p in profiles[:enrichment_count]], return_exceptions=True)
+                
+            except Exception as e:
+                logger.error(f"ContactOut service enrichment failed: {e}")
         
         # Log successful response
         logger.info(
             "Prospect search completed successfully",
             extra={
-                "profiles_returned": len(result.get("profiles", [])),
+                "profiles_returned": len(profiles),
                 "total_available": result.get("total_count", 0)
             }
         )
         
         # Return successful response
         return ProspectSearchResponse(
-            profiles=result.get("profiles", []),
+            profiles=profiles,
             total_count=result.get("total_count", 0),
             next_cursor=result.get("next_cursor"),
             query=result.get("query")
