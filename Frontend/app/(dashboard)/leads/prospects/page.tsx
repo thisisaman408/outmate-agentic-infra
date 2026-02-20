@@ -4,12 +4,13 @@ import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { UserCircle, Download, Plus, Loader2, AlertCircle, AlertTriangle } from "lucide-react"
+import { UserCircle, Download, Plus, Loader2, AlertCircle, AlertTriangle, Sparkles } from "lucide-react"
 import { FilterSidebar } from "@/components/leads/prospects/filter-sidebar"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import { searchProspects, ProspectProfile, ProspectSearchFilters } from "@/lib/services/prospectService"
 import { useToast } from "@/hooks/use-toast"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
+import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 
 // IMPORTANT: Credit protection - limit results during testing
 const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
@@ -265,6 +266,63 @@ export default function ProspectsPage() {
         }
     }
 
+    // NLP search: takes LLM-extracted filters and calls the prospect search API (max 3 results)
+    const handleNlpSearch = async (filters: Record<string, any>) => {
+        setError(null)
+        setIsSearching(true)
+        setHasSearched(true)
+
+        try {
+            // Map NLP filter keys to ProspectSearchFilters
+            // NOTE: Don't pass keywords — CrustData's KEYWORD filter_type mixes
+            // badly with column-based filters and the LLM often extracts non-searchable
+            // terms like "verified emails". The structured filters are sufficient.
+            const searchFilters: ProspectSearchFilters = {
+                current_title: filters.current_title || undefined,
+                location: filters.location || undefined,
+                industry: filters.industry || undefined,
+                limit: 3,
+            }
+
+            // Add company_size as employees filter if present
+            if (filters.company_size && Array.isArray(filters.company_size) && filters.company_size.length > 0) {
+                searchFilters.employees = filters.company_size
+            }
+
+            setCurrentFilters(searchFilters)
+            const response = await searchProspects(searchFilters)
+
+            const limitedProfiles = response.profiles.slice(0, 3)
+            setProfiles(limitedProfiles)
+            setTotalCount(response.total_count)
+            setNextCursor(response.next_cursor || null)
+
+            localStorage.setItem("prospect_search_results", JSON.stringify(limitedProfiles))
+
+            saveSearchToHistory(
+                searchFilters,
+                limitedProfiles,
+                response.total_count,
+                response.next_cursor || null
+            )
+
+            toast({
+                title: "AI Search Complete",
+                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${limitedProfiles.length}.`,
+            })
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
+            setError(errorMessage)
+            toast({
+                title: "Search Failed",
+                description: errorMessage,
+                variant: "destructive",
+            })
+        } finally {
+            setIsSearching(false)
+        }
+    }
+
     return (
         <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
             {/* Left Sidebar - Filters */}
@@ -304,7 +362,16 @@ export default function ProspectsPage() {
                         </div>
                     </div>
 
-                    {/* Main Content Area */}
+                    {/* NLP Search Bar */}
+                    <div className="rounded-lg border bg-card p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Sparkles className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium">AI Search</span>
+                            <span className="text-xs text-muted-foreground">Describe the people you&apos;re looking for in plain English</span>
+                        </div>
+                        <NlpSearchBar intent="prospect" onFiltersExtracted={handleNlpSearch} />
+                    </div>
+
                     {/* Credit Limit Warning */}
                     {profiles.length > 0 && (
                         <Card className="p-4 border-amber-500/50 bg-amber-500/5">

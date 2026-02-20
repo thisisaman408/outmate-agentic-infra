@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Database } from "lucide-react"
+import { Database, Sparkles } from "lucide-react"
 import { FilterSidebar } from "@/components/leads/companies/filter-sidebar"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
@@ -9,6 +9,7 @@ import { searchCache } from "@/lib/cache/search-cache"
 import { PINNED_FILTERS_DEFAULT } from "@/components/leads/companies/constants"
 import { useSearchParams } from "next/navigation"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
+import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 
 export default function InDbCompanySearchPage() {
   const params = useSearchParams()
@@ -139,6 +140,39 @@ export default function InDbCompanySearchPage() {
     setHasSearched(searched)
   }
 
+  // NLP search: takes LLM-extracted filters and calls the company search API directly
+  const handleNlpSearch = async (filters: Record<string, any>) => {
+    setIsLoading(true)
+    setHasSearched(false)
+    setCompanies([])
+
+    try {
+      const response = await fetch(`/api/leads/search/companies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filters, options: { limit: 3 } }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status}`)
+      }
+
+      const result = await response.json()
+      if (!result.success) {
+        throw new Error(result.error?.message || "Search failed")
+      }
+
+      // API returns { success, data: { companies: [...] } }
+      const rawCompanies = result.data?.companies || []
+      const limited = rawCompanies.slice(0, 3)
+      handleSearch(limited, false, true, filters)
+    } catch (e) {
+      console.error("[NLP Company Search] Error:", e)
+      setIsLoading(false)
+      setHasSearched(true)
+    }
+  }
+
   // Attempt to restore from historyId on first render
   useEffect(() => {
     if (!historyId) return
@@ -247,9 +281,19 @@ export default function InDbCompanySearchPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">In-DB Company Search</h1>
             <p className="text-sm text-muted-foreground">
-              Search and filter companies from Explorium&apos;s business dataset. Use the filters on the left, then view company profiles.
+              Search and filter companies from Explorium&apos;s business dataset. Use the filters on the left or describe what you need below.
             </p>
           </div>
+        </div>
+
+        {/* NLP Search Bar */}
+        <div className="mb-4 rounded-lg border bg-card p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">AI Search</span>
+            <span className="text-xs text-muted-foreground">Describe the companies you&apos;re looking for in plain English</span>
+          </div>
+          <NlpSearchBar intent="company" onFiltersExtracted={handleNlpSearch} />
         </div>
 
         {/* Results Area */}
