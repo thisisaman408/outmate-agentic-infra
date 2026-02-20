@@ -11,6 +11,7 @@ import { searchProspects, ProspectProfile, ProspectSearchFilters } from "@/lib/s
 import { useToast } from "@/hooks/use-toast"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
+import { enrichProspect } from "@/lib/services/betterContactService"   // <-- New import
 
 // IMPORTANT: Credit protection - limit results during testing
 const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
@@ -24,6 +25,7 @@ export default function ProspectsPage() {
     const [profiles, setProfiles] = useState<ProspectProfile[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
+    const [isEnriching, setIsEnriching] = useState(false)   // <-- New state
     const [hasSearched, setHasSearched] = useState(false)
     const [totalCount, setTotalCount] = useState(0)
     const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -177,24 +179,37 @@ export default function ProspectsPage() {
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
 
-            setProfiles(response.profiles)
+            // ---- Waterfall Enrichment using BetterContact ----
+            setIsEnriching(true)
+            const enrichedProfiles = await Promise.all(
+                response.profiles.map(async (profile) => {
+                    const primaryEmail = profile.emails?.[0]
+                    if (!primaryEmail) return profile
+                    const enriched = await enrichProspect(primaryEmail)
+                    return enriched ? { ...profile, ...enriched } : profile
+                })
+            )
+            setIsEnriching(false)
+            // --------------------------------------------------
+
+            setProfiles(enrichedProfiles)
             setTotalCount(response.total_count)
             setNextCursor(response.next_cursor || null)
 
             // Store in localStorage for profile detail page access
-            localStorage.setItem("prospect_search_results", JSON.stringify(response.profiles))
+            localStorage.setItem("prospect_search_results", JSON.stringify(enrichedProfiles))
 
             // Save to search history for easy restoration
             saveSearchToHistory(
                 searchFilters,
-                response.profiles,
+                enrichedProfiles,
                 response.total_count,
                 response.next_cursor || null
             )
 
             toast({
                 title: "Search Complete",
-                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${response.profiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
+                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${enrichedProfiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
             })
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
@@ -235,7 +250,20 @@ export default function ProspectsPage() {
                 limit: loadLimit,
             })
 
-            const newProfiles = [...profiles, ...response.profiles]
+            // ---- Enrichment for newly loaded profiles ----
+            setIsEnriching(true)
+            const enrichedNew = await Promise.all(
+                response.profiles.map(async (profile) => {
+                    const primaryEmail = profile.emails?.[0]
+                    if (!primaryEmail) return profile
+                    const enriched = await enrichProspect(primaryEmail)
+                    return enriched ? { ...profile, ...enriched } : profile
+                })
+            )
+            setIsEnriching(false)
+            // ----------------------------------------------
+
+            const newProfiles = [...profiles, ...enrichedNew]
             setProfiles(newProfiles)
 
             // Stop pagination if we've hit the limit
@@ -292,7 +320,19 @@ export default function ProspectsPage() {
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
 
-            const limitedProfiles = response.profiles.slice(0, 3)
+            // Enrich the limited results
+            setIsEnriching(true)
+            const enrichedProfiles = await Promise.all(
+                response.profiles.map(async (profile) => {
+                    const primaryEmail = profile.emails?.[0]
+                    if (!primaryEmail) return profile
+                    const enriched = await enrichProspect(primaryEmail)
+                    return enriched ? { ...profile, ...enriched } : profile
+                })
+            )
+            setIsEnriching(false)
+
+            const limitedProfiles = enrichedProfiles.slice(0, 3)
             setProfiles(limitedProfiles)
             setTotalCount(response.total_count)
             setNextCursor(response.next_cursor || null)
@@ -400,10 +440,10 @@ export default function ProspectsPage() {
                         </Card>
                     )}
 
-                    {isSearching ? (
+                    {isSearching || isEnriching ? (
                         <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
                             <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-                            <h3 className="text-lg font-semibold">Searching for prospects...</h3>
+                            <h3 className="text-lg font-semibold">{isSearching ? "Searching for prospects..." : "Enriching prospect data..."}</h3>
                             <p className="text-sm text-muted-foreground mt-2">
                                 This may take a few seconds
                             </p>

@@ -10,12 +10,14 @@ import { PINNED_FILTERS_DEFAULT } from "@/components/leads/companies/constants"
 import { useSearchParams } from "next/navigation"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
+import { enrichCompany } from "@/lib/services/betterContactService"   // <-- New import
 
 export default function InDbCompanySearchPage() {
   const params = useSearchParams()
   const historyId = params.get('historyId') || undefined
   const [companies, setCompanies] = useState<CompanyData[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isEnriching, setIsEnriching] = useState(false)   // <-- New state
   const [hasSearched, setHasSearched] = useState(false)
   const [restoredFilters, setRestoredFilters] = useState<Record<string, any> | undefined>(undefined)
   const [autoSearch, setAutoSearch] = useState(false)
@@ -124,13 +126,25 @@ export default function InDbCompanySearchPage() {
       })
     }
 
-    setCompanies(mapped)
-    console.log('mapped companies set:', mapped.length)
+    // ---- Waterfall Enrichment using BetterContact ----
+    setIsEnriching(true)
+    const enrichedCompanies = await Promise.all(
+      mapped.map(async (c) => {
+        if (!c.domain) return c
+        const enriched = await enrichCompany(c.domain)
+        return enriched ? { ...c, ...enriched } : c
+      })
+    )
+    setIsEnriching(false)
+    // --------------------------------------------------
+
+    setCompanies(enrichedCompanies)
+    console.log('mapped companies set:', enrichedCompanies.length)
 
     // Save to history on successful completion (when loading=false and searched=true)
     if (!loading && searched) {
       try {
-        saveSearchToHistory(filters, mapped, mapped.length, null, 'companies', '/leads/companies/search')
+        saveSearchToHistory(filters, enrichedCompanies, enrichedCompanies.length, null, 'companies', '/leads/companies/search')
       } catch (e) {
         console.warn('Failed to save companies search to history', e)
       }
@@ -299,7 +313,7 @@ export default function InDbCompanySearchPage() {
         {/* Results Area */}
         <CompaniesResultsTable
           companies={companies}
-          isLoading={isLoading}
+          isLoading={isLoading || isEnriching}
           hasSearched={hasSearched}
         />
       </div>
