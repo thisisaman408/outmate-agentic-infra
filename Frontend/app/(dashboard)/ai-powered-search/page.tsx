@@ -54,6 +54,7 @@ type ChatSession = {
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
 
 const PROMPT_LIBRARY: PromptLibraryItem[] = [
+  // --- Build Lead Lists ---
   {
     id: "build-1",
     useCase: "Build Lead Lists",
@@ -62,12 +63,49 @@ const PROMPT_LIBRARY: PromptLibraryItem[] = [
     prompt: "Find Marketing decision makers at digital agencies with 1 to 50 employees in Texas and Florida.",
   },
   {
+    id: "build-2",
+    useCase: "Build Lead Lists",
+    title: "Series A-B SaaS companies in North America",
+    description: "Find early-stage SaaS companies with recent funding in the US and Canada.",
+    prompt: "Find B2B SaaS companies in the US and Canada that raised Series A or Series B funding with 50 to 500 employees.",
+  },
+  {
+    id: "build-3",
+    useCase: "Build Lead Lists",
+    title: "Healthcare companies using Salesforce in California",
+    description: "Find healthcare companies that use Salesforce CRM in California.",
+    prompt: "Find healthcare companies in California with 100 to 2000 employees that use Salesforce.",
+  },
+  {
+    id: "build-4",
+    useCase: "Build Lead Lists",
+    title: "E-commerce brands with fast employee growth",
+    description: "Find e-commerce companies showing strong hiring signals.",
+    prompt: "Find e-commerce companies in the US with more than 50 employees that have grown headcount by at least 20% in the last 12 months.",
+  },
+  // --- Find Contact Info ---
+  {
     id: "contact-1",
     useCase: "Find Contact Info",
     title: "Data decision makers at mid-size Snowflake users",
     description: "Find data leaders at companies with 100-1000 employees using Snowflake and include verified emails only.",
     prompt: "Find data decision makers at companies with 100 to 1000 employees that use Snowflake, only with verified emails.",
   },
+  {
+    id: "contact-2",
+    useCase: "Find Contact Info",
+    title: "CTOs and VPs of Engineering at AI startups",
+    description: "Find senior engineering leaders at AI companies with verified contact details.",
+    prompt: "Find CTOs and VPs of Engineering at artificial intelligence companies with 20 to 500 employees, only with verified emails.",
+  },
+  {
+    id: "contact-3",
+    useCase: "Find Contact Info",
+    title: "HR directors at manufacturing companies in the Midwest",
+    description: "Source HR leaders at manufacturing firms in the US Midwest with emails.",
+    prompt: "Find HR Directors and VP of People at manufacturing companies in Illinois, Ohio, and Michigan with verified emails.",
+  },
+  // --- Personalize Your Outreach ---
   {
     id: "personalize-1",
     useCase: "Personalize Your Outreach",
@@ -76,6 +114,21 @@ const PROMPT_LIBRARY: PromptLibraryItem[] = [
     prompt: "Find VP/Head level marketing leaders in fintech companies in the US and include recent company signals for personalized outreach.",
   },
   {
+    id: "personalize-2",
+    useCase: "Personalize Your Outreach",
+    title: "Recently funded startups for partnership outreach",
+    description: "Find companies that recently raised funding for timely partnership conversations.",
+    prompt: "Find technology companies in the US that raised funding in the last 6 months with 20 to 200 employees and include signals for personalized outreach.",
+  },
+  {
+    id: "personalize-3",
+    useCase: "Personalize Your Outreach",
+    title: "Sales leaders at companies hiring SDRs",
+    description: "Find VP Sales at companies actively hiring sales reps — a strong buying signal.",
+    prompt: "Find VP of Sales and Sales Directors at B2B SaaS companies with 100 to 1000 employees that are currently hiring SDRs or Account Executives.",
+  },
+  // --- Meeting Prep ---
+  {
     id: "meeting-1",
     useCase: "Meeting Prep",
     title: "Company overview with competitors and likely pain points",
@@ -83,11 +136,33 @@ const PROMPT_LIBRARY: PromptLibraryItem[] = [
     prompt: "Find B2B SaaS companies in the US with 200 to 1000 employees and include data useful for competitor and pain-point analysis.",
   },
   {
+    id: "meeting-2",
+    useCase: "Meeting Prep",
+    title: "Fintech companies in Europe with recent leadership changes",
+    description: "Prep for meetings with European fintech firms experiencing executive turnover.",
+    prompt: "Find fintech companies in Europe with 100 to 5000 employees and include recent leadership changes and company signals.",
+  },
+  // --- Recruiting ---
+  {
     id: "recruiting-1",
     useCase: "Recruiting",
     title: "Texas DevOps or platform engineers in security",
     description: "Source DevOps/platform engineering prospects in information security companies in Texas.",
     prompt: "Find DevOps or Platform Engineers in information security companies in Texas with at least 18 months in role.",
+  },
+  {
+    id: "recruiting-2",
+    useCase: "Recruiting",
+    title: "Senior product managers at growth-stage startups",
+    description: "Find experienced PMs at fast-growing startups in the US.",
+    prompt: "Find Senior Product Managers and Directors of Product at startups with 50 to 500 employees in the US that have grown headcount by 15% or more.",
+  },
+  {
+    id: "recruiting-3",
+    useCase: "Recruiting",
+    title: "Machine learning engineers in the Bay Area",
+    description: "Source ML engineers at AI-focused companies in San Francisco and the Bay Area.",
+    prompt: "Find Machine Learning Engineers and AI Researchers at artificial intelligence companies in California with verified emails and LinkedIn profiles.",
   },
 ]
 
@@ -2277,8 +2352,9 @@ export default function DatabaseFinderPage() {
                       </thead>
                       <tbody>
                         {campaignDraft.recipients.map((r: any, idx: number) => {
-                          const firstName = r.first_name || r.name?.split(" ")[0] || "there"
-                          const companyName = r.company || r.domain || "your company"
+                          const isCompanyIntent = intent === "business"
+                          const firstName = isCompanyIntent ? "" : (r.first_name || r.name?.split(" ")[0] || "there")
+                          const companyName = r.company || r.name || r.domain || "your company"
                           const personalizedBody = campaignDraft.email_body
                             .replace(/\{\{firstName\}\}/g, firstName)
                             .replace(/\{\{companyName\}\}/g, companyName)
@@ -2413,8 +2489,9 @@ export default function DatabaseFinderPage() {
                         for (const idx of Array.from(selectedRecipients)) {
                           const r = campaignDraft.recipients[idx]
                           if (!r?.email || sentRecipients[idx] === "email" || sentRecipients[idx] === "both") continue
-                          const firstName = r.first_name || r.name?.split(" ")[0] || "there"
-                          const companyName = r.company || r.domain || "your company"
+                          const isCompanyIntent2 = intent === "business"
+                          const firstName = isCompanyIntent2 ? "" : (r.first_name || r.name?.split(" ")[0] || "there")
+                          const companyName = r.company || r.name || r.domain || "your company"
                           const body = campaignDraft.email_body.replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{companyName\}\}/g, companyName)
                           const subj = campaignDraft.subject.replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{companyName\}\}/g, companyName)
                           await handleSendEmail(idx, r.email, subj, body)
@@ -2436,8 +2513,9 @@ export default function DatabaseFinderPage() {
                         for (const idx of Array.from(selectedRecipients)) {
                           const r = campaignDraft.recipients[idx]
                           if (!r?.linkedin_url || sentRecipients[idx] === "linkedin" || sentRecipients[idx] === "both") continue
-                          const firstName = r.first_name || r.name?.split(" ")[0] || "there"
-                          const companyName = r.company || r.domain || "your company"
+                          const isCompanyIntent3 = intent === "business"
+                          const firstName = isCompanyIntent3 ? "" : (r.first_name || r.name?.split(" ")[0] || "there")
+                          const companyName = r.company || r.name || r.domain || "your company"
                           const msg = campaignDraft.linkedin_message.replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{companyName\}\}/g, companyName)
                           await handleSendLinkedIn(idx, r.linkedin_url, msg)
                           count++

@@ -106,43 +106,115 @@ class CampaignService:
 
         intent_label = "prospects" if request.intent == "prospect" else "companies"
 
+        # Build intent-specific variable rules and reference examples
         if request.intent == "prospect":
-            variable_instructions = """- MUST use {{{{firstName}}}} for the recipient's first name and {{{{companyName}}}} for the company name
-- Use {{{{firstName}}}} and {{{{companyName}}}} everywhere you would mention a name or company
-- NEVER hardcode any specific person name — ALWAYS use {{{{firstName}}}} instead
-- NEVER hardcode any specific company name — ALWAYS use {{{{companyName}}}} instead"""
-            json_template = """{{
-  "subject": "Email subject line using {{{{companyName}}}} variable",
-  "email_body": "Email body template. MUST use {{{{firstName}}}} for the person's name and {{{{companyName}}}} for the company. Keep under 150 words. Professional but warm tone.",
-  "linkedin_message": "Shorter LinkedIn template. MUST use {{{{firstName}}}} and {{{{companyName}}}} variables. Under 100 words. More casual."
-}}"""
+            variable_rules = """VARIABLE RULES:
+- MUST use {{{{firstName}}}} for the recipient's first name and {{{{companyName}}}} for the company name.
+- NEVER hardcode any specific person or company name — ALWAYS use the variables.
+- Use {{{{firstName}}}} and {{{{companyName}}}} everywhere you would mention a name or company."""
+
+            example_emails = """
+REFERENCE EXAMPLES (study the tone, structure, and brevity — do NOT copy verbatim):
+
+Example A (Signal-based):
+Subject: Quick question about {{{{companyName}}}}
+Body:
+Hi {{{{firstName}}}},
+
+Noticed {{{{companyName}}}} is [signal reference, e.g. expanding / hiring / launched something]. Congrats on the momentum.
+
+I'm curious — how are you currently handling [pain point relevant to the search context]?
+
+We've helped [similar role/company type] [specific result], and I'd be happy to share how.
+
+Worth a quick chat this week?
+
+[Sender Name]
+
+Example B (Value-first):
+Subject: Idea for {{{{companyName}}}}
+Body:
+Hi {{{{firstName}}}},
+
+Most [job title]s at [company type] focus on [common approach], but I noticed {{{{companyName}}}} is doing something different with [signal or observation].
+
+That's relevant to a pattern I've been tracking — companies that [action] have seen [tangible result].
+
+Not sure if it applies to you, but thought it was worth flagging. Open to a 10-min call?
+
+[Sender Name]
+
+Example C (LinkedIn — short):
+Hi {{{{firstName}}}}, saw {{{{companyName}}}} is [signal]. We helped a similar team [result] — thought it might be relevant. Open to connecting?"""
+
         else:
-            variable_instructions = """- MUST use {{{{companyName}}}} for the company name. This is the ONLY variable you should use.
-- Do NOT use {{{{firstName}}}} — these are companies, not individual people. Address the email to the company or team generically (e.g. "Hi {{{{companyName}}}} team" or "Hello").
-- NEVER hardcode any specific company name — ALWAYS use {{{{companyName}}}} instead"""
-            json_template = """{{
-  "subject": "Email subject line using {{{{companyName}}}} variable",
-  "email_body": "Email body template. MUST use {{{{companyName}}}} for the company name. Do NOT use {{{{firstName}}}} since these are companies. Address generically like 'Hi {{{{companyName}}}} team'. Keep under 150 words. Professional but warm tone.",
-  "linkedin_message": "Shorter LinkedIn template. MUST use {{{{companyName}}}} only. Do NOT use {{{{firstName}}}}. Under 100 words. More casual."
-}}"""
+            variable_rules = """VARIABLE RULES:
+- MUST use {{{{companyName}}}} for the company name. This is the ONLY template variable.
+- Do NOT use {{{{firstName}}}} — these are companies, not individual people.
+- Address the email to the team generically (e.g. "Hi {{{{companyName}}}} team" or just "Hi there").
+- NEVER hardcode any specific company name — ALWAYS use {{{{companyName}}}}."""
 
-        prompt = f"""You are an expert B2B sales copywriter. Generate a TEMPLATE outreach message that works for ALL recipients below using template variables.
+            example_emails = """
+REFERENCE EXAMPLES (study the tone, structure, and brevity — do NOT copy verbatim):
 
-Recipients ({intent_label}) for context:
+Example A (Signal-based):
+Subject: Quick question for the {{{{companyName}}}} team
+Body:
+Hi {{{{companyName}}}} team,
+
+I came across {{{{companyName}}}} while researching [industry/niche] companies [signal reference, e.g. showing strong growth / expanding into new markets].
+
+We work with similar [company type] to [primary benefit], and given what {{{{companyName}}}} is building, there might be a fit worth exploring.
+
+Would anyone on your team be open to a brief conversation?
+
+[Sender Name]
+
+Example B (Value-first):
+Subject: Idea for {{{{companyName}}}}
+Body:
+Hi there,
+
+I noticed {{{{companyName}}}} is [signal or observation]. That caught my attention because companies in [industry] that [action] have seen [tangible result].
+
+We've helped teams like yours [specific outcome]. Happy to share how if it's relevant.
+
+Worth a quick call?
+
+[Sender Name]
+
+Example C (LinkedIn — short):
+Hi, noticed {{{{companyName}}}} is [signal]. We've helped similar companies [result] — thought it might be relevant to your team. Open to connecting?"""
+
+        prompt = f"""You are an expert B2B cold outreach copywriter. Your emails get replies because they are short, signal-driven, and human.
+
+RECIPIENTS ({intent_label}) with detected signals:
 {formatted_recipients}
 
-User's search context: "{request.context}"
+USER'S SEARCH CONTEXT: "{request.context}"
 
-Generate a JSON response with exactly these keys:
-{json_template}
+{example_emails}
 
-CRITICAL RULES:
-{variable_instructions}
-- The template must work for ANY recipient when variables are replaced
-- Reference the TYPES of signals (funding, hiring, growth, etc.) naturally but generically
-- Include a clear but soft CTA
-- No emojis, no exclamation marks overload
-- Return ONLY valid JSON, no other text"""
+YOUR TASK:
+Generate ONE outreach template (JSON) that works for ALL recipients above. The template must:
+1. Open with a specific signal reference (funding, hiring, growth, product launch, leadership change, etc.) drawn from the recipients' signals above. Use the CATEGORY of signal, not a specific company's details.
+2. Connect that signal to a relevant pain point or opportunity.
+3. Offer a concrete value statement (what you help with and a tangible result).
+4. End with a low-friction CTA — a question or short meeting ask, NOT "let me know your thoughts."
+5. Be under 120 words for email, under 80 words for LinkedIn.
+6. Sound like a real human wrote it — no corporate jargon, no filler phrases like "I hope this email finds you well", no "I wanted to reach out", no "I'd love to".
+7. No emojis. No exclamation mark overload (max 1 in the entire email). No bullet points in the email body.
+
+{variable_rules}
+
+Return ONLY valid JSON with exactly these keys:
+{{
+  "subject": "Short, curiosity-driven subject line (under 8 words) using {{{{companyName}}}}",
+  "email_body": "The email body following the rules above.",
+  "linkedin_message": "Shorter, more casual LinkedIn version following the rules above."
+}}
+
+Return ONLY the JSON object, no other text."""
 
         headers = {
             "Authorization": f"Bearer {self.openrouter_api_key}",
