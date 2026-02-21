@@ -693,14 +693,18 @@ class AdvancedNLPService:
                     payload["current_title"] = [str(x).strip() for x in filters["current_title"] if str(x).strip()]
 
                 keywords = filters.get("keywords")
-                # Only send keyword when title is not available; keyword forces realtime endpoint.
-                if not payload.get("current_title"):
-                    if isinstance(keywords, list):
-                        kw = " ".join([str(x) for x in keywords if str(x).strip()]).strip()
-                        if kw:
-                            payload["keyword"] = kw
-                    elif isinstance(keywords, str) and keywords.strip():
-                        payload["keyword"] = keywords.strip()
+                has_column_filters = bool(
+                    payload.get("current_title") or
+                    payload.get("industry") or
+                    payload.get("location")
+                )
+                # Only use keyword search when we don't already have column filters
+                if not has_column_filters and isinstance(keywords, list):
+                    kw = " ".join([str(x) for x in keywords if str(x).strip()]).strip()
+                    if kw:
+                        payload["keyword"] = kw
+                elif not has_column_filters and isinstance(keywords, str) and keywords.strip():
+                    payload["keyword"] = keywords.strip()
                 
                 async with httpx.AsyncClient(timeout=90) as client:
                     response = await client.post(

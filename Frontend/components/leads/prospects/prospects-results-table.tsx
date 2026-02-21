@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Eye, Linkedin, Loader2, Lock } from "lucide-react"
+import { Eye, Linkedin, Loader2, Lock, Zap } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ProspectProfile } from "@/lib/services/prospectService"
 import { getInitials } from "@/lib/services/prospectService"
@@ -21,6 +21,8 @@ interface ProspectsResultsTableProps {
     onLoadMore?: () => void
     isLoadingMore?: boolean
     enableContactReveal?: boolean
+    onEnrichReveal?: (linkedinUrl: string, field: 'email' | 'phone') => void
+    enrichCache?: Record<string, { email?: any, phone?: any }>
 }
 
 export function ProspectsResultsTable({
@@ -32,6 +34,8 @@ export function ProspectsResultsTable({
     onLoadMore,
     isLoadingMore = false,
     enableContactReveal = false,
+    onEnrichReveal,
+    enrichCache,
 }: ProspectsResultsTableProps) {
     // Support both 'profiles' and 'data' props for compatibility
     const actualProfiles = profiles || data || []
@@ -200,22 +204,60 @@ export function ProspectsResultsTable({
 
         setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: true } }))
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ linkedin_url: linkedinUrl }),
-            })
-            if (!response.ok) throw new Error("Failed to reveal contact")
-            const payload = await response.json()
-            const safeEmails = sanitizeEmails(Array.isArray(payload?.emails) ? payload.emails : [])
-            const safePhones = sanitizePhones(Array.isArray(payload?.phones) ? payload.phones : [])
+            let safeEmails: string[] = []
+            let safePhones: string[] = []
+
+            // Step 1: Try existing reveal API (ContactOut/CrustData)
+            try {
+                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ linkedin_url: linkedinUrl }),
+                })
+                if (response.ok) {
+                    const payload = await response.json()
+                    safeEmails = sanitizeEmails(Array.isArray(payload?.emails) ? payload.emails : [])
+                    safePhones = sanitizePhones(Array.isArray(payload?.phones) ? payload.phones : [])
+                }
+            } catch {
+                // Primary reveal failed, continue to fallback
+            }
+
+            // Step 2: If no email or phone found, try BetterContact waterfall
+            if (safeEmails.length === 0 && safePhones.length === 0) {
+                try {
+                    const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
+                    const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
+                    const employer = profile.current_employers?.[0]
+                    const companyName = employer?.name || ""
+                    const companyDomain = employer?.company_website_domain || ""
+
+                    const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/bettercontact/enrich-prospect`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            first_name: firstName,
+                            last_name: lastName,
+                            company_name: companyName,
+                            company_domain: companyDomain,
+                            linkedin_url: linkedinUrl,
+                        }),
+                    })
+                    if (bcRes.ok) {
+                        const bcData = await bcRes.json()
+                        if (bcData.success && !bcData.not_found) {
+                            if (bcData.email) safeEmails = sanitizeEmails([bcData.email])
+                            if (bcData.phone) safePhones = sanitizePhones([bcData.phone])
+                        }
+                    }
+                } catch {
+                    // BetterContact fallback also failed
+                }
+            }
+
             setContactCache((prev) => ({
                 ...prev,
-                [rowId]: {
-                    emails: safeEmails,
-                    phones: safePhones,
-                    loading: false,
-                },
+                [rowId]: { emails: safeEmails, phones: safePhones, loading: false },
             }))
         } catch {
             setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: false } }))
@@ -310,7 +352,7 @@ export function ProspectsResultsTable({
                             {filteredProfiles.map((prospect, idx) => {
                                 // Support both In-DB API (current_employers) and Realtime API (employer)
                                 const currentEmployer = prospect.current_employers?.[0] ||
-                                    (prospect.employer as any)?.[0]
+                                    ((prospect as any).employer as any)?.[0]
                                 const displayName = asText(prospect.name) || "Unknown"
                                 const initials = getInitials(displayName)
                                 const stableId = getStableId(prospect, idx)
@@ -397,20 +439,43 @@ export function ProspectsResultsTable({
                                         {enableContactReveal && (
                                             <TableCell onClick={(e) => e.stopPropagation()}>
                                                 {!isEmailRevealed ? (
-                                                    <Button
-                                                        variant="secondary"
-                                                        size="sm"
-                                                        className="h-7 text-[11px]"
-                                                        onClick={async () => {
-                                                            setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
-                                                            await revealContact(rowKey, prospect)
-                                                        }}
-                                                    >
-                                                        <Lock className="h-3 w-3 mr-1" />
-                                                        Tap to Reveal
-                                                    </Button>
+                                                    <>
+                                                        <Button
+                                                            variant="secondary"
+                                                            size="sm"
+                                                            className="h-7 text-[11px]"
+                                                            onClick={async () => {
+                                                                setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
+                                                                await revealContact(rowKey, prospect)
+                                                            }}
+                                                        >
+                                                            <Lock className="h-3 w-3 mr-1" />
+                                                            Tap to Reveal
+                                                        </Button>
+                                                        {/* Waterfall enrichment icon */}
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600 ml-1"
+                                                            onClick={async () => {
+                                                                setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
+                                                                console.log('Email Zap clicked, calling onEnrichReveal for:', prospect.linkedin_profile_url || prospect.flagship_profile_url || "")
+                                                                onEnrichReveal?.(rowKey, 'email')
+                                                            }}
+                                                            title="Enrich with waterfall (BetterContact)"
+                                                        >
+                                                            <Zap className="h-3 w-3" />
+                                                        </Button>
+                                                    </>
                                                 ) : cache?.loading ? (
                                                     <span className="text-xs text-muted-foreground">Loading...</span>
+                                                ) : enrichCache?.[rowKey]?.email ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-xs break-all ${!enrichCache[rowKey].email?.email ? 'text-muted-foreground italic' : ''}`}>
+                                                            {enrichCache[rowKey].email?.email || 'Not available'}
+                                                        </span>
+                                                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                                    </div>
                                                 ) : emails.length > 0 ? (
                                                     <span className="text-xs break-all">{emails[0]}</span>
                                                 ) : (
@@ -421,60 +486,104 @@ export function ProspectsResultsTable({
 
                                         {enableContactReveal && (
                                             <TableCell onClick={(e) => e.stopPropagation()}>
-                                                {!isPhoneRevealed ? (
-                                                    <Button
-                                                        variant="secondary"
-                                                        size="sm"
-                                                        className="h-7 text-[11px]"
-                                                        onClick={async () => {
-                                                            setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
-                                                            await revealContact(rowKey, prospect)
-                                                        }}
-                                                    >
-                                                        <Lock className="h-3 w-3 mr-1" />
-                                                        Tap to Reveal
-                                                    </Button>
-                                                ) : cache?.loading ? (
-                                                    <span className="text-xs text-muted-foreground">Loading...</span>
-                                                ) : phones.length > 0 ? (
-                                                    <span className="text-xs">{phones[0]}</span>
-                                                ) : (
-                                                    <span className="text-xs text-muted-foreground">Phone not Available</span>
-                                                )}
+                                                <div className="flex items-center gap-2">
+                                                    {!isPhoneRevealed ? (
+                                                        <>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="sm"
+                                                                className="h-7 text-[11px]"
+                                                                onClick={async () => {
+                                                                    setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
+                                                                    await revealContact(rowKey, prospect)
+                                                                }}
+                                                            >
+                                                                <Lock className="h-3 w-3 mr-1" />
+                                                                Tap to Reveal
+                                                            </Button>
+                                                            {/* Waterfall enrichment icon */}
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
+                                                                onClick={async () => {
+                                                                    setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
+                                                                    onEnrichReveal?.(prospect.linkedin_profile_url || prospect.flagship_profile_url || "", 'phone')
+                                                                }}
+                                                                title="Enrich with waterfall (BetterContact)"
+                                                            >
+                                                                <Zap className="h-3 w-3" />
+                                                            </Button>
+                                                        </>
+                                                    ) : enrichCache?.[rowKey]?.phone ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-xs ${!enrichCache[rowKey].phone?.phone ? 'text-muted-foreground italic' : ''}`}>
+                                                                {enrichCache[rowKey].phone?.phone || 'Not available'}
+                                                            </span>
+                                                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                                        </div>
+                                                    ) : cache?.loading ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                            <span className="text-xs text-muted-foreground">Enriching...</span>
+                                                        </div>
+                                                    ) : phones.length > 0 ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs">{phones[0]}</span>
+                                                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs text-muted-foreground">Not found</span>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-6 w-6 p-0 text-orange-500 hover:text-orange-600"
+                                                                onClick={async () => {
+                                                                    setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
+                                                                    await revealContact(rowKey, prospect)
+                                                                }}
+                                                                title="Retry waterfall enrichment"
+                                                            >
+                                                                <Zap className="h-3 w-3" />
+                                                            </Button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </TableCell>
                                         )}
 
-                                        {/* Actions */}
-                                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                                            <div className="flex justify-end gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8"
-                                                    onClick={() => handleProfileClick(stableId as any)}
-                                                >
-                                                    <Eye className="h-4 w-4" />
-                                                    <span className="sr-only">View Profile</span>
-                                                </Button>
-                                                {prospect.flagship_profile_url && (
+                                            {/* Actions */}
+                                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                                <div className="flex justify-end gap-1">
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        className="h-8 w-8 text-blue-600 hover:text-blue-700"
-                                                        asChild
+                                                        className="h-8 w-8"
+                                                        onClick={() => handleProfileClick(stableId as any)}
                                                     >
-                                                        <a
-                                                            href={prospect.flagship_profile_url}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                        >
-                                                            <Linkedin className="h-4 w-4" />
-                                                            <span className="sr-only">LinkedIn Profile</span>
-                                                        </a>
+                                                        <Eye className="h-4 w-4" />
+                                                        <span className="sr-only">View Profile</span>
                                                     </Button>
-                                                )}
-                                            </div>
-                                        </TableCell>
+                                                    {prospect.flagship_profile_url && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-8 w-8 text-blue-600 hover:text-blue-700"
+                                                            asChild
+                                                        >
+                                                            <a
+                                                                href={prospect.flagship_profile_url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                            >
+                                                                <Linkedin className="h-4 w-4" />
+                                                                <span className="sr-only">LinkedIn Profile</span>
+                                                            </a>
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </TableCell>
                                     </TableRow>
                                 )
                             })}

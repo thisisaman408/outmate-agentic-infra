@@ -28,6 +28,9 @@ from app.api.routes import explorium_routes
 from app.api.routes import signals
 from app.api.routes import campaigns
 from app.api.routes import chat
+from app.api.routes import chat_history
+from app.api.routes import bettercontact_routes
+from app.api.routes import enrichment_routes
 
 # Register routers
 
@@ -127,6 +130,13 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"]
 logger.info("Campaigns router registered")
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 logger.info("Chat router registered")
+
+app.include_router(chat_history.router)
+logger.info("Chat history router registered")
+app.include_router(bettercontact_routes.router, prefix="/api/bettercontact", tags=["bettercontact"])
+logger.info("BetterContact router registered")
+app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrichment"])
+logger.info("Enrichment router registered")
 
 @app.on_event("startup")
 async def startup_event():

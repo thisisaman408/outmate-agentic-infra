@@ -18,7 +18,10 @@ import {
     ChevronLeft,
     ChevronRight,
     Columns3,
-    Download
+    Download,
+    Loader2,
+    Zap,
+    Lock,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
@@ -192,6 +195,8 @@ interface CompaniesResultsTableProps {
     companies: CompanyData[]
     isLoading: boolean
     hasSearched: boolean
+    onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void
+    enrichCache?: Record<string, { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean }>
 }
 
 // Format utilities
@@ -228,12 +233,18 @@ const RenderCell = ({
     column,
     company,
     revealed,
-    onReveal
+    onReveal,
+    enrichData,
+    setRevealed,
+    onEnrichReveal
 }: {
     column: ColumnConfig,
     company: CompanyData,
     revealed: Record<string, boolean>,
-    onReveal: (key: string) => void
+    onReveal: (key: string) => void,
+    enrichData?: { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean },
+    setRevealed: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void,
+    onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void
 }) => {
     const value = (company as any)[column.key]
 
@@ -242,26 +253,97 @@ const RenderCell = ({
         column.key.toString().toLowerCase().includes('email')) {
         const revealKey = `${company.id}-${column.key}`
         const isRevealed = revealed[revealKey]
+        const isPhoneCol = column.key.toString().toLowerCase().includes('phone')
+        const isEmailCol = column.key.toString().toLowerCase().includes('email')
 
-        const displayValue = value ? (Array.isArray(value) ? value.join(', ') : value) : 'Not found'
-
-        if (isRevealed) {
-            return <span className={`font-mono text-sm break-all ${!value ? 'text-muted-foreground italic' : ''}`}>{displayValue}</span>
-        }
+        // Check enrichment data first, then existing data
+        const enrichedValue = isPhoneCol ? enrichData?.phone : isEmailCol ? enrichData?.email : undefined
+        const displayValue = enrichedValue || (value ? (Array.isArray(value) ? value.join(', ') : value) : null)
 
         return (
-            <div className="flex">
-                <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-7 text-[10px] text-white bg-blue-600 hover:bg-blue-700 font-black border-blue-700 uppercase tracking-tighter px-3 shadow-md transition-all animate-pulse"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        onReveal(revealKey)
-                    }}
-                >
-                    [Click to Reveal]
-                </Button>
+            <div className="flex items-center gap-2">
+                {/* Existing company data */}
+                {value && !enrichedValue && (
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs">
+                            {Array.isArray(value) ? value.join(', ') : value}
+                        </span>
+                        <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                    </div>
+                )}
+
+                {/* Enriched data */}
+                {typeof enrichedValue !== 'undefined' && (
+                    <div className="flex items-center gap-2">
+                        <span className={`text-xs ${!displayValue ? 'text-muted-foreground italic' : ''}`}>
+                            {displayValue || 'Not available'}
+                        </span>
+                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                    </div>
+                )}
+
+                {/* Reveal UI - shown when no enriched data and not revealed */}
+                {!enrichedValue && !isRevealed && !enrichData?.loading && (
+                    <>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-7 text-[11px]"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                setRevealed(prev => ({ ...prev, [revealKey]: true }))
+                                const field = isPhoneCol ? 'phone' : 'email'
+                                const companyId = company.domain || company.id
+                                onEnrichReveal?.(companyId, field)
+                            }}
+                        >
+                            <Lock className="h-3 w-3 mr-1" />
+                            Tap to Reveal
+                        </Button>
+                        {/* Waterfall enrichment icon */}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600 ml-1"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                setRevealed(prev => ({ ...prev, [revealKey]: true }))
+                                const field = isPhoneCol ? 'phone' : 'email'
+                                const companyId = company.domain || company.id
+                                onEnrichReveal?.(companyId, field)
+                            }}
+                            title="Enrich with waterfall (BetterContact)"
+                        >
+                            <Zap className="h-3 w-3" />
+                        </Button>
+                    </>
+                )}
+
+                {/* Waterfall enrichment icon - shown when revealed or has data */}
+                {(enrichedValue || isRevealed) && !enrichData?.loading && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                        onClick={(e) => {
+                            e.stopPropagation()
+                            const field = isPhoneCol ? 'phone' : 'email'
+                            const companyId = company.domain || company.id
+                            onEnrichReveal?.(companyId, field)
+                        }}
+                        title="Enrich with waterfall (BetterContact)"
+                    >
+                        <Zap className="h-3 w-3" />
+                    </Button>
+                )}
+
+                {/* Enrichment loading state */}
+                {enrichData?.loading && (
+                    <div className="flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span className="text-xs text-muted-foreground">Enriching...</span>
+                    </div>
+                )}
             </div>
         )
     }
@@ -497,12 +579,14 @@ const RenderCell = ({
     }
 }
 
-export function CompaniesResultsTable({ companies = [], isLoading, hasSearched }: CompaniesResultsTableProps) {
+export function CompaniesResultsTable({ companies = [], isLoading, hasSearched, onEnrichReveal, enrichCache = {} }: CompaniesResultsTableProps) {
     const router = useRouter()
     const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS)
     const [currentPage, setCurrentPage] = useState(1)
     const [revealed, setRevealed] = useState<Record<string, boolean>>({})
     const itemsPerPage = 25
+
+    console.log('Complex CompaniesResultsTable called with:', { companies: companies.length, isLoading, hasSearched, enrichCache })
 
     const visibleColumns = useMemo(() => columns.filter(col => col.visible), [columns])
 
@@ -708,7 +792,12 @@ export function CompaniesResultsTable({ companies = [], isLoading, hasSearched }
                                             column={col}
                                             company={company}
                                             revealed={revealed}
-                                            onReveal={handleReveal}
+                                            onReveal={(key) => {
+                                                handleReveal(key)
+                                            }}
+                                            enrichData={enrichCache[company.domain || company.id]}
+                                            setRevealed={setRevealed}
+                                            onEnrichReveal={onEnrichReveal}
                                         />
                                     </TableCell>
                                 ))}

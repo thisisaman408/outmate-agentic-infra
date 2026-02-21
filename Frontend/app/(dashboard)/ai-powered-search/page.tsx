@@ -10,6 +10,7 @@ import { CompaniesResultsTable } from "@/components/leads/companies/companies-re
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
+import { authService } from "@/lib/auth"
 
 type WorkflowStep = {
   title: string
@@ -52,6 +53,8 @@ type ChatSession = {
 }
 
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
+const CHAT_STORAGE_USER_KEY = "nlp_enrichment_user_id"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 const PROMPT_LIBRARY: PromptLibraryItem[] = [
   // --- Build Lead Lists ---
@@ -216,6 +219,7 @@ export default function DatabaseFinderPage() {
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null)
   const agentMessagesEndRef = useRef<HTMLDivElement>(null)
+  const initialActiveChatId = useRef<string | null>(null)
 
   // Auto-scroll agent conversation when new messages appear
   useEffect(() => {
@@ -357,11 +361,11 @@ export default function DatabaseFinderPage() {
     return words.length < cleaned.length ? `${words}...` : words
   }
 
-  const createEmptySession = (): ChatSession => {
-    const now = new Date().toISOString()
-    return {
-      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      title: "New Chat",
+const createEmptySession = (): ChatSession => {
+  const now = new Date().toISOString()
+  return {
+    id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title: "New Chat",
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -374,9 +378,78 @@ export default function DatabaseFinderPage() {
       hasSearched: false,
       clarificationStep: "pending",
       extractedFilters: {},
-      suggestedPrompts: []
-    }
+    suggestedPrompts: []
   }
+}
+
+const getPersistentUserId = (): string | null => {
+  if (typeof window === "undefined") return null
+  const user = authService.getCurrentUser()
+  if (user?.id) return user.id
+  let stored = localStorage.getItem(CHAT_STORAGE_USER_KEY)
+  if (!stored) {
+    const randomString =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2)
+    stored = `anon_${randomString}`
+    localStorage.setItem(CHAT_STORAGE_USER_KEY, stored)
+  }
+  return stored
+}
+
+const mergeChatCollections = (existing: ChatSession[], incoming: ChatSession[]): ChatSession[] => {
+  const map = new Map<string, ChatSession>()
+  incoming.forEach((session) => map.set(session.id, session))
+  existing.forEach((session) => {
+    if (!map.has(session.id)) {
+      map.set(session.id, session)
+    }
+  })
+  const merged = Array.from(map.values())
+  merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  return merged
+}
+
+const normalizeServerSession = (record: any): ChatSession => {
+  const data = record.data || {}
+  const now = new Date().toISOString()
+  return {
+    id: data.id || data.sessionId || record.session_id || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title: data.title || record.title || "Chat",
+    createdAt: data.createdAt || record.created_at || now,
+    updatedAt: data.updatedAt || record.updated_at || now,
+    messages: Array.isArray(data.messages) ? data.messages : [],
+    query: data.query || "",
+    intent: data.intent || "business",
+    results: Array.isArray(data.results) ? data.results : [],
+    tamPreview: data.tamPreview || { count: 0, cost: 0 },
+    clarification: data.clarification || "",
+    workflowSteps: Array.isArray(data.workflowSteps) ? data.workflowSteps : [],
+    hasSearched: Boolean(data.hasSearched),
+    clarificationStep: data.clarificationStep || "pending",
+    extractedFilters: data.extractedFilters || {},
+    suggestedPrompts: Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
+  }
+}
+
+const syncChatWithServer = async (session: ChatSession) => {
+  const userId = getPersistentUserId()
+  if (!userId) return
+  try {
+    await fetch(`${API_BASE_URL}/api/chat/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: session.id,
+        data: session,
+      }),
+    })
+  } catch (error) {
+    console.warn("Persisting chat session failed:", error)
+  }
+}
 
   const applySessionToView = (session: ChatSession) => {
     const normalizeLinkedinUrl = (value: any) => {
@@ -555,15 +628,38 @@ export default function DatabaseFinderPage() {
     try {
       const raw = localStorage.getItem(CHAT_STORAGE_KEY)
       const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : []
-      if (parsed.length > 0) {
-        const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        setChats(ordered)
-        setActiveChatId(ordered[0].id)
-        applySessionToView(ordered[0])
-      }
+        if (parsed.length > 0) {
+          const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          setChats(ordered)
+          setActiveChatId(ordered[0].id)
+          initialActiveChatId.current = ordered[0].id
+          applySessionToView(ordered[0])
+        }
     } catch (e) {
       console.warn("Failed to load NLP chats", e)
     }
+
+    const loadServerHistory = async () => {
+      try {
+        const userId = getPersistentUserId()
+        if (!userId) return
+        const response = await fetch(`${API_BASE_URL}/api/chat/history?user_id=${encodeURIComponent(userId)}`)
+        if (!response.ok) return
+        const payload = await response.json()
+        const sessions = Array.isArray(payload.sessions) ? payload.sessions.map(normalizeServerSession) : []
+        if (sessions.length === 0) return
+        setChats((prev) => mergeChatCollections(prev, sessions))
+        if (!initialActiveChatId.current && sessions[0]) {
+          initialActiveChatId.current = sessions[0].id
+          setActiveChatId(sessions[0].id)
+          applySessionToView(sessions[0])
+        }
+      } catch (error) {
+        console.warn("Failed to load server chat history", error)
+      }
+    }
+
+    loadServerHistory()
   }, [])
 
   useEffect(() => {
@@ -653,6 +749,7 @@ export default function DatabaseFinderPage() {
         : [nextSession, ...prev]
       return merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     })
+    void syncChatWithServer(nextSession)
   }
 
   const buildExamples = (query: string) => {
@@ -1084,65 +1181,44 @@ export default function DatabaseFinderPage() {
     setIsSearching(true)
     try {
       setClarification("Starting search with your confirmed filters...")
-      const currentIntent = detectIntent(trimmedQuery)
 
-      // Use shared extraction logic
       const extractedFilters = extractFiltersFromQuery(trimmedQuery)
       setLatestExtractedFilters(extractedFilters)
 
-      console.log('DEBUG: Final extractedFilters:', extractedFilters)
+      console.log("DEBUG: Final extractedFilters:", extractedFilters)
+      console.log("=== DEBUG: handleConfirmFilters ===")
+      console.log("latestExtractedFilters:", latestExtractedFilters)
+      console.log("Intent:", intent)
+      console.log("Query:", trimmedQuery)
 
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const endpoint = `${API}/api/explorium/search`
+      const payload = { query: trimmedQuery, filters: extractedFilters }
 
-      // Debug: Log current filters
-      console.log('=== DEBUG: handleConfirmFilters ===')
-      console.log('latestExtractedFilters:', latestExtractedFilters)
-      console.log('Intent:', intent)
-      console.log('Query:', trimmedQuery)
+      console.log("Calling endpoint:", endpoint)
+      console.log("Request body:", JSON.stringify(payload))
 
-      // Follow-up queries are now handled by handleNaturalSearch → handleAgentChat
-      // This function only runs for confirmed new searches
-
-      let response;
-
-      {
-        // Use different endpoints based on currentIntent
-        const endpoint = currentIntent === "prospect"
-          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/prospects/search`
-          : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/leads/search/companies`;
-
-        console.log('Calling endpoint:', endpoint);
-        console.log('Request body:', JSON.stringify(
-          currentIntent === "prospect"
-            ? { ...extractedFilters, limit: 3 }
-            : { filters: extractedFilters, options: { limit: 3, page: 1, enrich: true } }
-        ));
-
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            currentIntent === "prospect"
-              ? { ...extractedFilters, limit: 3 }
-              : { filters: extractedFilters, options: { limit: 3, page: 1, enrich: true } }
-          ),
-        });
-      }
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('API Error Response:', errorText);
-        throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+        const errorText = await response.text()
+        console.error("Search API Error Response:", errorText)
+        throw new Error(`Search failed: ${response.status} ${response.statusText}`)
       }
 
-      const data = await response.json();
-      console.log('Search API Response:', data);
-      console.log('API Response Keys:', Object.keys(data));
-      console.log('Intent from API:', data.nlp_analysis?.categorized_intent || data.intent);
+      const data = await response.json()
+      console.log("Search API Response:", data)
+      console.log("API Response Keys:", Object.keys(data))
+      console.log("Intent from API:", data.nlp_analysis?.categorized_intent || data.intent)
 
-      let mappedResults = [];
-      const searchIntent = currentIntent;
+      let mappedResults = []
+      const searchIntent = data.nlp_analysis?.categorized_intent === "prospect" ? "prospect" : "business"
       setIntent(searchIntent);
 
       // Handle different response formats from different endpoints

@@ -256,11 +256,21 @@ Rules for Filters:
   - "marketing leaders" -> ["VP of Marketing", "CMO", "Head of Marketing", "Marketing Director"]
   - "engineering leaders" -> ["VP of Engineering", "CTO", "Head of Engineering", "Engineering Director"]
   - Always expand vague role descriptions into specific job titles.
-- Map industry terms to LinkedIn industry categories.
+- Map industry terms to EXACT LinkedIn industry category names. Common mappings:
+  - "fintech" -> ["Financial Services"]
+  - "saas" / "software" -> ["Software Development"]
+  - "digital agencies" -> ["Advertising Services", "Marketing Services"]
+  - "healthcare" -> ["Hospitals and Health Care"]
+  - "e-commerce" -> ["Retail", "E-Learning Providers"]
+  - "ai" / "artificial intelligence" -> ["Technology, Information and Internet"]
+  - "consulting" -> ["Business Consulting and Services"]
+  - "manufacturing" -> ["Manufacturing"]
+  - "real estate" -> ["Real Estate"]
+  - NEVER use made-up industry names like "Financial Technology" or "Fintech" — always use the LinkedIn standard name.
 - Map location terms to country/state names.
 - For company_size: if "100 to 1000 employees" -> ["101-200", "201-500", "501-1000"]. Always use CrustData-compatible ranges.
 - Extract technology/tool names (like "Snowflake", "Salesforce", "HubSpot") into keywords.
-- Extract any qualifier like "verified emails" into keywords as well.
+- Do NOT put qualifiers like "verified emails", "contact information", "with emails" into keywords — these are not searchable terms.
 - Keep only the five allowed filter keys above.
 - If unknown, return empty arrays for that filter key.
 - IMPORTANT: Be very specific and restrictive to avoid broad results like Google, Amazon, etc."""

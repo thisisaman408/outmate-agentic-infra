@@ -18,6 +18,7 @@ from app.db.models.filter import AvailableFilter, ProviderFilterMapping
 from app.db.models.search_result import SearchResult
 from app.db.models.cache import CachedQuery
 from app.db.models.api_log import ApiUsageLog
+from app.db.models.chat_session import NLPChatSession
 
 __all__ = [
     "User",
@@ -32,4 +33,5 @@ __all__ = [
     "SearchResult",
     "CachedQuery",
     "ApiUsageLog",
+    "NLPChatSession",
 ]

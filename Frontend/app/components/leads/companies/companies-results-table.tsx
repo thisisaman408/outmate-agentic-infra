@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ExternalLink, Building2, Users, DollarSign, TrendingUp } from "lucide-react"
+import { ExternalLink, Building2, Users, DollarSign, TrendingUp, Zap, Loader2 } from "lucide-react"
 
 export interface CompanyData {
   id: string
@@ -43,14 +43,19 @@ interface Props {
   isLoading: boolean
   hasSearched: boolean
   viewProfileBasePath?: string
+  onEnrichReveal?: (companyId: string) => Promise<void>
+  enrichCache?: Record<string, any>
 }
 
 export function CompaniesResultsTable({ 
   companies, 
   isLoading, 
   hasSearched, 
-  viewProfileBasePath = "/company" 
+  viewProfileBasePath = "/leads/companies",
+  onEnrichReveal,
+  enrichCache = {}
 }: Props) {
+  console.log('CompaniesResultsTable component called with:', { companies: companies.length, isLoading, hasSearched, enrichCache })
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set())
 
   const handleSelectCompany = (companyId: string) => {
@@ -155,6 +160,8 @@ export function CompaniesResultsTable({
                 <TableHead>Revenue</TableHead>
                 <TableHead>Funding</TableHead>
                 <TableHead>Location</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Phone</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -240,6 +247,56 @@ export function CompaniesResultsTable({
                           {company.headquarters_state}
                         </div>
                       )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {company.email ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">
+                            {company.email}
+                          </span>
+                          <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                        </div>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                        onClick={() => {
+                          const companyId = company.domain || company.id
+                          console.log('TEST: Email Zap clicked for companyId:', companyId)
+                          onEnrichReveal?.(companyId)
+                        }}
+                        title="Enrich email with waterfall (BetterContact)"
+                      >
+                        <Zap className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {company.phone ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">
+                            {company.phone}
+                          </span>
+                          <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                        </div>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                        onClick={() => {
+                          const companyId = company.domain || company.id
+                          console.log('TEST: Phone Zap clicked for companyId:', companyId)
+                          onEnrichReveal?.(companyId)
+                        }}
+                        title="Enrich phone with waterfall (BetterContact)"
+                      >
+                        <Zap className="h-3 w-3" />
+                      </Button>
                     </div>
                   </TableCell>
                   <TableCell>

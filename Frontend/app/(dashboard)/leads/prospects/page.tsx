@@ -11,7 +11,8 @@ import { searchProspects, ProspectProfile, ProspectSearchFilters } from "@/lib/s
 import { useToast } from "@/hooks/use-toast"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
-import { enrichProspect } from "@/lib/services/betterContactService"   // <-- New import
+import { enrichProspect, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
+import { Zap } from "lucide-react"
 
 // IMPORTANT: Credit protection - limit results during testing
 const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
@@ -25,7 +26,6 @@ export default function ProspectsPage() {
     const [profiles, setProfiles] = useState<ProspectProfile[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
-    const [isEnriching, setIsEnriching] = useState(false)   // <-- New state
     const [hasSearched, setHasSearched] = useState(false)
     const [totalCount, setTotalCount] = useState(0)
     const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -34,6 +34,11 @@ export default function ProspectsPage() {
         seniority_level: 'in',  // Default to include
     })
     const [error, setError] = useState<string | null>(null)
+
+    // Enrichment state - field-specific like companies
+    const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
+    const [enrichedData, setEnrichedData] = useState<Record<string, { email?: ProspectEnrichmentResult, phone?: ProspectEnrichmentResult }>>({})
+    const [isBulkEnriching, setIsBulkEnriching] = useState(false)
 
     // Export functionality
     const handleExport = async () => {
@@ -179,37 +184,25 @@ export default function ProspectsPage() {
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
 
-            // ---- Waterfall Enrichment using BetterContact ----
-            setIsEnriching(true)
-            const enrichedProfiles = await Promise.all(
-                response.profiles.map(async (profile) => {
-                    const primaryEmail = profile.emails?.[0]
-                    if (!primaryEmail) return profile
-                    const enriched = await enrichProspect(primaryEmail)
-                    return enriched ? { ...profile, ...enriched } : profile
-                })
-            )
-            setIsEnriching(false)
-            // --------------------------------------------------
-
-            setProfiles(enrichedProfiles)
+            setProfiles(response.profiles)
             setTotalCount(response.total_count)
             setNextCursor(response.next_cursor || null)
+            setEnrichedData({}) // Reset enrichment on new search
 
             // Store in localStorage for profile detail page access
-            localStorage.setItem("prospect_search_results", JSON.stringify(enrichedProfiles))
+            localStorage.setItem("prospect_search_results", JSON.stringify(response.profiles))
 
             // Save to search history for easy restoration
             saveSearchToHistory(
                 searchFilters,
-                enrichedProfiles,
+                response.profiles,
                 response.total_count,
                 response.next_cursor || null
             )
 
             toast({
                 title: "Search Complete",
-                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${enrichedProfiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
+                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${response.profiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
             })
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
@@ -250,20 +243,7 @@ export default function ProspectsPage() {
                 limit: loadLimit,
             })
 
-            // ---- Enrichment for newly loaded profiles ----
-            setIsEnriching(true)
-            const enrichedNew = await Promise.all(
-                response.profiles.map(async (profile) => {
-                    const primaryEmail = profile.emails?.[0]
-                    if (!primaryEmail) return profile
-                    const enriched = await enrichProspect(primaryEmail)
-                    return enriched ? { ...profile, ...enriched } : profile
-                })
-            )
-            setIsEnriching(false)
-            // ----------------------------------------------
-
-            const newProfiles = [...profiles, ...enrichedNew]
+            const newProfiles = [...profiles, ...response.profiles]
             setProfiles(newProfiles)
 
             // Stop pagination if we've hit the limit
@@ -320,19 +300,8 @@ export default function ProspectsPage() {
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
 
-            // Enrich the limited results
-            setIsEnriching(true)
-            const enrichedProfiles = await Promise.all(
-                response.profiles.map(async (profile) => {
-                    const primaryEmail = profile.emails?.[0]
-                    if (!primaryEmail) return profile
-                    const enriched = await enrichProspect(primaryEmail)
-                    return enriched ? { ...profile, ...enriched } : profile
-                })
-            )
-            setIsEnriching(false)
-
-            const limitedProfiles = enrichedProfiles.slice(0, 3)
+            const limitedProfiles = response.profiles.slice(0, 3)
+            setEnrichedData({}) // Reset enrichment on new search
             setProfiles(limitedProfiles)
             setTotalCount(response.total_count)
             setNextCursor(response.next_cursor || null)
@@ -361,6 +330,43 @@ export default function ProspectsPage() {
         } finally {
             setIsSearching(false)
         }
+    }
+
+
+    const enrichedCount = Object.values(enrichedData).filter(r => (r.email?.success && !r.email?.not_found) || (r.phone?.success && !r.phone?.not_found)).length
+
+    // Field-specific enrichment handler
+    const onEnrichReveal = async (prospectId: string, field: 'email' | 'phone') => {
+        console.log('onEnrichReveal called with', prospectId, field)
+        const profile = profiles.find(p => p.linkedin_profile_url === prospectId || p.flagship_profile_url === prospectId)
+        if (!profile) {
+            console.log('No profile found for prospectId (linkedin url)', prospectId)
+            return
+        }
+
+        const key = prospectId
+        const enrichmentKey = `${key}-${field}`
+
+        if (enrichingRows[enrichmentKey]) return
+
+        const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
+        const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
+        const employer = profile.current_employers?.[0]
+        const companyName = employer?.name || ""
+        const companyDomain = employer?.company_website_domain || ""
+        const linkedinUrl = profile.linkedin_profile_url || profile.flagship_profile_url || ""
+
+        setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
+        const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinUrl, field)
+        console.log('enrichProspect result:', result)
+        setEnrichedData(prev => ({
+            ...prev,
+            [key]: {
+                email: field === 'email' ? result : prev[key]?.email,
+                phone: field === 'phone' ? result : prev[key]?.phone
+            }
+        }))
+        setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: false }))
     }
 
     return (
@@ -440,10 +446,10 @@ export default function ProspectsPage() {
                         </Card>
                     )}
 
-                    {isSearching || isEnriching ? (
+                    {isSearching ? (
                         <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
                             <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-                            <h3 className="text-lg font-semibold">{isSearching ? "Searching for prospects..." : "Enriching prospect data..."}</h3>
+                            <h3 className="text-lg font-semibold">Searching for prospects...</h3>
                             <p className="text-sm text-muted-foreground mt-2">
                                 This may take a few seconds
                             </p>
@@ -456,6 +462,8 @@ export default function ProspectsPage() {
                             onLoadMore={handleLoadMore}
                             isLoadingMore={isLoadingMore}
                             enableContactReveal={true}
+                            onEnrichReveal={onEnrichReveal}
+                            enrichCache={enrichedData}
                         />
                     ) : hasSearched ? (
                         <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
