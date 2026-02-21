@@ -28,6 +28,7 @@ from app.api.routes import explorium_routes
 from app.api.routes import signals
 from app.api.routes import campaigns
 from app.api.routes import chat
+from app.api.routes import ai_agents
 
 # Register routers
 
@@ -127,6 +128,9 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"]
 logger.info("Campaigns router registered")
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 logger.info("Chat router registered")
+
+app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
+logger.info("AI Agents router registered")
 
 @app.on_event("startup")
 async def startup_event():

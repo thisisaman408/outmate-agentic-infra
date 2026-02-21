@@ -159,22 +159,35 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/30;
   }
+
+  @keyframes pulse-subtle {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.05); }
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 3s ease-in-out infinite;
+  }
 }
 
 @layer utilities {
   .glass-effect {
-    @apply bg-card/80 backdrop-blur-xl border-border/50;
+    @apply bg-card/40 backdrop-blur-md border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.3)];
   }
 
   .text-gradient {
-    @apply bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary via-primary/80 to-primary/50 bg-clip-text text-transparent;
   }
 
   .hover-lift {
-    @apply transition-transform duration-200 hover:-translate-y-0.5;
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-primary/10;
   }
 
   .card-elevated {
-    @apply shadow-lg shadow-black/5 dark:shadow-black/20;
+    @apply shadow-2xl shadow-black/40 border border-white/5;
+  }
+
+  .ai-gradient-bg {
+    @apply bg-[radial-gradient(circle_at_50%_50%,rgba(var(--primary-rgb),0.1)_0%,transparent_50%)];
   }
 }

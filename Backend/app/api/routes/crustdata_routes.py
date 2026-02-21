@@ -206,7 +206,7 @@ async def search_company_realtime(payload: Dict[str, Any]):
 @router.post("/screener/linkedin_posts/keyword_search/")
 @router.get("/screener/linkedin_posts/keyword_search/")
 async def realtime_linkedin_posts_keyword_search(
-    company_domain: str = Path(..., regex=r"[^/]+"),
+    company_domain: str = Path(..., pattern=r"[^/]+"),
     page: int = Query(default=1),
     limit: int = Query(default=5, ge=1, le=25),
     post_types: str = Query(default="repost, original"),
@@ -321,7 +321,7 @@ async def linkedin_posts_by_company_query(
 
 @router.get("/linkedin_posts/{company_domain}")
 async def linkedin_posts_by_company(
-    company_domain: str = Path(..., regex=r"[^/]+"),
+    company_domain: str = Path(..., pattern=r"[^/]+"),
     page: int = Query(default=1),
     limit: int = Query(default=5, ge=1, le=25),
     post_types: str = Query(default="repost, original"),

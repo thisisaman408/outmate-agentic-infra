@@ -1,14 +1,68 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Sparkles, Loader2, Mail } from "lucide-react"
+import { Sparkles, Loader2, Mail, Users, MapPin, Briefcase, ChevronRight, Zap } from "lucide-react"
 import { aiAgentsApi, type AgenticSearchResult } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
+
+function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
+  const [messages, setMessages] = useState<string[]>([])
+  const allMessages = [
+    "Mapping persona parameters...",
+    "Scanning unified B2B database...",
+    "Filtering by recent funding rounds...",
+    "Verifying tech stack compatibility...",
+    "Calculating ICP match scores...",
+    "Predicting stakeholder accessibility...",
+    "Validating contact deliverability...",
+    "Ranking results by relevance..."
+  ]
+
+  useEffect(() => {
+    if (!isActive) {
+      setMessages([])
+      return
+    }
+
+    let i = 0
+    const interval = setInterval(() => {
+      if (i < allMessages.length) {
+        setMessages(prev => [...prev.slice(-3), allMessages[i]])
+        i++
+      } else {
+        clearInterval(interval)
+      }
+    }, 1200)
+
+    return () => clearInterval(interval)
+  }, [isActive])
+
+  return (
+    <div className="font-mono text-[9px] uppercase tracking-tighter text-blue-400/60 h-12 flex flex-col justify-end">
+      <AnimatePresence mode="popLayout">
+        {messages.map((msg) => (
+          <motion.div
+            key={msg}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="flex items-center gap-1"
+          >
+            <span className="h-1 w-1 rounded-full bg-blue-500 animate-pulse" />
+            {msg}
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 export function AgenticSearchPanel() {
   const { toast } = useToast()
@@ -19,25 +73,26 @@ export function AgenticSearchPanel() {
   const handleSearch = async () => {
     if (!query.trim()) {
       toast({
-        title: "Error",
-        description: "Please enter a search query",
+        title: "Query Required",
+        description: "Please specify your target prospect persona.",
         variant: "destructive",
       })
       return
     }
 
     setIsSearching(true)
+    setResults([])
     try {
       const searchResults = await aiAgentsApi.searchProspects(query)
       setResults(searchResults)
       toast({
-        title: "Success",
-        description: `Found ${searchResults.length} matching prospects`,
+        title: "Search Complete",
+        description: `Agent identified ${searchResults.length} high-confidence prospects.`,
       })
-    } catch (error) {
+    } catch (error: any) {
       toast({
-        title: "Error",
-        description: "Failed to search prospects",
+        title: "Search Interrupt",
+        description: error.message === 'Failed to search prospects' ? "Insufficient credits or database issue." : error.message,
         variant: "destructive",
       })
     } finally {
@@ -46,79 +101,205 @@ export function AgenticSearchPanel() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            Agentic Search
-          </CardTitle>
-          <CardDescription>Describe your ideal prospect and let AI find the best matches</CardDescription>
+    <div className="space-y-10 max-w-6xl mx-auto">
+      <Card className="glass-effect border-white/5 relative overflow-hidden bg-transparent">
+        <div className="absolute top-0 right-0 p-12 opacity-[0.03] pointer-events-none">
+          <Sparkles className="h-48 w-48 text-blue-400" />
+        </div>
+
+        <CardHeader className="pb-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <CardTitle className="text-3xl font-black flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                Agentic Search
+              </CardTitle>
+              <CardDescription className="text-lg font-medium text-muted-foreground/80">
+                Natural-language discovery for hyper-targeted lead generation.
+              </CardDescription>
+            </div>
+            <SimulatedActivityFeed isActive={isSearching} />
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Find B2B SaaS companies with 100-500 employees that recently raised Series B..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              disabled={isSearching}
-            />
-            <Button onClick={handleSearch} disabled={isSearching}>
-              {isSearching ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Searching...
-                </>
-              ) : (
-                "Search"
-              )}
-            </Button>
+
+        <CardContent className="pb-8">
+          <div className="relative group p-1 rounded-3xl bg-gradient-to-br from-white/10 via-transparent to-white/5 border border-white/10 transition-all focus-within:border-blue-500/50 focus-within:shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+            <div className="flex flex-col md:flex-row gap-3">
+              <div className="relative flex-1">
+                <Input
+                  placeholder="Find sales leaders at Series B startups in SF with >20% headcount growth..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  disabled={isSearching}
+                  className="h-16 text-lg border-0 bg-transparent focus-visible:ring-0 placeholder:text-muted-foreground/40 pl-6 rounded-2xl"
+                />
+                <div className="absolute right-4 top-5 flex items-center gap-2 px-2 py-1 rounded-lg bg-white/5 text-[10px] font-bold text-muted-foreground/50 border border-white/5">
+                  <Zap className="h-3 w-3" />
+                  POWERED BY GPT-4O
+                </div>
+              </div>
+              <Button
+                onClick={handleSearch}
+                disabled={isSearching}
+                className={cn(
+                  "h-16 px-10 text-lg font-bold rounded-2xl transition-all duration-300",
+                  isSearching
+                    ? "bg-muted"
+                    : "bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-500/20"
+                )}
+              >
+                {isSearching ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Executing...
+                  </>
+                ) : (
+                  <>
+                    Deploy Agent
+                    <ChevronRight className="ml-2 h-5 w-5" />
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2 px-2">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mr-2 my-auto">Suggestions:</span>
+            {["Series B SaaS", "Remote Sales VPs", "Recent Funding", "Hiring Product Mgrs"].map(tag => (
+              <button
+                key={tag}
+                onClick={() => setQuery(`Find companies that match: ${tag}`)}
+                className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-white/5 border border-white/5 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all transition-colors text-muted-foreground hover:text-blue-400"
+              >
+                {tag}
+              </button>
+            ))}
           </div>
         </CardContent>
       </Card>
 
-      {isSearching && (
-        <div className="space-y-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-32 w-full" />
-          ))}
-        </div>
-      )}
-
-      {!isSearching && results.length > 0 && (
-        <div className="space-y-4">
-          {results.map((result) => (
-            <Card key={result.id}>
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-3 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold">{result.companyName}</h3>
-                      <Badge variant="default">Score: {result.score}</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{result.reason}</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">{result.industry}</Badge>
-                      <Badge variant="outline">{result.employees} employees</Badge>
-                      <Badge variant="outline">{result.location}</Badge>
-                    </div>
-                    <div className="text-sm">
-                      <p className="font-medium">{result.contactName}</p>
-                      <p className="text-muted-foreground">{result.title}</p>
-                      <p className="text-muted-foreground">{result.email}</p>
+      <div className="space-y-6">
+        <AnimatePresence mode="popLayout">
+          {isSearching && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="grid gap-4"
+            >
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="glass-effect border-white/5 bg-transparent p-8">
+                  <div className="flex items-center gap-6">
+                    <Skeleton className="h-20 w-20 rounded-2xl" />
+                    <div className="space-y-4 flex-1">
+                      <Skeleton className="h-6 w-1/3" />
+                      <Skeleton className="h-4 w-2/3" />
+                      <div className="flex gap-2">
+                        <Skeleton className="h-6 w-20 rounded-full" />
+                        <Skeleton className="h-6 w-20 rounded-full" />
+                      </div>
                     </div>
                   </div>
-                  <Button>
-                    <Mail className="mr-2 h-4 w-4" />
-                    Add to Campaign
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+                </Card>
+              ))}
+            </motion.div>
+          )}
+
+          {!isSearching && results.length > 0 && (
+            <motion.div
+              className="grid gap-6"
+              variants={{
+                show: { transition: { staggerChildren: 0.1 } }
+              }}
+              initial="hidden"
+              animate="show"
+            >
+              {results.map((result, idx) => (
+                <motion.div
+                  key={result.id}
+                  variants={{
+                    hidden: { opacity: 0, y: 20 },
+                    show: { opacity: 1, y: 0 }
+                  }}
+                >
+                  <Card className="glass-effect border-white/5 overflow-hidden active:scale-[0.99] transition-transform hover:shadow-2xl hover:shadow-blue-500/5 hover:border-white/10 cursor-default group">
+                    <CardContent className="p-0">
+                      <div className="flex flex-col lg:flex-row">
+                        <div className="p-8 flex-1 space-y-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                              <div className="h-16 w-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-2xl group-hover:scale-110 transition-transform">
+                                {result.companyName[0]}
+                              </div>
+                              <div>
+                                <h3 className="text-2xl font-black tracking-tight">{result.companyName}</h3>
+                                <div className="flex items-center gap-3 mt-1 sm:mt-0">
+                                  <Badge className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border-0 font-bold px-3">
+                                    Match Score: {result.score}%
+                                  </Badge>
+                                  <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                    <MapPin className="h-3 w-3" />
+                                    {result.location}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <Button className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all">
+                              <Mail className="mr-2 h-4 w-4" />
+                              Engage Now
+                            </Button>
+                          </div>
+
+                          <div className="p-5 rounded-2xl bg-blue-500/5 border border-blue-500/10 relative">
+                            <div className="absolute top-3 right-4">
+                              <Sparkles className="h-4 w-4 text-blue-400/30" />
+                            </div>
+                            <p className="text-sm text-blue-300 leading-relaxed pr-8">
+                              <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
+                              {result.reason}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
+                            <div className="flex items-center gap-2">
+                              <Briefcase className="h-4 w-4 text-muted-foreground/60" />
+                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{result.industry}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users className="h-4 w-4 text-muted-foreground/60" />
+                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{result.employees} Employees</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="lg:w-80 bg-white/5 p-8 border-l border-white/5 flex flex-col justify-center gap-4">
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Target Stakeholder</p>
+                            <h4 className="text-lg font-bold leading-tight">{result.contactName}</h4>
+                            <p className="text-sm font-medium text-blue-400/80">{result.title}</p>
+                          </div>
+                          <div className="space-y-3 pt-2">
+                            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
+                              <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
+                              <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">{result.email}</span>
+                            </div>
+                            <button className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2">
+                              View Intelligence Record
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
