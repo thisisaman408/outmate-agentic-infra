@@ -570,23 +570,23 @@ async def reveal_contact_info(request: ContactRevealRequest):
             include_phone=True
         )
 
-        profile = result.get("profile") or {}
-        emails = profile.get("email") or profile.get("emails") or []
-        phones = profile.get("phone") or profile.get("phones") or []
+        sanitized_emails = result.get("sanitized_emails") or []
+        sanitized_phones = result.get("sanitized_phones") or []
 
-        if isinstance(emails, str):
-            emails = [emails]
-        if isinstance(phones, str):
-            phones = [phones]
-
-        emails = [e for e in emails if isinstance(e, str) and e.strip()]
-        phones = [p for p in phones if isinstance(p, str) and p.strip()]
+        reveal_success = bool(sanitized_emails or sanitized_phones)
+        if reveal_success:
+            logger.info(
+                f"ContactOut reveal succeeded for {linkedin_url}",
+                extra={"emails_returned": len(sanitized_emails), "phones_returned": len(sanitized_phones)}
+            )
+        else:
+            logger.info(f"ContactOut reveal returned only placeholders for {linkedin_url}")
 
         return {
-            "success": True,
+            "success": reveal_success,
             "linkedin_url": linkedin_url,
-            "emails": emails,
-            "phones": phones,
+            "emails": sanitized_emails,
+            "phones": sanitized_phones,
         }
     except HTTPException:
         raise

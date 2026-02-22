@@ -103,23 +103,51 @@ export function ProspectsResultsTable({
             `${asText(profile.name) || "Unknown"}-${idx}`
         )
     }
-    const getExistingEmails = (profile: any): string[] => {
-        const sanitizeEmails = (values: any[]): string[] =>
-            values
-                .filter((v) => typeof v === "string" && v.includes("@"))
-                .map((v) => (v as string).trim())
-                .filter((v) => {
-                    const low = v.toLowerCase()
-                    if (!v) return false
-                    // Hide obvious demo/sample placeholders.
-                    const [localPart = "", domainPart = ""] = low.split("@")
-                    if (low.endsWith("@example.com") || low.includes("test@")) return false
-                    if (/^email\d+$/.test(localPart)) return false
-                    if (/^(test|demo|sample)\d*$/.test(localPart)) return false
-                    if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
-                    return true
-                })
 
+    const normalizeStringValue = (value: any): string => {
+        if (!value && value !== 0) return ""
+        if (typeof value === "string") return value
+        if (typeof value === "number") return String(value)
+        if (typeof value === "object") {
+            return String(
+                value.email ||
+                value.value ||
+                value.address ||
+                value.work_email ||
+                value.personal_email ||
+                ""
+            )
+        }
+        return ""
+    }
+
+    const sanitizeEmails = (values: any[]): string[] =>
+        values
+            .map((v) => normalizeStringValue(v))
+            .filter((v) => v.includes("@"))
+            .filter((v) => {
+                const low = v.toLowerCase()
+                if (!v) return false
+                const [localPart = "", domainPart = ""] = low.split("@")
+                if (low.endsWith("@example.com") || low.includes("test@")) return false
+                if (/^email\d+$/.test(localPart)) return false
+                if (/^(test|demo|sample)\d*$/.test(localPart)) return false
+                if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
+                return true
+            })
+
+    const sanitizePhones = (values: any[]): string[] =>
+        values
+            .map((v) => normalizeStringValue(v))
+            .filter((v) => v.trim().length > 0)
+            .filter((v) => {
+                const low = v.toLowerCase()
+                if (low.includes("phone number")) return false
+                const digits = v.replace(/\D/g, "")
+                return digits.length >= 6
+            })
+
+    const getExistingEmails = (profile: any): string[] => {
         const raw = (profile?.raw_data && typeof profile.raw_data === "object")
             ? profile.raw_data
             : ((profile?.rawData && typeof profile.rawData === "object") ? profile.rawData : {})
@@ -139,20 +167,6 @@ export function ProspectsResultsTable({
         return sanitizeEmails(candidates)
     }
     const getExistingPhones = (profile: any): string[] => {
-        const sanitizePhones = (values: any[]): string[] =>
-            values
-                .filter((v) => typeof v === "string" && v.trim().length > 0)
-                .map((v) => (v as string).trim())
-                .filter((v) => {
-                    const low = v.toLowerCase()
-                    if (!v) return false
-                    // Hide obvious demo/sample placeholders.
-                    if (low.includes("phone number")) return false
-                    // Must contain at least 6 digits to be considered real.
-                    const digits = v.replace(/\D/g, "")
-                    return digits.length >= 6
-                })
-
         const raw = (profile?.raw_data && typeof profile.raw_data === "object")
             ? profile.raw_data
             : ((profile?.rawData && typeof profile.rawData === "object") ? profile.rawData : {})
@@ -166,30 +180,6 @@ export function ProspectsResultsTable({
         return sanitizePhones(candidates)
     }
     const revealContact = async (rowId: string, profile: ProspectProfile) => {
-        const sanitizeEmails = (values: any[]): string[] =>
-            values
-                .filter((v) => typeof v === "string" && v.includes("@"))
-                .map((v) => (v as string).trim())
-                .filter((v) => {
-                    const low = v.toLowerCase()
-                    if (!v) return false
-                    const [localPart = "", domainPart = ""] = low.split("@")
-                    if (low.endsWith("@example.com") || low.includes("test@")) return false
-                    if (/^email\d+$/.test(localPart)) return false
-                    if (/^(test|demo|sample)\d*$/.test(localPart)) return false
-                    if (domainPart === "gmail.com" && (/^email\d+$/.test(localPart) || /^test\d*$/.test(localPart))) return false
-                    return true
-                })
-        const sanitizePhones = (values: any[]): string[] =>
-            values
-                .filter((v) => typeof v === "string" && v.trim().length > 0)
-                .map((v) => (v as string).trim())
-                .filter((v) => {
-                    const low = v.toLowerCase()
-                    if (low.includes("phone number")) return false
-                    const digits = v.replace(/\D/g, "")
-                    return digits.length >= 6
-                })
 
         const existingEmails = getExistingEmails(profile as any)
         const existingPhones = getExistingPhones(profile as any)

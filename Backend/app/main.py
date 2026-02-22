@@ -17,6 +17,8 @@ import logging
 load_dotenv()
 
 from app.db.vector_setup import setup_vector_database
+from app.db.base import Base
+from app.db.session import engine
 
 from app.db.deps import get_db
 from app.db.models.user import User
@@ -54,14 +56,11 @@ app = FastAPI(
 )
 
 # CORS Configuration
-# Allow frontend to make requests from localhost:3000
+# Allow frontends configured via settings to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Frontend development server
-        "http://127.0.0.1:3000",  # Alternative localhost
-        # Add production URLs when deploying
-    ],
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
@@ -144,6 +143,10 @@ async def startup_event():
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
+    # Ensure all ORM tables exist
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables ensured")
+
     # Initialize Redis connection
     RedisManager.connect()
     logger.info("Redis connection established")

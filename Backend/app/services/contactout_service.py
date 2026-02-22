@@ -7,7 +7,9 @@ import os
 import logging
 from typing import Dict, List, Optional, Any
 import json
+from typing import Iterable, List
 from app.core.config import settings
+from app.utils.contact_sanitization import sanitize_email_values, sanitize_phone_values
 
 logger = logging.getLogger(__name__)
 
@@ -270,8 +272,25 @@ class ContactOutService:
                         raise
 
                 profile = data.get("profile", {})
-                print(f">>> ContactOut: revealed {len(profile.get('email', []))} emails, {len(profile.get('phone', []))} phones", flush=True)
-                return data
+                raw_emails = profile.get("email") or profile.get("emails") or []
+                raw_phones = profile.get("phone") or profile.get("phones") or []
+                if isinstance(raw_emails, str):
+                    raw_emails = [raw_emails]
+                if isinstance(raw_phones, str):
+                    raw_phones = [raw_phones]
+
+                sanitized_emails = sanitize_email_values(raw_emails)
+                sanitized_phones = sanitize_phone_values(raw_phones)
+                if sanitized_emails or sanitized_phones:
+                    print(f">>> ContactOut: sanitized reveal {len(sanitized_emails)} emails, {len(sanitized_phones)} phones", flush=True)
+                else:
+                    print(f">>> ContactOut: reveal returned only placeholders", flush=True)
+
+                return {
+                    "profile": profile,
+                    "sanitized_emails": sanitized_emails,
+                    "sanitized_phones": sanitized_phones,
+                }
 
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text if e.response else str(e)

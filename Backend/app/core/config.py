@@ -11,7 +11,7 @@ This module centralizes all configuration in one place with:
 import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, Field, ValidationInfo
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(
         "development",
         description="Environment name (development, staging, production)"
+    )
+    CORS_ALLOWED_ORIGINS: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+        ],
+        description="Front-end origins allowed to make cross-origin requests"
     )
     
     @field_validator('CRUSTDATA_API_KEY', 'EXPLORIUM_API_KEY', 'CONTACTOUT_API_KEY')

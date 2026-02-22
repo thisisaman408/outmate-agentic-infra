@@ -289,7 +289,38 @@ Return ONLY the JSON object, no other text."""
         raise ValueError(f"Campaign draft generation failed after 3 attempts: {last_error}")
 
     @staticmethod
-    def _parse_json(content: str) -> Optional[Dict[str, Any]]:
+    def _extract_json_block(content: str) -> Optional[str]:
+        if not content:
+            return None
+        start = None
+        stack = 0
+        in_string = False
+        escape = False
+        for idx, ch in enumerate(content):
+            if escape:
+                escape = False
+                continue
+            if start is None:
+                if ch == "{":
+                    start = idx
+                    stack = 1
+                    continue
+            else:
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                elif not in_string:
+                    if ch == "{":
+                        stack += 1
+                    elif ch == "}":
+                        stack -= 1
+                        if stack == 0:
+                            return content[start : idx + 1]
+        return None
+
+    def _parse_json(self, content: str) -> Optional[Dict[str, Any]]:
         """Parse JSON from LLM response, handling markdown fences."""
         if not content or not content.strip():
             return None
@@ -303,11 +334,10 @@ Return ONLY the JSON object, no other text."""
             pass
 
         # Try extracting from markdown code fence
-        import re
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", content, re.DOTALL)
-        if match:
+        block = CampaignService._extract_json_block(content)
+        if block:
             try:
-                parsed = json.loads(match.group(1))
+                parsed = json.loads(block)
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
