@@ -47,9 +47,9 @@ function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   return (
     <div className="font-mono text-[9px] uppercase tracking-tighter text-blue-400/60 h-12 flex flex-col justify-end">
       <AnimatePresence mode="popLayout">
-        {messages.map((msg) => (
+        {messages.map((msg, index) => (
           <motion.div
-            key={msg}
+            key={`${msg}-${index}`}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}

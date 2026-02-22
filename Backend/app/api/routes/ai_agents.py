@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from app.services.ai_agents_service import AiAgentsService
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 ai_service = AiAgentsService()
 
 class SearchRequest(BaseModel):

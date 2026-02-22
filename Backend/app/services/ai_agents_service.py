@@ -3,7 +3,9 @@ import json
 import logging
 import httpx
 from typing import List, Dict, Any, Optional
+from fastapi import HTTPException
 from app.core.config import settings
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +14,7 @@ class AiAgentsService:
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         self.tavily_api_key = os.getenv("TAVILY_API_KEY")
         self.serper_api_key = os.getenv("SERPER_API_KEY")
-        self.openrouter_base_url = "https://openrouter.ai/api/v1"
+        self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
         self.tavily_base_url = "https://api.tavily.com"
         
         if not self.openrouter_api_key:
@@ -77,7 +79,6 @@ class AiAgentsService:
                 )
                 if response.status_code == 402:
                     logger.error("OpenRouter Error: Insufficient credits (402 Payment Required)")
-                    from fastapi import HTTPException
                     raise HTTPException(status_code=402, detail="OpenRouter insufficient credits. Please top up your account.")
                 
                 response.raise_for_status()
