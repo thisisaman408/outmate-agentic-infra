@@ -24,7 +24,6 @@ from app.db.deps import get_db
 from app.db.models.user import User
 from app.core.redis import RedisManager
 
-from app.api.routes import leads
 from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
 from app.api.routes import signals
@@ -33,6 +32,7 @@ from app.api.routes import chat
 from app.api.routes import chat_history
 from app.api.routes import bettercontact_routes
 from app.api.routes import enrichment_routes
+from app.api.routes import ai_agents
 
 # Register routers
 
@@ -56,7 +56,6 @@ app = FastAPI(
 )
 
 # CORS Configuration
-# Allow frontends configured via settings to talk to this backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ALLOWED_ORIGINS,
@@ -71,15 +70,12 @@ app.add_middleware(
 async def validation_exception_handler(request, exc: RequestValidationError):
     """
     Custom handler for Pydantic validation errors
-    Logs detailed error information for debugging
     """
-    # Get request body for debugging
     try:
         body = await request.json()
     except:
         body = "Could not parse body"
     
-    # Log detailed validation error
     logger.error(
         "VALIDATION ERROR DETAILS",
         extra={
@@ -91,19 +87,17 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         }
     )
     
-    # Log each error individually for clarity
     for i, error in enumerate(exc.errors(), 1):
         logger.error(
             f"Validation Error #{i}",
             extra={
                 "field": error.get('loc'),
                 "error_type": error.get('type'),
-                "error_message": error.get('msg'),  # Changed from 'message' to avoid conflict
+                "error_message": error.get('msg'),
                 "input": error.get('input')
             }
         )
     
-    # Return detailed error to client
     return JSONResponse(
         status_code=422,
         content={
@@ -130,12 +124,15 @@ logger.info("Campaigns router registered")
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 logger.info("Chat router registered")
 
+# Integrated routes from both branches
 app.include_router(chat_history.router)
 logger.info("Chat history router registered")
 app.include_router(bettercontact_routes.router, prefix="/api/bettercontact", tags=["bettercontact"])
 logger.info("BetterContact router registered")
 app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrichment"])
 logger.info("Enrichment router registered")
+app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
+logger.info("AI Agents router registered")
 
 @app.on_event("startup")
 async def startup_event():
@@ -143,15 +140,12 @@ async def startup_event():
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
-    # Ensure all ORM tables exist
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ensured")
 
-    # Initialize Redis connection
     RedisManager.connect()
     logger.info("Redis connection established")
     
-    # Initialize Vector Database
     try:
         await setup_vector_database()
         logger.info("Vector database initialized")
@@ -165,24 +159,16 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event handler"""
     logger.info("Shutting down application")
-    
     try:
-        # Close Redis connection
         await RedisManager.close()
         logger.info("Redis connection closed")
     except Exception as e:
         logger.error(f"Error closing Redis connection: {e}")
-    
     logger.info("Application shutdown complete")
 
 
 @app.get("/")
 async def root():
-    """
-    Root endpoint - API information
-    
-    Provides basic info about the API and links to documentation.
-    """
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
@@ -190,22 +176,12 @@ async def root():
         "documentation": {
             "swagger": "/docs",
             "redoc": "/redoc"
-        },
-        "endpoints": {
-            "health": "/health",
-            "prospects": "/api/prospects"
         }
     }
 
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
-    """
-    Global health check endpoint
-    
-    Checks database connectivity and returns basic system status.
-    Used by load balancers and monitoring systems.
-    """
     try:
         user_count = db.query(User).count()
         db_status = "connected"
@@ -226,10 +202,6 @@ def health(db: Session = Depends(get_db)):
 
 @app.get("/v1/models")
 def openai_models():
-    """
-    OpenAI-compatible models endpoint for compatibility with tools expecting OpenAI API.
-    Returns a mock response to prevent 404 errors from monitoring services.
-    """
     return {
         "data": [
             {

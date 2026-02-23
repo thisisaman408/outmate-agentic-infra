@@ -17,13 +17,18 @@ import { useRouter } from "next/navigation"
 import { authService } from "@/lib/auth"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { AuthModal } from "@/components/auth/auth-modal"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 export function Header() {
   const { user, logout } = useStore()
   const router = useRouter()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authTab, setAuthTab] = useState<"login" | "signup">("login")
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
 
   const handleLogout = async () => {
     await authService.logout()
@@ -65,7 +70,7 @@ export function Header() {
             <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
           </Button>
 
-          {user ? (
+          {hydrated && user ? (
             // User Menu for authenticated users
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

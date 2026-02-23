@@ -1,0 +1,162 @@
+
+# 2026-02-21 00:33:48.214160
++No
+
+# 2026-02-21 00:34:30.434973
++analyze this project
+
+# 2026-02-21 00:37:15.208473
++$env:GEMINI_API_KEY="AIzaSyBX9S7DC9P_UggLPlZE0GCkho2J8Jb_J8A"
+
+# 2026-02-21 00:37:53.614839
++aider --model gemini/gemini-1.5-flash
+
+# 2026-02-21 00:38:24.354084
++aider --model gemini/gemini-1.5-flash --list-models gemini/
+
+# 2026-02-21 00:38:37.662797
++$env:DEEPSEEK_API_KEY=""
+
+# 2026-02-21 00:38:50.782932
++Remove-Item -Recurse -Force .aider
+
+# 2026-02-21 00:39:01.095884
++aider --model gemini/gemini-1.5-pro
+
+# 2026-02-21 00:39:36.522177
++aider --model gemini/gemini-1.5-pro --architect --map-tokens 1024 --no-auto-commits
+
+# 2026-02-21 00:40:48.191534
++$env:DEEPSEEK_API_KEY="null"
+
+# 2026-02-21 00:41:00.094044
++uvx aider-chat --model gemini/gemini-1.5-pro
+
+# 2026-02-21 00:41:42.098906
++/exit
+
+# 2026-02-21 00:44:33.057216
++No
+
+# 2026-02-21 00:44:50.228220
++Analyze this project
+
+# 2026-02-21 00:45:49.778170
++aider --model gemini/gemini-pro --weak-model gemini/gemini-flash --no-auto-commits
+
+# 2026-02-21 00:46:03.782303
++aider --model gemini/gemini-1.5-pro-latest --weak-model gemini/gemini-1.5-flash-latest --no-auto-commits
+
+# 2026-02-21 00:46:31.657597
++$env:AIDER_MODEL="gemini/gemini-1.5-pro"
+
+# 2026-02-21 00:46:39.933684
++/exit
+
+# 2026-02-21 00:46:59.605059
++No
+
+# 2026-02-21 00:48:06.944971
++Analyze the project
+
+# 2026-02-21 00:49:27.242412
++/exit
+
+# 2026-02-21 00:49:37.048393
++No
+
+# 2026-02-21 00:49:43.983273
++Analyze this project
+
+# 2026-02-21 00:51:08.684098
++Yes
+
+# 2026-02-21 00:51:29.459010
++/exit
+
+# 2026-02-21 00:52:25.314065
++No
+
+# 2026-02-21 00:52:33.189815
++Analyze this project
+
+# 2026-02-21 00:53:23.534090
++/exit
+
+# 2026-02-21 00:53:30.862071
++No
+
+# 2026-02-21 00:53:54.646093
++Analyze this project
+
+# 2026-02-21 00:54:12.720747
++/exit
+
+# 2026-02-21 00:54:19.337258
++No
+
+# 2026-02-21 00:54:25.942475
++Analyze this project
+
+# 2026-02-21 00:55:09.693159
++/exit
+
+# 2026-02-21 00:55:15.700893
++No
+
+# 2026-02-21 00:55:22.282163
++Analyze this project
+
+# 2026-02-21 00:55:40.776580
++/exit
+
+# 2026-02-21 00:55:48.059716
++No
+
+# 2026-02-21 00:56:19.433895
++Analyze the project
+
+# 2026-02-21 01:07:05.288128
++No
+
+# 2026-02-21 01:07:27.016798
++Mo
+
+# 2026-02-21 01:07:34.436175
++No
+
+# 2026-02-21 01:14:56.415267
++I have store the bettercontactapi key in .env file. I want you to implemnt waterfall enrichment using bettercontact in company page: C:\Outmate\Product-4\Frontend\app\(dashboard)\leads\companies\search\page.tsx and prospect page: C:\Outmate\Product-4\Frontend\app\(dashboard)\leads\prospects\page.tsxRefer this: C:\Outmate\Product-4\Backend\Bettercontact.docs
+
+# 2026-02-21 01:17:39.627591
++Yes
+
+# 2026-02-21 01:25:05.150973
++don't commit, the one that you have uncommit it, I will commit them myself later
+
+# 2026-02-21 12:55:30.292207
++Analyze the project
+
+# 2026-02-21 13:03:28.565041
++/exit
+
+# 2026-02-21 13:04:23.120333
++No
+
+# 2026-02-21 13:05:18.836026
++Analyze the project
+
+# 2026-02-21 13:07:12.078386
++/exit
+
+# 2026-02-21 13:07:43.564934
++No
+
+# 2026-02-21 13:08:18.749810
++Analyze the project
+
+# 2026-02-21 13:09:02.901591
++See what changes I have done and analyze it
+
+# 2026-02-21 13:09:35.911583
++See and analyze this project: C:\Outmate\Product-4

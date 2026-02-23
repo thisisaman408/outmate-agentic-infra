@@ -10,6 +10,7 @@ python-multipart
 pydantic-settings>=2.0.0
 # Advanced NLP and Vector Database
 langchain>=0.1.0
+langchain-community>=0.0.10
 langchain-openai>=0.0.5
 langgraph>=0.1.0
 pgvector>=0.2.0
