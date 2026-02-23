@@ -39,7 +39,9 @@ class AiAgentsService:
             try:
                 response = await client.post("https://google.serper.dev/search", headers=headers, json=payload)
                 response.raise_for_status()
-                return response.json().get("organic", [])
+                data = response.json().get("organic", [])
+                logger.debug(f"Serper returned {len(data)} hits for query:{query}")
+                return data
             except Exception as e:
                 logger.error(f"Serper Search Error: {str(e)}")
                 return []
@@ -78,9 +80,15 @@ class AiAgentsService:
                     json=payload
                 )
                 if response.status_code == 402:
-                    logger.error("OpenRouter Error: Insufficient credits (402 Payment Required)")
-                    raise HTTPException(status_code=402, detail="OpenRouter insufficient credits. Please top up your account.")
-                
+                    detail = ""
+                    try:
+                        payload = response.json()
+                        detail = payload.get("detail") or payload.get("error") or response.text
+                    except Exception:
+                        detail = response.text
+                    logger.error(f"OpenRouter Error 402: {detail}")
+                    raise HTTPException(status_code=402, detail=f"OpenRouter error: {detail}")
+
                 response.raise_for_status()
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
@@ -150,6 +158,8 @@ class AiAgentsService:
         raw_results = await asyncio.gather(*(self._call_serper(term, num=20) for term in search_terms))
         famous, mid, startups = raw_results
 
+        logger.info(f"Serper tier results sizes: famous={len(famous)}, mid={len(mid)}, startups={len(startups)}")
+
         # --- LAYER 3: DEDUPLICATION & MERGING ---
         processed_domains = set()
         candidates = []
@@ -172,7 +182,10 @@ class AiAgentsService:
         for item in mid[:5]: add_candidate(item, 5)
         for item in startups[:10]: add_candidate(item, 10)
 
-        if not candidates: return []
+        logger.info(f"Candidate list length after deduplication: {len(candidates)}")
+        if not candidates:
+            logger.warning("Agentic search produced zero candidates; check Serper/Tavily sources.")
+            return []
 
         # --- LAYER 4: DEEP EVIDENCE COLLECTION ---
         async def collect_evidence(c):
@@ -200,6 +213,7 @@ class AiAgentsService:
             }
 
         rich_data = await self._map_with_concurrency(candidates, 5, collect_evidence)
+        logger.info(f"Collected evidence for {len(rich_data)} candidates")
 
         # --- LAYER 5: AI INTERPRETATION ---
         async def analyze_batch(batch):
@@ -247,19 +261,48 @@ class AiAgentsService:
             """
             
             # Using Gemini 1.5 Flash via OpenRouter
-            response_raw = await self._call_openrouter("google/gemini-flash-1.5", [{"role": "user", "content": prompt}])
+            response_raw = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": prompt}])
+            def _extract_json_from_text(text: str) -> List[Dict[str, Any]]:
+                clean = text.strip()
+                if "```json" in clean:
+                    clean = clean.split("```json")[1].split("```")[0].strip()
+                else:
+                    start = clean.find("[")
+                    end = clean.rfind("]")
+                    if start != -1 and end != -1 and end > start:
+                        clean = clean[start : end + 1]
+                    elif clean and clean[0] == "{":
+                        clean = clean.split("}", 1)[0] + "}"
+                return json.loads(clean)
+
             try:
-                # Cleanup markdown
-                clean_json = response_raw.strip()
-                if "```json" in clean_json:
-                    clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                
+                clean_parsed = _extract_json_from_text(response_raw)
                 import uuid
-                parsed = json.loads(clean_json)
-                for item in parsed:
+                for item in clean_parsed:
                     if "id" not in item or len(item["id"]) < 10:
                         item["id"] = str(uuid.uuid4())
-                return parsed
+                return clean_parsed
+            except json.JSONDecodeError as e:
+                logger.error(f"AI Batch JSON parse failed: {str(e)}; response={response_raw[:120]}")
+                retry_prompt = (
+                    prompt
+                    + "\nYou failed to produce valid JSON. Repeat the entire JSON array now, without markdown or explanation."
+                )
+                try:
+                    retry_raw = await self._call_openrouter(
+                        "anthropic/claude-3.5-haiku",
+                        [{"role": "user", "content": retry_prompt}],
+                        temperature=0.3,
+                    )
+                    clean_parsed = _extract_json_from_text(retry_raw)
+                    import uuid
+                    for item in clean_parsed:
+                        if "id" not in item or len(item["id"]) < 10:
+                            item["id"] = str(uuid.uuid4())
+                    return clean_parsed
+                except Exception as retry_exc:
+                    logger.error(f"AI Batch retry failed: {str(retry_exc)}")
+                    return []
             except Exception as e:
                 logger.error(f"AI Batch Error: {str(e)}")
                 return []
@@ -267,7 +310,15 @@ class AiAgentsService:
         # Process in batches of 10
         batches = [rich_data[i:i + 10] for i in range(0, len(rich_data), 10)]
         batch_results = await asyncio.gather(*(analyze_batch(b) for b in batches))
-        final_results = [item for sublist in batch_results for item in sublist]
+        final_results = []
+        for sublist in batch_results:
+            final_results.extend(sublist)
+        for item in final_results:
+            primary = (item.get("contacts") or [{}])[0] or {}
+            item["contactName"] = primary.get("name") or "Not found"
+            item["title"] = primary.get("title") or ""
+            item["email"] = primary.get("email") or ""
+        logger.info(f"AI batches produced {len(final_results)} items before filtering")
 
         # --- LAYER 6: CONSTRAINT ENFORCEMENT ---
         filtered = final_results
@@ -429,6 +480,8 @@ class AiAgentsService:
             match = re.search(r"\{[\s\S]*\}", report_raw)
             if match:
                 return json.loads(match.group(0))
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Perplexity Search Error: {str(e)}")
 
@@ -440,10 +493,12 @@ class AiAgentsService:
         SCHEMA: {json_schema}
         """
         try:
-            repaired = await self._call_openrouter("google/gemini-flash-1.5", [{"role": "user", "content": repair_prompt}])
+            repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}])
             match = re.search(r"\{[\s\S]*\}", repaired)
             if match:
                 return json.loads(match.group(0))
+        except HTTPException:
+            raise
         except:
             return {"error": "Failed to generate research report.", "companyName": company_name}
 
@@ -474,7 +529,7 @@ class AiAgentsService:
         Return ONLY valid JSON array.
         """
         
-        lookalikes_raw = await self._call_openrouter("google/gemini-flash-1.5", [{"role": "user", "content": prompt}], temperature=0.3)
+        lookalikes_raw = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": prompt}], temperature=0.3)
         try:
             import re
             match = re.search(r"\[[\s\S]*\]", lookalikes_raw)
@@ -612,13 +667,34 @@ class AiAgentsService:
         }}
         """
 
+        import uuid, re
+        logger.info(f"Calling OpenRouter predictive model for {name} with template size {len(prompt)} chars")
         try:
             scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1)
-            import re
             match = re.search(r"\{[\s\S]*\}", scores_raw)
             if match:
-                return json.loads(match.group(0))
+                parsed = json.loads(match.group(0))
+                summary = parsed.get("predictiveSummary", {})
+                payload = {
+                    "id": str(uuid.uuid4()),
+                    "companyId": target.get("domain"),
+                    "companyName": target.get("name"),
+                    "contactName": target.get("name"),
+                    "title": "Predicted Champion",
+                    "email": None,
+                    "score": summary.get("customScore") or 0,
+                    "conversionLikelihood": summary.get("confidence") or 0,
+                    "confidence": min(max((summary.get("confidence") or 0) / 100, 0), 1),
+                    "prediction": summary.get("intentSignal") or "Medium",
+                    "factors": summary.get("signals", []),
+                    "guidance": summary.get("reasoning") or parsed.get("reasoning") or "",
+                    "recommendation": "Execute outreach with predictive confidence."
+                }
+                logger.info("Received predictive score payload from OpenRouter")
+                return [payload]
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Predictive Scoring Error: {str(e)}")
             
-        return {"error": "Failed to score lead", "companyName": name}
+        return []

@@ -27,6 +27,8 @@ async def agentic_search(request: SearchRequest):
     try:
         results = await ai_service.agentic_search(request.query)
         return results
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Search API Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -37,6 +39,8 @@ async def company_research(request: ResearchRequest):
     try:
         result = await ai_service.deep_research(request.companyName, request.depth)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Research API Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -47,6 +51,8 @@ async def find_lookalikes(request: LookalikeRequest):
     try:
         results = await ai_service.find_lookalikes(request.seedCompanyIds)
         return results
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Lookalike API Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -57,6 +63,8 @@ async def score_leads(request: PredictiveRequest):
     try:
         results = await ai_service.predictive_scoring(request.dict())
         return results
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Predictive API Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

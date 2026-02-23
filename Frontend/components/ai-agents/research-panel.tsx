@@ -50,7 +50,7 @@ function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
       <AnimatePresence mode="popLayout">
         {messages.map((msg, idx) => (
           <motion.div
-            key={msg}
+            key={`${msg}-${idx}`}
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
@@ -194,10 +194,10 @@ export function ResearchPanel() {
             <div className="grid gap-6 md:grid-cols-3">
               <Card className="md:col-span-2 glass-effect border-emerald-500/10">
                 <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-xl">
-                      {result.companyName[0]}
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-xl">
+                    {result.companyName[0]}
+                  </div>
                     <div>
                       <CardTitle className="text-2xl">{result.companyName}</CardTitle>
                       <CardDescription className="flex items-center gap-2 mt-1">
@@ -218,7 +218,13 @@ export function ResearchPanel() {
                     <h4 className="text-xs uppercase font-bold tracking-tighter text-muted-foreground mb-2 flex items-center gap-2">
                       Strategic Positioning
                     </h4>
-                    <p className="text-muted-foreground leading-relaxed italic border-l-2 border-emerald-500/30 pl-4">{result.marketPosition}</p>
+                    <p className="text-muted-foreground leading-relaxed italic border-l-2 border-emerald-500/30 pl-4">
+                      {typeof result.marketPosition === "string"
+                        ? result.marketPosition
+                        : result.marketPosition
+                          ? `${result.marketPosition.positioning || "Positioning unknown"} · ${result.marketPosition.industry || "Industry unknown"} · ${result.marketPosition.geographicPresence || "Regions unspecified"}`
+                          : "Positioning data unavailable."}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -232,7 +238,7 @@ export function ResearchPanel() {
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-4">
-                    {result.recentNews.slice(0, 3).map((news, index) => (
+                    {(result.recentNews ?? []).slice(0, 3).map((news, index) => (
                       <li key={index} className="text-sm leading-snug group border-b border-white/5 pb-3 last:border-0">
                         <p className="text-muted-foreground group-hover:text-foreground transition-colors">{news}</p>
                       </li>
@@ -253,7 +259,7 @@ export function ResearchPanel() {
                 </CardHeader>
                 <CardContent>
                   <ul className="grid gap-3">
-                    {result.opportunities.map((opp, index) => (
+                    {(result.opportunities ?? []).map((opp, index) => (
                       <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/10 text-sm">
                         <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
                         <span className="text-muted-foreground">{opp}</span>
@@ -272,7 +278,7 @@ export function ResearchPanel() {
                 </CardHeader>
                 <CardContent>
                   <ul className="grid gap-3">
-                    {result.risks.map((risk, index) => (
+                    {(result.risks ?? []).map((risk, index) => (
                       <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-orange-500/5 border border-orange-500/10 text-sm">
                         <AlertCircle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
                         <span className="text-muted-foreground">{risk}</span>
@@ -292,7 +298,7 @@ export function ResearchPanel() {
                     Key Insight Findings
                   </h3>
                   <div className="space-y-6">
-                    {result.keyInsights.map((insight, i) => (
+                    {(result.keyInsights ?? []).map((insight, i) => (
                       <div key={i} className="flex gap-4">
                         <span className="font-mono text-emerald-500/40 text-sm">0{i + 1}</span>
                         <p className="text-sm text-muted-foreground leading-relaxed">{insight}</p>
@@ -306,7 +312,7 @@ export function ResearchPanel() {
                     Competitor Landscape
                   </h3>
                   <div className="flex flex-wrap gap-3">
-                    {result.competitors.map((comp) => (
+                    {(result.competitors ?? []).map((comp) => (
                       <Badge key={comp} className="px-4 py-2 bg-muted/40 hover:bg-primary/20 text-muted-foreground border-white/5 transition-colors cursor-default text-sm rounded-lg">
                         {comp}
                       </Badge>

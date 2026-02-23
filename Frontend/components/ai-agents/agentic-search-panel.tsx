@@ -84,6 +84,7 @@ export function AgenticSearchPanel() {
     setResults([])
     try {
       const searchResults = await aiAgentsApi.searchProspects(query)
+      console.log("Agentic search response", searchResults)
       setResults(searchResults)
       toast({
         title: "Search Complete",
@@ -185,6 +186,7 @@ export function AgenticSearchPanel() {
         <AnimatePresence mode="popLayout">
           {isSearching && (
             <motion.div
+              key="searching-state"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -210,6 +212,7 @@ export function AgenticSearchPanel() {
 
           {!isSearching && results.length > 0 && (
             <motion.div
+              key="results-list"
               className="grid gap-6"
               variants={{
                 show: { transition: { staggerChildren: 0.1 } }
@@ -217,85 +220,120 @@ export function AgenticSearchPanel() {
               initial="hidden"
               animate="show"
             >
-              {results.map((result, idx) => (
-                <motion.div
-                  key={result.id}
-                  variants={{
-                    hidden: { opacity: 0, y: 20 },
-                    show: { opacity: 1, y: 0 }
-                  }}
-                >
-                  <Card className="glass-effect border-white/5 overflow-hidden active:scale-[0.99] transition-transform hover:shadow-2xl hover:shadow-blue-500/5 hover:border-white/10 cursor-default group">
-                    <CardContent className="p-0">
-                      <div className="flex flex-col lg:flex-row">
-                        <div className="p-8 flex-1 space-y-6">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                            <div className="flex items-center gap-4">
-                              <div className="h-16 w-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-2xl group-hover:scale-110 transition-transform">
-                                {result.companyName[0]}
-                              </div>
-                              <div>
-                                <h3 className="text-2xl font-black tracking-tight">{result.companyName}</h3>
-                                <div className="flex items-center gap-3 mt-1 sm:mt-0">
-                                  <Badge className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border-0 font-bold px-3">
-                                    Match Score: {result.score}%
-                                  </Badge>
-                                  <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
-                                    <MapPin className="h-3 w-3" />
-                                    {result.location}
-                                  </span>
+              {results.map((result, idx) => {
+                const cardKey = result.id || `${result.companyName || "candidate"}-${idx}`
+                const contactName = result.contactName?.trim() || "Not found"
+                const contactTitle = result.title?.trim() || "N/A"
+                const contactEmail = result.email?.trim() || "Email not available"
+                const employeesLabel = result.employees || "N/A"
+                const companyName = result.companyName?.trim() || "Unnamed company"
+                const matchScore = result.score ?? 0
+                const locationLabel = result.location?.trim() || "Location not specified"
+                const reasonText = result.reason?.trim() || "No reasoning provided yet."
+                const industryLabel = result.industry || "Industry Unknown"
+                const initialLetter = (companyName.charAt(0) || "?").toUpperCase()
+
+                return (
+                  <motion.div
+                    key={cardKey}
+                    variants={{
+                      hidden: { opacity: 0, y: 20 },
+                      show: { opacity: 1, y: 0 }
+                    }}
+                  >
+                    <Card className="glass-effect border-white/5 overflow-hidden active:scale-[0.99] transition-transform hover:shadow-2xl hover:shadow-blue-500/5 hover:border-white/10 cursor-default group">
+                      <CardContent className="p-0">
+                        <div className="flex flex-col lg:flex-row">
+                          <div className="p-8 flex-1 space-y-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="flex items-center gap-4">
+                                <div className="h-16 w-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-2xl group-hover:scale-110 transition-transform">
+                                  {initialLetter}
+                                </div>
+                                <div>
+                                  <h3 className="text-2xl font-black tracking-tight">{companyName}</h3>
+                                  <div className="flex items-center gap-3 mt-1 sm:mt-0">
+                                    <Badge className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border-0 font-bold px-3">
+                                      Match Score: {matchScore}%
+                                    </Badge>
+                                    <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                      <MapPin className="h-3 w-3" />
+                                      {locationLabel}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
+                              <Button className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all">
+                                <Mail className="mr-2 h-4 w-4" />
+                                Engage Now
+                              </Button>
                             </div>
-                            <Button className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all">
-                              <Mail className="mr-2 h-4 w-4" />
-                              Engage Now
-                            </Button>
+
+                            <div className="p-5 rounded-2xl bg-blue-500/5 border border-blue-500/10 relative">
+                              <div className="absolute top-3 right-4">
+                                <Sparkles className="h-4 w-4 text-blue-400/30" />
+                              </div>
+                              <p className="text-sm text-blue-300 leading-relaxed pr-8">
+                                <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
+                                {reasonText}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
+                              <div className="flex items-center gap-2">
+                                <Briefcase className="h-4 w-4 text-muted-foreground/60" />
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{industryLabel}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-muted-foreground/60" />
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{employeesLabel} Employees</span>
+                              </div>
+                            </div>
                           </div>
 
-                          <div className="p-5 rounded-2xl bg-blue-500/5 border border-blue-500/10 relative">
-                            <div className="absolute top-3 right-4">
-                              <Sparkles className="h-4 w-4 text-blue-400/30" />
+                          <div className="lg:w-80 bg-white/5 p-8 border-l border-white/5 flex flex-col justify-center gap-4">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Target Stakeholder</p>
+                              <h4 className="text-lg font-bold leading-tight">{contactName}</h4>
+                              <p className="text-sm font-medium text-blue-400/80">{contactTitle}</p>
                             </div>
-                            <p className="text-sm text-blue-300 leading-relaxed pr-8">
-                              <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
-                              {result.reason}
-                            </p>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
-                            <div className="flex items-center gap-2">
-                              <Briefcase className="h-4 w-4 text-muted-foreground/60" />
-                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{result.industry}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Users className="h-4 w-4 text-muted-foreground/60" />
-                              <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{result.employees} Employees</span>
+                            <div className="space-y-3 pt-2">
+                              <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
+                                <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
+                                <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">{contactEmail}</span>
+                              </div>
+                              <button className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2">
+                                View Intelligence Record
+                              </button>
                             </div>
                           </div>
                         </div>
-
-                        <div className="lg:w-80 bg-white/5 p-8 border-l border-white/5 flex flex-col justify-center gap-4">
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Target Stakeholder</p>
-                            <h4 className="text-lg font-bold leading-tight">{result.contactName}</h4>
-                            <p className="text-sm font-medium text-blue-400/80">{result.title}</p>
-                          </div>
-                          <div className="space-y-3 pt-2">
-                            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
-                              <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
-                              <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">{result.email}</span>
-                            </div>
-                            <button className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2">
-                              View Intelligence Record
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                )
+              })}
+            </motion.div>
+          )}
+          {!isSearching && results.length === 0 && (
+            <motion.div
+              key="no-results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="p-6 rounded-2xl bg-white/5 border border-white/10 text-muted-foreground text-sm text-center"
+            >
+              No prospects found yet. The model may still be processing - check the console log for the raw response.
+            </motion.div>
+          )}
+          {!isSearching && results.length > 0 && (
+            <motion.div
+              key="results-json"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <pre className="text-xs text-muted-foreground bg-black/30 p-4 rounded-2xl overflow-x-auto">
+                {JSON.stringify(results, null, 2)}
+              </pre>
             </motion.div>
           )}
         </AnimatePresence>

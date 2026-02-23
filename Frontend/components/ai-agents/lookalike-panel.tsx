@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Users, Loader2, Target, BarChart3, MapPin, Building2, Layers, Search, PlusCircle } from "lucide-react"
+import { Users, Loader2, Target, BarChart3, MapPin, Building2, Layers, Search, PlusCircle, X } from "lucide-react"
 import { aiAgentsApi, type LookalikeResult } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -47,9 +47,9 @@ function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   return (
     <div className="font-mono text-[9px] uppercase tracking-tighter text-purple-400/60 h-10 flex flex-col justify-end">
       <AnimatePresence mode="popLayout">
-        {messages.map((msg) => (
+        {messages.map((msg, idx) => (
           <motion.div
-            key={msg}
+            key={`${msg}-${idx}`}
             initial={{ opacity: 0, x: -5 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 5 }}
@@ -68,12 +68,24 @@ export function LookalikePanel() {
   const { toast } = useToast()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [results, setResults] = useState<LookalikeResult[]>([])
+  const [seedPool, setSeedPool] = useState(["Stripe", "Airbnb", "Notion"])
+
+  const handleAddSeed = () => {
+    const candidate = window?.prompt?.("Enter a seed company name to expand the pool:")
+    if (candidate && candidate.trim()) {
+    setSeedPool((prev) => [...prev, candidate.trim()])
+      toast({
+        title: "Seed Added",
+        description: `${candidate.trim()} added to the seed pool.`,
+      })
+    }
+  }
 
   const handleFindLookalikes = async () => {
     setIsAnalyzing(true)
     setResults([])
     try {
-      const seedCompanies = ["1", "2", "3"]
+    const seedCompanies = seedPool.map((seed, idx) => `${seed}-${idx}`)
       const lookalikeResults = await aiAgentsApi.findLookalikeCompanies(seedCompanies)
       setResults(lookalikeResults)
       toast({
@@ -120,14 +132,25 @@ export function LookalikePanel() {
             <div className="rounded-[1.9rem] bg-black/20 p-8 flex flex-col md:flex-row items-center justify-between gap-8">
               <div className="flex-1 space-y-4">
                 <div className="flex flex-wrap gap-3">
-                  {["Stripe", "Airbnb", "Notion"].map(seed => (
-                    <div key={seed} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/5 group hover:border-purple-500/30 transition-all">
+                  {seedPool.map((seed, index) => (
+                    <div key={`${seed}-${index}`} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/5 group hover:border-purple-500/30 transition-all">
                       <div className="h-6 w-6 rounded-lg bg-purple-500/20 flex items-center justify-center text-[10px] font-black text-purple-400">{seed[0]}</div>
                       <span className="text-sm font-bold">{seed}</span>
-                      <button className="text-muted-foreground/40 hover:text-destructive transition-colors"><PlusCircle className="h-3 w-3 rotate-45" /></button>
+                      <button
+                        type="button"
+                        onClick={() => setSeedPool(prev => prev.filter((value, idx) => idx !== index))}
+                        className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                        title={`Remove ${seed}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     </div>
                   ))}
-                  <button className="p-2 px-4 rounded-xl border border-dashed border-white/10 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all text-muted-foreground/60 hover:text-purple-400 flex items-center gap-2 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={handleAddSeed}
+                    className="p-2 px-4 rounded-xl border border-dashed border-white/10 hover:border-purple-500/50 hover:bg-purple-500/5 transition-all text-muted-foreground/60 hover:text-purple-400 flex items-center gap-2 text-xs font-bold"
+                  >
                     <PlusCircle className="h-4 w-4" />
                     Add Seed Pool
                   </button>
@@ -229,7 +252,7 @@ export function LookalikePanel() {
                       <div className="space-y-4">
                         <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Core Matching Vectors</p>
                         <div className="flex flex-wrap gap-2">
-                          {result.matchingFactors.map((factor) => (
+                    {result.matchingFactors.map((factor) => (
                             <Badge key={factor} className="bg-white/5 hover:bg-purple-500/10 text-muted-foreground hover:text-purple-400 border-white/5 transition-colors font-bold px-3 py-1 rounded-lg">
                               {factor}
                             </Badge>

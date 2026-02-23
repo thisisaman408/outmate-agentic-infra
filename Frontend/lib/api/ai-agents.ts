@@ -102,7 +102,16 @@ export const aiAgentsApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ leadIds }),
     });
-    if (!response.ok) throw new Error('Failed to score leads');
+    if (!response.ok) {
+      let detail = `Failed to score leads (${response.status})`
+      try {
+        const payload = await response.json()
+        detail = payload.detail || payload.error || detail
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(detail)
+    }
     return response.json();
   },
 }

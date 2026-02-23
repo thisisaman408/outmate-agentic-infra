@@ -47,9 +47,9 @@ function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   return (
     <div className="font-mono text-[9px] uppercase tracking-tighter text-orange-400/60 h-10 flex flex-col justify-end">
       <AnimatePresence mode="popLayout">
-        {messages.map((msg) => (
+        {messages.map((msg, idx) => (
           <motion.div
-            key={msg}
+            key={`${msg}-${idx}`}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
@@ -213,7 +213,7 @@ export function PredictivePanel() {
                           <div className="space-y-4">
                             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Contributing Signals</p>
                             <div className="space-y-3">
-                              {result.factors.map((factor: any, idx: number) => (
+                              {(result.factors ?? []).map((factor: any, idx: number) => (
                                 <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
                                   <span className="text-xs font-medium text-muted-foreground/80">{factor.name}</span>
                                   <span className={cn("text-xs font-bold flex items-center gap-1", factor.impact === "positive" ? "text-emerald-400" : "text-red-400")}>
@@ -254,6 +254,16 @@ export function PredictivePanel() {
                   </Card>
                 </motion.div>
               ))}
+            </motion.div>
+          )}
+          {!isScoring && results.length === 0 && (
+            <motion.div
+              key="predictive-empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-sm text-muted-foreground"
+            >
+              Run the model to score leads. If the API returns an error (e.g., insufficient credits), check the toast for details.
             </motion.div>
           )}
         </AnimatePresence>
