@@ -37,6 +37,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Visitors", href: "/visitors", icon: Users },
   { name: "AI-Powered Search", href: "/ai-powered-search", icon: Database },
   {
     name: "Leads",

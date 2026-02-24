@@ -87,6 +87,16 @@ class Settings(BaseSettings):
         30,
         description="ContactOut API timeout in seconds"
     )
+
+    # Visitor Tracker Configuration
+    IPINFO_TOKEN: Optional[str] = Field(
+        None,
+        description="IPinfo API token"
+    )
+    ENRICH_API_KEY: Optional[str] = Field(
+        None,
+        description="Enrich.so API key"
+    )
     
     # Logging Configuration
     LOG_LEVEL: str = Field(

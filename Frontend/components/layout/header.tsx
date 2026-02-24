@@ -17,13 +17,26 @@ import { useRouter } from "next/navigation"
 import { authService } from "@/lib/auth"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { AuthModal } from "@/components/auth/auth-modal"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 export function Header() {
   const { user, logout } = useStore()
   const router = useRouter()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authTab, setAuthTab] = useState<"login" | "signup">("login")
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) return (
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border/50 bg-background/95 px-6">
+      <div className="flex-1 max-w-md">
+        <div className="h-10 bg-muted/50 rounded-lg animate-pulse" />
+      </div>
+    </header>
+  )
 
   const handleLogout = async () => {
     await authService.logout()

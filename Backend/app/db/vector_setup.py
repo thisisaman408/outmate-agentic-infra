@@ -11,7 +11,11 @@ async def setup_vector_database():
     """Setup PGVector extension and create necessary tables"""
     
     db_url = os.getenv("DATABASE_URL")
-    engine = create_engine(db_url)
+    # Add connect_args with a timeout to prevent indefinite hanging
+    engine = create_engine(
+        db_url, 
+        connect_args={"connect_timeout": 10} if "postgresql" in (db_url or "") else {}
+    )
     
     try:
         # Enable pgvector extension
@@ -88,8 +92,14 @@ async def setup_vector_database():
         print(">>> [Vector DB] Setup complete", flush=True)
         
     except Exception as e:
-        print(f">>> [Vector DB] Setup failed: {e}", flush=True)
-        raise e
+        error_msg = str(e)
+        if "timeout expired" in error_msg:
+            print(f">>> [Vector DB] Connection TIMEOUT to database. Please check your internet connection or if Supabase is reachable.", flush=True)
+            print(f">>> [Vector DB] URL used (obfuscated): {db_url.split('@')[1] if '@' in db_url else db_url}", flush=True)
+        else:
+            print(f">>> [Vector DB] Setup failed with error: {e}", flush=True)
+        # We don't raise e here to avoid crashing the background task entirely if it's just a setup step
+        # though it's already caught in main.py
 
 if __name__ == "__main__":
     asyncio.run(setup_vector_database())

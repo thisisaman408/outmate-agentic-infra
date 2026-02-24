@@ -29,6 +29,7 @@ from app.api.routes import signals
 from app.api.routes import campaigns
 from app.api.routes import chat
 from app.api.routes import ai_agents
+from app.api.routes import visitors
 
 # Register routers
 
@@ -56,9 +57,13 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",  # Frontend development server
-        "http://127.0.0.1:3000",  # Alternative localhost
-        # Add production URLs when deploying
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "null",  # Allows requests from local .html files
     ],
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
@@ -132,6 +137,9 @@ logger.info("Chat router registered")
 app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
 logger.info("AI Agents router registered")
 
+app.include_router(visitors.router)
+logger.info("Visitors router registered")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
@@ -142,12 +150,17 @@ async def startup_event():
     RedisManager.connect()
     logger.info("Redis connection established")
     
-    # Initialize Vector Database
-    try:
-        await setup_vector_database()
-        logger.info("Vector database initialized")
-    except Exception as e:
-        logger.error(f"Vector database setup failed: {e}")
+    # Initialize Vector Database in the background to avoid blocking API startup
+    async def run_setup():
+        try:
+            await setup_vector_database()
+            logger.info("Vector database initialized successfully")
+        except Exception as e:
+            logger.error(f"Vector database setup failed: {e}")
+
+    import asyncio
+    asyncio.create_task(run_setup())
+    logger.info("Vector database initialization started in background")
     
     logger.info("Application startup complete")
 
