@@ -7,6 +7,7 @@ export interface User {
   name: string
   workspace: string
   credits: number
+  plan?: "basic" | "pro"
 }
 
 export interface AuthState {

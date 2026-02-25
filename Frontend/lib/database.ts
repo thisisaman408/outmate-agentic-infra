@@ -36,7 +36,7 @@ const dbConfig = {
   ...parseDatabaseUrl(databaseUrl),
   max: 20, // maximum number of clients in the pool
   idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
-  connectionTimeoutMillis: 2000, // how long to wait when connecting a new client
+  connectionTimeoutMillis: 10000, // how long to wait when connecting a new client
 }
 
 // Redis configuration from environment variables
@@ -62,8 +62,13 @@ export const getDatabasePool = (): Pool => {
     })
     
     // Handle connection errors
-    pool.on('connect', (client) => {
+    pool.on('connect', async (client) => {
       console.log('New database client connected')
+      try {
+        await client.query(`SET statement_timeout = 60000`)
+      } catch (timeoutError) {
+        console.error('Failed to set statement_timeout:', timeoutError)
+      }
     })
     
     console.log('Database pool created with config:', dbConfig)

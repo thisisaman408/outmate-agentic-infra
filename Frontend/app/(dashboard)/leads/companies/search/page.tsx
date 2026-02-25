@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -7,11 +8,14 @@ import { FilterSidebar } from "@/components/leads/companies/filter-sidebar"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { searchCache } from "@/lib/cache/search-cache"
-import { PINNED_FILTERS_DEFAULT } from "@/components/leads/companies/constants"
+import { ALL_FILTERS, PINNED_FILTERS_DEFAULT } from "@/components/leads/companies/constants"
 import { useSearchParams } from "next/navigation"
 import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 import { enrichCompany, type CompanyEnrichmentResult } from "@/lib/services/betterContactService"
+import { CsvImportButton } from "@/components/shared/csv-import-button"
+import { normalizeCsvRecord } from "@/lib/utils/csv"
+import { useToast } from "@/hooks/use-toast"
 
 export default function InDbCompanySearchPage() {
   const params = useSearchParams()
@@ -22,11 +26,13 @@ export default function InDbCompanySearchPage() {
   const [restoredFilters, setRestoredFilters] = useState<Record<string, any> | undefined>(undefined)
   const [autoSearch, setAutoSearch] = useState(false)
   const [restored, setRestored] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
 
   // Enrichment state
   const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
   const [enrichedData, setEnrichedData] = useState<Record<string, CompanyEnrichmentResult>>({})
   const [isBulkEnriching, setIsBulkEnriching] = useState(false)
+  const [waterfallAttempts, setWaterfallAttempts] = useState<Record<string, { email?: boolean; phone?: boolean }>>({})
 
   const mapCompany = (c: any): CompanyData => ({
     id: String(c.id ?? c.domain ?? ""),
@@ -104,7 +110,8 @@ export default function InDbCompanySearchPage() {
     results: any[],
     loading: boolean,
     searched: boolean,
-    filters: Record<string, any>
+    filters: Record<string, any>,
+    matchList?: string[]
   ) => {
     if (results && results.length > 0) {
       searchCache.set(results)
@@ -112,7 +119,36 @@ export default function InDbCompanySearchPage() {
 
     const mapped: CompanyData[] = results.map(mapCompany)
 
-    setCompanies(mapped)
+    let limited = mapped
+    const normalizedMatchTokens = (matchList || [])
+      .map((value) => value)
+      .map((value) => value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim())
+      .map((value) => value.split(/\s+/).filter(Boolean))
+      .filter((tokens) => tokens.length > 0)
+
+    if (normalizedMatchTokens.length > 0) {
+      const narrowed = mapped.filter((c) => {
+        const nameTokens = (c.name || c.domain || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter(Boolean)
+        const domainTokens = (c.domain || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter(Boolean)
+        const companyTokenSet = new Set([...nameTokens, ...domainTokens])
+        return normalizedMatchTokens.some((matchTokens) =>
+          matchTokens.every((token) => token && companyTokenSet.has(token))
+        )
+      })
+      if (narrowed.length > 0) {
+        limited = narrowed
+      }
+    }
+
+    setCompanies(limited)
     setEnrichedData({}) // Reset enrichment on new search
 
     if (!loading && searched) {
@@ -128,6 +164,8 @@ export default function InDbCompanySearchPage() {
   }
 
   // NLP search: limit 3
+  const { toast } = useToast()
+
   const handleNlpSearch = async (filters: Record<string, any>) => {
     setIsLoading(true)
     setHasSearched(false)
@@ -156,6 +194,140 @@ export default function InDbCompanySearchPage() {
   }
 
   // Enrich a single company row
+  const fetchCompaniesForFilters = async (filters: Record<string, any>) => {
+    const response = await fetch(`/api/leads/search/companies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filters,
+        options: { limit: 3, page: 1 }
+      })
+    })
+    if (!response.ok) throw new Error(`Import search failed: ${response.status}`)
+
+    const result = await response.json()
+    if (!result.success) throw new Error(result.error?.message || "Import search failed")
+
+    return result.data?.companies || []
+  }
+
+  const handleImportRecords = async (records: Record<string, string>[]) => {
+    if (!records.length) {
+      toast({
+        title: "No rows found",
+        description: "CSV must contain at least one row with filter columns.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const matchableKeys = ["name", "domain"]
+    const parsedRows: Array<{ filters: Record<string, string>; matchTokens: string[] }> = []
+
+    records.forEach((record) => {
+      const normalized = normalizeCsvRecord(record)
+      const rowFilters: Record<string, string> = {}
+      const rowTokens: string[] = []
+
+      Object.entries(normalized).forEach(([key, value]) => {
+        if (!value) return
+
+        const mappedKey = mapCsvHeaderToFilterKey(key)
+        if (!mappedKey) return
+
+        const addValues = Array.isArray(value) ? value : [value]
+        const firstValue = addValues.find(Boolean)
+        if (!firstValue) return
+
+        rowFilters[mappedKey] = firstValue
+        if (matchableKeys.includes(mappedKey)) {
+          rowTokens.push(firstValue)
+        }
+      })
+
+      if (rowFilters.name || rowFilters.domain) {
+        parsedRows.push({ filters: rowFilters, matchTokens: rowTokens })
+      }
+    })
+
+    if (!parsedRows.length) {
+      toast({
+        title: "Import failed",
+        description: "CSV rows must include Company Name or Domain values.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setIsImporting(true)
+    setIsLoading(true)
+    setHasSearched(false)
+    setCompanies([])
+
+    try {
+      const collectedCompanies: any[] = []
+      const combinedMatchTokens: string[] = []
+      const aggregatedFilters: Record<string, string[]> = {}
+
+      for (const { filters, matchTokens } of parsedRows) {
+        combinedMatchTokens.push(...matchTokens)
+
+        Object.entries(filters).forEach(([key, value]) => {
+          if (!aggregatedFilters[key]) {
+            aggregatedFilters[key] = []
+          }
+          if (!aggregatedFilters[key].includes(value)) {
+            aggregatedFilters[key].push(value)
+          }
+        })
+
+        const fetched = await fetchCompaniesForFilters(filters)
+        collectedCompanies.push(...fetched)
+
+        if (collectedCompanies.length >= 3) {
+          break
+        }
+      }
+
+      const limited = collectedCompanies.slice(0, 3)
+      handleSearch(limited, false, true, aggregatedFilters, combinedMatchTokens.filter(Boolean))
+
+      toast({
+        title: "Import complete",
+        description: `Imported ${limited.length} companies from CSV filters.`
+      })
+    } catch (error) {
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Could not import CSV filters.",
+        variant: "destructive"
+      })
+      setIsLoading(false)
+      setHasSearched(true)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  function mapCsvHeaderToFilterKey(header: string): string | undefined {
+    const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, " ").trim()
+    const mapping: Record<string, string> = {
+      "company name": "name",
+      "company": "name",
+      "name": "name",
+      "domain": "domain",
+      "website": "domain",
+      "company domain": "domain",
+      "company website": "domain"
+    }
+    for (const key of Object.keys(mapping)) {
+      if (normalized === key || normalized.includes(key)) {
+        return mapping[key]
+      }
+    }
+    return undefined
+  }
+
   const handleEnrichRow = async (company: CompanyData) => {
     const key = company.domain || company.id
     if (!key || enrichingRows[key] || enrichedData[key]) return
@@ -178,6 +350,44 @@ export default function InDbCompanySearchPage() {
       setEnrichingRows(prev => ({ ...prev, [key]: false }))
     }
     setIsBulkEnriching(false)
+  }
+
+  const handleCompanyWaterfallResult = (companyId: string, field: 'email' | 'phone', result: Record<string, any>) => {
+    if (!companyId || !result) return
+    setEnrichedData(prev => {
+      const existing = prev[companyId] || {}
+      const updated = { ...existing }
+      if (result.email) {
+        updated.email = {
+          email: result.email,
+          credits_consumed: result.credits_consumed,
+        }
+      }
+      if (result.phone) {
+        updated.phone = {
+          phone: result.phone,
+          credits_consumed: result.credits_consumed,
+        }
+      }
+      if (!result.email && field === 'email') {
+        updated.email = result
+      }
+      if (!result.phone && field === 'phone') {
+        updated.phone = result
+      }
+      return {
+        ...prev,
+        [companyId]: updated,
+      }
+    })
+
+    setWaterfallAttempts(prev => ({
+      ...prev,
+      [companyId]: {
+        ...prev[companyId],
+        [field]: true,
+      },
+    }))
   }
 
   // Attempt to restore from historyId on first render
@@ -212,13 +422,17 @@ export default function InDbCompanySearchPage() {
         hideCategoryHeaders
       />
       <div className="flex-1 flex flex-col min-w-0 p-4">
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex flex-col gap-3">
           <Database className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-2xl font-bold tracking-tight">In-DB Company Search</h1>
             <p className="text-sm text-muted-foreground">
               Search and filter companies from Explorium&apos;s business dataset. Use the filters on the left or describe what you need below.
             </p>
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <CsvImportButton label="Import filters" onRecordsParsed={handleImportRecords} />
+            {isImporting && <span className="text-xs text-muted-foreground">Applying CSV filters...</span>}
           </div>
         </div>
 
@@ -239,14 +453,11 @@ export default function InDbCompanySearchPage() {
           hasSearched={hasSearched}
           onEnrichReveal={async (companyId, field) => {
             if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
-            // Find the company for this id
             const company = companies.find(c => (c.domain || c.id) === companyId)
             if (!company) return
             setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
-            // Set loading state in enrichCache
-            setEnrichedData(prev => ({ ...prev, [companyId]: { success: false } as any }))
             const result = await enrichCompany(company.name, company.domain, field)
-            setEnrichedData(prev => ({ ...prev, [companyId]: result }))
+            handleCompanyWaterfallResult(companyId, field, result)
             setEnrichingRows(prev => ({ ...prev, [companyId]: false }))
           }}
           enrichCache={Object.fromEntries(
@@ -255,10 +466,18 @@ export default function InDbCompanySearchPage() {
               enrichingRows[key]
                 ? { loading: true }
                 : data?.success && !data?.not_found
-                  ? { email: data.email, phone: data.phone, contact_name: data.contact_name, contact_title: data.contact_title }
+                  ? {
+                    email: data.email ? { email: data.email, credits_consumed: data.credits_consumed } : undefined,
+                    phone: data.phone ? { phone: data.phone, credits_consumed: data.credits_consumed } : undefined,
+                    contact_name: data.contact_name,
+                    contact_title: data.contact_title,
+                  }
                   : {}
             ])
           )}
+          enrichingRows={enrichingRows}
+          onWaterfallResult={handleCompanyWaterfallResult}
+          waterfallAttempts={waterfallAttempts}
         />
       </div>
     </div>

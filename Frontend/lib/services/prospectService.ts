@@ -62,6 +62,7 @@ export interface ProspectProfile {
         country: string;
         continent: string;
     };
+    data_quality_score?: number;
 }
 
 export interface EducationItem {

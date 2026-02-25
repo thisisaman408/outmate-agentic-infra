@@ -12,6 +12,11 @@ import { ALL_FILTERS, FILTER_CATEGORIES, FilterConfig } from "./constants"
 import { FilterSection } from "./filters/filter-section"
 import { FilterInputText } from "./filters/filter-input-text"
 import { FilterInputMultiSelect } from "./filters/filter-input-multi-select"
+import { FilterInputDualMode } from "./filters/filter-input-dual-mode"
+import { FilterTagsDisplay } from "./filters/filter-tags-display"
+import { ProFilterLock } from "./filters/pro-filter-lock"
+import { useToast } from "@/hooks/use-toast"
+import { useStore } from "@/lib/store"
 
 interface AllFiltersViewProps {
     open: boolean
@@ -35,6 +40,18 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
             setLocalFilters(filters)
         }
     }, [open, filters])
+
+    const { toast } = useToast()
+    const { user } = useStore()
+    const isPro = user?.plan === "pro"
+
+    const handleProFilterClick = (label: string) => {
+        toast({
+            title: "Pro required",
+            description: `Upgrade to Outmate Pro to unlock the ${label} filter.`,
+            variant: "destructive",
+        })
+    }
 
     const handleLocalFilterChange = (id: string, value: any) => {
         setLocalFilters(prev => ({ ...prev, [id]: value }))
@@ -154,7 +171,11 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
                                                                     <Pin className={cn("h-3.5 w-3.5", pinnedFilters.includes(filter.id) && "fill-current")} />
                                                                 </Button>
                                                             </div>
-                                                            {renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val))}
+                                                            {filter.requiresPro && !isPro ? (
+                                                                <ProFilterLock label={filter.label} onUpgrade={() => handleProFilterClick(filter.label)} />
+                                                            ) : (
+                                                                renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val))
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -184,7 +205,11 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
                                                             <Pin className={cn("h-3.5 w-3.5", pinnedFilters.includes(filter.id) && "fill-current")} />
                                                         </Button>
                                                     </div>
-                                                    {renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val))}
+                                                    {filter.requiresPro && !isPro ? (
+                                                        <ProFilterLock label={filter.label} onUpgrade={() => handleProFilterClick(filter.label)} />
+                                                    ) : (
+                                                        renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val))
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>

@@ -21,6 +21,9 @@ import { FilterMultiLocation } from "./filters/filter-multi-location"
 import { FilterInputLanguage } from "./filters/filter-input-language"
 import { FilterInputSchool } from "./filters/filter-input-school"
 import { FilterInputBoolean } from "./filters/filter-input-boolean"
+import { ProFilterLock } from "@/components/leads/companies/filters/pro-filter-lock"
+import { useToast } from "@/hooks/use-toast"
+import { useStore } from "@/lib/store"
 
 interface FilterSidebarProps {
     onApplyFilters?: (filters: Record<string, any>) => void
@@ -49,12 +52,31 @@ export function FilterSidebar({ onApplyFilters, filterOperators = {}, onOperator
         onApplyFilters?.(filters)
     }
 
+    const { toast } = useToast()
+    const { user } = useStore()
+    const isPro = user?.plan === "pro"
+
+    const handleProFilterClick = (label: string) => {
+        toast({
+            title: "Upgrade to Pro",
+            description: `Unlock the ${label} filter by upgrading to Outmate Pro.`,
+            variant: "destructive"
+        })
+    }
+
     // Memoize pinned filter configs
     const pinnedFilters = React.useMemo(() => {
         return pinnedFilterIds
             .map(id => ALL_FILTERS.find(f => f.id === id))
             .filter((f): f is FilterConfig => !!f)
     }, [pinnedFilterIds])
+
+    const renderFilterControl = (filter: FilterConfig) => {
+        if (filter.requiresPro && !isPro) {
+            return <ProFilterLock label={filter.label} onUpgrade={() => handleProFilterClick(filter.label)} />
+        }
+        return renderFilterInput(filter, filters[filter.id], (val) => handleFilterChange(filter.id, val))
+    }
 
     return (
         <>
@@ -131,7 +153,7 @@ export function FilterSidebar({ onApplyFilters, filterOperators = {}, onOperator
                                         </Button>
                                     </div>
                                 )}
-                                {renderFilterInput(filter, filters[filter.id], (val) => handleFilterChange(filter.id, val), filterOperators[filter.id] || 'in', filter.supportsOperator)}
+                                {renderFilterControl(filter)}
                             </FilterSection>
                         ))}
                     </div>
@@ -180,6 +202,8 @@ export function FilterSidebar({ onApplyFilters, filterOperators = {}, onOperator
                 onPinChange={setPinnedFilterIds}
                 filterOperators={filterOperators}
                 onOperatorChange={onOperatorChange}
+                isPro={isPro}
+                onProFilterClick={(label) => handleProFilterClick(label)}
             />
         </>
     )

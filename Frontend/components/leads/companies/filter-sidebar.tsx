@@ -23,8 +23,10 @@ import { FilterInputInvestors } from "./filters/filter-input-investors"
 import { FilterInputGrowthRange } from "./filters/filter-input-growth-range"
 import { FilterInputEmployeeGrowth } from "./filters/filter-input-employee-growth"
 import { FilterInputDepartmentRange } from "./filters/filter-input-department-range"
+import { ProFilterLock } from "./filters/pro-filter-lock"
 import { leadsApi, type Lead } from "@/lib/api/leads"
 import { useToast } from "@/hooks/use-toast"
+import { useStore } from "@/lib/store"
 
 interface FilterSidebarProps {
     onSearch?: (results: Lead[], loading: boolean, searched: boolean, filters: Record<string, any>) => void
@@ -238,6 +240,22 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
             .filter((f): f is FilterConfig => !!f)
     }, [pinnedFilterIds])
 
+    const { user } = useStore()
+    const isPro = user?.plan === "pro"
+    const handleProFilterClick = (label: string) => {
+        toast({
+            title: "Pro Feature",
+            description: `Only Outmate Pro users can use the ${label} filter. Upgrade to unlock precision controls.`,
+        })
+    }
+
+    const renderFilterControl = (filter: FilterConfig) => {
+        if (filter.requiresPro && !isPro) {
+            return <ProFilterLock label={filter.label} onUpgrade={() => handleProFilterClick(filter.label)} />
+        }
+        return renderFilterInput(filter, filters[filter.id], (val) => handleFilterChange(filter.id, val))
+    }
+
     return (
         <>
             <div className="w-80 flex-shrink-0 h-full flex flex-col bg-card border-r border-border shadow-sm z-10">
@@ -252,19 +270,19 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
                 {/* Scrollable Filters Area */}
                 <ScrollArea className="flex-1">
                     <div className="p-3 space-y-1">
-                        {pinnedFilters.map((filter) => (
-                            <FilterSection
-                                key={filter.id}
-                                title={filter.label}
-                                description={filter.description}
-                                count={Array.isArray(filters[filter.id]) ? filters[filter.id].length : (filters[filter.id] ? 1 : 0)}
-                                onClear={() => handleFilterChange(filter.id, undefined)}
-                            >
-                                {renderFilterInput(filter, filters[filter.id], (val) => handleFilterChange(filter.id, val))}
-                            </FilterSection>
-                        ))}
-                    </div>
-                </ScrollArea>
+                            {pinnedFilters.map((filter) => (
+                                <FilterSection
+                                    key={filter.id}
+                                    title={filter.label}
+                                    description={filter.description}
+                                    count={Array.isArray(filters[filter.id]) ? filters[filter.id].length : (filters[filter.id] ? 1 : 0)}
+                                    onClear={() => handleFilterChange(filter.id, undefined)}
+                                >
+                                    {renderFilterControl(filter)}
+                                </FilterSection>
+                            ))}
+                        </div>
+                    </ScrollArea>
 
                 {/* Footer Actions */}
                 <div className="p-3 border-t border-border/40 space-y-2 bg-gradient-to-t from-background/80 to-background/20">
@@ -307,18 +325,20 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
                 </div>
             </div>
 
-            <AllFiltersView
-                open={showAllFilters}
-                onOpenChange={setShowAllFilters}
-                filters={filters}
-                onFilterChange={handleFilterChange}
-                onApply={(newFilters) => {
-                    setFilters(newFilters)
-                    setShowAllFilters(false)
-                }}
-                pinnedFilters={pinnedFilterIds}
-                onPinChange={setPinnedFilterIds}
-            />
+                        <AllFiltersView
+                            open={showAllFilters}
+                            onOpenChange={setShowAllFilters}
+                            filters={filters}
+                            onFilterChange={handleFilterChange}
+                            onApply={(newFilters) => {
+                                setFilters(newFilters)
+                                setShowAllFilters(false)
+                            }}
+                            pinnedFilters={pinnedFilterIds}
+                            onPinChange={setPinnedFilterIds}
+                            isPro={isPro}
+                            onProFilterClick={(label) => handleProFilterClick(label)}
+                        />
         </>
     )
 }

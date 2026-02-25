@@ -5,12 +5,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Search, Sparkles, Users, Loader2, Plus, MessageSquare, Library, Copy, Download, Zap, Mail, ExternalLink, Send, Check, CheckCircle2 } from "lucide-react"
+import {
+  Search,
+  Sparkles,
+  Users,
+  Loader2,
+  Plus,
+  MessageSquare,
+  Library,
+  Copy,
+  Download,
+  Zap,
+  Mail,
+  ExternalLink,
+  Send,
+  Check,
+  CheckCircle2,
+  Mic,
+  MicOff,
+} from "lucide-react"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
 import { authService } from "@/lib/auth"
+import { useToast } from "@/hooks/use-toast"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { CsvImportButton } from "@/components/shared/csv-import-button"
+import { normalizeCsvRecord } from "@/lib/utils/csv"
 
 type WorkflowStep = {
   title: string
@@ -212,12 +234,17 @@ export default function DatabaseFinderPage() {
   const [gmailConnected, setGmailConnected] = useState(false)
   const [gmailEmail, setGmailEmail] = useState("")
   const [linkedinConnected, setLinkedinConnected] = useState(false)
+  const { toast } = useToast()
+  const [isImportingFilters, setIsImportingFilters] = useState(false)
+  const [isVoiceListening, setIsVoiceListening] = useState(false)
+  const [voiceSupported, setVoiceSupported] = useState(false)
 
   // Agent conversation state
   const [agentMessages, setAgentMessages] = useState<Array<{role: "user" | "assistant", content: string}>>([])
   const [isAgentResponding, setIsAgentResponding] = useState(false)
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null)
+  const recognitionRef = useRef<any>(null)
   const agentMessagesEndRef = useRef<HTMLDivElement>(null)
   const initialActiveChatId = useRef<string | null>(null)
 
@@ -225,6 +252,51 @@ export default function DatabaseFinderPage() {
   useEffect(() => {
     agentMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [agentMessages, isAgentResponding])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) return
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = "en-US"
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = ""
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (result.isFinal) {
+          finalTranscript += result[0]?.transcript || ""
+        }
+      }
+      if (finalTranscript.trim()) {
+        setNaturalLanguageQuery((prev) => {
+          const combined = prev ? `${prev} ${finalTranscript}` : finalTranscript
+          return combined.trim()
+        })
+      }
+    }
+
+    recognition.onerror = () => {
+      setIsVoiceListening(false)
+    }
+
+    recognition.onend = () => {
+      if (isVoiceListening) {
+        setIsVoiceListening(false)
+      }
+    }
+
+    recognitionRef.current = recognition
+    setVoiceSupported(true)
+    return () => {
+      recognition.stop()
+      recognitionRef.current = null
+    }
+  }, [])
 
   // Check Gmail & LinkedIn connection status on mount
   useEffect(() => {
@@ -622,6 +694,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     setHasSearched(Boolean(session.hasSearched))
     // Load suggested prompts from saved session
     setSuggestedPrompts(session.suggestedPrompts || [])
+    setAgentMessages(Array.isArray(session.messages) ? session.messages : [])
   }
 
   useEffect(() => {
@@ -1084,7 +1157,10 @@ const syncChatWithServer = async (session: ChatSession) => {
     return extractedFilters
   }
 
-  const handleClarifyFilters = async () => {
+  const handleClarifyFilters = async (
+    overrideFilters?: Record<string, any>,
+    overrideIntent?: "business" | "prospect"
+  ) => {
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
     const trimmedQuery = naturalLanguageQuery.trim()
     if (!trimmedQuery) return
@@ -1100,8 +1176,9 @@ const syncChatWithServer = async (session: ChatSession) => {
     console.log('[AI Search] Parsing query with LLM:', trimmedQuery)
 
     // Use LLM to extract intent + filters, with client-side as fallback
-    let searchIntent: "business" | "prospect" = detectIntent(trimmedQuery)
-    let extractedFilters = extractFiltersFromQuery(trimmedQuery)
+    let searchIntent: "business" | "prospect" = overrideIntent || detectIntent(trimmedQuery)
+    let extractedFilters = overrideFilters ?? extractFiltersFromQuery(trimmedQuery)
+    setLatestExtractedFilters(extractedFilters)
 
     try {
       const parseRes = await fetch(`${API}/api/chat/parse-query`, {
@@ -1607,6 +1684,84 @@ const syncChatWithServer = async (session: ChatSession) => {
 
     // Otherwise → existing clarify-then-search flow
     await handleClarifyFilters()
+  }
+
+  const inferIntentFromFilters = (filters: Record<string, any>): "business" | "prospect" => {
+    const prospectIndicators = ["current_title", "past_title", "function", "seniority_level", "keyword", "company"]
+    return prospectIndicators.some((key) => filters[key]) ? "prospect" : "business"
+  }
+
+  const handleImportedFilters = async (records: Record<string, string>[]) => {
+    if (!records.length) {
+      toast({
+        title: "No filters found",
+        description: "CSV should contain at least one row with filter columns.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const normalized = normalizeCsvRecord(records[0])
+    if (Object.keys(normalized).length === 0) {
+      toast({
+        title: "Empty filter row",
+        description: "Please map columns to search filters before importing.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const inferredIntent = inferIntentFromFilters(normalized)
+    setIntent(inferredIntent)
+    setNaturalLanguageQuery("Imported filters")
+    setLatestExtractedFilters(normalized)
+    setClarification("Running search with imported filters...")
+    setIsImportingFilters(true)
+
+    try {
+      await handleClarifyFilters(normalized, inferredIntent)
+    } finally {
+      setIsImportingFilters(false)
+    }
+  }
+
+  const handleGenerateLeadList = (prompt?: string) => {
+    const fromLibrary = PROMPT_LIBRARY[0]?.prompt
+    const query = prompt || fromLibrary || naturalLanguageQuery
+    setNaturalLanguageQuery(query)
+    handleNaturalSearch()
+  }
+
+  const handleSummarizeResults = () => {
+    if (!results.length) {
+      toast({
+        title: "No results yet",
+        description: "Run a search before requesting a summary.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    handleSuggestedPrompt("Summarize the key insights from these results and highlight what makes each company/prospect interesting.")
+  }
+
+  const toggleVoiceListening = () => {
+    if (!voiceSupported || !recognitionRef.current) {
+      toast({
+        title: "Voice not supported",
+        description: "Your browser does not support voice input.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (isVoiceListening) {
+      recognitionRef.current.stop()
+      setIsVoiceListening(false)
+    } else {
+      recognitionRef.current.start()
+      setIsVoiceListening(true)
+    }
   }
 
   /**
@@ -2193,7 +2348,54 @@ const syncChatWithServer = async (session: ChatSession) => {
                 rows={2}
                 className="resize-none"
               />
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon">
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onSelect={() => handleGenerateLeadList()}>
+                      <Sparkles className="mr-2 h-4 w-4 text-purple-500" /> Generate leads
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleSummarizeResults}>
+                      <Library className="mr-2 h-4 w-4 text-foreground" /> Summarize results
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleGenerateCampaign}>
+                      <Mail className="mr-2 h-4 w-4 text-foreground" /> Draft campaign
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => handleDetectSignals(results, intent)}>
+                      <Zap className="mr-2 h-4 w-4 text-yellow-500" /> Detect signals
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <div className="w-full">
+                        <CsvImportButton
+                          label="Import CSV filters"
+                          onRecordsParsed={handleImportedFilters}
+                          className="w-full justify-start text-left"
+                        />
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={toggleVoiceListening}>
+                      {isVoiceListening ? (
+                        <>
+                          <MicOff className="mr-2 h-4 w-4 text-red-500" />
+                          Stop voice input
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="mr-2 h-4 w-4 text-green-500" />
+                          Voice mode
+                        </>
+                      )}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {isImportingFilters && (
+                  <span className="text-xs text-muted-foreground">Applying imported filters...</span>
+                )}
                 <Button
                   onClick={handleNaturalSearch}
                   disabled={isSearching || isAgentResponding || !naturalLanguageQuery.trim()}

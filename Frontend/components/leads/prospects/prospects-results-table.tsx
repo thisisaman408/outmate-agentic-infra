@@ -21,7 +21,8 @@ interface ProspectsResultsTableProps {
     onLoadMore?: () => void
     isLoadingMore?: boolean
     enableContactReveal?: boolean
-    onEnrichReveal?: (linkedinUrl: string, field: 'email' | 'phone') => void
+    onEnrichReveal?: (profile: ProspectProfile, field: 'email' | 'phone') => void
+    onWaterfallResult?: (linkedinUrl: string, field: 'email' | 'phone', result: any) => void
     enrichCache?: Record<string, { email?: any, phone?: any }>
 }
 
@@ -35,8 +36,17 @@ export function ProspectsResultsTable({
     isLoadingMore = false,
     enableContactReveal = false,
     onEnrichReveal,
+    onWaterfallResult,
     enrichCache,
 }: ProspectsResultsTableProps) {
+    const CONTACTOUT_EMAIL_COST = 1
+    const CONTACTOUT_PHONE_COST = 1
+    const formatCreditsLabel = (value?: number, fallback = "~1 credit") => {
+        if (typeof value === "number") {
+            return `${value} credit${value === 1 ? "" : "s"}`
+        }
+        return fallback
+    }
     // Support both 'profiles' and 'data' props for compatibility
     const actualProfiles = profiles || data || []
     
@@ -93,6 +103,45 @@ export function ProspectsResultsTable({
             if (labelYears > 0) total += labelYears
         }
         return formatExperienceFromYears(total)
+    }
+
+    const estimateExperienceYears = (profile: ProspectProfile): number => {
+        const raw = ((profile as any).raw_data && typeof (profile as any).raw_data === "object")
+            ? (profile as any).raw_data
+            : (((profile as any).rawData && typeof (profile as any).rawData === "object") ? (profile as any).rawData : {})
+
+        const employers = [
+            ...(Array.isArray(profile.current_employers) ? profile.current_employers : []),
+            ...(Array.isArray(profile.past_employers) ? profile.past_employers : []),
+            ...(Array.isArray(raw?.current_employers) ? raw.current_employers : []),
+            ...(Array.isArray(raw?.past_employers) ? raw.past_employers : []),
+        ]
+
+        let total = 0
+        for (const emp of employers) {
+            const rawYears = parseYears(emp?.years_at_company_raw)
+            if (rawYears > 0) {
+                total += rawYears
+                continue
+            }
+            const labelYears = parseYears(emp?.years_at_company)
+            if (labelYears > 0) total += labelYears
+        }
+        return total
+    }
+
+    const computeConfidence = (profile: ProspectProfile): number => {
+        const raw = (profile as any).raw_data ?? ((profile as any).rawData && typeof (profile as any).rawData === "object" ? (profile as any).rawData : {})
+        const baseQuality = Number(
+            profile.data_quality_score ??
+            raw?.quality_score ??
+            raw?.confidence ??
+            50
+        ) || 50
+        const experienceBoost = Math.min(10, estimateExperienceYears(profile) / 2)
+        const connectionBoost = Math.min(10, (Number(profile.num_of_connections) || 0) / 500)
+        const computed = (baseQuality * 0.7) + (experienceBoost * 2) + connectionBoost
+        return Math.max(0, Math.min(100, Math.round(computed)))
     }
     const getStableId = (profile: ProspectProfile, idx: number): string => {
         return String(
@@ -179,79 +228,111 @@ export function ProspectsResultsTable({
         ]
         return sanitizePhones(candidates)
     }
-    const revealContact = async (rowId: string, profile: ProspectProfile) => {
 
-        const existingEmails = getExistingEmails(profile as any)
-        const existingPhones = getExistingPhones(profile as any)
-        if (existingEmails.length > 0 || existingPhones.length > 0) {
-            setContactCache((prev) => ({ ...prev, [rowId]: { emails: existingEmails, phones: existingPhones } }))
-            return
+    const updateCacheEntry = (
+        rowId: string,
+        updates: Partial<{ emails: string[]; phones: string[]; loading?: boolean }>
+    ) => {
+        setContactCache((prev) => {
+            const existing = prev[rowId] || { emails: [], phones: [] }
+            return {
+                ...prev,
+                [rowId]: {
+                    ...existing,
+                    ...updates,
+                },
+            }
+        })
+    }
+
+    const setCacheField = (rowId: string, field: "email" | "phone", values: string[], loading = false) => {
+        const updates: Partial<{ emails: string[]; phones: string[]; loading?: boolean }> = {
+            loading,
         }
-
+        if (field === "email") updates.emails = values
+        else updates.phones = values
+        updateCacheEntry(rowId, updates)
+    }
+    const revealContact = async (rowId: string, profile: ProspectProfile, field: "email" | "phone") => {
         if (!enableContactReveal) return
+
         const linkedinUrl = profile.flagship_profile_url || profile.linkedin_profile_url
         if (!linkedinUrl) return
 
-        setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: true } }))
-        try {
-            let safeEmails: string[] = []
-            let safePhones: string[] = []
-
-            // Step 1: Try existing reveal API (ContactOut/CrustData)
-            try {
-                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ linkedin_url: linkedinUrl }),
-                })
-                if (response.ok) {
-                    const payload = await response.json()
-                    safeEmails = sanitizeEmails(Array.isArray(payload?.emails) ? payload.emails : [])
-                    safePhones = sanitizePhones(Array.isArray(payload?.phones) ? payload.phones : [])
-                }
-            } catch {
-                // Primary reveal failed, continue to fallback
-            }
-
-            // Step 2: If no email or phone found, try BetterContact waterfall
-            if (safeEmails.length === 0 && safePhones.length === 0) {
-                try {
-                    const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
-                    const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
-                    const employer = profile.current_employers?.[0]
-                    const companyName = employer?.name || ""
-                    const companyDomain = employer?.company_website_domain || ""
-
-                    const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/bettercontact/enrich-prospect`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            first_name: firstName,
-                            last_name: lastName,
-                            company_name: companyName,
-                            company_domain: companyDomain,
-                            linkedin_url: linkedinUrl,
-                        }),
-                    })
-                    if (bcRes.ok) {
-                        const bcData = await bcRes.json()
-                        if (bcData.success && !bcData.not_found) {
-                            if (bcData.email) safeEmails = sanitizeEmails([bcData.email])
-                            if (bcData.phone) safePhones = sanitizePhones([bcData.phone])
-                        }
-                    }
-                } catch {
-                    // BetterContact fallback also failed
-                }
-            }
-
-            setContactCache((prev) => ({
-                ...prev,
-                [rowId]: { emails: safeEmails, phones: safePhones, loading: false },
-            }))
-        } catch {
-            setContactCache((prev) => ({ ...prev, [rowId]: { emails: [], phones: [], loading: false } }))
+        const existingValues = field === "email" ? getExistingEmails(profile as any) : getExistingPhones(profile as any)
+        if (existingValues.length > 0) {
+            setCacheField(rowId, field, existingValues, false)
+            return
         }
+
+        setCacheField(rowId, field, [], true)
+        let fieldValues: string[] = []
+
+        try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ linkedin_url: linkedinUrl }),
+            })
+            if (response.ok) {
+                const payload = await response.json()
+                fieldValues = field === "email"
+                    ? sanitizeEmails(Array.isArray(payload?.emails) ? payload.emails : [])
+                    : sanitizePhones(Array.isArray(payload?.phones) ? payload.phones : [])
+            }
+        } catch {
+            // ContactOut reveal failed, continue to fallback
+        }
+
+        if (fieldValues.length > 0) {
+            setCacheField(rowId, field, fieldValues, false)
+            return
+        }
+
+        const callBetterContact = async () => {
+            const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
+            const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
+            const employer = profile.current_employers?.[0]
+            const companyName = employer?.name || ""
+            const companyDomain = employer?.company_website_domain || ""
+
+            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/bettercontact/enrich-prospect`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    first_name: firstName,
+                    last_name: lastName,
+                    company_name: companyName,
+                    company_domain: companyDomain,
+                    linkedin_url: linkedinUrl,
+                    field,
+                }),
+            })
+            return bcRes.ok ? await bcRes.json() : null
+        }
+
+        try {
+            const bcData = await callBetterContact()
+            const fallbackValue = field === "email" ? bcData?.email : bcData?.phone
+            const sanitized = field === "email"
+                ? sanitizeEmails(fallbackValue ? [fallbackValue] : [])
+                : sanitizePhones(fallbackValue ? [fallbackValue] : [])
+
+            if (sanitized.length > 0) {
+                setCacheField(rowId, field, sanitized, false)
+            } else {
+                updateCacheEntry(rowId, { loading: false })
+            }
+
+            if (bcData) {
+                onWaterfallResult?.(linkedinUrl, field, bcData)
+            }
+            return
+        } catch {
+            // BetterContact fallback failed
+        }
+
+        updateCacheEntry(rowId, { loading: false })
     }
 
     // Filter profiles by search term
@@ -347,6 +428,7 @@ export function ProspectsResultsTable({
                                 const initials = getInitials(displayName)
                                 const stableId = getStableId(prospect, idx)
                                 const rowKey = `${stableId}-${idx}`
+                                const contactKey = prospect.linkedin_profile_url || prospect.flagship_profile_url || rowKey
                                 const isEmailRevealed = Boolean(revealedEmail[rowKey])
                                 const isPhoneRevealed = Boolean(revealedPhone[rowKey])
                                 const cache = contactCache[rowKey]
@@ -354,6 +436,9 @@ export function ProspectsResultsTable({
                                 const localPhones = getExistingPhones(prospect as any)
                                 const emails = (cache?.emails && cache.emails.length > 0) ? cache.emails : localEmails
                                 const phones = (cache?.phones && cache.phones.length > 0) ? cache.phones : localPhones
+                                const waterfallEmail = enrichCache?.[contactKey]?.email
+                                const waterfallPhone = enrichCache?.[contactKey]?.phone
+                                const profileConfidence = computeConfidence(prospect)
 
                                 return (
                                     <TableRow
@@ -382,6 +467,9 @@ export function ProspectsResultsTable({
                                                 </span>
                                                 <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                                     {(Number(prospect.num_of_connections) || 0).toLocaleString()} connections
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground">
+                                                    Confidence Score: {profileConfidence}%
                                                 </span>
                                             </div>
                                         </TableCell>
@@ -430,41 +518,50 @@ export function ProspectsResultsTable({
                                             <TableCell onClick={(e) => e.stopPropagation()}>
                                                 {!isEmailRevealed ? (
                                                     <>
-                                                        <Button
-                                                            variant="secondary"
-                                                            size="sm"
-                                                            className="h-7 text-[11px]"
-                                                            onClick={async () => {
-                                                                setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
-                                                                await revealContact(rowKey, prospect)
-                                                            }}
-                                                        >
-                                                            <Lock className="h-3 w-3 mr-1" />
-                                                            Tap to Reveal
-                                                        </Button>
-                                                        {/* Waterfall enrichment icon */}
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600 ml-1"
-                                                            onClick={async () => {
-                                                                setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
-                                                                console.log('Email Zap clicked, calling onEnrichReveal for:', prospect.linkedin_profile_url || prospect.flagship_profile_url || "")
-                                                                onEnrichReveal?.(rowKey, 'email')
-                                                            }}
-                                                            title="Enrich with waterfall (BetterContact)"
-                                                        >
-                                                            <Zap className="h-3 w-3" />
-                                                        </Button>
+                                                        <div className="flex items-center gap-1">
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="sm"
+                                                                className="h-7 text-[11px]"
+                                                                onClick={async () => {
+                                                                    setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
+                                                                    await revealContact(rowKey, prospect, "email")
+                                                                }}
+                                                            >
+                                                                <Lock className="h-3 w-3 mr-1" />
+                                                                Tap to Reveal
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
+                                                                onClick={async () => {
+                                                                    setRevealedEmail((prev) => ({ ...prev, [rowKey]: true }))
+                                                                    onEnrichReveal?.(prospect, "email")
+                                                                }}
+                                                                title={`Waterfall zap: ${formatCreditsLabel(waterfallEmail?.credits_consumed)}`}
+                                                            >
+                                                                <Zap className="h-3 w-3" />
+                                                            </Button>
+                                                        </div>
+                                                        <div className="text-[10px] text-muted-foreground mt-1 space-x-3">
+                                                            <span>Reveal cost: {formatCreditsLabel(CONTACTOUT_EMAIL_COST)}</span>
+                                                            <span>Waterfall zap: {formatCreditsLabel(waterfallEmail?.credits_consumed)}</span>
+                                                        </div>
                                                     </>
                                                 ) : cache?.loading ? (
                                                     <span className="text-xs text-muted-foreground">Loading...</span>
-                                                ) : enrichCache?.[rowKey]?.email ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-xs break-all ${!enrichCache[rowKey].email?.email ? 'text-muted-foreground italic' : ''}`}>
-                                                            {enrichCache[rowKey].email?.email || 'Not available'}
+                                                ) : waterfallEmail ? (
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-xs break-all ${!waterfallEmail?.email ? "text-muted-foreground italic" : ""}`}>
+                                                                {waterfallEmail?.email || "Not available"}
+                                                            </span>
+                                                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            Cost: {formatCreditsLabel(waterfallEmail?.credits_consumed, "~1 credit")}
                                                         </span>
-                                                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
                                                     </div>
                                                 ) : emails.length > 0 ? (
                                                     <span className="text-xs break-all">{emails[0]}</span>
@@ -476,70 +573,78 @@ export function ProspectsResultsTable({
 
                                         {enableContactReveal && (
                                             <TableCell onClick={(e) => e.stopPropagation()}>
-                                                <div className="flex items-center gap-2">
-                                                    {!isPhoneRevealed ? (
-                                                        <>
+                                                {!isPhoneRevealed ? (
+                                                    <>
+                                                        <div className="flex items-center gap-1">
                                                             <Button
                                                                 variant="secondary"
                                                                 size="sm"
                                                                 className="h-7 text-[11px]"
                                                                 onClick={async () => {
                                                                     setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
-                                                                    await revealContact(rowKey, prospect)
+                                                                    await revealContact(rowKey, prospect, "phone")
                                                                 }}
                                                             >
                                                                 <Lock className="h-3 w-3 mr-1" />
                                                                 Tap to Reveal
                                                             </Button>
-                                                            {/* Waterfall enrichment icon */}
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"
                                                                 className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
                                                                 onClick={async () => {
                                                                     setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
-                                                                    onEnrichReveal?.(prospect.linkedin_profile_url || prospect.flagship_profile_url || "", 'phone')
+                                                                    onEnrichReveal?.(prospect, "phone")
                                                                 }}
-                                                                title="Enrich with waterfall (BetterContact)"
+                                                                title={`Waterfall zap: ${formatCreditsLabel(waterfallPhone?.credits_consumed)}`}
                                                             >
                                                                 <Zap className="h-3 w-3" />
                                                             </Button>
-                                                        </>
-                                                    ) : enrichCache?.[rowKey]?.phone ? (
+                                                        </div>
+                                                        <div className="text-[10px] text-muted-foreground mt-1 space-x-3">
+                                                            <span>Reveal cost: {formatCreditsLabel(CONTACTOUT_PHONE_COST)}</span>
+                                                            <span>Waterfall zap: {formatCreditsLabel(waterfallPhone?.credits_consumed)}</span>
+                                                        </div>
+                                                    </>
+                                                ) : waterfallPhone ? (
+                                                    <div className="flex flex-col gap-1">
                                                         <div className="flex items-center gap-2">
-                                                            <span className={`text-xs ${!enrichCache[rowKey].phone?.phone ? 'text-muted-foreground italic' : ''}`}>
-                                                                {enrichCache[rowKey].phone?.phone || 'Not available'}
+                                                            <span className={`text-xs ${!waterfallPhone?.phone ? "text-muted-foreground italic" : ""}`}>
+                                                                {waterfallPhone?.phone || "Not available"}
                                                             </span>
                                                             <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
                                                         </div>
-                                                    ) : cache?.loading ? (
-                                                        <div className="flex items-center gap-2">
-                                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                                            <span className="text-xs text-muted-foreground">Enriching...</span>
-                                                        </div>
-                                                    ) : phones.length > 0 ? (
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-xs">{phones[0]}</span>
-                                                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-xs text-muted-foreground">Not found</span>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                className="h-6 w-6 p-0 text-orange-500 hover:text-orange-600"
-                                                                onClick={async () => {
-                                                                    setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
-                                                                    await revealContact(rowKey, prospect)
-                                                                }}
-                                                                title="Retry waterfall enrichment"
-                                                            >
-                                                                <Zap className="h-3 w-3" />
-                                                            </Button>
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            Cost: {formatCreditsLabel(waterfallPhone?.credits_consumed, "~1 credit")}
+                                                        </span>
+                                                    </div>
+                                                ) : cache?.loading ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                        <span className="text-xs text-muted-foreground">Enriching...</span>
+                                                    </div>
+                                                ) : phones.length > 0 ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs">{phones[0]}</span>
+                                                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs text-muted-foreground">Not found</span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-6 w-6 p-0 text-orange-500 hover:text-orange-600"
+                                                            onClick={async () => {
+                                                                setRevealedPhone((prev) => ({ ...prev, [rowKey]: true }))
+                                                                await revealContact(rowKey, prospect, "phone")
+                                                            }}
+                                                            title="Retry waterfall enrichment"
+                                                        >
+                                                            <Zap className="h-3 w-3" />
+                                                        </Button>
+                                                    </div>
+                                                )}
                                             </TableCell>
                                         )}
 

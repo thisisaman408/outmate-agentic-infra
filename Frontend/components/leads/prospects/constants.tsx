@@ -160,7 +160,8 @@ export const ALL_FILTERS: FilterConfig[] = [
         type: "text",
         category: "Job & Role (Professional Info)",
         icon: Hash,
-        placeholder: "Search keywords..."
+        placeholder: "Search keywords...",
+        requiresPro: true
     },
     // People Lookalikes
     {
@@ -326,7 +327,8 @@ export const ALL_FILTERS: FilterConfig[] = [
         type: "technology",
         category: "Company Criteria",
         icon: Monitor,
-        placeholder: "Search technologies..."
+        placeholder: "Search technologies...",
+        requiresPro: true
     },
     // Revenue
     {
@@ -335,6 +337,7 @@ export const ALL_FILTERS: FilterConfig[] = [
         type: "select",
         category: "Company Criteria",
         icon: DollarSign,
+        requiresPro: true,
         options: [
             { label: "$0 - $1M", value: "0-1M" },
             { label: "$1M - $10M", value: "1M-10M" },
@@ -343,13 +346,13 @@ export const ALL_FILTERS: FilterConfig[] = [
             { label: "$100M+", value: "100M+" }
         ]
     },
-    // Funding
     {
         id: "funding",
         label: "Funding",
         type: "multi-select",
         category: "Company Criteria",
         icon: TrendingUp,
+        requiresPro: true,
         options: [
             { label: "Any", value: "" },
             { label: "Seed", value: "seed" },
@@ -456,6 +459,7 @@ export const ALL_FILTERS: FilterConfig[] = [
         type: "range",
         category: "Experience & Education",
         icon: Clock,
+        requiresPro: true,
         options: [
             { label: "Less than 1 year", value: "less_than_1_year" },
             { label: "1 to 2 years", value: "1_to_2_years" },

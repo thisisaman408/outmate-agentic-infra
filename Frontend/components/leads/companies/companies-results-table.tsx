@@ -41,6 +41,16 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip"
 
+const CONTACTOUT_EMAIL_COST = 1
+const CONTACTOUT_PHONE_COST = 1
+
+const formatCreditsLabel = (value?: number, fallback = "~1 credit") => {
+    if (typeof value === "number") {
+        return `${value} credit${value === 1 ? "" : "s"}`
+    }
+    return fallback
+}
+
 // Complete company data interface matching all backend columns
 export interface CompanyData {
     id: string
@@ -206,6 +216,7 @@ interface CompaniesResultsTableProps {
     hasSearched: boolean
     onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void
     enrichCache?: Record<string, { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean }>
+    waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
 }
 
 // Format utilities
@@ -244,7 +255,8 @@ const RenderCell = ({
     enrichData,
     onEnrichReveal,
     contactCache,
-    onContactReveal
+    onContactReveal,
+    waterfallAttempts
 }: {
     column: ColumnConfig,
     company: CompanyData,
@@ -252,8 +264,12 @@ const RenderCell = ({
     onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void,
     contactCache: Record<string, ContactCacheEntry>,
     onContactReveal?: (company: CompanyData, field: 'email' | 'phone') => Promise<void>
+    waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
 }) => {
-    const value = (company as any)[column.key]
+        const value = (company as any)[column.key]
+        const companyConfidence = typeof company.data_quality_score === 'number'
+            ? Math.max(0, Math.min(100, Math.round(company.data_quality_score)))
+            : undefined
 
     // Revealable Contact Info (Phone/Email)
     if (column.key.toString().toLowerCase().includes('phone') ||
@@ -268,15 +284,28 @@ const RenderCell = ({
         const isLoadingContact = isPhoneCol ? cacheEntry.loadingPhone : cacheEntry.loadingEmail
         const companyId = company.domain || company.id
         const fallbackValue = value ? (Array.isArray(value) ? value.join(', ') : value) : null
-        const enrichedValue = isPhoneCol ? enrichData?.phone : isEmailCol ? enrichData?.email : undefined
+        const waterfallField = isPhoneCol ? enrichData?.phone : isEmailCol ? enrichData?.email : undefined
+        const waterfallValue = waterfallField
+            ? typeof waterfallField === 'object'
+                ? (waterfallField.email || waterfallField.phone || waterfallField.value || '')
+                : String(waterfallField)
+            : undefined
+        const waterfallCredits = typeof waterfallField === 'object' ? waterfallField.credits_consumed : undefined
         const contactAttempted = isEmailCol ? cacheEntry.attemptedEmail : cacheEntry.attemptedPhone
-        const showRevealControls = !enrichedValue && !contactValue && !isLoadingContact
+        const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact
+        const attemptRecord = waterfallAttempts?.[companyId] || {}
+        const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
         const attemptMessage = isEmailCol ? "Email not available via ContactOut" : "Phone not available via ContactOut"
+        const iconColorClass = waterfallValue
+            ? "text-emerald-500 hover:text-emerald-600"
+            : attemptedWaterfall
+                ? "text-orange-500 hover:text-orange-600"
+                : "text-blue-500 hover:text-blue-600"
 
         return (
             <div className="flex items-center gap-2">
                 {/* Existing company data */}
-                {fallbackValue && !enrichedValue && !contactValue && (
+                {fallbackValue && !waterfallValue && !contactValue && (
                     <div className="flex items-center gap-2">
                         <span className="text-xs">
                             {fallbackValue}
@@ -286,7 +315,7 @@ const RenderCell = ({
                 )}
 
                 {/* ContactOut result */}
-                {contactValue && !enrichedValue && (
+                {contactValue && !waterfallValue && (
                     <div className="flex items-center gap-2">
                         <span className="text-xs break-all">
                             {contactValue}
@@ -296,10 +325,10 @@ const RenderCell = ({
                 )}
 
                 {/* Enriched data */}
-                {typeof enrichedValue !== 'undefined' && (
+                {typeof waterfallValue !== 'undefined' && (
                     <div className="flex items-center gap-2">
-                        <span className={`text-xs ${!enrichedValue ? 'text-muted-foreground italic' : ''}`}>
-                            {enrichedValue || 'Not available'}
+                        <span className={`text-xs ${!waterfallValue ? 'text-muted-foreground italic' : ''}`}>
+                            {waterfallValue || 'Not available'}
                         </span>
                         <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
                     </div>
@@ -334,12 +363,12 @@ const RenderCell = ({
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600 ml-1"
+                                className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                                 onClick={(e) => {
                                     e.stopPropagation()
                                     onEnrichReveal?.(companyId, field)
                                 }}
-                                title="Enrich with waterfall (BetterContact)"
+                                title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
                             >
                                 <Zap className="h-3 w-3" />
                             </Button>
@@ -357,27 +386,27 @@ const RenderCell = ({
                                 disabled={!company.linkedin_url}
                             >
                                 <Lock className="h-3 w-3 mr-1" />
-                                Tap to Reveal
+                                Tap to Reveal · {field === "email" ? formatCreditsLabel(CONTACTOUT_EMAIL_COST) : formatCreditsLabel(CONTACTOUT_PHONE_COST)}
                             </Button>
                             {/* Waterfall enrichment icon */}
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600 ml-1"
+                                className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                                 onClick={(e) => {
                                     e.stopPropagation()
                                     onEnrichReveal?.(companyId, field)
                                 }}
-                                title="Enrich with waterfall (BetterContact)"
+                                title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
                             >
-                                <Zap className="h-3 w-3" />
-                            </Button>
+                            <Zap className="h-3 w-3" />
+                        </Button>
                         </>
                     )
                 )}
 
                 {/* Offer re-enrich option when contact data already present */}
-                {contactValue && !enrichedValue && (
+                {contactValue && !waterfallValue && (
                     <Button
                         variant="ghost"
                         size="sm"
@@ -427,6 +456,11 @@ const RenderCell = ({
                     <div className="flex flex-col">
                         <span className="font-medium truncate max-w-[150px]">{company.name}</span>
                         <span className="text-[10px] text-muted-foreground truncate max-w-[150px]">{company.domain}</span>
+                        {typeof companyConfidence === 'number' && (
+                            <span className="text-[10px] text-muted-foreground">
+                                Confidence Score: {companyConfidence}%
+                            </span>
+                        )}
                     </div>
                 </div>
             )
@@ -634,7 +668,14 @@ const RenderCell = ({
     }
 }
 
-export function CompaniesResultsTable({ companies = [], isLoading, hasSearched, onEnrichReveal, enrichCache = {} }: CompaniesResultsTableProps) {
+export function CompaniesResultsTable({
+    companies = [],
+    isLoading,
+    hasSearched,
+    onEnrichReveal,
+    enrichCache = {},
+    waterfallAttempts = {},
+}: CompaniesResultsTableProps) {
     const router = useRouter()
     const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS)
     const [currentPage, setCurrentPage] = useState(1)
@@ -928,6 +969,7 @@ export function CompaniesResultsTable({ companies = [], isLoading, hasSearched, 
                                             onEnrichReveal={onEnrichReveal}
                                             contactCache={contactCache}
                                             onContactReveal={handleContactReveal}
+                                            waterfallAttempts={waterfallAttempts}
                                         />
                                     </TableCell>
                                 ))}

@@ -13,6 +13,7 @@ import { FilterInputText } from "@/components/leads/companies/filters/filter-inp
 import { FilterInputMultiSelect } from "@/components/leads/companies/filters/filter-input-multi-select"
 import { FilterInputDualMode } from "@/components/leads/companies/filters/filter-input-dual-mode"
 import { FilterTagsDisplay } from "@/components/leads/companies/filters/filter-tags-display"
+import { ProFilterLock } from "@/components/leads/companies/filters/pro-filter-lock"
 
 interface AllFiltersViewProps {
     open: boolean
@@ -24,9 +25,11 @@ interface AllFiltersViewProps {
     onPinChange: (ids: string[]) => void
     filterOperators?: Record<string, 'in' | 'not_in'>
     onOperatorChange?: (filterId: string, operator: 'in' | 'not_in') => void
+    isPro?: boolean
+    onProFilterClick?: (label: string) => void
 }
 
-export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, onApply, pinnedFilters = [], onPinChange, filterOperators = {}, onOperatorChange }: AllFiltersViewProps) {
+export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, onApply, pinnedFilters = [], onPinChange, filterOperators = {}, onOperatorChange, isPro = false, onProFilterClick }: AllFiltersViewProps) {
     const [activeCategory, setActiveCategory] = React.useState<string>(FILTER_CATEGORIES[0])
     const [searchQuery, setSearchQuery] = React.useState("")
     // Local state to track changes before applying
@@ -43,6 +46,13 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
 
     const handleLocalFilterChange = (id: string, value: any) => {
         setLocalFilters(prev => ({ ...prev, [id]: value }))
+    }
+
+    const renderFilterControl = (filter: FilterConfig, value: any, operator: 'in' | 'not_in' = 'in') => {
+        if (filter.requiresPro && !isPro) {
+            return <ProFilterLock label={filter.label} onUpgrade={() => onProFilterClick?.(filter.label || filter.id)} />
+        }
+        return renderFilterInput(filter, value, (val) => handleLocalFilterChange(filter.id, val), operator, filter.supportsOperator)
     }
 
     const togglePin = (id: string) => {
@@ -148,7 +158,7 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
                                                     {categoryFilters.map(filter => (
                                                         <div key={filter.id} className="space-y-2">
                                                             <label className="text-sm font-medium text-foreground">{filter.label}</label>
-                                                            {renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val))}
+                                                            {renderFilterControl(filter, localFilters[filter.id], localOperators[filter.id] || 'in')}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -220,7 +230,7 @@ export function AllFiltersView({ open, onOpenChange, filters, onFilterChange, on
                                                             </Button>
                                                         </div>
                                                     )}
-                                                    {renderFilterInput(filter, localFilters[filter.id], (val) => handleLocalFilterChange(filter.id, val), localOperators[filter.id] || 'in', filter.supportsOperator)}
+                                                    {renderFilterControl(filter, localFilters[filter.id], localOperators[filter.id] || 'in')}
                                                 </div>
                                             ))}
                                             {(!filtersByCategory[activeCategory] || filtersByCategory[activeCategory].length === 0) && (

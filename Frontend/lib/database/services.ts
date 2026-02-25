@@ -62,6 +62,7 @@ export class CompanyService {
       // Add other known columns from payload
       for (const key of Object.keys(payload)) {
         if (key === 'domain') continue
+        if (key === 'id') continue
         if (this.companyColumns.has(key)) {
           insertCols.push(key)
           values.push(normalize(payload[key]))

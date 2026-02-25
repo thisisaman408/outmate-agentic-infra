@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { UserCircle, Download, Plus, Loader2, AlertCircle, AlertTriangle, Sparkles } from "lucide-react"
+import { CsvImportButton } from "@/components/shared/csv-import-button"
 import { FilterSidebar } from "@/components/leads/prospects/filter-sidebar"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import { searchProspects, ProspectProfile, ProspectSearchFilters } from "@/lib/services/prospectService"
@@ -13,11 +14,12 @@ import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHi
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 import { enrichProspect, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
 import { Zap } from "lucide-react"
+import { normalizeCsvRecord } from "@/lib/utils/csv"
 
 // IMPORTANT: Credit protection - limit results during testing
 const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
-const INITIAL_LIMIT = 10 // Results per search
-const LOAD_MORE_LIMIT = 10 // Results per "Load More" click
+const INITIAL_LIMIT = 3 // Results per search
+const LOAD_MORE_LIMIT = 3 // Results per "Load More" click
 
 export default function ProspectsPage() {
     const { toast } = useToast()
@@ -33,7 +35,8 @@ export default function ProspectsPage() {
     const [filterOperators, setFilterOperators] = useState<Record<string, 'in' | 'not_in'>>({
         seniority_level: 'in',  // Default to include
     })
-    const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
 
     // Enrichment state - field-specific like companies
     const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
@@ -41,13 +44,13 @@ export default function ProspectsPage() {
     const [isBulkEnriching, setIsBulkEnriching] = useState(false)
 
     // Export functionality
-    const handleExport = async () => {
-        if (profiles.length === 0) {
-            toast({
-                title: "No Data to Export",
-                description: "Please search for prospects first before exporting.",
-                variant: "destructive"
-            })
+  const handleExport = async () => {
+    if (profiles.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "Please search for prospects first before exporting.",
+        variant: "destructive"
+      })
             return
         }
 
@@ -98,8 +101,50 @@ export default function ProspectsPage() {
                 description: "Failed to export prospects. Please try again.",
                 variant: "destructive"
             })
-        }
     }
+  }
+
+  const handleProspectImport = async (records: Record<string, string>[]) => {
+    if (!records.length) {
+      toast({
+        title: "Empty file",
+        description: "CSV must include at least one row with filter columns.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const filters = normalizeCsvRecord(records[0])
+    setCurrentFilters(filters as ProspectSearchFilters)
+    setProfiles([])
+    setError(null)
+    setHasSearched(false)
+    setIsSearching(true)
+    setIsImporting(true)
+
+    try {
+      const response = await searchProspects({ ...filters, limit: INITIAL_LIMIT })
+      setProfiles(response.profiles)
+      setTotalCount(response.total_count)
+      setNextCursor(response.next_cursor)
+      setHasSearched(true)
+      toast({
+        title: "Import complete",
+        description: `Imported ${response.profiles.length} prospects from CSV filters.`
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to import CSV filters."
+      setError(message)
+      toast({
+        title: "Import failed",
+        description: message,
+        variant: "destructive"
+      })
+    } finally {
+      setIsSearching(false)
+      setIsImporting(false)
+    }
+  }
 
     // Restore search from history if historyId is in URL params
     useEffect(() => {
@@ -336,17 +381,11 @@ export default function ProspectsPage() {
     const enrichedCount = Object.values(enrichedData).filter(r => (r.email?.success && !r.email?.not_found) || (r.phone?.success && !r.phone?.not_found)).length
 
     // Field-specific enrichment handler
-    const onEnrichReveal = async (prospectId: string, field: 'email' | 'phone') => {
-        console.log('onEnrichReveal called with', prospectId, field)
-        const profile = profiles.find(p => p.linkedin_profile_url === prospectId || p.flagship_profile_url === prospectId)
-        if (!profile) {
-            console.log('No profile found for prospectId (linkedin url)', prospectId)
-            return
-        }
+    const onEnrichReveal = async (profile: ProspectProfile, field: 'email' | 'phone') => {
+        const linkedinKey = profile.linkedin_profile_url || profile.flagship_profile_url
+        if (!linkedinKey) return
 
-        const key = prospectId
-        const enrichmentKey = `${key}-${field}`
-
+        const enrichmentKey = `${linkedinKey}-${field}`
         if (enrichingRows[enrichmentKey]) return
 
         const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
@@ -354,19 +393,48 @@ export default function ProspectsPage() {
         const employer = profile.current_employers?.[0]
         const companyName = employer?.name || ""
         const companyDomain = employer?.company_website_domain || ""
-        const linkedinUrl = profile.linkedin_profile_url || profile.flagship_profile_url || ""
+        const linkedinUrl = linkedinKey
 
         setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
         const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinUrl, field)
-        console.log('enrichProspect result:', result)
         setEnrichedData(prev => ({
             ...prev,
-            [key]: {
-                email: field === 'email' ? result : prev[key]?.email,
-                phone: field === 'phone' ? result : prev[key]?.phone
-            }
+            [linkedinKey]: {
+                email: field === 'email' ? result : prev[linkedinKey]?.email,
+                phone: field === 'phone' ? result : prev[linkedinKey]?.phone,
+            },
         }))
         setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: false }))
+    }
+
+    const handleWaterfallResult = (linkedinUrl: string, field: 'email' | 'phone', result: Record<string, any>) => {
+        if (!linkedinUrl || !result) return
+        setEnrichedData(prev => {
+            const existing = prev[linkedinUrl] || {}
+            const updated = { ...existing }
+            if (result.email) {
+                updated.email = {
+                    email: result.email,
+                    credits_consumed: result.credits_consumed,
+                }
+            }
+            if (result.phone) {
+                updated.phone = {
+                    phone: result.phone,
+                    credits_consumed: result.credits_consumed,
+                }
+            }
+            if (!result.email && field === 'email') {
+                updated.email = result
+            }
+            if (!result.phone && field === 'phone') {
+                updated.phone = result
+            }
+            return {
+                ...prev,
+                [linkedinUrl]: updated,
+            }
+        })
     }
 
     return (
@@ -399,6 +467,8 @@ export default function ProspectsPage() {
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
+                            <CsvImportButton label="Import filters" onRecordsParsed={handleProspectImport} />
+                            {isImporting && <span className="text-xs text-muted-foreground">Applying filters...</span>}
                             {profiles.length > 0 && (
                                 <Button variant="outline" className="gap-2 bg-background" onClick={handleExport}>
                                     <Download className="h-4 w-4" />
@@ -463,6 +533,7 @@ export default function ProspectsPage() {
                             isLoadingMore={isLoadingMore}
                             enableContactReveal={true}
                             onEnrichReveal={onEnrichReveal}
+                            onWaterfallResult={handleWaterfallResult}
                             enrichCache={enrichedData}
                         />
                     ) : hasSearched ? (

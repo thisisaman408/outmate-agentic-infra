@@ -18,6 +18,7 @@ export const useStore = create<AppState>((set) => ({
     name: "Demo User",
     workspace: "Main Workspace",
     credits: 1000,
+    plan: "basic",
   },
   isAuthenticated: true,
   sidebarCollapsed: false,

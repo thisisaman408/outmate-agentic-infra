@@ -58,8 +58,8 @@ class BetterContactService:
 
         payload = {
             "data": [contact],
-            "enrich_email": field == "email" or field not in ("email", "phone"),
-            "enrich_phone": field == "phone" or field not in ("email", "phone"),
+            "enrich_email": True,
+            "enrich_phone": True,
         }
 
         try:
@@ -101,14 +101,33 @@ class BetterContactService:
                         data_list = poll_data.get("data", [])
                         if data_list and len(data_list) > 0:
                             enriched = data_list[0]
+                            email = enriched.get("contact_email_address") or ""
+                            phone = enriched.get("contact_phone_number") or enriched.get("contact_mobile_phone") or ""
+                            if not email and not phone:
+                                logger.info("BetterContact async returned empty contact, running prospect fallback",
+                                            extra={"name": f"{first_name} {last_name}", "company": company_name})
+                                fallback = await self.enrich_prospect(
+                                    first_name=first_name,
+                                    last_name=last_name,
+                                    company_name=company_name,
+                                    company_domain=company_domain,
+                                    linkedin_url=linkedin_url,
+                                )
+                                email = fallback.get("email") or ""
+                                phone = fallback.get("phone") or ""
+                                credits_consumed = fallback.get("credits_consumed", 0) or poll_data.get("credits_consumed", 0)
+                                credits_left = fallback.get("credits_left", 0) or poll_data.get("credits_left", 0)
+                            else:
+                                credits_consumed = poll_data.get("credits_consumed", 0)
+                                credits_left = poll_data.get("credits_left", 0)
                             return {
                                 "success": True,
-                                "email": enriched.get("contact_email_address") or "",
+                                "email": email,
                                 "email_status": enriched.get("contact_email_address_status") or "",
-                                "phone": enriched.get("contact_phone_number") or enriched.get("contact_mobile_phone") or "",
+                                "phone": phone,
                                 "email_provider": enriched.get("email_provider") or "",
-                                "credits_consumed": poll_data.get("credits_consumed", 0),
-                                "credits_left": poll_data.get("credits_left", 0),
+                                "credits_consumed": credits_consumed,
+                                "credits_left": credits_left,
                             }
                         return {"success": True, "email": "", "phone": "", "not_found": True}
 
@@ -138,16 +157,50 @@ class BetterContactService:
             return {"success": False, "error": "BETTERCONTACT_API_KEY not set"}
 
         # Use lead_finder to find contacts at this company
+        JOB_TITLE_CANDIDATES = [
+            "CEO",
+            "Chief Executive Officer",
+            "Founder",
+            "Co-Founder",
+            "President",
+            "Managing Director",
+            "Chief Revenue Officer",
+            "Chief Growth Officer",
+            "Vice President",
+            "Head of Sales",
+            "Director of Sales",
+            "Sales Leader"
+        ]
+
         payload = {
             "filters": {
                 "company": {
                     "include": [company_domain] if company_domain else [company_name]
                 },
                 "lead_seniority": {
-                    "include": ["c_suite", "vp", "director", "head", "owner", "founder"]
+                    "include": [
+                        "c_suite",
+                        "vp",
+                        "director",
+                        "owner",
+                        "founder",
+                        "head"
+                    ]
+                },
+                "lead_job_title": {
+                    "include": JOB_TITLE_CANDIDATES,
+                    "exact_match": False
+                },
+                "lead_function": {
+                    "include": ["sales", "revenue", "growth"],
+                    "exclude": []
+                },
+                "lead_department": {
+                    "include": ["sales", "business development"],
+                    "exclude": []
                 }
             },
-            "max_leads": 1,
+            "max_leads": 3,
         }
 
         try:
@@ -190,16 +243,53 @@ class BetterContactService:
                         leads = poll_data.get("leads", [])
                         logger.info(f"BetterContact lead_finder terminated: found {len(leads)} leads")
                         if leads and len(leads) > 0:
-                            lead = leads[0]
+                            lead = next((l for l in leads if l.get("contact_email_address") or l.get("contact_phone_number") or l.get("contact_mobile_phone")), leads[0])
+                            contact_email = lead.get("contact_email_address") or ""
+                            contact_phone = lead.get("contact_phone_number") or lead.get("contact_mobile_phone") or ""
+                            if not contact_email and not contact_phone:
+                                logger.info("BetterContact lead lacks email+phone, invoking prospect fallback",
+                                            extra={"lead_id": lead.get("contact_id"), "company": company_name})
+                                prospect_first_name = lead.get("contact_first_name") or ""
+                                prospect_last_name = lead.get("contact_last_name") or ""
+                                if not prospect_first_name and not prospect_last_name:
+                                    full_name = lead.get("contact_full_name", "") or ""
+                                    name_parts = [p for p in full_name.split() if p]
+                                    if name_parts:
+                                        prospect_first_name = name_parts[0]
+                                        prospect_last_name = name_parts[-1] if len(name_parts) > 1 else ""
+                                    else:
+                                        prospect_first_name = company_name
+                                prospect_result = await self.enrich_prospect(
+                                    first_name=prospect_first_name,
+                                    last_name=prospect_last_name,
+                                    company_name=company_name,
+                                    company_domain=company_domain,
+                                    linkedin_url=lead.get("contact_linkedin_profile_url", ""),
+                                )
+                                logger.info("BetterContact prospect fallback result triggered",
+                                            extra={
+                                                "lead_id": lead.get("contact_id"),
+                                                "company": company_name,
+                                                "email": prospect_result.get("email"),
+                                                "phone": prospect_result.get("phone"),
+                                            })
+                                contact_email = prospect_result.get("email") or ""
+                                if not contact_phone:
+                                    contact_phone = prospect_result.get("phone") or ""
+                                credits_consumed = prospect_result.get("credits_consumed") or poll_data.get("credits_consumed", 0)
+                                credits_left = prospect_result.get("credits_left") or poll_data.get("credits_left", 0)
+                            else:
+                                credits_consumed = poll_data.get("credits_consumed", 0)
+                                credits_left = poll_data.get("credits_left", 0)
                             return {
                                 "success": True,
                                 "contact_name": lead.get("contact_full_name") or "",
                                 "contact_title": lead.get("contact_job_title") or "",
-                                "email": lead.get("contact_email_address") or "",
-                                "phone": lead.get("contact_phone_number") or lead.get("contact_mobile_phone") or "",
+                                "email": contact_email,
+                                "phone": contact_phone,
                                 "linkedin_url": lead.get("contact_linkedin_url") or "",
-                                "credits_consumed": poll_data.get("credits_consumed", 0),
-                                "credits_left": poll_data.get("credits_left", 0),
+                                "credits_consumed": credits_consumed,
+                                "credits_left": credits_left,
                             }
                         return {"success": True, "email": "", "phone": "", "not_found": True}
 
