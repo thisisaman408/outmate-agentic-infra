@@ -50,7 +50,14 @@ export const signalsApi = {
       body: JSON.stringify({ action }),
     })
     if (!response.ok) {
-      throw new Error("Signal run failed")
+      let errorMessage = "Signal run failed"
+      try {
+        const errData = await response.json()
+        if (errData?.detail) {
+          errorMessage = errData.detail
+        }
+      } catch (_) {}
+      throw new Error(errorMessage)
     }
     return response.json()
   },

@@ -9,11 +9,17 @@ import logging
 from uuid import uuid4
 from datetime import datetime
 
+from httpx import HTTPStatusError
+
 from app.services.signal_detection_service import SignalDetectionService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["signals"])
+
+
+class ExploriumCreditError(Exception):
+    """Indicates that Explorium rejected the query for lack of credits."""
 
 
 def _normalize_signals_to_feed(signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -181,18 +187,19 @@ async def signals_overview():
 @router.get("/feed")
 async def signals_feed():
     """Return example signal feed items for the Signals page."""
-    sample_companies = [
-        {"name": "Catalyst Security", "domain": "catalystsecurity.com"},
-        {"name": "Northwind Analytics", "domain": "northwindanalytics.com"},
-        {"name": "Streamline DevOps", "domain": "streamlinedevops.com"},
-    ]
-
     service = SignalDetectionService()
     try:
-        signals = await service.detect_signals(sample_companies, data_source="explorium")
+        companies = await _build_companies_for_action(service, "Live signal feed")
+        if not companies:
+            raise ValueError("No companies to process")
+        signals = await service.detect_signals(companies, data_source="explorium")
         if signals:
             normalized = _normalize_signals_to_feed(signals)
-            return {"feeds": normalized, "count": len(normalized)}
+            capped = normalized[:3]
+            return {"feeds": capped, "count": len(capped)}
+    except ExploriumCreditError as cre:
+        logger.error(f"[Signals API] feed blocked by credits: {cre}")
+        raise HTTPException(status_code=402, detail=str(cre))
     except Exception as error:
         logger.error(f"[Signals API] Explorium feed failed: {error}")
 
@@ -234,26 +241,82 @@ class RunSignalRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
 
 
+ACTION_FILTERS: Dict[str, Dict[str, Any]] = {
+    "Hiring Signals Explorer": {
+        "keywords": ["hiring", "job openings", "talent"],
+        "company_size": ["201-500", "501-1000"],
+        "location": ["United States", "United Kingdom"],
+        "industry": ["software", "technology"],
+    },
+    "Funding Alerts": {
+        "keywords": ["funding", "recent funding", "series b", "series a"],
+        "revenue": ["100M-1B", "1B-10B"],
+        "company_size": ["501-1000", "1001-5000"],
+    },
+    "Tech Adoption Tracking": {
+        "keywords": ["ai", "cloud", "machine learning", "observability"],
+        "linkedin_category": ["technology, information and internet", "computer software"],
+        "company_size": ["201-500", "501-1000", "1001-5000"],
+    },
+    "Signal Decay Logic": {
+        "keywords": ["momentum", "growth", "expansion"],
+        "company_size": ["201-500", "501-1000"],
+    },
+    "Build a signal": {
+        "keywords": ["saas", "enterprise", "growth"],
+        "linkedin_category": ["technology, information and internet"],
+        "company_size": ["201-500"],
+    },
+    "default": {
+        "keywords": ["b2b", "saas"],
+        "company_size": ["201-500"],
+    },
+}
+
+SAMPLE_COMPANIES_DEFAULT = [
+    {"name": "Catalyst Security", "domain": "catalystsecurity.com"},
+    {"name": "Northwind Analytics", "domain": "northwindanalytics.com"},
+    {"name": "Streamline DevOps", "domain": "streamlinedevops.com"},
+]
+
+
+async def _build_companies_for_action(service: SignalDetectionService, action: str) -> List[Dict[str, Any]]:
+    filters = ACTION_FILTERS.get(action) or ACTION_FILTERS["default"]
+    try:
+        matches = await service.explorium.search_companies(filters, limit=3)
+        companies = []
+        if isinstance(matches, dict):
+            companies = matches.get("companies") or []
+        elif isinstance(matches, list):
+            companies = matches
+        if companies:
+            return companies
+    except HTTPStatusError as hse:
+        if hse.response.status_code == 403:
+            raise ExploriumCreditError("Explorium reported insufficient credits for this query.")
+        logger.warning(f"[Signals API] Explorium returned {hse.response.status_code}: {hse.response.text}")
+    except Exception as error:
+        logger.warning(f"[Signals API] Failed to load companies for action '{action}': {error}")
+    return SAMPLE_COMPANIES_DEFAULT
+
+
 @router.post("/run")
 async def run_signal(request: RunSignalRequest):
     """
     Run signal detection immediately for CI and return the detected signals.
     """
-    sample_companies = [
-        {"name": "Catalyst Security", "domain": "catalystsecurity.com"},
-        {"name": "Northwind Analytics", "domain": "northwindanalytics.com"},
-        {"name": "Streamline DevOps", "domain": "streamlinedevops.com"},
-    ]
-
-    # allow overriding sample companies via filters
-    if request.filters:
-        sample_companies = request.filters.get("companies", sample_companies)
-
     service = SignalDetectionService()
+    companies = request.filters.get("companies") if request.filters else None
+    if not companies:
+        companies = await _build_companies_for_action(service, request.action)
     try:
-        signals = await service.detect_signals(sample_companies, data_source="explorium")
+        signals = await service.detect_signals(companies, data_source="explorium")
         normalized = _normalize_signals_to_feed(signals)
-        return {"count": len(normalized), "signals": normalized}
+        capped = normalized[:3]
+        return {"count": len(capped), "signals": capped}
+    except ExploriumCreditError as cre:
+        logger.error(f"[Signals API] run signal blocked by credits: {cre}")
+        raise HTTPException(status_code=402, detail=str(cre))
     except Exception as error:
         logger.error(f"[Signals API] run signal failed: {error}")
         raise HTTPException(status_code=500, detail="Signal run failed")

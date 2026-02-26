@@ -456,25 +456,33 @@ class SignalDetectionService:
                             # 3. Get LinkedIn posts from Explorium
                             try:
                                 posts_result = await self.explorium.enrich_linkedin_posts(business_id)
-                                posts_data = posts_result.get("data", {})
-                                
-                                if posts_data:
+                                if isinstance(posts_result, dict):
+                                    posts_data = posts_result.get("data", {})
+                                else:
+                                    posts_data = posts_result
+                                if isinstance(posts_data, dict):
                                     recent_posts = posts_data.get("recent_posts", [])
-                                    for post in recent_posts[:3]:
-                                        post_text = post.get("text", "").lower()
-                                        
-                                        if any(word in post_text for word in ["raised", "funding", "series"]):
-                                            company_signals.append({
-                                                "type": "recent_funding",
-                                                "description": "Funding news in recent LinkedIn post",
-                                                "urgency": "high"
-                                            })
-                                        elif any(word in post_text for word in ["hiring", "join team"]):
-                                            company_signals.append({
-                                                "type": "hiring_surge",
-                                                "description": "Hiring activity mentioned in LinkedIn",
-                                                "urgency": "high"
-                                            })
+                                elif isinstance(posts_data, list):
+                                    recent_posts = posts_data
+                                else:
+                                    recent_posts = []
+                                for post in recent_posts[:3]:
+                                    if isinstance(post, dict):
+                                        post_text = str(post.get("text", "")).lower()
+                                    else:
+                                        post_text = str(post).lower()
+                                    if any(word in post_text for word in ["raised", "funding", "series"]):
+                                        company_signals.append({
+                                            "type": "recent_funding",
+                                            "description": "Funding news in recent LinkedIn post",
+                                            "urgency": "high"
+                                        })
+                                    elif any(word in post_text for word in ["hiring", "join team"]):
+                                        company_signals.append({
+                                            "type": "hiring_surge",
+                                            "description": "Hiring activity mentioned in LinkedIn",
+                                            "urgency": "high"
+                                        })
                             except Exception as e:
                                 print(f">>> [Signals] Explorium posts error: {e}", flush=True)
                 
@@ -576,7 +584,8 @@ class SignalDetectionService:
         """Rule-based signal detection when API is unavailable"""
         signals = []
         
-        for company in companies[:20]:
+        companies_list = list(companies) if isinstance(companies, (tuple, set, dict)) else list(companies or [])
+        for company in companies_list[:20]:
             company_signals = []
             company_name = company.get("name", "Unknown")
             domain = company.get("domain", "")
