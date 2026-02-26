@@ -1,0 +1,25 @@
+[project]
+name = "b2b_viral_growth_engine"
+version = "0.1.0"
+description = "b2b_viral_growth_engine using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai[litellm,tools]==1.9.3",
+    "firecrawl-py",
+]
+
+[project.scripts]
+b2b_viral_growth_engine = "b2b_viral_growth_engine.main:run"
+run_crew = "b2b_viral_growth_engine.main:run"
+train = "b2b_viral_growth_engine.main:train"
+replay = "b2b_viral_growth_engine.main:replay"
+test = "b2b_viral_growth_engine.main:test"
+run_with_trigger = "b2b_viral_growth_engine.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"

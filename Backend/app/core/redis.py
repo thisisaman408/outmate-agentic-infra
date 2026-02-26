@@ -12,7 +12,7 @@ class RedisManager:
             
             # Use synchronous client for initial ping check to avoid blocking
             try:
-                checker = sync_redis.from_url(REDIS_URL)
+                checker = sync_redis.from_url(REDIS_URL, socket_timeout=1)
                 checker.ping()
                 print("Connected to Redis")
             except Exception as e:

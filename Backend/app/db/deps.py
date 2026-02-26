@@ -1,6 +1,9 @@
 from typing import Generator
 from app.db.session import SessionLocal
 from sqlalchemy.orm import Session
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -12,3 +15,4 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+

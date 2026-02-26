@@ -28,7 +28,11 @@ import {
     CheckCircle2,
     Code2,
     ArrowRight,
-    ExternalLink
+    ExternalLink,
+    AlertTriangle,
+    Mail,
+    Phone,
+    Linkedin
 } from "lucide-react"
 import {
     Dialog,
@@ -40,6 +44,8 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+
 interface Visit {
     id: string
     ip: string
@@ -49,6 +55,16 @@ interface Visit {
     matched: boolean
     created_at: string
     resolution: any
+    // Flattened enrichment fields
+    company: string | null
+    domain: string | null
+    geo: { city: string; region: string; country: string } | null
+    confidence: number
+    email: string | null
+    phone: string | null
+    full_name: string | null
+    linkedin_url: string | null
+    job_title: string | null
 }
 
 export default function VisitorsPage() {
@@ -56,26 +72,48 @@ export default function VisitorsPage() {
     const [stats, setStats] = useState({ total_visits: 0, matched_visits: 0, match_rate: 0 })
     const [isLoading, setIsLoading] = useState(true)
     const [mounted, setMounted] = useState(false)
+    const [error, setError] = useState<string | null>(null)
     const pixelKey = "outmate_test_key_123"
 
     const fetchData = async () => {
+        setError(null)
         try {
             const [visitsRes, statsRes] = await Promise.all([
-                fetch('http://127.0.0.1:8000/api/visitors/'),
-                fetch('http://127.0.0.1:8000/api/visitors/stats')
+                fetch(`${API_BASE}/api/visitors/`),
+                fetch(`${API_BASE}/api/visitors/stats`)
             ])
 
-            if (visitsRes.ok) setVisits(await visitsRes.json())
-            if (statsRes.ok) setStats(await statsRes.json())
-        } catch (error) {
-            console.error("Failed to fetch visitor data:", error)
+            if (visitsRes.ok) {
+                const data = await visitsRes.json()
+                // Handle both array response and error object
+                if (Array.isArray(data)) {
+                    setVisits(data)
+                } else if (data.error) {
+                    setError(data.error)
+                }
+            } else if (visitsRes.status === 503) {
+                const errData = await visitsRes.json()
+                setError(errData.error || "Database temporarily unavailable")
+            }
+
+            if (statsRes.ok) {
+                const statsData = await statsRes.json()
+                setStats({
+                    total_visits: statsData.total_visits ?? 0,
+                    matched_visits: statsData.matched_visits ?? 0,
+                    match_rate: statsData.match_rate ?? 0,
+                })
+            }
+        } catch (err) {
+            console.error("Failed to fetch visitor data:", err)
+            setError("Cannot connect to backend. Ensure the server is running on port 8000.")
         } finally {
             setIsLoading(false)
         }
     }
 
     const copyPixel = () => {
-        const snippet = `<script src="http://127.0.0.1:8000/pixel.js" data-pixel-key="${pixelKey}"></script>`
+        const snippet = `<script src="${API_BASE}/api/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`
         navigator.clipboard.writeText(snippet)
         toast.success("Pixel snippet copied to clipboard!")
     }
@@ -113,7 +151,7 @@ export default function VisitorsPage() {
                         </DialogHeader>
                         <div className="bg-muted p-4 rounded-lg relative font-mono text-sm group">
                             <pre className="whitespace-pre-wrap break-all">
-                                {`<script src="http://localhost:8000/pixel.js" \n  data-pixel-key="${pixelKey}">\n</script>`}
+                                {`<script src="${API_BASE}/api/visitors/pixel.js" \n  data-pixel-key="${pixelKey}">\n</script>`}
                             </pre>
                             <Button
                                 size="icon"
@@ -136,6 +174,24 @@ export default function VisitorsPage() {
                 </Dialog>
             </div>
 
+            {/* Error Banner */}
+            {error && (
+                <Card className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950/20">
+                    <CardContent className="flex items-center gap-3 py-3">
+                        <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                        <div>
+                            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">{error}</p>
+                            <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                                Check your Supabase database connection or try refreshing.
+                            </p>
+                        </div>
+                        <Button size="sm" variant="outline" className="ml-auto" onClick={fetchData}>
+                            Retry
+                        </Button>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-3">
                 <Card>
@@ -155,7 +211,7 @@ export default function VisitorsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.matched_visits}</div>
-                        <p className="text-xs text-muted-foreground">Success rate: {stats.match_rate.toFixed(1)}%</p>
+                        <p className="text-xs text-muted-foreground">Success rate: {(stats.match_rate ?? 0).toFixed(1)}%</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -183,71 +239,123 @@ export default function VisitorsPage() {
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Visitor / Company</TableHead>
+                                <TableHead>Contact Info</TableHead>
                                 <TableHead>Location</TableHead>
                                 <TableHead>Page Visited</TableHead>
                                 <TableHead>Time</TableHead>
                                 <TableHead>Intent</TableHead>
-                                <TableHead className="text-right">Action</TableHead>
+                                <TableHead className="text-right">Status</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {isLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center py-10">Loading visitors...</TableCell>
+                                    <TableCell colSpan={7} className="text-center py-10">Loading visitors...</TableCell>
                                 </TableRow>
                             ) : visits.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center py-10">No visitors tracked yet. Install the pixel to get started!</TableCell>
+                                    <TableCell colSpan={7} className="text-center py-10">
+                                        {error ? "Unable to load visitors. Check database connection." : "No visitors tracked yet. Install the pixel to get started!"}
+                                    </TableCell>
                                 </TableRow>
                             ) : (
-                                visits.map((visit) => (
-                                    <TableRow key={visit.id}>
-                                        <TableCell>
-                                            <div className="flex flex-col">
-                                                <span className="font-medium">
-                                                    {visit.resolution?.company || "Anonymous Visitor"}
-                                                </span>
-                                                <span className="text-xs text-muted-foreground font-mono">
-                                                    {visit.ip}
-                                                </span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>
-                                            {visit.resolution?.geo ? (
+                                visits.map((visit) => {
+                                    const geo = visit.geo || visit.resolution?.geo
+                                    const company = visit.company || visit.resolution?.company
+                                    const person = visit.resolution?.person || {}
+                                    const email = visit.email || person.email
+                                    const phone = visit.phone || person.phone
+                                    const fullName = visit.full_name || person.full_name || person.name
+                                    const linkedinUrl = visit.linkedin_url || person.linkedin_url || person.linkedin
+                                    const jobTitle = visit.job_title || person.title || person.job_title
+
+                                    // Safe URL parsing
+                                    let pagePath = visit.url
+                                    try { pagePath = new URL(visit.url).pathname } catch { }
+
+                                    return (
+                                        <TableRow key={visit.id}>
+                                            <TableCell>
+                                                <div className="flex flex-col gap-0.5">
+                                                    {fullName && (
+                                                        <span className="font-semibold text-sm">{fullName}</span>
+                                                    )}
+                                                    <span className="font-medium text-sm">
+                                                        {company || "Anonymous Visitor"}
+                                                    </span>
+                                                    {jobTitle && (
+                                                        <span className="text-xs text-muted-foreground">{jobTitle}</span>
+                                                    )}
+                                                    <span className="text-xs text-muted-foreground font-mono">
+                                                        {visit.ip}
+                                                    </span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col gap-1">
+                                                    {email ? (
+                                                        <a href={`mailto:${email}`} className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                                                            <Mail className="h-3 w-3" />
+                                                            {email}
+                                                        </a>
+                                                    ) : null}
+                                                    {phone ? (
+                                                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                            <Phone className="h-3 w-3" />
+                                                            {phone}
+                                                        </span>
+                                                    ) : null}
+                                                    {linkedinUrl ? (
+                                                        <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                                                            <Linkedin className="h-3 w-3" />
+                                                            LinkedIn
+                                                        </a>
+                                                    ) : null}
+                                                    {!email && !phone && !linkedinUrl && (
+                                                        <span className="text-xs text-muted-foreground italic">—</span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                {geo ? (
+                                                    <span className="flex items-center gap-1 text-sm">
+                                                        <Globe className="h-3 w-3" />
+                                                        {geo.city}, {geo.country}
+                                                    </span>
+                                                ) : "Unknown"}
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-1 max-w-[200px]">
+                                                    <span className="truncate text-sm" title={visit.url}>
+                                                        {pagePath}
+                                                    </span>
+                                                    <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
                                                 <span className="flex items-center gap-1 text-sm">
-                                                    <Globe className="h-3 w-3" />
-                                                    {visit.resolution.geo.city}, {visit.resolution.geo.country}
+                                                    <Clock className="h-3 w-3" />
+                                                    {new Date(visit.created_at).toLocaleTimeString()}
                                                 </span>
-                                            ) : "Unknown"}
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="flex items-center gap-1 max-w-[200px]">
-                                                <span className="truncate text-sm" title={visit.url}>
-                                                    {new URL(visit.url).pathname}
-                                                </span>
-                                                <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className="flex items-center gap-1 text-sm">
-                                                <Clock className="h-3 w-3" />
-                                                {new Date(visit.created_at).toLocaleTimeString()}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Badge variant={visit.intent_score > 0.7 ? "default" : "secondary"}>
-                                                {(visit.intent_score * 100).toFixed(0)}%
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            {visit.matched ? (
-                                                <Button size="sm" variant="outline">View Details</Button>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground italic">Resolving...</span>
-                                            )}
-                                        </TableCell>
-                                    </TableRow>
-                                ))
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant={visit.intent_score > 0.7 ? "default" : "secondary"}>
+                                                    {(visit.intent_score * 100).toFixed(0)}%
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {visit.matched ? (
+                                                    <Badge variant="default" className="bg-green-600">
+                                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                        Identified
+                                                    </Badge>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground italic">Resolving...</span>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })
                             )}
                         </TableBody>
                     </Table>

@@ -1,0 +1,36 @@
+---
+analyze_jurisdiction_compliance_requirements:
+  description: Research and analyze legal compliance requirements for {campaign_type}
+    outreach across {target_regions}. Focus on data protection laws (GDPR, CCPA, PECR),
+    marketing regulations, consent requirements, and opt-out mechanisms. Identify
+    jurisdiction-specific restrictions on cold outreach, email marketing, and lead
+    generation activities.
+  expected_output: A comprehensive compliance matrix detailing specific legal requirements,
+    risk levels, and mandatory compliance elements for each target jurisdiction, including
+    required disclaimers, consent mechanisms, and data handling protocols.
+  agent: global_outreach_compliance_architect
+review_and_optimize_outreach_messaging:
+  description: Review existing outreach templates and messaging for {campaign_type}
+    campaigns. Rewrite content to ensure full compliance with identified legal requirements
+    while maintaining persuasive impact. Add necessary legal disclaimers, unsubscribe
+    mechanisms, and data processing notices. Optimize messaging to reduce compliance
+    risks while maximizing engagement rates.
+  expected_output: Compliant, optimized outreach templates with integrated legal safeguards,
+    including jurisdiction-specific variations, required disclaimers, and clear consent
+    language that maintains high conversion potential.
+  agent: global_outreach_compliance_architect
+  context:
+  - analyze_jurisdiction_compliance_requirements
+generate_compliance_risk_assessment_report:
+  description: Create a comprehensive compliance risk assessment report for the {campaign_type}
+    outreach campaign targeting {target_regions}. Include risk scores (0-100) for
+    each jurisdiction, potential penalty exposure, recommended mitigation strategies,
+    and ongoing compliance monitoring procedures. Provide actionable recommendations
+    to minimize legal exposure while maximizing outreach effectiveness.
+  expected_output: A detailed compliance risk assessment report with jurisdiction-specific
+    risk scores, potential penalty calculations, mitigation strategies, and a compliance
+    monitoring framework with recommended review intervals and update triggers.
+  agent: global_outreach_compliance_architect
+  context:
+  - analyze_jurisdiction_compliance_requirements
+  - review_and_optimize_outreach_messaging

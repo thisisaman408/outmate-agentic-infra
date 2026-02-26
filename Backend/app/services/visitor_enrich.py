@@ -15,7 +15,7 @@ class VisitorEnricher:
 
     async def enrich_ip(self, ip: str, url: str, intent_score: float) -> Dict[str, Any]:
         """
-        Enrich visitor IP with company and person data.
+        Enrich visitor IP with company, person, email, phone, and other contact data.
         """
         resolution = {
             "ip": ip,
@@ -24,25 +24,34 @@ class VisitorEnricher:
             "geo": None,
             "confidence": 0.0,
             "person": None,
-            "intent_score": intent_score
+            "intent_score": intent_score,
+            # Contact-level fields (flattened for easy access)
+            "email": None,
+            "phone": None,
+            "full_name": None,
+            "linkedin_url": None,
+            "job_title": None,
         }
 
         try:
-            # 1. IPinfo lookup (Geo + Basic Company)
+            # ──────────────────────────────────────────────
+            # 1. IPinfo lookup (Geo + Basic Company/ISP)
+            # ──────────────────────────────────────────────
             if self.ipinfo_client:
-                logger.info(f"Visiting IPinfo for {ip}")
-                # details = self.ipinfo_client.getDetails(ip) # Synchronous!
-                # For now let's keep it but add try/except and logging
+                logger.info(f"[Enrichment] Step 1: IPinfo lookup for {ip}")
                 try:
                     import asyncio
                     from functools import partial
                     loop = asyncio.get_event_loop()
                     details = await loop.run_in_executor(None, partial(self.ipinfo_client.getDetails, ip))
                     
-                    logger.info(f"IPinfo success for {ip}: {getattr(details, 'org', 'No Org')}")
+                    org = getattr(details, 'org', None)
+                    hostname = getattr(details, 'hostname', None)
+                    logger.info(f"[Enrichment] IPinfo success: org={org}, hostname={hostname}")
+                    
                     resolution.update({
-                        "company": getattr(details, 'org', None),
-                        "domain": getattr(details, 'hostname', None),
+                        "company": org,
+                        "domain": hostname,
                         "geo": {
                             "city": getattr(details, 'city', None),
                             "region": getattr(details, 'region', None),
@@ -51,38 +60,82 @@ class VisitorEnricher:
                         "confidence": 0.5
                     })
                 except Exception as e:
-                    logger.error(f"IPinfo lookup failed: {e}")
+                    logger.error(f"[Enrichment] IPinfo lookup failed: {e}")
 
-            # 2. Enrich.so lookup (IP to Person/Email) for high intent
-            if (intent_score > 0.7 or any(x in url.lower() for x in ["/pricing", "/demo", "/contact"])) and self.enrich_api_key:
+            # ──────────────────────────────────────────────
+            # 2. Enrich.so (IP → Person/Email/Phone)
+            # ──────────────────────────────────────────────
+            is_high_intent = intent_score > 0.7 or any(
+                x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]
+            )
+            
+            if is_high_intent and self.enrich_api_key:
+                logger.info(f"[Enrichment] Step 2: Enrich.so lookup for {ip}")
                 enrich_data = await self._enrich_so_lookup(ip)
+                
                 if enrich_data and enrich_data.get("data"):
                     person_data = enrich_data["data"]
                     resolution["person"] = person_data
                     resolution["confidence"] = 0.8
                     
-                    # If we got a domain from Enrich.so, use it
+                    # Extract contact details from Enrich.so response
+                    resolution["email"] = (
+                        person_data.get("email") or 
+                        person_data.get("work_email") or
+                        person_data.get("personal_email")
+                    )
+                    resolution["phone"] = (
+                        person_data.get("phone") or 
+                        person_data.get("mobile_phone") or
+                        person_data.get("work_phone")
+                    )
+                    resolution["full_name"] = (
+                        person_data.get("full_name") or 
+                        person_data.get("name") or
+                        f"{person_data.get('first_name', '')} {person_data.get('last_name', '')}".strip()
+                    )
+                    resolution["linkedin_url"] = (
+                        person_data.get("linkedin_url") or 
+                        person_data.get("linkedin") or
+                        person_data.get("linkedin_profile_url")
+                    )
+                    resolution["job_title"] = (
+                        person_data.get("title") or 
+                        person_data.get("job_title") or
+                        person_data.get("position")
+                    )
+                    
+                    # Company data from Enrich.so
                     if person_data.get("company_domain"):
                         resolution["domain"] = person_data["company_domain"]
                     if person_data.get("company_name"):
                         resolution["company"] = person_data["company_name"]
+                    
+                    logger.info(f"[Enrichment] Enrich.so found: {resolution['full_name']}, {resolution['email']}")
+                else:
+                    logger.info(f"[Enrichment] Enrich.so returned no data for {ip}")
 
-            # 3. Explorium Enrichment for Company details if domain exists
+            # ──────────────────────────────────────────────
+            # 3. Explorium (Company firmographics via domain)
+            # ──────────────────────────────────────────────
             if resolution["domain"]:
+                logger.info(f"[Enrichment] Step 3: Explorium lookup for domain={resolution['domain']}")
                 try:
                     explorium_data = await self.explorium.search_companies({"domain": resolution["domain"]}, limit=1)
                     if explorium_data.get("companies"):
                         company = explorium_data["companies"][0]
                         resolution["explorium"] = company
                         resolution["confidence"] = max(resolution["confidence"], 0.9)
-                        # Optionally update company name from explorium
                         resolution["company"] = company.get("name") or resolution["company"]
+                        logger.info(f"[Enrichment] Explorium found: {company.get('name')}")
                 except Exception as e:
-                    logger.error(f"Explorium enrichment failed for {resolution['domain']}: {e}")
+                    logger.error(f"[Enrichment] Explorium enrichment failed for {resolution['domain']}: {e}")
 
         except Exception as e:
-            logger.error(f"Visitor enrichment failed for IP {ip}: {e}")
+            logger.error(f"[Enrichment] Visitor enrichment failed for IP {ip}: {e}")
         
+        logger.info(f"[Enrichment] Final result for {ip}: company={resolution['company']}, "
+                     f"email={resolution.get('email')}, confidence={resolution['confidence']}")
         return resolution
 
     async def _enrich_so_lookup(self, ip: str) -> Optional[Dict[str, Any]]:
@@ -95,7 +148,7 @@ class VisitorEnricher:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    "https://api.enrich.so/ip-to-person", # Adjust endpoint based on actual API docs if needed
+                    "https://api.enrich.so/ip-to-person",
                     json={"ip": ip},
                     headers={"Authorization": f"Bearer {self.enrich_api_key}"},
                     timeout=10.0
@@ -103,8 +156,8 @@ class VisitorEnricher:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    logger.warning(f"Enrich.so API error: {response.status_code} - {response.text}")
+                    logger.warning(f"[Enrichment] Enrich.so API error: {response.status_code} - {response.text}")
         except Exception as e:
-            logger.error(f"Enrich.so API call failed: {e}")
+            logger.error(f"[Enrichment] Enrich.so API call failed: {e}")
         
         return None

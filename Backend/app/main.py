@@ -137,6 +137,10 @@ logger.info("Chat router registered")
 app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
 logger.info("AI Agents router registered")
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 app.include_router(visitors.router)
 logger.info("Visitors router registered")
 

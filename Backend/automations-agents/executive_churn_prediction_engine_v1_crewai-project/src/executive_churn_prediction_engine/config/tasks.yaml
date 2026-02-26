@@ -1,0 +1,48 @@
+---
+monitor_customer_hiring_signals_market_intelligence:
+  description: 'Conduct comprehensive monitoring of customer accounts for churn risk
+    signals using multiple data sources. Search for hiring announcements, executive
+    changes, and job postings at target companies using {customer_list}. Focus on
+    high-risk indicators: new VP Sales (78% churn risk), new CTO/CRO appointments,
+    mass hiring in competitive departments, and departures of key stakeholders. Use
+    advanced internet search and structured data scraping to monitor company websites,
+    press releases, LinkedIn announcements, and industry publications. Cross-reference
+    findings with competitive intelligence to identify threats. Compile all signals
+    into structured data format for analysis.'
+  expected_output: 'A detailed intelligence report containing: company name, signal
+    type (executive hire/departure/reorganization), risk level (1-100), specific individuals
+    involved, timing, source URLs, and preliminary churn probability assessment. Include
+    competitive threat analysis and market context for each signal detected.'
+  agent: executive_churn_prediction_strategist
+cross_platform_account_analysis_risk_scoring:
+  description: 'Analyze customer accounts across Salesforce and HubSpot to build comprehensive
+    risk profiles. For each company identified with hiring signals, pull data from
+    both platforms including: contract renewal dates, engagement scores, support ticket
+    volume, usage metrics, deal pipeline health, and account team notes. Create Excel
+    workbooks with risk scoring models and send Slack alerts for critical findings.
+    Identify accounts showing both hiring red flags AND declining engagement patterns.
+    Generate predictive churn scores using proven algorithms.'
+  expected_output: 'A comprehensive risk analysis dashboard in Excel format showing:
+    account name, contract value, renewal date, hiring risk factors, multi-platform
+    health scores, predicted churn probability percentage, recommended intervention
+    level, and ROI projections for retention efforts. Include Slack summary for immediate
+    team notification.'
+  agent: executive_churn_prediction_strategist
+  context:
+  - monitor_customer_hiring_signals_market_intelligence
+execute_multi_channel_retention_campaign:
+  description: Execute sophisticated, multi-channel retention campaigns for high-risk
+    accounts identified in the analysis. Based on specific churn risk factors and
+    predictive scores, craft targeted email sequences, executive briefings, and team
+    communications. For accounts with new executives, send personalized onboarding
+    packages. For declining usage patterns, deploy optimization consultations. For
+    competitive threats, activate differentiated value narratives. Coordinate outreach
+    timing across Gmail and Slack channels. Track engagement metrics and revenue impact
+    in real-time.
+  expected_output: 'A comprehensive campaign execution report showing: accounts contacted,
+    multi-channel touchpoints deployed, recipients engaged, response rates by channel,
+    sentiment analysis of feedback, estimated revenue preserved, and next-step recommendations.
+    Include campaign ROI metrics and lessons learned for future optimization.'
+  agent: executive_churn_prediction_strategist
+  context:
+  - cross_platform_account_analysis_risk_scoring

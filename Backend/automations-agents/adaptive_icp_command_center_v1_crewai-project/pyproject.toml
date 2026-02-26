@@ -1,0 +1,26 @@
+[project]
+name = "adaptive_icp_command_center"
+version = "0.1.0"
+description = "adaptive_icp_command_center using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "contextual-client",
+    "crewai[litellm,tools]==1.9.3",
+    "minds-sdk",
+]
+
+[project.scripts]
+adaptive_icp_command_center = "adaptive_icp_command_center.main:run"
+run_crew = "adaptive_icp_command_center.main:run"
+train = "adaptive_icp_command_center.main:train"
+replay = "adaptive_icp_command_center.main:replay"
+test = "adaptive_icp_command_center.main:test"
+run_with_trigger = "adaptive_icp_command_center.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"
