@@ -1,0 +1,13 @@
+{
+    "ip": "8.8.8.8",
+    "company": "AS15169 Google LLC",
+    "domain": "dns.google",
+    "geo": {
+        "city": "Mountain View",
+        "region": "California",
+        "country": "US"
+    },
+    "confidence": 0.5,
+    "person": null,
+    "intent_score": 1.0
+}

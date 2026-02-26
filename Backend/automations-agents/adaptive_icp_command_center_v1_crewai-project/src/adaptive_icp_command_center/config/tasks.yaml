@@ -1,0 +1,46 @@
+---
+deploy_intelligence_surveillance_network:
+  description: 'Activate comprehensive surveillance across news feeds, economic data
+    streams, and market intelligence sources to detect {key_events} affecting {geographic_region}
+    and {industry}. Focus on early-warning signals including: tariff announcements,
+    election polling shifts, central bank policy changes, recession indicators, supply
+    chain disruptions, and regulatory changes. Parse complex documents and cross-reference
+    multiple sources for validation.'
+  expected_output: 'A classified-level intelligence brief containing: (1) Breaking
+    events with market impact scores, (2) Early-warning signals with confidence ratings,
+    (3) Causal analysis linking events to {industry} customer behavior, (4) Urgency
+    matrix for ICP adaptation priorities, (5) Competitive landscape assessment showing
+    which companies are responding'
+  agent: elite_market_intelligence_analyst
+execute_strategic_war_room_analysis:
+  description: Analyze intelligence patterns using advanced forecasting models to
+    predict customer behavior shifts in {market_focus}. Run scenario simulations on
+    how {key_events} will cascade through decision-making processes, budget allocations,
+    and procurement cycles. Deploy pattern recognition to identify which customer
+    segments will expand/contract, timing of budget freezes/releases, and messaging
+    sensitivity changes. Generate tactical adaptation directives with implementation
+    timelines.
+  expected_output: 'Strategic command directives including: (1) ICP adaptation framework
+    with new targeting criteria, (2) Predictive scenarios with probability weights,
+    (3) Customer segment risk/opportunity matrix, (4) Messaging pivot recommendations,
+    (5) Sequence timing adjustments, (6) Competitive moat strategy to maintain 2x
+    pipeline velocity, (7) 24/48/72-hour implementation roadmap'
+  agent: strategic_icp_war_room_commander
+  context:
+  - deploy_intelligence_surveillance_network
+launch_rapid_deployment_operations:
+  description: Execute immediate implementation of strategic directives with surgical
+    precision. Deploy updated ICP targeting criteria, recalibrate lead scoring algorithms,
+    adjust outreach sequences, and pivot messaging for {market_focus}. Implement with
+    zero revenue disruption while capturing market opportunities ahead of competitors.
+    Monitor real-time performance metrics and maintain rollback capabilities. Document
+    all changes for audit trail and future optimization.
+  expected_output: 'Operational deployment report containing: (1) Implemented ICP
+    updates with before/after comparisons, (2) Recalibrated targeting parameters and
+    lead scoring models, (3) Updated sequence flows and messaging variants, (4) Real-time
+    performance dashboard showing pipeline velocity metrics, (5) Rollback procedures
+    and contingency protocols, (6) Competitive advantage timeline analysis, (7) Success
+    metrics and optimization recommendations"'
+  agent: rapid_deployment_operations_chief
+  context:
+  - execute_strategic_war_room_analysis

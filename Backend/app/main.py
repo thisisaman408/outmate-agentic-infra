@@ -33,6 +33,7 @@ from app.api.routes import chat_history
 from app.api.routes import bettercontact_routes
 from app.api.routes import enrichment_routes
 from app.api.routes import ai_agents
+from app.api.routes import visitors
 
 # Register routers
 
@@ -61,8 +62,8 @@ app.add_middleware(
     allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_origin_regex=".*",
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Add custom exception handler for validation errors
@@ -134,9 +135,15 @@ logger.info("Enrichment router registered")
 app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
 logger.info("AI Agents router registered")
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+app.include_router(visitors.router)
+logger.info("Visitors router registered")
+
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup"""
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
@@ -146,11 +153,17 @@ async def startup_event():
     RedisManager.connect()
     logger.info("Redis connection established")
     
-    try:
-        await setup_vector_database()
-        logger.info("Vector database initialized")
-    except Exception as e:
-        logger.error(f"Vector database setup failed: {e}")
+    # Initialize Vector Database in the background
+    async def run_setup():
+        try:
+            await setup_vector_database()
+            logger.info("Vector database initialized successfully")
+        except Exception as e:
+            logger.error(f"Vector database setup failed: {e}")
+
+    import asyncio
+    asyncio.create_task(run_setup())
+    logger.info("Vector database initialization started in background")
     
     logger.info("Application startup complete")
 

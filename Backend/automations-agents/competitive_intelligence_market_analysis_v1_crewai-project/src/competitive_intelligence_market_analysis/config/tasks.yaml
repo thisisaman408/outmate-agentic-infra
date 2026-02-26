@@ -1,0 +1,48 @@
+---
+research_competitor_landscape:
+  description: Conduct comprehensive research on {company_name}'s competitive landscape
+    in the {industry} industry. Identify the top 5-7 competitors, their market positioning,
+    key products/services, pricing strategies, customer base, and recent business
+    developments. Focus on gathering publicly available information including company
+    websites, press releases, news articles, and industry reports.
+  expected_output: A detailed competitive landscape report in markdown format including
+    competitor profiles, market share insights, pricing analysis, product/service
+    comparisons, and recent strategic moves by each competitor.
+  agent: competitive_intelligence_research_specialist
+analyze_market_opportunities:
+  description: Research market trends, customer needs, and industry developments in
+    the {industry} space. Identify emerging opportunities, underserved market segments,
+    and potential gaps in the competitive landscape that {company_name} could capitalize
+    on. Analyze recent industry reports, customer feedback, and market data.
+  expected_output: A market opportunity analysis report identifying key trends, unmet
+    customer needs, market gaps, and strategic recommendations for {company_name}
+    to gain competitive advantage.
+  agent: competitive_intelligence_research_specialist
+  context:
+  - research_competitor_landscape
+develop_strategic_recommendations:
+  description: Synthesize the competitive intelligence research and market opportunity
+    analysis to develop actionable strategic recommendations for {company_name}. Create
+    a comprehensive strategy document that includes competitive positioning, differentiation
+    opportunities, market entry strategies, and tactical recommendations for gaining
+    market share in the {industry} space.
+  expected_output: A strategic action plan document with specific recommendations
+    for competitive positioning, product/service differentiation, market opportunities
+    to pursue, and tactical steps for {company_name} to improve their competitive
+    position in the {industry} market.
+  agent: strategic_market_analyst
+  context:
+  - research_competitor_landscape
+  - analyze_market_opportunities
+create_actionable_implementation_plan:
+  description: Transform the strategic recommendations into a concrete implementation
+    plan for {company_name}. Define specific KPIs, success metrics, resource requirements,
+    budget estimates, team responsibilities, risk assessments, and detailed timelines.
+    Create measurable milestones and accountability frameworks that make the strategy
+    executable.
+  expected_output: A detailed implementation roadmap with specific KPIs, success metrics,
+    resource allocation plans, budget estimates, risk mitigation strategies, team
+    responsibilities, and quarterly milestones for executing the competitive strategy.
+  agent: strategic_implementation_consultant
+  context:
+  - develop_strategic_recommendations

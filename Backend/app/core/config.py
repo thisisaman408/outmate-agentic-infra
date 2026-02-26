@@ -87,6 +87,20 @@ class Settings(BaseSettings):
         30,
         description="ContactOut API timeout in seconds"
     )
+
+    # Visitor Tracker Configuration
+    IPINFO_TOKEN: Optional[str] = Field(
+        None,
+        description="IPinfo API token"
+    )
+    ENRICH_API_KEY: Optional[str] = Field(
+        None,
+        description="Enrich.so API key"
+    )
+    VISITOR_DEDUPE_SECONDS: int = Field(
+        3600,
+        description="How long to deduplicate visitor hits (seconds). Set to 0 to disable."
+    )
     
     # Logging Configuration
     LOG_LEVEL: str = Field(

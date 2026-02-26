@@ -1,0 +1,33 @@
+---
+map_network_virality_opportunities:
+  description: Research and map viral growth opportunities for {company_name} by analyzing
+    competitor referral programs, identifying key network nodes and influencers in
+    the {target_industry} space. Analyze successful B2B viral loops like Dropbox,
+    Slack, and Notion to extract replicable patterns.
+  expected_output: A comprehensive network virality map document with competitor analysis,
+    identified viral loop patterns, key network influencers, and actionable opportunities
+    for {company_name} to achieve viral coefficient >1.2
+  agent: b2b_network_virality_engineer
+engineer_self_propagating_referral_hooks:
+  description: Design viral hooks and referral mechanisms tailored to {company_name}'s
+    {target_industry} audience. Create psychological triggers that make champions
+    autonomously spread the product through their networks. Focus on peer-to-peer
+    cascade triggers, network effects, and viral coefficients.
+  expected_output: A viral hook playbook with 5+ engineered referral mechanisms, psychological
+    triggers, implementation guidelines, and projected viral coefficients for each
+    hook designed to generate 4x organic pipeline
+  agent: b2b_network_virality_engineer
+  context:
+  - map_network_virality_opportunities
+execute_multi_channel_cascade_strategy:
+  description: Implement and optimize the engineered viral hooks across multiple channels.
+    Create cascade execution plans that leverage 2nd/3rd-degree networks, co-visit
+    patterns, and champion behavior to maximize viral coefficient. Include measurement
+    frameworks and optimization protocols.
+  expected_output: A detailed implementation plan with multi-channel cascade strategy,
+    execution timeline, KPI tracking framework, and optimization playbook to achieve
+    viral coefficient >1.2 and generate 4x organic pipeline growth
+  agent: b2b_network_virality_engineer
+  context:
+  - map_network_virality_opportunities
+  - engineer_self_propagating_referral_hooks

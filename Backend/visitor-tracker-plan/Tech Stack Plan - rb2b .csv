@@ -1,0 +1,9 @@
+Layer,Exact Tool,Monthly Cost,Justification
+Backend/Core,FastAPI + Celery + Redis,$0,Your existing stack
+DB,Postgres (local → Neon free tier),$0,Visits/alerts storage
+IP Enrichment,"IPinfo.io (free 30k lookups/mo) + Enrich.so API ($29 starter, 5k credits)",$29,"70% match rate, persons/emails"
+Visitor Pixel,Custom JS 1x1 beacon (Vercel CDN),$0,RB2B-identical tracking
+Dashboard,Next.js 15 + TanStack Table 8 + SSE,$0,Real-time visitor UI
+Integrations,Webhooks + n8n self-hosted (Docker),$0,Slack/CRM/HubSpot pushes
+Local Testing,ngrok free + Postman,$0,Simulate live pixel traffic
+Monitoring,Sentry (free 5k events/mo),$0,Match rates/errors
