@@ -97,6 +97,10 @@ class Settings(BaseSettings):
         None,
         description="Enrich.so API key"
     )
+    VISITOR_DEDUPE_SECONDS: int = Field(
+        3600,
+        description="How long to deduplicate visitor hits (seconds). Set to 0 to disable."
+    )
     
     # Logging Configuration
     LOG_LEVEL: str = Field(

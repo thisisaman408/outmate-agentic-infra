@@ -260,11 +260,30 @@ export default function VisitorsPage() {
                                 </TableRow>
                             ) : (
                                 visits.map((visit) => {
-                                    const geo = visit.geo || visit.resolution?.geo
+                                    const geo =
+                                        visit.geo ||
+                                        visit.resolution?.geo ||
+                                        (visit.resolution?.explorium
+                                            ? {
+                                                  city: visit.resolution.explorium?.headquarters_city,
+                                                  region: visit.resolution.explorium?.headquarters_state,
+                                                  country: visit.resolution.explorium?.headquarters_country,
+                                              }
+                                            : null)
                                     const company = visit.company || visit.resolution?.company
                                     const person = visit.resolution?.person || {}
-                                    const email = visit.email || person.email
-                                    const phone = visit.phone || person.phone
+                                    const email =
+                                        visit.email ||
+                                        person.email ||
+                                        person.work_email ||
+                                        person.personal_email ||
+                                        person.emails?.[0]
+                                    const phone =
+                                        visit.phone ||
+                                        person.phone ||
+                                        person.mobile_phone ||
+                                        person.work_phone ||
+                                        person.phones?.[0]
                                     const fullName = visit.full_name || person.full_name || person.name
                                     const linkedinUrl = visit.linkedin_url || person.linkedin_url || person.linkedin
                                     const jobTitle = visit.job_title || person.title || person.job_title

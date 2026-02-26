@@ -68,9 +68,10 @@ class VisitorEnricher:
             is_high_intent = intent_score > 0.7 or any(
                 x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]
             )
-            
-            if is_high_intent and self.enrich_api_key:
-                logger.info(f"[Enrichment] Step 2: Enrich.so lookup for {ip}")
+            should_enrich = bool(self.enrich_api_key)
+
+            if should_enrich:
+                logger.info(f"[Enrichment] Step 2: Enrich.so lookup for {ip} (high intent={is_high_intent})")
                 enrich_data = await self._enrich_so_lookup(ip)
                 
                 if enrich_data and enrich_data.get("data"):

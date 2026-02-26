@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, Form, HTTPException
+from fastapi import APIRouter, Header, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 from urllib.parse import urlparse
@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.core.redis import RedisManager
 from app.db.models.visitor import SiteConfig, Visit
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Thread pool for running synchronous DB operations with timeouts
 _db_executor = ThreadPoolExecutor(max_workers=4)
-DB_TIMEOUT = 5  # seconds — if DB doesn't respond within this, return 503
+DB_TIMEOUT = 15  # seconds — if DB doesn't respond within this, return 503
 
 
 async def _run_db(func, timeout=DB_TIMEOUT):
@@ -38,7 +39,7 @@ async def get_pixel():
     """Serves the tracking pixel JavaScript."""
     import os
     from fastapi.responses import FileResponse
-    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Frontend/public/pixel.js"))
+    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../Frontend/public/pixel.js"))
     
     if not os.path.exists(pixel_path):
         return {"error": "pixel.js not found"}
@@ -48,6 +49,7 @@ async def get_pixel():
 
 @router.post("/track")
 async def track_visitor(
+    request: Request,
     url: str = Form(...),
     referrer: Optional[str] = Form(None),
     user_agent: str = Header(...),
@@ -68,21 +70,24 @@ async def track_visitor(
             raise HTTPException(status_code=401, detail="Invalid pixel key")
 
         # 2. Get IP
-        ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else "127.0.0.1"
+        forwarded = x_forwarded_for or request.headers.get("x-forwarded-for")
+        ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
         
         # 3. Calculate Intent Score
         intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact"]) else 0.5
         
         # 4. Redis Deduplication (1 hour)
         try:
-            redis_client = RedisManager.get_client()
-            domain = urlparse(url).netloc
-            dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-            
-            if await redis_client.get(dedupe_key):
-                return {"status": "deduplicated"}
-            
-            await redis_client.setex(dedupe_key, 3600, "1")
+            dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
+            if dedupe_seconds > 0:
+                redis_client = RedisManager.get_client()
+                domain = urlparse(url).netloc
+                dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
+                
+                if await redis_client.get(dedupe_key):
+                    return {"status": "deduplicated"}
+                
+                await redis_client.setex(dedupe_key, dedupe_seconds, "1")
         except Exception as e:
             logger.error(f"Redis deduplication failed: {e}")
 
