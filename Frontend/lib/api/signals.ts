@@ -1,4 +1,4 @@
-// Mock API service for signals - ready for backend integration
+// Signals API integration
 export interface Signal {
   id: string
   companyId: string
@@ -18,112 +18,47 @@ export interface Signal {
   }
 }
 
-export interface SignalFilters {
-  type?: string
-  minConfidence?: number
-  companyId?: string
-}
-
 export const signalsApi = {
-  getSignals: async (filters?: SignalFilters): Promise<Signal[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const mockSignals: Signal[] = [
-          {
-            id: "1",
-            companyId: "1",
-            companyName: "TechCorp Solutions",
-            type: "job_posting",
-            confidence: 92,
-            title: "Hiring VP of Sales",
-            description: "Posted 3 new sales leadership positions indicating expansion into enterprise segment",
-            source: "LinkedIn",
-            impact: "high",
-            timestamp: "1 hour ago",
-            metadata: {
-              position: "VP of Sales, Enterprise",
-            },
-          },
-          {
-            id: "2",
-            companyId: "2",
-            companyName: "InnovateLabs",
-            type: "funding",
-            confidence: 88,
-            title: "Series B Funding Announced",
-            description: "Raised $50M in Series B funding led by top-tier VCs",
-            source: "TechCrunch",
-            impact: "high",
-            timestamp: "3 hours ago",
-            metadata: {
-              amount: "$50M",
-            },
-          },
-          {
-            id: "3",
-            companyId: "3",
-            companyName: "DataDrive Inc",
-            type: "tech_stack",
-            confidence: 85,
-            title: "Recently Adopted Snowflake",
-            description: "Job postings mention Snowflake expertise, indicating recent adoption",
-            source: "Job Boards",
-            impact: "medium",
-            timestamp: "6 hours ago",
-            metadata: {
-              technology: "Snowflake",
-            },
-          },
-          {
-            id: "4",
-            companyId: "4",
-            companyName: "CloudScale Systems",
-            type: "leadership_change",
-            confidence: 90,
-            title: "New CRO Appointed",
-            description: "Hired experienced CRO from competitor, signaling aggressive growth strategy",
-            source: "Press Release",
-            impact: "high",
-            timestamp: "1 day ago",
-            metadata: {
-              position: "Chief Revenue Officer",
-            },
-          },
-          {
-            id: "5",
-            companyId: "5",
-            companyName: "Nexus Enterprises",
-            type: "product_launch",
-            confidence: 87,
-            title: "New Product Line Launch",
-            description: "Announced launch of new enterprise product suite targeting mid-market",
-            source: "Company Website",
-            impact: "high",
-            timestamp: "2 days ago",
-          },
-          {
-            id: "6",
-            companyId: "1",
-            companyName: "TechCorp Solutions",
-            type: "expansion",
-            confidence: 83,
-            title: "Opening European Offices",
-            description: "Job postings for multiple positions in London and Berlin offices",
-            source: "LinkedIn",
-            impact: "medium",
-            timestamp: "3 days ago",
-            metadata: {
-              location: "London, Berlin",
-            },
-          },
-        ]
-        resolve(mockSignals)
-      }, 1000)
-    })
+  getSignals: async (): Promise<Signal[]> => {
+    const response = await fetch("/api/signals/feed")
+    if (!response.ok) throw new Error("Signals feed is unavailable")
+    const data = await response.json()
+    return data.feeds ?? []
+  },
+
+  getSignalsOverview: async (): Promise<{
+    hero: { title: string; eyebrow: string; description: string }
+    signalActions: Array<{ title: string; summary: string; badge: string }>
+    jobSignals: Array<{ title: string; description: string }>
+    enrichmentPillars: Array<{ title: string; description: string }>
+    signalBuilder: { focus: string[]; delivery: string[] }
+  }> => {
+    const response = await fetch("/api/signals/overview")
+    if (!response.ok) throw new Error("Signals overview is unavailable")
+    return response.json()
   },
 
   getSignalsByCompany: async (companyId: string): Promise<Signal[]> => {
     const allSignals = await signalsApi.getSignals()
     return allSignals.filter((signal) => signal.companyId === companyId)
+  },
+
+  runSignal: async (action: string): Promise<{ signals: Signal[]; count: number }> => {
+    const response = await fetch("/api/signals/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    })
+    if (!response.ok) {
+      let errorMessage = "Signal run failed"
+      try {
+        const errData = await response.json()
+        if (errData?.detail) {
+          errorMessage = errData.detail
+        }
+      } catch (_) {}
+      throw new Error(errorMessage)
+    }
+    return response.json()
   },
 }

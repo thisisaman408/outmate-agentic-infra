@@ -415,56 +415,17 @@ class ExploriumService:
             except Exception as e:
                 print(f">>> [ExploriumService] Explorium match failed: {e}", flush=True)
         
-        # If no companies from match or no domain/name, fallback to broad fetch
+        # If no companies from match or no domain/name, fetch a limited batch
         if not companies:
-            print(f">>> [ExploriumService] No companies found via match, falling back to fetch_businesses", flush=True)
+            print(f">>> [ExploriumService] No companies found via match, fetching limited results", flush=True)
             try:
                 raw = await self.fetch_businesses(filters, size=limit, page_size=limit, page=1, mode="full")
                 data_list = raw.get("data") or []
                 print(f">>> [ExploriumService] Explorium fetch returned {len(data_list)} records", flush=True)
-                if len(data_list) > 0:
-                    print(f">>> [ExploriumService] Sample raw record: {data_list[0]}", flush=True)
                 companies = [self.normalize_company(item) for item in data_list]
                 if name:
                     for c in companies:
                         c["__query_name"] = name
-
-                # Fallback 1: broaden industry taxonomy if zero results
-                if len(companies) == 0 and not strict_filters:
-                    ind_vals = filters.get("industry")
-                    if ind_vals:
-                        broadened = self._broaden_industries(ind_vals)
-                        if broadened:
-                            print(f">>> [ExploriumService] Zero results. Retrying with broadened industry terms: {broadened}", flush=True)
-                            broaden_filters = dict(filters)
-                            broaden_filters["industry"] = broadened
-                            raw2 = await self.fetch_businesses(broaden_filters, size=limit, page_size=limit, page=1, mode="full")
-                            data_list2 = raw2.get("data") or []
-                            print(f">>> [ExploriumService] Explorium fetch (broadened) returned {len(data_list2)} records", flush=True)
-                            companies = [self.normalize_company(item) for item in data_list2]
-                            if name:
-                                for c in companies:
-                                    c["__query_name"] = name
-
-                # Fallback 2: drop industry constraint entirely if still zero
-                if len(companies) == 0 and filters.get("industry") is not None and not strict_filters:
-                    drop_filters = dict(filters)
-                    try:
-                        del drop_filters["industry"]
-                    except KeyError:
-                        pass
-                    print(f">>> [ExploriumService] Still zero. Retrying without industry filter.", flush=True)
-                    raw3 = await self.fetch_businesses(drop_filters, size=limit, page_size=limit, page=1, mode="full")
-                    data_list3 = raw3.get("data") or []
-                    print(f">>> [ExploriumService] Explorium fetch (no industry) returned {len(data_list3)} records", flush=True)
-                    companies = [self.normalize_company(item) for item in data_list3]
-                    if name:
-                        for c in companies:
-                            c["__query_name"] = name
-                
-                # If searching for a specific company name but got no results, give a helpful message
-                if name and len(companies) == 0:
-                    print(f">>> [ExploriumService] No companies found for specific name: {name}", flush=True)
             except Exception as e:
                 print(f">>> [ExploriumService] Explorium fetch failed: {e}", flush=True)
 

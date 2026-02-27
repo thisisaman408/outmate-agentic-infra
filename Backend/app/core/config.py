@@ -12,6 +12,9 @@ import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, Field, ValidationInfo
 from typing import Optional, List
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 
 class Settings(BaseSettings):
@@ -101,6 +104,16 @@ class Settings(BaseSettings):
         3600,
         description="How long to deduplicate visitor hits (seconds). Set to 0 to disable."
     )
+
+    # OpenRouter Configuration
+    OPENROUTER_API_KEY: str = Field(
+        ..., 
+        description="OpenRouter API key for Claude access"
+    )
+    OPENROUTER_BASE_URL: str = Field(
+        "https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL"
+    )
     
     # Logging Configuration
     LOG_LEVEL: str = Field(
@@ -168,7 +181,7 @@ class Settings(BaseSettings):
     
     class Config:
         """Pydantic configuration"""
-        env_file = ".env"
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = True
         
@@ -176,8 +189,10 @@ class Settings(BaseSettings):
         extra = "allow"
 
 
+dotenv_path = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path, override=True)
+
 # Create global settings instance
-# This will load and validate all environment variables
 try:
     settings = Settings()
 except Exception as e:
@@ -185,9 +200,11 @@ except Exception as e:
     print("Please ensure your .env file is properly configured.")
     raise
 
+print(f"Loaded .env from {dotenv_path}")
+print(f"Explorium key prefix used: {str(settings.EXPLORIUM_API_KEY)[:6]}****")
+
 
 # Export individual settings for backward compatibility
-# This allows existing code using `from app.core.config import DATABASE_URL` to still work
 DATABASE_URL = settings.DATABASE_URL
 REDIS_URL = settings.REDIS_URL
 CRUSTDATA_API_KEY = settings.CRUSTDATA_API_KEY

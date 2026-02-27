@@ -126,7 +126,7 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
                 body: JSON.stringify({
                     filters: transformedFilters,
                     options: {
-                        limit: 50
+                        limit: 3
                     }
                 }),
             })

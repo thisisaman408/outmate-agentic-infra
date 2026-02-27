@@ -173,9 +173,14 @@ class FilterMappingService:
 
         # Region / Country (Specific fields)
         if filter_key in ('region', 'headquarters_country'):
-             values = filter_value if isinstance(filter_value, list) else [filter_value]
-             normalized = [COUNTRY_REGION_MAP.get(v.lower(), v) for v in values]
-             return {"filter_type": "hq_country", "type": "in", "value": normalized}
+            values = filter_value if isinstance(filter_value, list) else [filter_value]
+            normalized = [COUNTRY_REGION_MAP.get(v.lower(), v) for v in values]
+            return {"filter_type": "hq_country", "type": "in", "value": normalized}
+
+        if filter_key == "country_code":
+            values = filter_value if isinstance(filter_value, list) else [filter_value]
+            normalized = [COUNTRY_REGION_MAP.get(str(v).lower(), str(v)) for v in values]
+            return {"filter_type": "hq_country", "type": "in", "value": normalized}
 
         # --- INDUSTRIES & TECHNOLOGIES ---
         
@@ -184,6 +189,14 @@ class FilterMappingService:
              values = filter_value if isinstance(filter_value, list) else [filter_value]
              normalized = [INDUSTRY_MAP.get(i.lower(), i) for i in values]
              return {"filter_type": "linkedin_industries", "type": "in", "value": normalized}
+
+        if filter_key == "google_category":
+            values = filter_value if isinstance(filter_value, list) else [filter_value]
+            return {"filter_type": "google_category", "type": "in", "value": values}
+
+        if filter_key == "linkedin_category":
+            values = filter_value if isinstance(filter_value, list) else [filter_value]
+            return {"filter_type": "linkedin_category", "type": "in", "value": values}
              
         # Technologies
         if filter_key == 'technologies':

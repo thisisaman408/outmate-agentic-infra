@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+DEFAULT_EXPLORIUM_LIMIT = 3
+
 @router.get("/test-endpoint")
 async def test_endpoint():
     """Test endpoint to verify routing is working."""
@@ -258,15 +260,14 @@ async def search_companies(
                     error={"code": "INVALID_USER_ID", "message": f"Invalid user ID: {request.user_id}"}
                 )
 
-        requested_limit = 3
+        requested_limit = DEFAULT_EXPLORIUM_LIMIT
         if request.options and isinstance(request.options, dict):
-            raw_limit = request.options.get("limit", 3)
+            raw_limit = request.options.get("limit", DEFAULT_EXPLORIUM_LIMIT)
             try:
-                requested_limit = int(raw_limit)
+                requested_limit = max(1, min(int(raw_limit), DEFAULT_EXPLORIUM_LIMIT))
             except (TypeError, ValueError):
-                requested_limit = 3
-        # Keep a safe upper bound for latency/provider costs.
-        required_credits = max(1, min(requested_limit, 100))
+                requested_limit = DEFAULT_EXPLORIUM_LIMIT
+        required_credits = requested_limit
         if user_id is None:
             print(">>> No user_id - skipping credit check (unauthenticated)", flush=True)
             has_credits = True
@@ -288,16 +289,25 @@ async def search_companies(
         # Transform to Explorium format
         explorium_filters = FilterMappingService.transform_to_explorium_format(filters_dict)
         print(f">>> Explorium filters: {explorium_filters}", flush=True)
-        
+
+        if not explorium_filters:
+            print(">>> No Explorium filters generated; skipping Explorium search", flush=True)
+            return LeadSearchResponse(
+                success=False,
+                error={"code": "MISSING_FILTERS", "message": "Please specify filters such as industry or location before searching."}
+            )
+
         # Use SearchService which handles Explorium + ContactOut
         search_service = SearchService(db)
         result = await search_service.search_companies_explorium(filters=explorium_filters, limit=required_credits)
 
         print(f">>> DEBUG: Comprehensive search returned: {result}", flush=True)
         print(f">>> DEBUG: result keys: {list(result.keys()) if result else 'None'}", flush=True)
-        
+
         # Search processing - essential guards are handled within SearchService
         companies = result.get("companies", [])
+        companies = companies[:required_credits]
+        result["companies"] = companies
 
         if not result or not result.get("companies"):
             print(">>> No companies found in result.", flush=True)
