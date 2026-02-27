@@ -5,16 +5,18 @@ class RedisManager:
     client: redis.Redis = None
 
     @classmethod
-    def connect(cls):
+    def connect(cls) -> bool:
         if cls.client is None:
             import redis as sync_redis
             from app.core.config import REDIS_URL
             
             # Use synchronous client for initial ping check to avoid blocking
+            connected = False
             try:
                 checker = sync_redis.from_url(REDIS_URL, socket_timeout=1)
                 checker.ping()
                 print("Connected to Redis")
+                connected = True
             except Exception as e:
                 print(f"ERROR: Could not connect to Redis at {REDIS_URL}: {e}")
                 print("PLEASE ENSURE REDIS SERVER IS RUNNING.")
@@ -25,6 +27,8 @@ class RedisManager:
                 decode_responses=True,
                 encoding="utf-8",
             )
+            return connected
+        return True
 
     @classmethod
     async def close(cls):

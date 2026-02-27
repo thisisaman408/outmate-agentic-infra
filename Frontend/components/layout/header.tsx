@@ -79,7 +79,7 @@ export function Header() {
             <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
           </Button>
 
-          {hydrated && user ? (
+          {mounted && user ? (
             // User Menu for authenticated users
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

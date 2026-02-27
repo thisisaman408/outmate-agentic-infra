@@ -290,7 +290,7 @@ class ProspectSearchResponse(BaseModel):
     
     class Config:
         """Pydantic model configuration"""
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "profiles": [
                     {
@@ -335,7 +335,7 @@ class ProspectSearchErrorResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "detail": "Invalid filter parameters: current_title must be a list",
                 "status_code": 400,
