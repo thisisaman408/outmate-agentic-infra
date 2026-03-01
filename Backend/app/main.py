@@ -33,6 +33,7 @@ from app.api.routes import chat_history
 from app.api.routes import bettercontact_routes
 from app.api.routes import enrichment_routes
 from app.api.routes import ai_agents
+from app.api.routes import gtm_agents
 from app.api.routes import visitors
 
 # Register routers
@@ -134,10 +135,18 @@ app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrich
 logger.info("Enrichment router registered")
 app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
 logger.info("AI Agents router registered")
+app.include_router(gtm_agents.router)
+logger.info("GTM Agents router registered")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "service": "outmate-backend",
+        "version": settings.APP_VERSION,
+        "database": {"ready": bool(getattr(app.state, "db_ready", False))},
+        "redis": {"ready": bool(getattr(app.state, "redis_ready", False))},
+    }
 
 app.include_router(visitors.router)
 logger.info("Visitors router registered")
@@ -147,17 +156,32 @@ async def startup_event():
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables ensured")
+    app.state.db_ready = False
+    app.state.redis_ready = False
 
-    RedisManager.connect()
-    logger.info("Redis connection established")
+    # DB boot should never crash the whole app; routes can return 503 if unavailable.
+    try:
+        Base.metadata.create_all(bind=engine)
+        app.state.db_ready = True
+        logger.info("Database tables ensured")
+    except Exception as e:
+        logger.error(f"Database init failed (app will start without DB): {e}")
+
+    try:
+        connected = RedisManager.connect()
+        app.state.redis_ready = bool(connected)
+        if connected:
+            logger.info("Redis connection established")
+        else:
+            logger.warning("Redis unavailable (continuing without Redis)")
+    except Exception as e:
+        logger.error(f"Redis init failed (app will start without Redis): {e}")
     
     # Initialize Vector Database in the background
     async def run_setup():
         try:
             await setup_vector_database()
-            logger.info("Vector database initialized successfully")
+            logger.info("Vector database setup finished")
         except Exception as e:
             logger.error(f"Vector database setup failed: {e}")
 
@@ -193,8 +217,8 @@ async def root():
     }
 
 
-@app.get("/health")
-def health(db: Session = Depends(get_db)):
+@app.get("/health/db")
+def health_db(db: Session = Depends(get_db)):
     try:
         user_count = db.query(User).count()
         db_status = "connected"
@@ -202,15 +226,15 @@ def health(db: Session = Depends(get_db)):
         logger.error(f"Database health check failed: {e}")
         user_count = None
         db_status = "error"
-    
+
     return {
         "status": "ok",
         "service": "outmate-backend",
         "version": settings.APP_VERSION,
         "database": {
             "status": db_status,
-            "users": user_count
-        }
+            "users": user_count,
+        },
     }
 
 @app.get("/v1/models")

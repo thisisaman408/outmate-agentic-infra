@@ -2,49 +2,59 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { AgenticSearchPanel } from "@/components/ai-agents/agentic-search-panel"
-import { LookalikePanel } from "@/components/ai-agents/lookalike-panel"
-import { ResearchPanel } from "@/components/ai-agents/research-panel"
-import { PredictivePanel } from "@/components/ai-agents/predictive-panel"
-import { Sparkles, Users, Search, TrendingUp, Cpu } from "lucide-react"
+import { CrossfirePanel } from "@/components/ai-agents/crossfire-panel"
+import { ComplianceOraclePanel } from "@/components/ai-agents/compliance-oracle-panel"
+import { ViralityEnginePanel } from "@/components/ai-agents/virality-engine-panel"
+import { TalentRadarPanel } from "@/components/ai-agents/talent-radar-panel"
+import { RegimeShifterPanel } from "@/components/ai-agents/regime-shifter-panel"
+import { Sparkles, ShieldCheck, Network, Radar, Globe, Cpu, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const AGENTS = [
   {
-    id: "search",
-    name: "Agentic Search",
-    description: "Multi-step prospect identification",
-    icon: Sparkles,
-    component: AgenticSearchPanel,
-    color: "text-blue-400",
-    bg: "bg-blue-400/10",
+    id: "crossfire",
+    name: "Crossfire Agent",
+    description: "Competitive poacher for weakening accounts",
+    icon: Target,
+    component: CrossfirePanel,
+    color: "text-rose-400",
+    bg: "bg-rose-400/10",
   },
   {
-    id: "lookalike",
-    name: "Lookalike",
-    description: "Mirror your best customers",
-    icon: Users,
-    component: LookalikePanel,
-    color: "text-purple-400",
-    bg: "bg-purple-400/10",
-  },
-  {
-    id: "research",
-    name: "Research",
-    description: "Deep company intelligence",
-    icon: Search,
-    component: ResearchPanel,
+    id: "compliance",
+    name: "Compliance Oracle",
+    description: "Global outreach compliance architect",
+    icon: ShieldCheck,
+    component: ComplianceOraclePanel,
     color: "text-emerald-400",
     bg: "bg-emerald-400/10",
   },
   {
-    id: "predictive",
-    name: "Predictive",
-    description: "Lead conversion scoring",
-    icon: TrendingUp,
-    component: PredictivePanel,
-    color: "text-orange-400",
-    bg: "bg-orange-400/10",
+    id: "virality",
+    name: "Virality Engine",
+    description: "Self-propagating B2B referral chains",
+    icon: Network,
+    component: ViralityEnginePanel,
+    color: "text-indigo-400",
+    bg: "bg-indigo-400/10",
+  },
+  {
+    id: "talent",
+    name: "Talent Radar",
+    description: "Executive churn prediction strategist",
+    icon: Radar,
+    component: TalentRadarPanel,
+    color: "text-sky-400",
+    bg: "bg-sky-400/10",
+  },
+  {
+    id: "regime",
+    name: "Regime Shifter",
+    description: "Geo-political ICP adaptation commander",
+    icon: Globe,
+    component: RegimeShifterPanel,
+    color: "text-lime-400",
+    bg: "bg-lime-400/10",
   },
 ]
 
@@ -70,7 +80,7 @@ export default function AIAgentsPage() {
           </div>
           <h1 className="text-5xl font-black tracking-tight text-gradient">AI Agents</h1>
           <p className="text-xl text-muted-foreground max-w-2xl leading-relaxed">
-            Deploy specialized autonomous agents to automate your GTM workflow with surgical precision.
+            Deploy Outmate&apos;s 5 GTM agents to orchestrate competitive poaching, compliance, virality, churn defence, and geo-adaptive ICP.
           </p>
         </div>
 
