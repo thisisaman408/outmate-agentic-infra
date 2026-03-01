@@ -98,11 +98,11 @@ class Settings(BaseSettings):
     )
     ENRICH_API_KEY: Optional[str] = Field(
         None,
-        description="Enrich.so API key"
+        description="Enrich.so API key",
     )
     VISITOR_DEDUPE_SECONDS: int = Field(
         3600,
-        description="How long to deduplicate visitor hits (seconds). Set to 0 to disable."
+        description="How long to deduplicate visitor hits (seconds). Set to 0 to disable.",
     )
 
     # OpenRouter Configuration

@@ -32,10 +32,11 @@ class SignalDetectionService:
         self.explorium = ExploriumService()
     
     async def detect_signals(
-        self, 
-        companies: List[Dict[str, Any]], 
+        self,
+        companies: List[Dict[str, Any]],
         prospect_query: str = "",
-        data_source: str | List[str] = "explorium"  # Accept string or list: "explorium" for companies, "crustdata" for prospects
+        data_source: str | List[str] = "explorium",  # Accept string or list: "explorium" for companies, "crustdata" for prospects
+        action: str = "",
     ) -> List[Dict[str, Any]]:
         """
         Detect signals for companies using Crustdata and Explorium APIs.
@@ -78,17 +79,13 @@ class SignalDetectionService:
                 signals = await self._detect_signals_crustdata(companies, prospect_query)
             elif "explorium" in sources:
                 # Use Explorium for companies
-                signals = await self._detect_signals_explorium(companies, prospect_query)
+                signals = await self._detect_signals_explorium(companies, prospect_query, action=action)
             else:
                 # Default fallback
-                signals = await self._detect_signals_explorium(companies, prospect_query)
+                signals = await self._detect_signals_explorium(companies, prospect_query, action=action)
                 
         except Exception as e:
             print(f">>> [Signals] Signal detection failed: {e}", flush=True)
-        
-        # If API calls fail or return empty, use fallback
-        if not signals:
-            return self._fallback_signal_detection(companies)
         
         return signals
     
@@ -380,7 +377,8 @@ class SignalDetectionService:
     async def _detect_signals_explorium(
         self,
         companies: List[Dict[str, Any]],
-        prospect_query: str
+        prospect_query: str,
+        action: str = ""
     ) -> List[Dict[str, Any]]:
         """Detect signals using Explorium APIs for companies"""
         signals = []
@@ -394,16 +392,7 @@ class SignalDetectionService:
                 continue
             
             company_signals = []
-            catalog_signals = self._sample_signals_for_demo(domain)
-            if catalog_signals:
-                signals.append({
-                    "company_name": company_name,
-                    "domain": domain,
-                    "signals": catalog_signals,
-                    "personalization_tips": self._generate_personalization_tips(catalog_signals)
-                })
-                continue
-            
+            primary_match = {}
             try:
                 # 1. Get business challenges from Explorium
                 # First we need to match the business to get a business_id
@@ -415,6 +404,7 @@ class SignalDetectionService:
                     
                     matched = match_result.get("matched_businesses") or match_result.get("matches") or []
                     if matched:
+                        primary_match = matched[0] if isinstance(matched, list) else {}
                         business_id = matched[0].get("business_id")
                         
                         if business_id:
@@ -525,6 +515,13 @@ class SignalDetectionService:
             except Exception as e:
                 print(f">>> [Signals] Explorium API error for {company_name}: {e}", flush=True)
             
+            if not company_signals and primary_match:
+                company_signals.append({
+                    "type": "explorium_matched",
+                    "description": self._describe_matched_company(primary_match, action),
+                    "urgency": "medium"
+                })
+            
             # Add company with signals
             if company_signals:
                 # Deduplicate signals
@@ -542,16 +539,15 @@ class SignalDetectionService:
                     "personalization_tips": self._generate_personalization_tips(unique_signals)
                 })
             else:
-                # Add default signal if no signals found
                 signals.append({
                     "company_name": company_name,
                     "domain": domain,
                     "signals": [{
-                        "type": "prospecting_target",
-                        "description": f"Active in {industry} industry" if industry else "Potential target for outreach",
-                        "urgency": "low"
+                        "type": "signal_builder",
+                        "description": self._generate_action_signal(action, industry),
+                        "urgency": "medium"
                     }],
-                    "personalization_tips": "Focus on core value proposition and industry-specific solutions"
+                    "personalization_tips": self._generate_action_tip(action)
                 })
         
         return signals
@@ -579,7 +575,8 @@ class SignalDetectionService:
     
     def _fallback_signal_detection(
         self, 
-        companies: List[Dict[str, Any]]
+        companies: List[Dict[str, Any]],
+        action: str = ""
     ) -> List[Dict[str, Any]]:
         """Rule-based signal detection when API is unavailable"""
         signals = []
@@ -705,11 +702,11 @@ class SignalDetectionService:
                     "company_name": company_name,
                     "domain": domain,
                     "signals": [{
-                        "type": "prospecting_target",
-                        "description": "Potential target for outreach",
+                        "type": "signal_builder",
+                        "description": self._generate_action_signal(action, industry),
                         "urgency": "low"
                     }],
-                    "personalization_tips": "Focus on core value proposition and industry-specific solutions"
+                    "personalization_tips": self._generate_action_tip(action)
                 })
         
         return signals
@@ -754,6 +751,41 @@ class SignalDetectionService:
             ],
         }
         return catalog.get(domain.lower(), [])
+
+    def _generate_action_signal(self, action: str, industry: str) -> str:
+        action_key = (action or "").lower()
+        if "funding" in action_key:
+            return f"Funding alert for {industry or 'target companies'}."
+        if "hiring" in action_key or "job" in action_key:
+            return f"Hiring momentum detected in {industry or 'target industries'}."
+        if "tech" in action_key:
+            return f"Technology adoption signal for {industry or 'otherwise qualified companies'}."
+        return f"Signal curated for {action or 'your request'}."
+
+    def _generate_action_tip(self, action: str) -> str:
+        action_key = (action or "").lower()
+        if "funding" in action_key:
+            return "Lead with funding momentum and use case studies showing measurable ROI."
+        if "hiring" in action_key or "job" in action_key:
+            return "Mention their recruiting push and offer efficiency gains for talent teams."
+        if "tech" in action_key:
+            return "Reference their stack and focus on integration speed."
+        return "Tie the outreach to the signal you selected."
+
+    def _describe_matched_company(self, match: Dict[str, Any], action: str) -> str:
+        name = match.get("name") or match.get("company_name") or "the target company"
+        industry = match.get("industry") or match.get("sector") or ""
+        size = match.get("employee_count_range") or match.get("company_size") or match.get("employee_count_exact")
+        funding = match.get("funding_stage") or match.get("last_funding_round")
+        description_parts = [name]
+        if industry:
+            description_parts.append(f"in {industry}")
+        if size:
+            description_parts.append(f"({size})")
+        if funding:
+            description_parts.append(f"recently in {funding}")
+        action_desc = action or "the selected signal"
+        return " ".join(description_parts) + f" matches {action_desc} intent."
 
     def _generate_personalization_tips(self, signals: List[Dict[str, Any]]) -> str:
         """Generate outreach tips based on detected signals"""

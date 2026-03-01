@@ -84,7 +84,8 @@ async def detect_signals(request: SignalDetectionRequest):
         signals = await service.detect_signals(
             companies=request.companies,
             prospect_query=request.prospect_query or "",
-            data_source=request.data_source or "explorium"
+            data_source=request.data_source or "explorium",
+            action="custom detection"
         )
         
         return SignalDetectionResponse(
@@ -191,8 +192,9 @@ async def signals_feed():
     try:
         companies = await _build_companies_for_action(service, "Live signal feed")
         if not companies:
-            raise ValueError("No companies to process")
-        signals = await service.detect_signals(companies, data_source="explorium")
+            logger.warning("[Signals API] Explorium returned no companies for the live feed")
+            return {"feeds": [], "count": 0}
+        signals = await service.detect_signals(companies, data_source="explorium", action="Live signal feed")
         if signals:
             normalized = _normalize_signals_to_feed(signals)
             capped = normalized[:3]
@@ -203,22 +205,7 @@ async def signals_feed():
     except Exception as error:
         logger.error(f"[Signals API] Explorium feed failed: {error}")
 
-    fallback = [
-        {
-            "id": "sig-001",
-            "companyId": "c1",
-            "companyName": "Catalyst Security",
-            "type": "job_posting",
-            "confidence": 91,
-            "title": "Hiring Director of Sales",
-            "description": "Director of Sales role posted as part of a European expansion, matching target ICP.",
-            "source": "Glassdoor",
-            "impact": "high",
-            "timestamp": "10 minutes ago",
-            "metadata": {"position": "Director of Sales", "location": "London"},
-        }
-    ]
-    return {"feeds": fallback, "count": len(fallback)}
+    return {"feeds": [], "count": 0}
 
 
 class BuildSignalRequest(BaseModel):
@@ -273,12 +260,6 @@ ACTION_FILTERS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-SAMPLE_COMPANIES_DEFAULT = [
-    {"name": "Catalyst Security", "domain": "catalystsecurity.com"},
-    {"name": "Northwind Analytics", "domain": "northwindanalytics.com"},
-    {"name": "Streamline DevOps", "domain": "streamlinedevops.com"},
-]
-
 
 async def _build_companies_for_action(service: SignalDetectionService, action: str) -> List[Dict[str, Any]]:
     filters = ACTION_FILTERS.get(action) or ACTION_FILTERS["default"]
@@ -291,13 +272,14 @@ async def _build_companies_for_action(service: SignalDetectionService, action: s
             companies = matches
         if companies:
             return companies
+        logger.warning(f"[Signals API] Explorium returned zero companies for action '{action}'")
     except HTTPStatusError as hse:
         if hse.response.status_code == 403:
             raise ExploriumCreditError("Explorium reported insufficient credits for this query.")
         logger.warning(f"[Signals API] Explorium returned {hse.response.status_code}: {hse.response.text}")
     except Exception as error:
         logger.warning(f"[Signals API] Failed to load companies for action '{action}': {error}")
-    return SAMPLE_COMPANIES_DEFAULT
+    return []
 
 
 @router.post("/run")
@@ -309,8 +291,11 @@ async def run_signal(request: RunSignalRequest):
     companies = request.filters.get("companies") if request.filters else None
     if not companies:
         companies = await _build_companies_for_action(service, request.action)
+    if not companies:
+        logger.warning(f"[Signals API] run signal action '{request.action}' returned no companies")
+        return {"count": 0, "signals": []}
     try:
-        signals = await service.detect_signals(companies, data_source="explorium")
+        signals = await service.detect_signals(companies, data_source="explorium", action=request.action)
         normalized = _normalize_signals_to_feed(signals)
         capped = normalized[:3]
         return {"count": len(capped), "signals": capped}
