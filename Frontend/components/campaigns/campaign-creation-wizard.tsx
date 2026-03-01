@@ -1,15 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Sparkles, Loader2, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react"
 import { campaignsApi, type CreateCampaignRequest } from "@/lib/api/campaigns"
+import { leadsApi, type Lead } from "@/lib/api/leads"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
 
@@ -21,13 +21,15 @@ export function CampaignCreationWizard() {
   const [currentStep, setCurrentStep] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  const [leadPool, setLeadPool] = useState<Lead[]>([])
+  const [isLeadLoading, setIsLeadLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
-    type: "email" as CreateCampaignRequest["type"],
     objective: "",
     leads: [] as string[],
     message: "",
     startDate: "",
+    signals: "",
   })
 
   const handleGenerateMessage = async () => {
@@ -42,7 +44,15 @@ export function CampaignCreationWizard() {
 
     setIsGenerating(true)
     try {
-      const message = await campaignsApi.generateMessage(formData.objective, formData.leads)
+      const signals = formData.signals
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const message = await campaignsApi.generateMessage({
+        objective: formData.objective,
+        leads: formData.leads,
+        signals,
+      })
       setFormData({ ...formData, message })
       toast({
         title: "Success",
@@ -64,7 +74,6 @@ export function CampaignCreationWizard() {
     try {
       const request: CreateCampaignRequest = {
         name: formData.name,
-        type: formData.type,
         objective: formData.objective,
         leads: formData.leads,
         schedule: formData.startDate
@@ -90,8 +99,45 @@ export function CampaignCreationWizard() {
     }
   }
 
+  const toggleLeadSelection = (leadId: string) => {
+    setFormData((prev) => {
+      const nextLeads = prev.leads.includes(leadId)
+        ? prev.leads.filter((id) => id !== leadId)
+        : [...prev.leads, leadId]
+      return { ...prev, leads: nextLeads }
+    })
+  }
+
+  const loadLeads = async () => {
+    setIsLeadLoading(true)
+    try {
+      const leads = await leadsApi.getLeads({
+        prompt: "",
+        filters: {
+          industry: ["software"],
+        },
+        limit: 3,
+      })
+      setLeadPool(leads)
+    } catch (error) {
+      toast({
+        title: "Lead load failed",
+        description: "Could not fetch leads from the database.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLeadLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (currentStep === 1 && leadPool.length === 0) {
+      loadLeads()
+    }
+  }, [currentStep, leadPool.length])
+
   const canGoNext = () => {
-    if (currentStep === 0) return formData.name && formData.type && formData.objective
+    if (currentStep === 0) return formData.name && formData.objective
     if (currentStep === 1) return formData.leads.length > 0
     if (currentStep === 2) return formData.message
     return true
@@ -153,19 +199,6 @@ export function CampaignCreationWizard() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="type">Campaign Type</Label>
-                <Select value={formData.type} onValueChange={(value: any) => setFormData({ ...formData, type: value })}>
-                  <SelectTrigger id="type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="slack">Slack Notification</SelectItem>
-                    <SelectItem value="multi-channel">Multi-Channel</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="objective">Campaign Objective</Label>
                 <Textarea
                   id="objective"
@@ -175,6 +208,19 @@ export function CampaignCreationWizard() {
                   rows={4}
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="signals">Signal references</Label>
+                <Textarea
+                  id="signals"
+                  placeholder="e.g. raised Series A, expanded hiring in Europe, adopted new AI platform"
+                  value={formData.signals}
+                  onChange={(e) => setFormData({ ...formData, signals: e.target.value })}
+                  rows={2}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Provide the signals you want the AI to mention, separated by commas.
+                </p>
+              </div>
             </>
           )}
 
@@ -182,23 +228,50 @@ export function CampaignCreationWizard() {
           {currentStep === 1 && (
             <div className="space-y-4">
               <div className="rounded-lg border p-4 bg-muted/30">
-                <p className="text-sm text-muted-foreground mb-2">
-                  In a production environment, you would select leads from your database here.
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => setFormData({ ...formData, leads: ["1", "2", "3", "4", "5"] })}
-                >
-                  Simulate Lead Selection (5 leads)
-                </Button>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground mb-2">
+                    Select actual leads from the seeker pool below.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={loadLeads} disabled={isLeadLoading}>
+                    {isLeadLoading ? "Refreshing..." : "Refresh Leads"}
+                  </Button>
+                </div>
               </div>
-              {formData.leads.length > 0 && (
-                <div>
-                  <Label>Selected Leads</Label>
+              {isLeadLoading ? (
+                <p className="text-sm text-muted-foreground">Loading leads...</p>
+              ) : leadPool.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No leads available yet.</p>
+              ) : (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {leadPool.map((lead) => {
+                      const selected = formData.leads.includes(lead.id)
+                      return (
+                        <Card
+                          key={lead.id}
+                          className={`border ${selected ? "border-primary bg-primary/5" : "border-border"} space-y-2 p-4`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-base font-medium">{lead.companyName}</p>
+                              <p className="text-xs text-muted-foreground">{lead.industry}</p>
+                            </div>
+                            <Button size="sm" variant={selected ? "secondary" : "outline"} onClick={() => toggleLeadSelection(lead.id)}>
+                              {selected ? "Selected" : "Select"}
+                            </Button>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            <p>{lead.location}</p>
+                            <p>Signals: {lead.signalsCount} · Score: {lead.score}</p>
+                          </div>
+                        </Card>
+                      )
+                    })}
+                  </div>
                   <div className="flex gap-2 mt-2">
                     <Badge variant="secondary">{formData.leads.length} leads selected</Badge>
                   </div>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -252,9 +325,6 @@ export function CampaignCreationWizard() {
                 <div className="text-sm space-y-1">
                   <p>
                     <span className="text-muted-foreground">Name:</span> {formData.name}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Type:</span> {formData.type}
                   </p>
                   <p>
                     <span className="text-muted-foreground">Leads:</span> {formData.leads.length}

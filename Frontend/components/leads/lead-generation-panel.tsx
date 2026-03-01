@@ -36,6 +36,15 @@ export function LeadGenerationPanel({ onLeadsGenerated }: LeadGenerationPanelPro
       return
     }
 
+    if (!filters.location.trim() && !filters.industry.trim()) {
+      toast({
+        title: "Add filters",
+        description: "Please specify at least an industry or location before running the search.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsGenerating(true)
     try {
       const request: GenerateLeadsRequest = {
