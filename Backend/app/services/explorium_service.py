@@ -683,7 +683,28 @@ class ExploriumService:
             )
         return resp.json()
 
-    async def enrich_technographics(self, business_id: str) -> Dict[str, Any]:
+    async def match_prospects(self, prospects_to_match: List[Dict[str, Any]]) -> Dict[str, Any]:
+        payload = {
+            "request_context": {},
+            "prospects_to_match": prospects_to_match,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/prospects/match",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
         payload = {
             "business_id": business_id,
             "parameters": {},
@@ -742,6 +763,32 @@ class ExploriumService:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/businesses/bombora_intent/enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def bulk_enrich_bombora_intent(self, business_ids: List[str], topics: str, min_score: int = 60) -> Dict[str, Any]:
+        payload = {
+            "business_ids": business_ids,
+            "parameters": {
+                "topics": topics,
+                "min_score": min_score
+            }
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/bombora_intent/bulk_enrich",
                 headers=self._headers(),
                 json=payload,
             )
@@ -1164,3 +1211,213 @@ class ExploriumService:
             else:
                 normalized[key] = [val]
         return normalized
+
+    async def bulk_enrich_firmographics(self, business_ids: List[str]) -> Dict[str, Any]:
+        payload = {
+            "business_ids": business_ids,
+            "parameters": {}
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/firmographics/bulk_enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def bulk_enrich_website_traffic(self, business_ids: List[str]) -> Dict[str, Any]:
+        payload = {
+            "business_ids": business_ids,
+            "parameters": {}
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/website_traffic/bulk_enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def bulk_enrich_business_challenges(self, business_ids: List[str]) -> Dict[str, Any]:
+        payload = {
+            "business_ids": business_ids,
+            "parameters": {}
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/pc_business_challenges_10k/bulk_enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def bulk_enrich_financial_indicators(self, business_ids: List[str]) -> Dict[str, Any]:
+        from datetime import datetime
+        payload = {
+            "business_ids": business_ids,
+            "parameters": {
+                "date": datetime.now().isoformat()
+            }
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/financial_indicators/bulk_enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def fetch_prospects(
+        self,
+        frontend_filters: Dict[str, Any],
+        size: int = 3,
+        page_size: int = 3,
+        page: int = 1,
+        mode: str = "full",
+    ) -> Dict[str, Any]:
+        # Note: Prospects may not have the same filter mapping, adjust as needed
+        mapped_filters = {}  # For now, no filters mapping, as prospects filters may differ
+        payload = {
+            "request_context": {},
+            "mode": mode,
+            "size": size,
+            "page_size": page_size,
+            "page": page,
+            "exclude": [],
+            "filters": mapped_filters,
+        }
+        print(f">>> [ExploriumService] fetch_prospects payload: {payload}", flush=True)
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/prospects",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                
+                # Robustly extract error message
+                error_msg = data
+                if isinstance(data, dict):
+                    error_msg = data.get("message") or data.get("detail") or data
+                elif isinstance(data, list):
+                    error_msg = data
+                
+                print(f">>> [ExploriumService] API Error {resp.status_code}: {error_msg}", flush=True)
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {error_msg}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def bulk_enrich_contacts_information(self, prospect_ids: List[str]) -> Dict[str, Any]:
+        payload = {
+            "prospect_ids": prospect_ids,
+            "parameters": {}
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/prospects/contacts_information/bulk_enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def autocomplete_businesses(self, field: str, query: str, semantic_search: bool = False) -> Dict[str, Any]:
+        params = {"field": field, "query": query}
+        if semantic_search:
+            params["semantic_search"] = "true"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(
+                f"{self.base_url}/businesses/autocomplete",
+                headers=self._headers(),
+                params=params,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def enroll_business_events(self, business_ids: List[str], event_types: List[str]) -> Dict[str, Any]:
+        payload = {
+            "business_ids": business_ids,
+            "event_types": event_types
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()

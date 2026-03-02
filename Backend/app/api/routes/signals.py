@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import logging
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from httpx import HTTPStatusError
 
@@ -45,7 +45,7 @@ def _normalize_signals_to_feed(signals: List[Dict[str, Any]]) -> List[Dict[str, 
             "description": description,
             "source": friendly_source,
             "impact": impact,
-            "timestamp": datetime.utcnow().strftime("%H:%M UTC"),
+            "timestamp": datetime.now(timezone.utc).strftime("%H:%M UTC"),
             "metadata": {"notes": signal.get("personalization_tips", "")}
         })
     return feed
@@ -223,9 +223,156 @@ async def build_signal(request: BuildSignalRequest):
     return {"status": "queued", "signalId": signal_id, "action": request.action}
 
 
+from pydantic import BaseModel
+
 class RunSignalRequest(BaseModel):
     action: str
     filters: Optional[Dict[str, Any]] = None
+
+class EntitySignalRequest(BaseModel):
+    type: str
+    name: str = ""
+    domain: str = ""
+
+@router.post("/entity")
+async def get_entity_signals(request: EntitySignalRequest):
+    """Get signals for a specific business or prospect entity"""
+    service = SignalDetectionService()
+    try:
+        signals = []
+        if request.type == "business":
+            # Match business
+            match_result = await service.explorium.match_businesses([{
+                "name": request.name,
+                "domain": request.domain
+            }])
+            matched = match_result.get("matched_businesses") or match_result.get("matches") or []
+            if matched:
+                business_id = matched[0].get("business_id")
+                if business_id:
+                    # Get intent signals
+                    intent_result = await service.explorium.bulk_enrich_bombora_intent(
+                        [business_id], 
+                        "training & development: corporate universities;training & development: career management;information technology: cloud computing;information technology: cybersecurity;marketing: content marketing;marketing: social media marketing;sales: sales automation;sales: crm software;finance: financial planning;finance: accounting software"
+                    )
+                    intent_data = intent_result.get("data", {}).get(business_id, {})
+                    intent_topics = intent_data.get("intent_topics", [])
+                    
+                    for topic in intent_topics[:5]:
+                        signals.append({
+                            "id": f"intent-{topic['topic']}",
+                            "companyId": business_id,
+                            "companyName": request.name or request.domain,
+                            "type": "intent",
+                            "confidence": min(95, max(60, int(topic.get("composite_score", 0) * 100))),
+                            "title": f"Intent: {topic['topic']}",
+                            "description": f"Researching {topic['topic']} ({topic['category']}) - {topic.get('level_of_intent', 'Early Research')}",
+                            "source": "Explorium",
+                            "impact": "high" if topic.get('level_of_intent') == "In-Depth Research" else "medium",
+                            "timestamp": "Just now",
+                            "metadata": {"category": topic['category']}
+                        })
+                    
+                    # Get firmographics signals
+                    try:
+                        firmographics_result = await service.explorium.bulk_enrich_firmographics([business_id])
+                        firmographics_data = firmographics_result.get("data", {}).get(business_id, {})
+                        revenue = firmographics_data.get("revenue_range")
+                        if revenue:
+                            signals.append({
+                                "id": f"revenue-{business_id}",
+                                "companyId": business_id,
+                                "companyName": request.name or request.domain,
+                                "type": "firmographics",
+                                "confidence": 85,
+                                "title": f"Revenue Range: {revenue}",
+                                "description": f"Company's estimated revenue range is {revenue}, indicating growth potential.",
+                                "source": "Explorium",
+                                "impact": "medium",
+                                "timestamp": "Just now",
+                                "metadata": {}
+                            })
+                        employees = firmographics_data.get("employee_count")
+                        if employees:
+                            signals.append({
+                                "id": f"employees-{business_id}",
+                                "companyId": business_id,
+                                "companyName": request.name or request.domain,
+                                "type": "firmographics",
+                                "confidence": 80,
+                                "title": f"Employee Count: {employees}",
+                                "description": f"Company has approximately {employees} employees.",
+                                "source": "Explorium",
+                                "impact": "low",
+                                "timestamp": "Just now",
+                                "metadata": {}
+                            })
+                    except Exception as e:
+                        print(f"Firmographics enrich failed: {e}")
+        
+        elif request.type == "prospect":
+            try:
+                match_result = await service.explorium.match_prospects([{
+                    "name": request.name,
+                    "company": request.domain
+                }])
+                matched = match_result.get("matched_prospects") or []
+                if matched:
+                    prospect_id = matched[0].get("prospect_id")
+                    if prospect_id:
+                        contacts_result = await service.explorium.bulk_enrich_contacts_information([prospect_id])
+                        contacts_data = contacts_result.get("data", {}).get(prospect_id, {})
+                        emails = contacts_data.get("emails", [])
+                        if emails:
+                            signals.append({
+                                "id": f"emails-{prospect_id}",
+                                "companyId": prospect_id,
+                                "companyName": request.name or request.domain,
+                                "type": "prospect",
+                                "confidence": 90,
+                                "title": "Contact Emails Available",
+                                "description": f"Prospect has {len(emails)} verified email addresses.",
+                                "source": "Explorium",
+                                "impact": "high",
+                                "timestamp": "Just now",
+                                "metadata": {"emails": emails}
+                            })
+                        phones = contacts_data.get("phones", [])
+                        if phones:
+                            signals.append({
+                                "id": f"phones-{prospect_id}",
+                                "companyId": prospect_id,
+                                "companyName": request.name or request.domain,
+                                "type": "prospect",
+                                "confidence": 85,
+                                "title": "Contact Phones Available",
+                                "description": f"Prospect has {len(phones)} verified phone numbers.",
+                                "source": "Explorium",
+                                "impact": "high",
+                                "timestamp": "Just now",
+                                "metadata": {"phones": phones}
+                            })
+            except Exception as e:
+                print(f"Prospect enrich failed: {e}")
+        
+        return {"feeds": signals, "count": len(signals)}
+    except Exception as e:
+        logger.error(f"Entity signals error: {e}")
+        return {"feeds": [], "count": 0}
+
+
+@router.get("/autocomplete")
+async def autocomplete_business(query: str, limit: int = 5):
+    if not query or len(query) < 2:
+        return {"suggestions": []}
+    service = SignalDetectionService()
+    try:
+        result = await service.explorium.autocomplete_businesses(query, limit=limit)
+        suggestions = [item.get("name") or item.get("business_name", "") for item in result.get("suggestions", [])]
+        return {"suggestions": suggestions}
+    except Exception as e:
+        logger.error(f"Autocomplete error: {e}")
+        return {"suggestions": []}
 
 
 ACTION_FILTERS: Dict[str, Dict[str, Any]] = {

@@ -1,0 +1,474 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Business Website Traffic (Bulk)
+
+### **Description**
+
+The **Business Website Traffic Enrichment** provides detailed insights into a company’s online presence by surfacing **monthly web traffic metrics** sourced from SEMrush’s a leading provider of digital analytics.
+
+For each input company (`business_id`), the enrichment resolves the associated domain and returns a set of standardized signals such as **total visits, users, traffic sources (search, social, referral, direct, paid), device breakdown (desktop vs. mobile), bounce rate, time on site, and more**.
+
+Data is available from **January 2017** through the **start of the previous month**, and is provided in raw form directly from SEMrush.
+
+Raw traffic data powered by :
+
+<img src="https://mintlify.s3.us-west-1.amazonaws.com/explorium/images/3462b6940c8e900090f9c254b680c07463ac23b4c6f7877a7e46bc657aedad28-image.png" alt="3462b6940c8e900090f9c254b680c07463ac23b4c6f7877a7e46bc657aedad28 Image Pn" title="3462b6940c8e900090f9c254b680c07463ac23b4c6f7877a7e46bc657aedad28 Image Pn" style={{ width:"48%" }} />
+
+This signal is particularly useful for:
+
+* Evaluating **digital reach** and engagement.
+* Comparing **marketing effectiveness** across companies.
+* Enriching **lead profiles** with behavioral indicators..
+
+***
+
+<AccordionGroup>
+  <Accordion title="How It Works">
+    * **Input:** Provide a `business_id` obtained from the **Match Businesses** API and `month_period`
+    * **Processing:** The system resolves the company’s domain and queries SEMrush’s `traffic_summary` API for the most recent monthly traffic metrics.
+    * **Output:** Standardized traffic data including sessions, users, traffic source distribution, device usage, bounce rate, and engagement metrics.
+  </Accordion>
+
+  <Accordion title="Example Request (cURL)">
+    ```bash  theme={null}
+    curl -X 'POST' \
+    'https://api.explorium.ai/v1/businesses/website_traffic/bulk_enrich' \
+    -H 'accept: application/json' \
+    -H 'api_key: your_api_key' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "request_context": {},
+    "parameters": {
+      "month_period": "2025-07"
+    },
+    "business_ids": [
+      "8adce3ca1cef0c986b22310e369a0793", "b197ffdef2ddc3308584dce7afa3661b"
+    ]
+    }'
+    ```
+  </Accordion>
+
+  <Accordion title="Example Response">
+    ```json  theme={null}
+    {
+    "response_context": {
+      "correlation_id": "6cbb9f51dd624e2bba1e8e6a333e30e0",
+      "request_status": "success",
+      "time_took_in_seconds": 1.675
+    },
+    "data": [
+      {
+        "business_id": "8adce3ca1cef0c986b22310e369a0793",
+        "data": {
+          "business_id": "8adce3ca1cef0c986b22310e369a0793",
+          "accuracy": 3,
+          "bounced_visits": null,
+          "bounce_rate": 0.6144,
+          "channel": null,
+          "desktop_share": 0,
+          "device_type": "all",
+          "direct": 457694910,
+          "display_ad": 822032,
+          "mail": 418780,
+          "mobile_bounce_rate": 0,
+          "mobile_hits": 898405066,
+          "mobile_pages_per_visit": 2,
+          "mobile_share": 0,
+          "mobile_users": 245528032,
+          "mobile_visits": 402005428,
+          "pages_per_visit": 3,
+          "paid": 2198872,
+          "referral": 80711907,
+          "rank": 49,
+          "search": 172090501,
+          "search_organic": 172090501,
+          "social_paid": 137644,
+          "target": "apple.com",
+          "time_on_site": 508,
+          "unknown_channel": 0,
+          "users": 397949074,
+          "visits": 728778992,
+          "month_period": "2025-07"
+        }
+      },
+      {
+        "business_id": "b197ffdef2ddc3308584dce7afa3661b",
+        "data": {
+          "business_id": "b197ffdef2ddc3308584dce7afa3661b",
+          "accuracy": 3,
+          "bounced_visits": null,
+          "bounce_rate": 0.376,
+          "channel": null,
+          "desktop_share": 0,
+          "device_type": "all",
+          "direct": 96570574099,
+          "display_ad": 26719878,
+          "mail": 257936305,
+          "mobile_bounce_rate": 0,
+          "mobile_hits": 242044539965,
+          "mobile_pages_per_visit": 3,
+          "mobile_share": 0,
+          "mobile_users": 4549983641,
+          "mobile_visits": 74145442283,
+          "pages_per_visit": 5,
+          "paid": 4062160,
+          "referral": 3171546695,
+          "rank": 1,
+          "search": 369052002,
+          "search_organic": 369052002,
+          "social_paid": 7098698,
+          "target": "google.com",
+          "time_on_site": 789,
+          "unknown_channel": 0,
+          "users": 5814204983,
+          "visits": 101348173032,
+          "month_period": "2025-07"
+        }
+      }
+    ],
+    "entity_id": null,
+    "total_results": 2
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Best Practices">
+    * **`Always use a validbusiness_id`** from the **Match Businesses** API.
+    * **`Specifymonth_period`** (YYYY-MM) when you want to retrieve metrics for a specific month.
+    * **Check for null values** — if SEMrush has no data for a given domain, the response will contain null fields.
+    * **Use rank, visits, and users together** for benchmarking against competitors.
+    * **Combine traffic metrics with firmographics** to build a richer business profile.
+  </Accordion>
+
+  <Accordion title="Website Traffic Output Signals">
+    | Signal                    | API Name               | Description                                                                            | Data Type |
+    | ------------------------- | ---------------------- | -------------------------------------------------------------------------------------- | --------- |
+    | accuracy                  | Accuracy               | Data accuracy, with values of 1, 2, or 3. 3 is the most accurate.                      | CATEGORY  |
+    | bounced\_visits           | Bounced Visits         | The number of single-page sessions.                                                    | NUMERIC   |
+    | bounce\_rate              | Bounce Rate            | The percentage of single-page sessions.                                                | NUMERIC   |
+    | channel                   | Channel                | The channel type, which can be direct, referral, search, social, mail, or display\_ad. | CATEGORY  |
+    | desktop\_share            | Desktop Share          | The proportion of total traffic that comes from desktops.                              | NUMERIC   |
+    | device\_type              | Device Type            | The type of device used by the user, such as desktop or mobile.                        | CATEGORY  |
+    | direct                    | Direct                 | Traffic from users typing in the URL or using bookmarks.                               | NUMERIC   |
+    | display\_ad               | Display Ad             | Traffic from banner or display advertising.                                            | NUMERIC   |
+    | mail                      | Mail                   | Traffic from email campaigns.                                                          | NUMERIC   |
+    | mobile\_bounce\_rate      | Mobile Bounce Rate     | The bounce rate specific to users on mobile devices.                                   | NUMERIC   |
+    | mobile\_hits              | Mobile Hits            | The number of pageviews from mobile devices.                                           | NUMERIC   |
+    | mobile\_pages\_per\_visit | Mobile Pages Per Visit | The number of pages viewed per session from mobile devices.                            | NUMERIC   |
+    | mobile\_share             | Mobile Share           | The proportion of total traffic that comes from mobile devices.                        | NUMERIC   |
+    | mobile\_users             | Mobile Users           | The number of unique users on mobile devices.                                          | NUMERIC   |
+    | mobile\_visits            | Mobile Visits          | The total number of sessions from mobile devices.                                      | NUMERIC   |
+    | pages\_per\_visit         | Pages Per Visit        | The number of pages viewed per session.                                                | NUMERIC   |
+    | paid                      | Paid                   | Traffic from all paid sources, including ads.                                          | NUMERIC   |
+    | referral                  | Referral               | Referral traffic.                                                                      | NUMERIC   |
+    | rank                      | Rank                   | The ranking of the target based on traffic volume, where 1 is the highest traffic.     | NUMERIC   |
+    | search                    | Search                 | Total search engine traffic (organic and paid).                                        | NUMERIC   |
+    | search\_organic           | Search Organic         | Traffic from unpaid search results.                                                    | NUMERIC   |
+    | search\_paid              | Search Paid            | Traffic from paid search ads.                                                          | NUMERIC   |
+    | social                    | Social                 | Traffic from all social media sources.                                                 | NUMERIC   |
+    | social\_organic           | Social Organic         | Unpaid traffic from social platforms.                                                  | NUMERIC   |
+    | social\_paid              | Social Paid            | Paid traffic from social media advertising.                                            | NUMERIC   |
+    | target                    | Target                 | The domain being analyzed, such as example.com.                                        | URL       |
+    | time\_on\_site            | Time On Site           | The average time spent on the site per session.                                        | NUMERIC   |
+    | unknown\_channel          | Unknown Channel        | Traffic for which the source could not be determined.                                  | NUMERIC   |
+    | users                     | Users                  | The total number of users.                                                             | NUMERIC   |
+    | visits                    | Visits                 | The total number of sessions.                                                          | NUMERIC   |
+    | month\_period             | Month period           | Reference month for cumulative data (default: previous month)                          | DATETIME  |
+  </Accordion>
+</AccordionGroup>
+
+📌 *For additional enrichment options, explore related API endpoints below.*
+
+
+## OpenAPI
+
+````yaml post /v1/businesses/website_traffic/bulk_enrich
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/businesses/website_traffic/bulk_enrich:
+    post:
+      tags:
+        - BulkBusinessEnrichments
+      summary: Website Traffic
+      operationId: businesses_website_traffic_bulk_enrich
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebsiteTrafficBulkEnrichRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: >-
+                  #/components/schemas/BusinessesBulkEnrichResponse_WebsiteTrafficOutputSchema_
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebsiteTrafficBulkEnrichRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        parameters:
+          $ref: '#/components/schemas/WebsiteTrafficEnrichmentParams'
+        business_ids:
+          items:
+            type: string
+            pattern: ^[a-f0-9]{32}$
+          type: array
+          maxItems: 50
+          minItems: 1
+          title: Business Ids
+      additionalProperties: false
+      type: object
+      required:
+        - business_ids
+      title: WebsiteTrafficBulkEnrichRequest
+    BusinessesBulkEnrichResponse_WebsiteTrafficOutputSchema_:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        data:
+          items:
+            $ref: >-
+              #/components/schemas/BusinessesBulkEnrichRow_WebsiteTrafficOutputSchema_
+          type: array
+          title: Data
+        entity_id:
+          anyOf:
+            - type: string
+              pattern: ^[a-f0-9]{32}$
+            - type: string
+              pattern: ^[a-f0-9]{40}$
+          title: Entity Id
+        total_results:
+          type: integer
+          title: Total Results
+      type: object
+      required:
+        - response_context
+        - total_results
+      title: BusinessesBulkEnrichResponse[WebsiteTrafficOutputSchema]
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    WebsiteTrafficEnrichmentParams:
+      properties:
+        month_period:
+          type: string
+          title: Month Period
+          description: The month period of the website. YYYY-MM
+      additionalProperties: false
+      type: object
+      required:
+        - month_period
+      title: WebsiteTrafficEnrichmentParams
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    BusinessesBulkEnrichRow_WebsiteTrafficOutputSchema_:
+      properties:
+        business_id:
+          type: string
+          pattern: ^[a-f0-9]{32}$
+          title: Business Id
+        data:
+          $ref: '#/components/schemas/WebsiteTrafficOutputSchema'
+      type: object
+      required:
+        - business_id
+      title: BusinessesBulkEnrichRow[WebsiteTrafficOutputSchema]
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+    WebsiteTrafficOutputSchema:
+      properties:
+        business_id:
+          type: string
+          pattern: ^[a-f0-9]{32}$
+          title: Business Id
+        accuracy:
+          type: integer
+          title: Accuracy
+        bounced_visits:
+          type: integer
+          title: Bounced Visits
+        bounce_rate:
+          type: number
+          title: Bounce Rate
+        channel:
+          type: string
+          title: Channel
+        desktop_share:
+          type: integer
+          title: Desktop Share
+        device_type:
+          type: string
+          title: Device Type
+        direct:
+          type: integer
+          title: Direct
+        display_ad:
+          type: integer
+          title: Display Ad
+        mail:
+          type: integer
+          title: Mail
+        mobile_bounce_rate:
+          type: integer
+          title: Mobile Bounce Rate
+        mobile_hits:
+          type: integer
+          title: Mobile Hits
+        mobile_pages_per_visit:
+          type: integer
+          title: Mobile Pages Per Visit
+        mobile_share:
+          type: integer
+          title: Mobile Share
+        mobile_users:
+          type: integer
+          title: Mobile Users
+        mobile_visits:
+          type: integer
+          title: Mobile Visits
+        pages_per_visit:
+          type: integer
+          title: Pages Per Visit
+        paid:
+          type: integer
+          title: Paid
+        referral:
+          type: integer
+          title: Referral
+        rank:
+          type: integer
+          title: Rank
+        search:
+          type: integer
+          title: Search
+        search_organic:
+          type: integer
+          title: Search Organic
+        social_paid:
+          type: integer
+          title: Social Paid
+        target:
+          type: string
+          title: Target
+        time_on_site:
+          type: integer
+          title: Time On Site
+        unknown_channel:
+          type: integer
+          title: Unknown Channel
+        users:
+          type: integer
+          title: Users
+        visits:
+          type: integer
+          title: Visits
+        month_period:
+          type: string
+          title: Month Period
+      type: object
+      title: WebsiteTrafficOutputSchema
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````

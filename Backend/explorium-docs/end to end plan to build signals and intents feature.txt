@@ -1,0 +1,216 @@
+
+
+Let me search for detailed information about Explorium's signals and related endpoints.Here's a comprehensive breakdown of Explorium's API signals and endpoints, organized by **Businesses** and **Prospects**:
+
+---
+
+## **Business Endpoints** (80M+ companies, 150+ countries)
+
+| Endpoint | Method | URL |
+|---|---|---|
+| **Match Businesses** | POST | `/v1/businesses/match` |
+| **Fetch Businesses** | POST | `/v1/businesses` |
+| **Business Statistics** | POST | `/v1/businesses/stats` |
+| **Autocomplete** | GET | `/v1/businesses/autocomplete` |
+| **Firmographics Enrichment (Bulk)** | POST | `/v1/businesses/firmographics/bulk_enrich` |
+| **Financial Metrics (Bulk)** | POST | `/v1/businesses/financial_indicators/bulk_enrich` |
+| **Business Challenges (Bulk)** | POST | `/v1/businesses/pc_business_challenges_10k/bulk_enrich` |
+| **Website Traffic (Bulk)** | POST | `/v1/businesses/website_traffic/bulk_enrich` |
+| **Intent Topics / Bombora (Bulk)** | POST | `/v1/businesses/bombora_intent/bulk_enrich` |
+| **Business Event Enrollments** | POST/GET/DELETE | `/v1/businesses/events/enrollments` |
+| **Webhooks** | POST | `/v1/webhooks` |
+
+**Business enrichment signals include:** firmographics (name, description, website, country, NAICS/SIC codes, employee range, revenue range, LinkedIn profile, locations), technographic data, financial indicators (EBITDA, revenue, ROA, P/E ratio, TSR, etc.), business challenges (competition, security breaches, market saturation), website traffic (visits, users, bounce rate, traffic sources, device breakdown via SEMrush), and intent topics (Bombora-powered buying signals).
+
+---
+
+## **Prospect Endpoints**
+
+| Endpoint | Method | URL |
+|---|---|---|
+| **Match Prospects** | POST | `/v1/prospects/match` |
+| **Fetch Prospects** | POST | `/v1/prospects` |
+| **Prospects Statistics** | POST | `/v1/prospects/stats` |
+| **Autocomplete** | GET | `/v1/prospects/autocomplete` |
+| **Contact Details Enrichment** | POST | `/v1/prospects/contacts_information/enrich` |
+| **Contact Details (Bulk)** | POST | `/v1/prospects/contacts_information/bulk_enrich` |
+| **Social Media Presence** | Enrichment endpoint | (via enrichments suite) |
+| **Professional Profile** | Enrichment endpoint | (via enrichments suite) |
+| **Prospect Events** | POST | `/v1/prospects/events` |
+| **Prospect Enrollments** | POST/GET | `/v1/prospects/events/enrollments` |
+
+**Prospect enrichment signals include:** professional emails, personal emails, email validity status, phone numbers, mobile phone, social media activity, job titles, work history, skills, education, and career trajectory.
+
+**Prospect event types:** `prospect_changed_role`, `prospect_changed_company`, `prospect_job_start_anniversary`.
+
+---
+
+## **Recommended Workflow**
+1. **Statistics** → gauge market size
+2. **Match** → get `business_id` / `prospect_id`
+3. **Fetch** → retrieve records with filters
+4. **Enrich** → layer on firmographic, contact, technographic, financial data
+5. **Events/Webhooks** → monitor real-time changes
+
+The documentation doesn't reference a specific "4,000 signals" number, but the API covers hundreds of firmographic, technographic, financial, intent, and contact attributes across these endpoints.
+
+```suggestions
+(Prospecting & Lead Enrichment Quickstart)[/reference/quick-starts/use_case_prospecting]
+(Business API Overview)[/reference/businesses/businesses_api]
+(Prospects API Overview)[/reference/prospects/prospects_api]
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Let me search for detailed information on intent signals and how to build with the Explorium API.Here's a **complete plan** for building an **Intents & Signals feature** using the Explorium API, based on the documentation:
+
+---
+
+## Complete Build Plan: Intents & Signals Feature
+
+### Phase 1: Foundation — Match & Identify
+
+**Goal:** Resolve your target accounts/prospects to Explorium IDs.
+
+| Step | API Endpoint | Purpose |
+|---|---|---|
+| 1a | `POST /v1/businesses/match` | Match company name/domain → get `business_id` |
+| 1b | `POST /v1/prospects/match` | Match person name/company → get `prospect_id` |
+
+```bash
+# Match a business
+curl -X POST https://api.explorium.ai/v1/businesses/match \
+  -H "api_key: YOUR_KEY" \
+  -d '{"businesses_to_match": [{"name": "Apple", "domain": "apple.com"}]}'
+```
+
+---
+
+### Phase 2: Intent Signals (Bombora)
+
+**Goal:** Detect what topics companies are actively researching.
+
+**Endpoint:** `POST /v1/businesses/bombora_intent/bulk_enrich`
+
+**Key parameters:**
+- `business_ids` — up to 50 per request
+- `topics` — semicolon-separated "category: topic" list (use **at least 12 topics** for meaningful results)
+- `min_score` — integer > 60 (default: 60)
+
+**Use Autocomplete first** to get valid topic values:
+`GET /v1/businesses/autocomplete?field=business_intent_topics&semantic_search=true`
+
+**Output signals:**
+
+| Signal | Description |
+|---|---|
+| `level_of_intent` | In-Depth Research (>25%), Active Research (5–25%), Early Research (<5%) |
+| `topic_count` | e.g., "4/12" — topics with score above threshold |
+| `intent_topics` | Array of topic name, category, composite_score, date |
+| `date_stamp` | Weekly refresh date (YYYYMMDD) |
+
+```bash
+curl -X POST https://api.explorium.ai/v1/businesses/bombora_intent/bulk_enrich \
+  -H "api_key: YOUR_KEY" \
+  -d '{
+    "business_ids": ["8adce3ca1cef0c986b22310e369a0793"],
+    "parameters": {
+      "topics": ["training & development: corporate universities;training & development: career management;...12+ topics"],
+      "min_score": 76
+    }
+  }'
+```
+
+---
+
+### Phase 3: Enrichment Signals (Layer on Context)
+
+Combine intent data with these enrichments for a full picture:
+
+| Signal Type | Endpoint | Key Data |
+|---|---|---|
+| **Firmographics** | `POST /v1/businesses/firmographics/bulk_enrich` | Name, revenue, employees, industry, NAICS/SIC, locations |
+| **Website Traffic** | `POST /v1/businesses/website_traffic/bulk_enrich` | Visits, bounce rate, traffic sources, device breakdown |
+| **Business Challenges** | `POST /v1/businesses/pc_business_challenges_10k/bulk_enrich` | Competition, security breaches, market saturation (public companies) |
+| **Financial Indicators** | `POST /v1/businesses/financial_indicators/bulk_enrich` | EBITDA, revenue, ROA, P/E ratio |
+| **Contact Details** | `POST /v1/prospects/contacts_information/enrich` | Emails, phone numbers, mobile |
+| **Professional Profile** | `POST /v1/prospects/profiles/enrich` | Job title, skills, education, work history |
+
+---
+
+### Phase 4: Real-Time Event Monitoring
+
+**Goal:** Get notified when key changes happen.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /v1/businesses/events/enrollments` | Enroll businesses for events (funding, IPO, M&A, workforce changes) |
+| `POST /v1/prospects/events/enrollments` | Enroll prospects for events (role change, company change, job anniversary) |
+| `POST /v1/webhooks` | Receive real-time event notifications |
+
+---
+
+### Phase 5: Build Your Feature Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│           YOUR INTENTS & SIGNALS UI          │
+├─────────────┬───────────────┬───────────────┤
+│  Intent     │  Company      │  Prospect     │
+│  Dashboard  │  Signals      │  Signals      │
+├─────────────┴───────────────┴───────────────┤
+│              ORCHESTRATION LAYER             │
+│  1. Match → 2. Enrich → 3. Monitor Events   │
+├─────────────────────────────────────────────┤
+│           EXPLORIUM API LAYER                │
+│  Match | Bombora Intent | Firmographics |   │
+│  Traffic | Challenges | Contacts | Events   │
+└─────────────────────────────────────────────┘
+```
+
+### Best Practices from the Docs:
+- **Always provide 12+ intent topics** for meaningful Bombora results
+- **Use Autocomplete with `semantic_search=true`** to build accurate topic lists
+- **Batch up to 50 IDs** per bulk enrichment request
+- **Combine intent + firmographic + event data** for full go-to-market insights
+- **Weekly refresh cadence** for Bombora intent data
+- **Store API keys securely** — never hardcode them
+
+```suggestions
+(Business Intent Topics (Bulk))[/reference/businesses/enrichments/bulk/business_intent_topics_bombora_bulk]
+(Business API Overview)[/reference/businesses/businesses_api]
+(API Introduction)[/reference/quick-starts/introduction]
+```
+
+
+
+
+
+
+
+

@@ -67,12 +67,31 @@ interface Visit {
     job_title: string | null
 }
 
+interface VisitorAnalytics {
+    window: { hours: number; since: string }
+    live: { window_minutes: number; unique_ips: number }
+    timeseries: Array<{
+        hour: string
+        total: number
+        matched: number
+        company: number
+        prospect: number
+        unknown: number
+    }>
+    top_pages: Array<{ page: string; count: number }>
+    top_referrers: Array<{ referrer: string; count: number }>
+    intent_distribution: Array<{ bucket: string; count: number }>
+}
+
 export default function VisitorsPage() {
     const [visits, setVisits] = useState<Visit[]>([])
     const [stats, setStats] = useState({ total_visits: 0, matched_visits: 0, match_rate: 0 })
     const [isLoading, setIsLoading] = useState(true)
     const [mounted, setMounted] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [analytics, setAnalytics] = useState<VisitorAnalytics | null>(null)
+    const [analyticsLoading, setAnalyticsLoading] = useState(false)
+    const [segment, setSegment] = useState<"all" | "company" | "prospect">("all")
     const pixelKey = "outmate_test_key_123"
 
     const fetchData = async () => {
@@ -112,6 +131,24 @@ export default function VisitorsPage() {
         }
     }
 
+    const fetchAnalytics = async () => {
+        setAnalyticsLoading(true)
+        try {
+            const res = await fetch(`${API_BASE}/api/visitors/analytics?hours=24&top_n=8`)
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null)
+                if (res.status === 503) setError(errData?.error || "Database temporarily unavailable")
+                return
+            }
+            const data = (await res.json()) as VisitorAnalytics
+            setAnalytics(data)
+        } catch (err) {
+            console.error("Failed to fetch visitor analytics:", err)
+        } finally {
+            setAnalyticsLoading(false)
+        }
+    }
+
     const copyPixel = () => {
         const snippet = `<script src="${API_BASE}/api/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`
         navigator.clipboard.writeText(snippet)
@@ -121,8 +158,43 @@ export default function VisitorsPage() {
     useEffect(() => {
         setMounted(true)
         fetchData()
+        fetchAnalytics()
+
         const interval = setInterval(fetchData, 30000)
-        return () => clearInterval(interval)
+        const analyticsInterval = setInterval(fetchAnalytics, 60000)
+
+        // Realtime stream (best-effort; will silently fail if Redis/SSE unavailable)
+        const es = new EventSource(`${API_BASE}/api/visitors/stream`)
+        es.onmessage = (evt) => {
+            try {
+                const msg = JSON.parse(evt.data)
+                if (msg?.type === "visit_created" && msg?.visit) {
+                    const v = msg.visit as Visit
+                    setVisits((prev) => [v, ...prev].slice(0, 200))
+                    setStats((s) => {
+                        const total = (s.total_visits ?? 0) + 1
+                        const matched = (s.matched_visits ?? 0) + (v.matched ? 1 : 0)
+                        return {
+                            total_visits: total,
+                            matched_visits: matched,
+                            match_rate: total > 0 ? (matched / total) * 100 : 0,
+                        }
+                    })
+                }
+            } catch {
+                // ignore
+            }
+        }
+        es.onerror = () => {
+            // avoid noisy console; polling still keeps UI fresh
+            es.close()
+        }
+
+        return () => {
+            clearInterval(interval)
+            clearInterval(analyticsInterval)
+            es.close()
+        }
     }, [])
 
     if (!mounted) return <div className="p-6 animate-pulse">Loading dashboard...</div>
@@ -193,7 +265,7 @@ export default function VisitorsPage() {
             )}
 
             {/* Stats Cards */}
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Visits</CardTitle>
@@ -224,15 +296,110 @@ export default function VisitorsPage() {
                         <p className="text-xs text-muted-foreground">Based on page engagement</p>
                     </CardContent>
                 </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Live Online</CardTitle>
+                        <Globe className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{analytics?.live?.unique_ips ?? "—"}</div>
+                        <p className="text-xs text-muted-foreground">
+                            Unique IPs in last {analytics?.live?.window_minutes ?? 5} min
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Analytics */}
+            <div className="grid gap-4 md:grid-cols-2">
+                <Card className="md:col-span-2">
+                    <CardHeader>
+                        <CardTitle>Traffic (last 24h)</CardTitle>
+                        <CardDescription>Realtime updates stream in when available.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {analyticsLoading ? (
+                            <div className="h-[260px] w-full animate-pulse bg-muted/40 rounded-lg" />
+                        ) : !analytics?.timeseries?.length ? (
+                            <div className="text-sm text-muted-foreground py-8">No analytics yet.</div>
+                        ) : (
+                            <div className="h-[260px]">
+                                {/* lightweight inline chart using existing CSS; no new component dependency */}
+                                <div className="grid grid-cols-12 gap-2 h-full items-end">
+                                    {analytics.timeseries.slice(-12).map((p) => (
+                                        <div key={p.hour} className="flex flex-col justify-end gap-1">
+                                            <div
+                                                className="bg-primary/80 rounded-sm"
+                                                style={{ height: `${Math.min(100, p.total * 6)}%` }}
+                                                title={`${p.total} visits`}
+                                            />
+                                            <div className="bg-green-600/70 rounded-sm" style={{ height: `${Math.min(100, p.matched * 6)}%` }} title={`${p.matched} identified`} />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                    Primary bars = total visits, green overlay = identified.
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Top Pages</CardTitle>
+                        <CardDescription>Most visited paths (window)</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        {(analytics?.top_pages || []).map((p) => (
+                            <div key={p.page} className="flex items-center justify-between gap-3 text-sm">
+                                <span className="truncate" title={p.page}>{p.page}</span>
+                                <Badge variant="secondary">{p.count}</Badge>
+                            </div>
+                        ))}
+                        {!analytics?.top_pages?.length && <div className="text-sm text-muted-foreground">—</div>}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Top Referrers</CardTitle>
+                        <CardDescription>Where visitors came from</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        {(analytics?.top_referrers || []).map((r) => (
+                            <div key={r.referrer} className="flex items-center justify-between gap-3 text-sm">
+                                <span className="truncate" title={r.referrer}>{r.referrer}</span>
+                                <Badge variant="secondary">{r.count}</Badge>
+                            </div>
+                        ))}
+                        {!analytics?.top_referrers?.length && <div className="text-sm text-muted-foreground">—</div>}
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Main Table */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Recent Visitors</CardTitle>
-                    <CardDescription>
-                        A real-time feed of visitors and their identified details.
-                    </CardDescription>
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <CardTitle>Recent Visitors</CardTitle>
+                            <CardDescription>
+                                A real-time feed of visitors and their identified details.
+                            </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" variant={segment === "all" ? "default" : "outline"} onClick={() => setSegment("all")}>
+                                All
+                            </Button>
+                            <Button size="sm" variant={segment === "company" ? "default" : "outline"} onClick={() => setSegment("company")}>
+                                Companies
+                            </Button>
+                            <Button size="sm" variant={segment === "prospect" ? "default" : "outline"} onClick={() => setSegment("prospect")}>
+                                Prospects
+                            </Button>
+                        </div>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     <Table>
@@ -259,7 +426,13 @@ export default function VisitorsPage() {
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                visits.map((visit) => {
+                                visits
+                                    .filter((v) => {
+                                        if (segment === "all") return true
+                                        const cat = (v as any).category || v.resolution?.category
+                                        return cat === segment
+                                    })
+                                    .map((visit) => {
                                     const geo =
                                         visit.geo ||
                                         visit.resolution?.geo ||
@@ -287,6 +460,7 @@ export default function VisitorsPage() {
                                     const fullName = visit.full_name || person.full_name || person.name
                                     const linkedinUrl = visit.linkedin_url || person.linkedin_url || person.linkedin
                                     const jobTitle = visit.job_title || person.title || person.job_title
+                                    const category = (visit as any).category || visit.resolution?.category
 
                                     // Safe URL parsing
                                     let pagePath = visit.url
@@ -304,6 +478,13 @@ export default function VisitorsPage() {
                                                     </span>
                                                     {jobTitle && (
                                                         <span className="text-xs text-muted-foreground">{jobTitle}</span>
+                                                    )}
+                                                    {category && category !== "unknown" && (
+                                                        <span className="text-xs">
+                                                            <Badge variant={category === "prospect" ? "default" : "secondary"}>
+                                                                {category === "prospect" ? "Prospect" : "Company"}
+                                                            </Badge>
+                                                        </span>
                                                     )}
                                                     <span className="text-xs text-muted-foreground font-mono">
                                                         {visit.ip}

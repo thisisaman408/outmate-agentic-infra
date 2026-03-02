@@ -1,0 +1,139 @@
+"use client"
+
+import { useState } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
+import { useToast } from "@/hooks/use-toast"
+import { gtmAgentsApi } from "@/lib/api/gtm-agents"
+import { Loader2, Network } from "lucide-react"
+
+export function ViralityEnginePanel() {
+  const { toast } = useToast()
+  const [seedCustomers, setSeedCustomers] = useState("Rippling, Figma, Linear")
+  const [channels, setChannels] = useState("email, linkedin, in-product")
+  const [isRunning, setIsRunning] = useState(false)
+  const [output, setOutput] = useState<string | null>(null)
+
+  const handleRun = async () => {
+    if (!seedCustomers.trim()) {
+      toast({
+        title: "Seed customers required",
+        description: "List at least one champion customer or persona.",
+        variant: "destructive",
+      })
+      return
+    }
+    setIsRunning(true)
+    setOutput(null)
+    try {
+      const res = await gtmAgentsApi.runViralityEngine({
+        seed_customers: seedCustomers.trim(),
+        channels: channels.trim() || undefined,
+      })
+      setOutput(JSON.stringify(res, null, 2))
+      toast({
+        title: "Virality plan generated",
+        description: "Review the referral hooks and multi-channel cascades.",
+      })
+    } catch (err: any) {
+      toast({
+        title: "Virality Engine failed",
+        description: err.message || "Unknown error",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="glass-effect border-white/10">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-xl font-bold">
+            <span className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+              <Network className="h-5 w-5" />
+            </span>
+            Virality Engine
+          </CardTitle>
+          <CardDescription>
+            Design self-propagating referral chains and viral loops around your champions.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Seed Customers / Personas
+            </label>
+            <Input
+              value={seedCustomers}
+              onChange={(e) => setSeedCustomers(e.target.value)}
+              disabled={isRunning}
+              className="h-10"
+              placeholder="Comma-separated list, e.g. 'Dev tools champions, RevOps leaders'"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Channels
+            </label>
+            <Input
+              value={channels}
+              onChange={(e) => setChannels(e.target.value)}
+              disabled={isRunning}
+              className="h-10"
+              placeholder="email, linkedin, slack, in-product"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Additional Notes (optional)
+            </label>
+            <Textarea
+              disabled={isRunning}
+              rows={4}
+              placeholder="Describe constraints, incentives, or audiences you want to prioritize."
+              onChange={() => {
+                /* optional free-form context captured by LLM via channels/seed text */
+              }}
+            />
+          </div>
+          <Button
+            onClick={handleRun}
+            disabled={isRunning}
+            className="mt-2 w-full md:w-auto h-11 font-semibold rounded-xl"
+          >
+            {isRunning ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Engineering viral loop…
+              </>
+            ) : (
+              <>
+                <Network className="mr-2 h-4 w-4" />
+                Run Virality Engine
+              </>
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {output && (
+        <Card className="glass-effect border-white/10">
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold">Virality Engine Output</CardTitle>
+            <CardDescription>Hooks, cascades, and referral logic suggested by the agent.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-xs text-muted-foreground bg-black/40 rounded-xl p-4 overflow-x-auto max-h-[360px]">
+              {output}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+

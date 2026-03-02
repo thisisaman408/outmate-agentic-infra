@@ -20,10 +20,25 @@ export interface Signal {
 
 export const signalsApi = {
   getSignals: async (): Promise<Signal[]> => {
-    const response = await fetch("/api/signals/feed")
-    if (!response.ok) throw new Error("Signals feed is unavailable")
-    const data = await response.json()
-    return data.feeds ?? []
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+
+    try {
+      const response = await fetch("/api/signals/feed", {
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!response.ok) throw new Error("Signals feed is unavailable")
+      const data = await response.json()
+      return data.feeds ?? []
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please try again.')
+      }
+      throw error
+    }
   },
 
   getSignalsOverview: async (): Promise<{
@@ -44,21 +59,71 @@ export const signalsApi = {
   },
 
   runSignal: async (action: string): Promise<{ signals: Signal[]; count: number }> => {
-    const response = await fetch("/api/signals/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      let errorMessage = "Signal run failed"
-      try {
-        const errData = await response.json()
-        if (errData?.detail) {
-          errorMessage = errData.detail
-        }
-      } catch (_) {}
-      throw new Error(errorMessage)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+
+    try {
+      const response = await fetch("/api/signals/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        let errorMessage = "Signal run failed"
+        try {
+          const errData = await response.json()
+          if (errData?.detail) {
+            errorMessage = errData.detail
+          }
+        } catch (_) {}
+        throw new Error(errorMessage)
+      }
+      return response.json()
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please try again.')
+      }
+      throw error
     }
-    return response.json()
+  },
+
+  searchEntitySignals: async (type: string, name: string, domain: string): Promise<Signal[]> => {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+
+    try {
+      const response = await fetch("/api/signals/entity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, name, domain }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (!response.ok) throw new Error("Entity signals unavailable")
+      const data = await response.json()
+      return data.feeds ?? []
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timed out. Please try again.')
+      }
+      throw error
+    }
+  },
+
+  autocomplete: async (query: string): Promise<string[]> => {
+    try {
+      const response = await fetch(`/api/signals/autocomplete?query=${encodeURIComponent(query)}`)
+      if (!response.ok) throw new Error("Autocomplete unavailable")
+      const data = await response.json()
+      return data.suggestions ?? []
+    } catch (error) {
+      throw error
+    }
   },
 }

@@ -20,3 +20,5 @@ faiss-cpu>=1.7.0
 celery>=5.3.0
 ipinfo>=5.0.0
 redis>=4.6.0
+crewai[tools]==1.9.3
+openai
