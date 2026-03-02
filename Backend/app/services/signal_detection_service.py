@@ -382,159 +382,184 @@ class SignalDetectionService:
         companies: List[Dict[str, Any]],
         prospect_query: str
     ) -> List[Dict[str, Any]]:
-        """Detect signals using Explorium APIs for companies"""
+        """Detect signals using new Explorium bulk APIs for comprehensive business and prospect signals"""
         signals = []
+        business_ids = []
+        business_to_company = {}
         
+        # First, match companies to get business_ids
         for company in companies[:10]:  # Limit to 10 companies
             company_name = company.get("name", "")
             domain = company.get("domain", "")
-            industry = company.get("industry", "")
             
             if not company_name and not domain:
                 continue
             
-            company_signals = []
-            catalog_signals = self._sample_signals_for_demo(domain)
-            if catalog_signals:
-                signals.append({
-                    "company_name": company_name,
-                    "domain": domain,
-                    "signals": catalog_signals,
-                    "personalization_tips": self._generate_personalization_tips(catalog_signals)
-                })
-                continue
-            
             try:
-                # 1. Get business challenges from Explorium
-                # First we need to match the business to get a business_id
-                if domain or company_name:
-                    match_result = await self.explorium.match_businesses([{
-                        "domain": domain,
-                        "name": company_name
-                    }])
-                    
-                    matched = match_result.get("matched_businesses") or match_result.get("matches") or []
-                    if matched:
-                        business_id = matched[0].get("business_id")
-                        
-                        if business_id:
-                            # 2. Get business challenges
-                            try:
-                                challenges = await self.explorium.enrich_business_challenges(business_id)
-                                challenges_data = challenges.get("data", {})
-                                
-                                if challenges_data:
-                                    # Look for challenge categories that indicate signals
-                                    challenge_categories = challenges_data.get("challenge_categories", [])
-                                    
-                                    if challenge_categories:
-                                        for cat in challenge_categories[:3]:  # Top 3 challenges
-                                            category_name = cat.get("category", "")
-                                            
-                                            # Map challenges to signal types
-                                            if any(word in category_name.lower() for word in ["growth", "scale", "expand"]):
-                                                company_signals.append({
-                                                    "type": "growth_challenge",
-                                                    "description": f"Challenge: {category_name} - may need solutions",
-                                                    "urgency": "high"
-                                                })
-                                            elif any(word in category_name.lower() for word in ["hiring", "talent", "recruit"]):
-                                                company_signals.append({
-                                                    "type": "talent_challenge",
-                                                    "description": f"Challenge: {category_name} - talent solutions needed",
-                                                    "urgency": "high"
-                                                })
-                                            elif any(word in category_name.lower() for word in ["technology", "tech", "digital"]):
-                                                company_signals.append({
-                                                    "type": "tech_challenge",
-                                                    "description": f"Challenge: {category_name} - tech solutions opportunity",
-                                                    "urgency": "medium"
-                                                })
-                            except Exception as e:
-                                print(f">>> [Signals] Explorium challenges error: {e}", flush=True)
-                            
-                            # 3. Get LinkedIn posts from Explorium
-                            try:
-                                posts_result = await self.explorium.enrich_linkedin_posts(business_id)
-                                if isinstance(posts_result, dict):
-                                    posts_data = posts_result.get("data", {})
-                                else:
-                                    posts_data = posts_result
-                                if isinstance(posts_data, dict):
-                                    recent_posts = posts_data.get("recent_posts", [])
-                                elif isinstance(posts_data, list):
-                                    recent_posts = posts_data
-                                else:
-                                    recent_posts = []
-                                for post in recent_posts[:3]:
-                                    if isinstance(post, dict):
-                                        post_text = str(post.get("text", "")).lower()
-                                    else:
-                                        post_text = str(post).lower()
-                                    if any(word in post_text for word in ["raised", "funding", "series"]):
-                                        company_signals.append({
-                                            "type": "recent_funding",
-                                            "description": "Funding news in recent LinkedIn post",
-                                            "urgency": "high"
-                                        })
-                                    elif any(word in post_text for word in ["hiring", "join team"]):
-                                        company_signals.append({
-                                            "type": "hiring_surge",
-                                            "description": "Hiring activity mentioned in LinkedIn",
-                                            "urgency": "high"
-                                        })
-                            except Exception as e:
-                                print(f">>> [Signals] Explorium posts error: {e}", flush=True)
+                match_result = await self.explorium.match_businesses([{
+                    "domain": domain,
+                    "name": company_name
+                }])
                 
-                # 4. Check company data we already have
-                if company.get("funding_stage"):
-                    company_signals.append({
-                        "type": "recent_funding",
-                        "description": f"Funding stage: {company.get('funding_stage')}",
-                        "urgency": "medium"
-                    })
-                
-                if company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent"):
-                    growth = company.get("employee_growth_6m_percent") or company.get("employee_growth_12m_percent")
-                    if growth and growth > 15:
-                        company_signals.append({
-                            "type": "rapid_growth",
-                            "description": f"Strong employee growth ({growth}%)",
-                            "urgency": "high"
-                        })
-                
-                if company.get("job_openings_count"):
-                    openings = company.get("job_openings_count")
-                    if openings > 20:
-                        company_signals.append({
-                            "type": "hiring_surge",
-                            "description": f"Active hiring ({openings} open positions)",
-                            "urgency": "high"
-                        })
-                
-                tech = company.get("technologies", [])
-                if tech and isinstance(tech, list) and len(tech) > 0:
-                    tech_str = " ".join([str(t).lower() for t in tech])
-                    if any(t in tech_str for t in ["ai", "machine learning", "artificial intelligence"]):
-                        company_signals.append({
-                            "type": "ai_adoption",
-                            "description": "AI/ML technology user",
-                            "urgency": "medium"
-                        })
-                
+                matched = match_result.get("matched_businesses") or match_result.get("matches") or []
+                if matched:
+                    business_id = matched[0].get("business_id")
+                    if business_id:
+                        business_ids.append(business_id)
+                        business_to_company[business_id] = company
             except Exception as e:
-                print(f">>> [Signals] Explorium API error for {company_name}: {e}", flush=True)
+                print(f">>> [Signals] Match error for {company_name}: {e}", flush=True)
+        
+        if not business_ids:
+            return self._fallback_signal_detection(companies)
+        
+        # Bulk enrich all matched businesses
+        enrichment_data = {}
+        try:
+            # Intent signals
+            intent_result = await self.explorium.bulk_enrich_bombora_intent(business_ids, "training & development: corporate universities;training & development: career management;information technology: cloud computing;information technology: cybersecurity;marketing: content marketing;marketing: social media marketing;sales: sales automation;sales: crm software;finance: financial planning;finance: accounting software")
+            intent_data = intent_result.get("data", {})
+            for bid, data in intent_data.items():
+                if bid not in enrichment_data:
+                    enrichment_data[bid] = {}
+                enrichment_data[bid]["intent"] = data
+        except Exception as e:
+            print(f">>> [Signals] Intent enrichment error: {e}", flush=True)
+        
+        try:
+            # Firmographics
+            fg_result = await self.explorium.bulk_enrich_firmographics(business_ids)
+            fg_data = fg_result.get("data", {})
+            for bid, data in fg_data.items():
+                if bid not in enrichment_data:
+                    enrichment_data[bid] = {}
+                enrichment_data[bid]["firmographics"] = data
+        except Exception as e:
+            print(f">>> [Signals] Firmographics enrichment error: {e}", flush=True)
+        
+        try:
+            # Website traffic
+            traffic_result = await self.explorium.bulk_enrich_website_traffic(business_ids)
+            traffic_data = traffic_result.get("data", {})
+            for bid, data in traffic_data.items():
+                if bid not in enrichment_data:
+                    enrichment_data[bid] = {}
+                enrichment_data[bid]["traffic"] = data
+        except Exception as e:
+            print(f">>> [Signals] Traffic enrichment error: {e}", flush=True)
+        
+        try:
+            # Business challenges
+            challenges_result = await self.explorium.bulk_enrich_business_challenges(business_ids)
+            challenges_data = challenges_result.get("data", {})
+            for bid, data in challenges_data.items():
+                if bid not in enrichment_data:
+                    enrichment_data[bid] = {}
+                enrichment_data[bid]["challenges"] = data
+        except Exception as e:
+            print(f">>> [Signals] Challenges enrichment error: {e}", flush=True)
+        
+        try:
+            # Financial indicators
+            financial_result = await self.explorium.bulk_enrich_financial_indicators(business_ids)
+            financial_data = financial_result.get("data", {})
+            for bid, data in financial_data.items():
+                if bid not in enrichment_data:
+                    enrichment_data[bid] = {}
+                enrichment_data[bid]["financial"] = data
+        except Exception as e:
+            print(f">>> [Signals] Financial enrichment error: {e}", flush=True)
+        
+        # Process enrichment data into signals
+        for business_id, data in enrichment_data.items():
+            company = business_to_company.get(business_id, {})
+            company_name = company.get("name", "")
+            domain = company.get("domain", "")
             
-            # Add company with signals
-            if company_signals:
-                # Deduplicate signals
-                seen_types = set()
-                unique_signals = []
-                for s in company_signals:
-                    if s["type"] not in seen_types:
-                        seen_types.add(s["type"])
-                        unique_signals.append(s)
+            company_signals = []
+            
+            # Process intent signals
+            intent_info = data.get("intent", {})
+            intent_topics = intent_info.get("intent_topics", [])
+            for topic in intent_topics[:5]:  # Top 5 topics
+                topic_name = topic.get("topic", "")
+                category = topic.get("category", "")
+                score = topic.get("composite_score", 0)
+                level = topic.get("level_of_intent", "Early Research")
                 
+                confidence = min(95, max(60, int(score * 100)))
+                
+                company_signals.append({
+                    "type": "intent_signal",
+                    "description": f"Researching {topic_name} ({category}) - {level}",
+                    "urgency": "high" if level == "In-Depth Research" else "medium",
+                    "confidence": confidence
+                })
+            
+            # Process firmographics signals
+            fg = data.get("firmographics", {})
+            revenue = fg.get("yearly_revenue_exact")
+            if revenue and revenue > 10000000:  # $10M+
+                company_signals.append({
+                    "type": "revenue_signal",
+                    "description": f"High revenue company (${revenue:,})",
+                    "urgency": "medium",
+                    "confidence": 85
+                })
+            
+            employee_range = fg.get("number_of_employees_range")
+            if employee_range and "1001-5000" in employee_range:
+                company_signals.append({
+                    "type": "size_signal",
+                    "description": f"Mid-sized company ({employee_range} employees)",
+                    "urgency": "medium",
+                    "confidence": 80
+                })
+            
+            # Process traffic signals
+            traffic = data.get("traffic", {})
+            visits = traffic.get("visits")
+            if visits and visits > 10000:
+                company_signals.append({
+                    "type": "traffic_signal",
+                    "description": f"High website traffic ({visits:,} visits)",
+                    "urgency": "medium",
+                    "confidence": 75
+                })
+            
+            # Process challenges signals
+            challenges = data.get("challenges", {})
+            challenge_categories = challenges.get("challenge_categories", [])
+            for cat in challenge_categories[:3]:
+                category_name = cat.get("category", "")
+                company_signals.append({
+                    "type": "challenge_signal",
+                    "description": f"Business challenge: {category_name}",
+                    "urgency": "high",
+                    "confidence": 70
+                })
+            
+            # Process financial signals
+            financial = data.get("financial", {})
+            revenue_growth = financial.get("revenue_growth_percentage")
+            if revenue_growth and revenue_growth > 20:
+                company_signals.append({
+                    "type": "growth_signal",
+                    "description": f"Strong revenue growth ({revenue_growth}%)",
+                    "urgency": "high",
+                    "confidence": 90
+                })
+            
+            # Deduplicate signals
+            seen_descriptions = set()
+            unique_signals = []
+            for s in company_signals:
+                desc = s.get("description", "")
+                if desc not in seen_descriptions:
+                    seen_descriptions.add(desc)
+                    unique_signals.append(s)
+            
+            if unique_signals:
                 signals.append({
                     "company_name": company_name,
                     "domain": domain,
@@ -542,16 +567,17 @@ class SignalDetectionService:
                     "personalization_tips": self._generate_personalization_tips(unique_signals)
                 })
             else:
-                # Add default signal if no signals found
+                # Fallback signal
                 signals.append({
                     "company_name": company_name,
                     "domain": domain,
                     "signals": [{
                         "type": "prospecting_target",
-                        "description": f"Active in {industry} industry" if industry else "Potential target for outreach",
-                        "urgency": "low"
+                        "description": "Active company with enrichment data available",
+                        "urgency": "low",
+                        "confidence": 60
                     }],
-                    "personalization_tips": "Focus on core value proposition and industry-specific solutions"
+                    "personalization_tips": "Leverage intent and enrichment data for targeted outreach"
                 })
         
         return signals

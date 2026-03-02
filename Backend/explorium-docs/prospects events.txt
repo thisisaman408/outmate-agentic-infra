@@ -1,0 +1,922 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Add Webhook
+
+> Add a webhook for events enrollments.
+
+
+
+## OpenAPI
+
+````yaml post /v1/webhooks
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/webhooks:
+    post:
+      tags:
+        - Webhooks
+      summary: Add Webhook
+      description: Add a webhook for events enrollments.
+      operationId: add_webhook
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookAddRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAddResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebhookAddRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        partner_id:
+          type: string
+          title: Partner Id
+        webhook_url:
+          type: string
+          title: Webhook Url
+      additionalProperties: false
+      type: object
+      required:
+        - partner_id
+        - webhook_url
+      title: WebhookAddRequest
+    WebhookAddResponse:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_modified_time:
+          type: string
+          format: date-time
+          title: Last Modified Time
+        webhook_url:
+          type: string
+          title: Webhook Url
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - response_context
+        - created_at
+        - last_modified_time
+        - webhook_url
+        - webhook_secret
+      title: WebhookAddResponse
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Add Webhook
+
+> Add a webhook for events enrollments.
+
+
+
+## OpenAPI
+
+````yaml post /v1/webhooks
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/webhooks:
+    post:
+      tags:
+        - Webhooks
+      summary: Add Webhook
+      description: Add a webhook for events enrollments.
+      operationId: add_webhook
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookAddRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAddResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebhookAddRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        partner_id:
+          type: string
+          title: Partner Id
+        webhook_url:
+          type: string
+          title: Webhook Url
+      additionalProperties: false
+      type: object
+      required:
+        - partner_id
+        - webhook_url
+      title: WebhookAddRequest
+    WebhookAddResponse:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_modified_time:
+          type: string
+          format: date-time
+          title: Last Modified Time
+        webhook_url:
+          type: string
+          title: Webhook Url
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - response_context
+        - created_at
+        - last_modified_time
+        - webhook_url
+        - webhook_secret
+      title: WebhookAddResponse
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````
+
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Add Webhook
+
+> Add a webhook for events enrollments.
+
+
+
+## OpenAPI
+
+````yaml post /v1/webhooks
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/webhooks:
+    post:
+      tags:
+        - Webhooks
+      summary: Add Webhook
+      description: Add a webhook for events enrollments.
+      operationId: add_webhook
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookAddRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAddResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebhookAddRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        partner_id:
+          type: string
+          title: Partner Id
+        webhook_url:
+          type: string
+          title: Webhook Url
+      additionalProperties: false
+      type: object
+      required:
+        - partner_id
+        - webhook_url
+      title: WebhookAddRequest
+    WebhookAddResponse:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_modified_time:
+          type: string
+          format: date-time
+          title: Last Modified Time
+        webhook_url:
+          type: string
+          title: Webhook Url
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - response_context
+        - created_at
+        - last_modified_time
+        - webhook_url
+        - webhook_secret
+      title: WebhookAddResponse
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Add Webhook
+
+> Add a webhook for events enrollments.
+
+
+
+## OpenAPI
+
+````yaml post /v1/webhooks
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/webhooks:
+    post:
+      tags:
+        - Webhooks
+      summary: Add Webhook
+      description: Add a webhook for events enrollments.
+      operationId: add_webhook
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookAddRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAddResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebhookAddRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        partner_id:
+          type: string
+          title: Partner Id
+        webhook_url:
+          type: string
+          title: Webhook Url
+      additionalProperties: false
+      type: object
+      required:
+        - partner_id
+        - webhook_url
+      title: WebhookAddRequest
+    WebhookAddResponse:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_modified_time:
+          type: string
+          format: date-time
+          title: Last Modified Time
+        webhook_url:
+          type: string
+          title: Webhook Url
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - response_context
+        - created_at
+        - last_modified_time
+        - webhook_url
+        - webhook_secret
+      title: WebhookAddResponse
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.explorium.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Add Webhook
+
+> Add a webhook for events enrollments.
+
+
+
+## OpenAPI
+
+````yaml post /v1/webhooks
+openapi: 3.1.0
+info:
+  title: Partner Service
+  version: 0.2.312
+servers:
+  - url: https://api.explorium.ai
+    description: AgentSource Server
+security: []
+paths:
+  /v1/webhooks:
+    post:
+      tags:
+        - Webhooks
+      summary: Add Webhook
+      description: Add a webhook for events enrollments.
+      operationId: add_webhook
+      parameters:
+        - required: false
+          schema:
+            type: string
+            title: Tenant
+            name: tenant
+            auto_error: false
+          name: tenant
+          in: header
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookAddRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAddResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+        - APIKeyHeader: []
+        - APIKeyHeader: []
+components:
+  schemas:
+    WebhookAddRequest:
+      properties:
+        request_context:
+          type: object
+          title: Request Context
+          example: null
+          nullable: true
+        partner_id:
+          type: string
+          title: Partner Id
+        webhook_url:
+          type: string
+          title: Webhook Url
+      additionalProperties: false
+      type: object
+      required:
+        - partner_id
+        - webhook_url
+      title: WebhookAddRequest
+    WebhookAddResponse:
+      properties:
+        response_context:
+          $ref: '#/components/schemas/ResponseContext'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_modified_time:
+          type: string
+          format: date-time
+          title: Last Modified Time
+        webhook_url:
+          type: string
+          title: Webhook Url
+        webhook_secret:
+          type: string
+          title: Webhook Secret
+      type: object
+      required:
+        - response_context
+        - created_at
+        - last_modified_time
+        - webhook_url
+        - webhook_secret
+      title: WebhookAddResponse
+      description: 'This is base response model for all responses in partner service. '
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ResponseContext:
+      properties:
+        correlation_id:
+          type: string
+          title: Correlation Id
+        request_status:
+          $ref: '#/components/schemas/RequestStatus'
+        time_took_in_seconds:
+          type: number
+          title: Time Took In Seconds
+      type: object
+      required:
+        - correlation_id
+        - request_status
+        - time_took_in_seconds
+      title: ResponseContext
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    RequestStatus:
+      type: string
+      enum:
+        - success
+        - miss
+        - failure
+      title: RequestStatus
+      description: >-
+        The `RequestStatus` class is an enumeration that defines the possible
+        statuses of a request.
+
+
+        This enum is used to indicate whether a request was successful, missed,
+        or failed. It ensures
+
+        consistent handling of request statuses across the application.
+
+
+        Attributes:
+            SUCCESS: Indicates that the request was successfully processed.
+            MISS: Indicates that the request did not find any matching data.
+            FAILURE: Indicates that the request encountered an error or failure.
+  securitySchemes:
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: api_key
+
+````
+
+
