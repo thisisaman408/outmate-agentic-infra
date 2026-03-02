@@ -6,11 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Sparkles, Loader2, Mail, Users, MapPin, Briefcase, ChevronRight, Zap } from "lucide-react"
+import { Sparkles, Loader2, Mail, Users, MapPin, Briefcase, ChevronRight, Zap, Download } from "lucide-react"
 import { aiAgentsApi, type AgenticSearchResult } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { exportToCSV } from "@/lib/export-csv"
 
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
@@ -69,6 +70,14 @@ export function AgenticSearchPanel() {
   const [query, setQuery] = useState("")
   const [isSearching, setIsSearching] = useState(false)
   const [results, setResults] = useState<AgenticSearchResult[]>([])
+  const [activeRecordId, setActiveRecordId] = useState<string | null>(null)
+
+  const getCardKey = (result: AgenticSearchResult, idx: number) =>
+    `${result.id ?? `record-${idx}`}-${idx}`
+
+  const activeRecord = activeRecordId
+    ? results.find((result, idx) => getCardKey(result, idx) === activeRecordId)
+    : null
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -82,11 +91,12 @@ export function AgenticSearchPanel() {
 
     setIsSearching(true)
     setResults([])
-    try {
-      const searchResults = await aiAgentsApi.searchProspects(query)
-      console.log("Agentic search response", searchResults)
-      setResults(searchResults)
-      toast({
+      try {
+        const searchResults = await aiAgentsApi.searchProspects(query)
+        console.log("Agentic search response", searchResults)
+        setResults(searchResults)
+        setActiveRecordId(null)
+        toast({
         title: "Search Complete",
         description: `Agent identified ${searchResults.length} high-confidence prospects.`,
       })
@@ -211,6 +221,28 @@ export function AgenticSearchPanel() {
           )}
 
           {!isSearching && results.length > 0 && (
+            <div key="agentic-export" className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{results.length} Prospects Found</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-white/10 hover:border-blue-500/30"
+                onClick={() => {
+                  const headers = ["Company Name", "Score", "Contact Name", "Title", "Email", "Location", "Industry", "Employees", "Reason"]
+                  const rows = results.map(r => [
+                    r.companyName || "", String(r.score ?? ""), r.contactName || "", r.title || "",
+                    r.email || "", r.location || "", r.industry || "", r.employees || "", r.reason || ""
+                  ])
+                  exportToCSV(`agentic_search_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            </div>
+          )}
+
+          {!isSearching && results.length > 0 && (
             <motion.div
               key="results-list"
               className="grid gap-6"
@@ -221,17 +253,20 @@ export function AgenticSearchPanel() {
               animate="show"
             >
               {results.map((result, idx) => {
-                const cardKey = result.id || `${result.companyName || "candidate"}-${idx}`
+                const cardKey = getCardKey(result, idx)
+                const isActiveCard = activeRecordId === cardKey
                 const contactName = result.contactName?.trim() || "Not found"
                 const contactTitle = result.title?.trim() || "N/A"
-                const contactEmail = result.email?.trim() || "Email not available"
-                const employeesLabel = result.employees || "N/A"
+                const rawEmail = result.email?.trim() || ""
+                const contactEmail = rawEmail || "Email not available"
+                const employeesLabel = result.employees?.trim()
                 const companyName = result.companyName?.trim() || "Unnamed company"
                 const matchScore = result.score ?? 0
                 const locationLabel = result.location?.trim() || "Location not specified"
                 const reasonText = result.reason?.trim() || "No reasoning provided yet."
                 const industryLabel = result.industry || "Industry Unknown"
                 const initialLetter = (companyName.charAt(0) || "?").toUpperCase()
+                const engagedHref = rawEmail.includes("@") ? `mailto:${rawEmail}` : undefined
 
                 return (
                   <motion.div
@@ -263,10 +298,20 @@ export function AgenticSearchPanel() {
                                   </div>
                                 </div>
                               </div>
-                              <Button className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all">
-                                <Mail className="mr-2 h-4 w-4" />
-                                Engage Now
-                              </Button>
+                              {engagedHref ? (
+                                <a
+                                  href={engagedHref}
+                                  className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all inline-flex items-center justify-center gap-2"
+                                >
+                                  <Mail className="mr-2 h-4 w-4" />
+                                  Engage Now
+                                </a>
+                              ) : (
+                                <span className="rounded-xl px-6 h-12 bg-muted/70 border border-white/10 text-muted-foreground flex items-center justify-center gap-2">
+                                  <Mail className="mr-2 h-4 w-4" />
+                                  Email not available
+                                </span>
+                              )}
                             </div>
 
                             <div className="p-5 rounded-2xl bg-blue-500/5 border border-blue-500/10 relative">
@@ -277,6 +322,12 @@ export function AgenticSearchPanel() {
                                 <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
                                 {reasonText}
                               </p>
+                              {result.perplexityDetails && (
+                                <p className="mt-3 text-xs text-blue-100 leading-relaxed line-clamp-3">
+                                  <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Perplexity:</span>
+                                  {result.perplexityDetails}
+                                </p>
+                              )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
@@ -300,11 +351,17 @@ export function AgenticSearchPanel() {
                             <div className="space-y-3 pt-2">
                               <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
                                 <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
-                                <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">{contactEmail}</span>
+                                <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">
+                                  {contactEmail}
+                                </span>
                               </div>
-                              <button className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2">
+                              <Button
+                                variant="outline"
+                                className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2"
+                                onClick={() => setActiveRecordId((prev) => (prev === cardKey ? null : cardKey))}
+                              >
                                 View Intelligence Record
-                              </button>
+                              </Button>
                             </div>
                           </div>
                         </div>
@@ -313,6 +370,37 @@ export function AgenticSearchPanel() {
                   </motion.div>
                 )
               })}
+            </motion.div>
+          )}
+          {activeRecord && (
+            <motion.div
+              key="active-record"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl border border-white/10 bg-white/5 p-6 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Intelligence Record</p>
+                <button
+                  className="text-[10px] uppercase tracking-[0.6em] text-muted-foreground hover:text-white transition-colors"
+                  onClick={() => setActiveRecordId(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
+              <p className="text-sm text-muted-foreground line-clamp-3">{activeRecord.reason}</p>
+              {activeRecord.perplexityDetails && (
+                <p className="text-sm text-blue-100 line-clamp-3">{activeRecord.perplexityDetails}</p>
+              )}
+              {activeRecord.perplexityReasoning && (
+                <p className="text-[10px] text-muted-foreground">
+                  Reasoning details: {JSON.stringify(activeRecord.perplexityReasoning)}
+                </p>
+              )}
+              <pre className="text-xs text-muted-foreground bg-black/40 p-4 rounded-2xl overflow-x-auto">
+                {JSON.stringify(activeRecord, null, 2)}
+              </pre>
             </motion.div>
           )}
           {!isSearching && results.length === 0 && (

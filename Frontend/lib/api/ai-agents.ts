@@ -16,17 +16,22 @@ export interface AgenticSearchResult {
   contactName: string
   title: string
   email: string
+  perplexityDetails?: string
+  perplexityReasoning?: any
 }
 
 export interface LookalikeResult {
   id: string
   companyName: string
-  similarityScore: number
-  matchingFactors: string[]
-  industry: string
-  employees: string
-  location: string
+  similarityScore?: number
+  matchingFactors?: string[]
+  industry?: string
+  employees?: string
+  location?: string
   revenue?: string
+  website?: string
+  description?: string
+  similarityLabel?: string
 }
 
 export interface ResearchResult {
@@ -57,6 +62,7 @@ export interface PredictiveScore {
   }[]
   guidance: string
   recommendation: string
+  profileLink?: string
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -113,5 +119,14 @@ export const aiAgentsApi = {
       throw new Error(detail)
     }
     return response.json();
+  },
+  addPipelineCompany: async (payload: { companyId: string; companyName: string; contactName?: string; similarityScore?: number }) => {
+    const response = await fetch(`${API_BASE_URL}/api/ai-agents/pipeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) throw new Error('Failed to add company to pipeline')
+    return response.json()
   },
 }

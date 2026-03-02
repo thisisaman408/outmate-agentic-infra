@@ -115,9 +115,20 @@ class Settings(BaseSettings):
         description="OpenRouter API base URL"
     )
     
+    # Serper Search Configuration
+    SERPER_API_KEY: Optional[str] = Field(
+        None,
+        description="Serper API key used for Google-branded search"
+    )
+
+    # Tavily Search Configuration
+    TAVILY_API_KEY: Optional[str] = Field(
+        None,
+        description="Tavily API key used for deep research"
+    )
+
     # Logging Configuration
     LOG_LEVEL: str = Field(
-        "INFO",
         description="Application log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     )
     

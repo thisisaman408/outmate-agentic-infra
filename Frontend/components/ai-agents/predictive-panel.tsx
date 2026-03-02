@@ -6,11 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { TrendingUp, Loader2, BrainCircuit, Target, ArrowUpRight, ArrowDownRight, Info, Mail, Phone, ExternalLink } from "lucide-react"
+import { TrendingUp, Loader2, BrainCircuit, Target, ArrowUpRight, ArrowDownRight, Info, Mail, Phone, ExternalLink, Download } from "lucide-react"
 import { aiAgentsApi, type PredictiveScore } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { Textarea } from "@/components/ui/textarea"
+import { exportToCSV } from "@/lib/export-csv"
 
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
@@ -68,6 +70,9 @@ export function PredictivePanel() {
   const { toast } = useToast()
   const [isScoring, setIsScoring] = useState(false)
   const [results, setResults] = useState<PredictiveScore[]>([])
+  const [insightCopy, setInsightCopy] = useState(
+    "Currently analyzing 128 enriched leads from your primary pipeline. The model uses 24+ behavioral and firmographic variables to predict close-won outcomes."
+  )
 
   const handleScoreLeads = async () => {
     setIsScoring(true)
@@ -117,10 +122,15 @@ export function PredictivePanel() {
 
         <CardContent className="pb-10">
           <div className="flex flex-col md:flex-row items-center justify-between gap-8 p-8 rounded-3xl bg-black/20 border border-white/5">
-            <div className="flex-1">
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Currently analyzing <span className="text-orange-400 font-bold">128</span> enriched leads from your primary pipeline. The model uses 24+ behavioral and firmographic variables to predict close-won outcomes.
-              </p>
+            <div className="flex-1 space-y-2">
+              <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 mb-2 block">
+                Summary copy
+              </label>
+              <Textarea
+                value={insightCopy}
+                onChange={(event) => setInsightCopy(event.target.value)}
+                className="h-28 text-sm leading-relaxed font-semibold text-muted-foreground bg-black/20 border border-white/10 focus-visible:border-white/20"
+              />
             </div>
             <Button
               onClick={handleScoreLeads}
@@ -166,6 +176,30 @@ export function PredictivePanel() {
           )}
 
           {!isScoring && results.length > 0 && (
+            <div key="predictive-export" className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{results.length} Leads Scored</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-white/10 hover:border-orange-500/30"
+                onClick={() => {
+                  const headers = ["Company Name", "Contact Name", "Title", "Email", "Score", "Prediction", "Confidence", "Factors", "Guidance", "Recommendation"]
+                  const rows = results.map(r => [
+                    r.companyName || "", r.contactName || "", r.title || "", r.email || "",
+                    String(r.score ?? ""), r.prediction || "", String(r.confidence ?? ""),
+                    (r.factors || []).map((f: any) => `${f.name} (${f.impact})`).join(" | "),
+                    r.guidance || "", r.recommendation || ""
+                  ])
+                  exportToCSV(`predictive_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            </div>
+          )}
+
+          {!isScoring && results.length > 0 && (
             <motion.div
               className="grid gap-6"
               initial="hidden"
@@ -193,9 +227,25 @@ export function PredictivePanel() {
                             <div className="space-y-1">
                               <h3 className="text-2xl font-black tracking-tight">{result.contactName}</h3>
                               <p className="text-muted-foreground font-medium">{result.title} @ <span className="text-foreground">{result.companyName}</span></p>
-                              <div className="flex gap-3 pt-2">
-                                <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground transition-colors"><Mail className="h-4 w-4" /></button>
-                                <button className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground transition-colors"><ExternalLink className="h-4 w-4" /></button>
+                              <div className="flex items-center gap-4 pt-2 text-xs text-muted-foreground/80">
+                                {result.email ? (
+                                  <a className="flex items-center gap-1 hover:text-foreground transition-colors" href={`mailto:${result.email}`}>
+                                    <Mail className="h-4 w-4" />
+                                  </a>
+                                ) : (
+                                  <span className="text-muted-foreground/50">
+                                    <Mail className="h-4 w-4" />
+                                  </span>
+                                )}
+                                {result.profileLink ? (
+                                  <a className="flex items-center gap-1 hover:text-foreground transition-colors" href={result.profileLink} target="_blank" rel="noreferrer">
+                                    <ExternalLink className="h-4 w-4" />
+                                  </a>
+                                ) : (
+                                  <span className="text-muted-foreground/50">
+                                    <ExternalLink className="h-4 w-4" />
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
