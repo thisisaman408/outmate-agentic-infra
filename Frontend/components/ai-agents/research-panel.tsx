@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Search, Loader2, CheckCircle2, AlertCircle, Building2, Globe, TrendingUp, ShieldAlert, Newspaper, Users } from "lucide-react"
+import { Search, Loader2, CheckCircle2, AlertCircle, Building2, Globe, TrendingUp, ShieldAlert, Newspaper, Users, Download } from "lucide-react"
 import { aiAgentsApi, type ResearchResult } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
+import { exportToCSV } from "@/lib/export-csv"
 
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
@@ -190,6 +191,30 @@ export function ResearchPanel() {
             animate={{ opacity: 1, y: 0 }}
             className="grid gap-6"
           >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Research Complete</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-white/10 hover:border-emerald-500/30"
+                onClick={() => {
+                  const mp = result.marketPosition
+                  const marketPos = typeof mp === "string" ? mp : mp ? `${mp.positioning || ""} · ${mp.industry || ""} · ${mp.geographicPresence || ""}` : ""
+                  const headers = ["Company Name", "Summary", "Market Position", "Key Insights", "Opportunities", "Risks", "Competitors", "Recent News"]
+                  const rows = [[
+                    result.companyName || "", result.summary || "", marketPos,
+                    (result.keyInsights || []).join(" | "), (result.opportunities || []).join(" | "),
+                    (result.risks || []).join(" | "), (result.competitors || []).join(" | "),
+                    (result.recentNews || []).join(" | ")
+                  ]]
+                  exportToCSV(`research_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            </div>
+
             {/* Overview Section */}
             <div className="grid gap-6 md:grid-cols-3">
               <Card className="md:col-span-2 glass-effect border-emerald-500/10">

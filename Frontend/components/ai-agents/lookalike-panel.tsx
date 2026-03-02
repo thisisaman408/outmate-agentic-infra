@@ -6,11 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Users, Loader2, Target, BarChart3, MapPin, Building2, Layers, Search, PlusCircle, X } from "lucide-react"
+import { Users, Loader2, Target, BarChart3, MapPin, Building2, Layers, Search, PlusCircle, X, Download } from "lucide-react"
 import { aiAgentsApi, type LookalikeResult } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { exportToCSV } from "@/lib/export-csv"
 
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
@@ -68,6 +69,7 @@ export function LookalikePanel() {
   const { toast } = useToast()
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [results, setResults] = useState<LookalikeResult[]>([])
+  const [addingId, setAddingId] = useState<string | null>(null)
   const [seedPool, setSeedPool] = useState(["Stripe", "Airbnb", "Notion"])
 
   const handleAddSeed = () => {
@@ -85,7 +87,7 @@ export function LookalikePanel() {
     setIsAnalyzing(true)
     setResults([])
     try {
-    const seedCompanies = seedPool.map((seed, idx) => `${seed}-${idx}`)
+      const seedCompanies = [...seedPool]
       const lookalikeResults = await aiAgentsApi.findLookalikeCompanies(seedCompanies)
       setResults(lookalikeResults)
       toast({
@@ -101,6 +103,16 @@ export function LookalikePanel() {
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  const handleExport = () => {
+    const headers = ["Company Name", "Similarity Score", "Similarity Label", "Industry", "Revenue", "Employees", "Location", "Website", "Matching Factors"]
+    const rows = results.map(r => [
+      r.companyName || "", String(r.similarityScore ?? ""), r.similarityLabel || "",
+      r.industry || "", r.revenue || "", r.employees || "", r.location || "",
+      r.website || "", (r.matchingFactors || []).join(" | ")
+    ])
+    exportToCSV(`lookalike_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
   }
 
   return (
@@ -186,44 +198,55 @@ export function LookalikePanel() {
       </Card>
 
       <div className="space-y-6">
-        <AnimatePresence mode="popLayout">
-          {isAnalyzing && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {[1, 2, 4].map((i) => (
-                <Card key={i} className="glass-effect border-white/5 bg-transparent p-6 space-y-4">
-                  <div className="flex justify-between">
-                    <Skeleton className="h-8 w-1/2 rounded-lg" />
-                    <Skeleton className="h-8 w-20 rounded-lg" />
-                  </div>
-                  <Skeleton className="h-2 w-full rounded-full" />
-                  <div className="flex gap-2">
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
+        {isAnalyzing && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {[1, 2, 4].map((i) => (
+              <Card key={i} className="glass-effect border-white/5 bg-transparent p-6 space-y-4">
+                <div className="flex justify-between">
+                  <Skeleton className="h-8 w-1/2 rounded-lg" />
+                  <Skeleton className="h-8 w-20 rounded-lg" />
+                </div>
+                <Skeleton className="h-2 w-full rounded-full" />
+                <div className="flex gap-2">
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
-          {!isAnalyzing && results.length > 0 && (
-            <motion.div
-              className="grid grid-cols-1 md:grid-cols-2 gap-6"
-              initial="hidden"
-              animate="show"
-              variants={{
-                show: { transition: { staggerChildren: 0.1 } }
-              }}
+        {!isAnalyzing && results.length > 0 && (
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{results.length} Lookalikes Found</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 border-white/10 hover:border-purple-500/30"
+              onClick={handleExport}
             >
-              {results.map((result) => (
+              <Download className="h-4 w-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
+        )}
+
+        {!isAnalyzing && results.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {results.map((result) => {
+              const similarityRaw = result.similarityScore
+              const similarityPercent =
+                typeof similarityRaw === "number"
+                  ? Math.min(Math.max(similarityRaw, 0), 100)
+                  : Number(similarityRaw) || 60
+              return (
                 <motion.div
                   key={result.id}
-                  variants={{
-                    hidden: { opacity: 0, scale: 0.95, y: 20 },
-                    show: { opacity: 1, scale: 1, y: 0 }
-                  }}
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
                 >
-                  <Card className="glass-effect border-white/5 overflow-hidden group hover:border-purple-500/30 transition-all hover:shadow-2xl hover:shadow-purple-500/5 h-full flex flex-col">
-                    <CardContent className="p-8 space-y-6 flex-1">
+                <Card className="glass-effect border-white/5 overflow-hidden group hover:border-purple-500/30 transition-all hover:shadow-2xl hover:shadow-purple-500/5 h-full flex flex-col">
+                  <CardContent className="p-8 space-y-6 flex-1">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-4">
                           <div className="h-14 w-14 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 font-black text-xl group-hover:scale-110 transition-transform">
@@ -233,60 +256,116 @@ export function LookalikePanel() {
                             <h3 className="text-xl font-bold tracking-tight mb-1">{result.companyName}</h3>
                             <div className="flex items-center gap-2">
                               <MapPin className="h-3 w-3 text-muted-foreground/60" />
-                              <span className="text-xs text-muted-foreground/60 font-medium">{result.location}</span>
+                              <span className="text-xs text-muted-foreground/60 font-medium">
+                                {result.location || "Location unknown"}
+                              </span>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-2xl font-black text-purple-400 leading-none">{result.similarityScore}%</div>
-                          <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mt-1">Similarity</div>
-                        </div>
-                      </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-black text-purple-400 leading-none">
+                      {typeof result.similarityScore === "number"
+                        ? `${result.similarityScore.toFixed(0)}%`
+                        : result.similarityScore ?? "Unknown"}
+                    </div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mt-1">
+                      {result.similarityLabel ?? "Similarity"}
+                    </div>
+                  </div>
+                </div>
 
                       <div className="space-y-2">
-                        <Progress value={result.similarityScore} className="h-1.5 bg-white/5 overflow-hidden rounded-full">
-                          <div className="h-full bg-gradient-to-r from-purple-600 to-purple-400" style={{ width: `${result.similarityScore}%` }} />
+                        <Progress value={similarityPercent} className="h-1.5 bg-white/5 overflow-hidden rounded-full">
+                          <div className="h-full bg-gradient-to-r from-purple-600 to-purple-400" style={{ width: `${similarityPercent}%` }} />
                         </Progress>
                       </div>
 
-                      <div className="space-y-4">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Core Matching Vectors</p>
-                        <div className="flex flex-wrap gap-2">
-                    {result.matchingFactors.map((factor) => (
-                            <Badge key={factor} className="bg-white/5 hover:bg-purple-500/10 text-muted-foreground hover:text-purple-400 border-white/5 transition-colors font-bold px-3 py-1 rounded-lg">
-                              {factor}
-                            </Badge>
-                          ))}
-                        </div>
+                    <div className="space-y-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Core Matching Vectors</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(result.matchingFactors || []).slice(0, 4).map((factor) => (
+                          <Badge
+                            key={factor}
+                            className="bg-white/5 hover:bg-purple-500/10 text-muted-foreground hover:text-purple-400 border-white/5 transition-colors font-bold px-3 py-1 rounded-lg"
+                          >
+                            {factor}
+                          </Badge>
+                        ))}
                       </div>
+                    </div>
 
-                      <div className="grid grid-cols-2 gap-6 pt-4 border-t border-white/5">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 text-muted-foreground/40 font-bold uppercase text-[9px] tracking-widest">
-                            <Layers className="h-3 w-3" />
-                            Industry
-                          </div>
-                          <p className="text-sm font-bold text-muted-foreground/80 truncate">{result.industry}</p>
+                    <div className="grid grid-cols-2 gap-6 pt-4 border-t border-white/5">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-muted-foreground/40 font-bold uppercase text-[9px] tracking-widest">
+                          <Layers className="h-3 w-3" />
+                          Industry
                         </div>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 text-muted-foreground/40 font-bold uppercase text-[9px] tracking-widest">
-                            <Building2 className="h-3 w-3" />
-                            Revenue
-                          </div>
-                          <p className="text-sm font-bold text-muted-foreground/80">{result.revenue || "Tiers A-C"}</p>
-                        </div>
+                        <p className="text-sm font-bold text-muted-foreground/80 truncate">{result.industry}</p>
                       </div>
-                    </CardContent>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-muted-foreground/40 font-bold uppercase text-[9px] tracking-widest">
+                          <Building2 className="h-3 w-3" />
+                          Revenue
+                        </div>
+                        <p className="text-sm font-bold text-muted-foreground/80">{result.revenue || "Tiers A-C"}</p>
+                      </div>
+                    </div>
+                  </CardContent>
 
-                    <button className="w-full py-5 bg-white/5 hover:bg-purple-600 hover:text-white transition-all text-xs font-black uppercase tracking-[0.2em] border-t border-white/5 text-muted-foreground">
-                      Add to Pipeline Cohort
-                    </button>
-                  </Card>
-                </motion.div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                  <Button
+                    className={cn(
+                      "w-full py-5 text-xs font-black uppercase tracking-[0.2em] border-t border-white/5",
+                      addingId === result.id
+                        ? "bg-purple-600 text-white"
+                        : "bg-white/5 text-muted-foreground hover:bg-purple-600 hover:text-white"
+                    )}
+                    onClick={async () => {
+                      setAddingId(result.id)
+                      try {
+                        await aiAgentsApi.addPipelineCompany({
+                          companyId: result.id,
+                          companyName: result.companyName,
+                          similarityScore: result.similarityScore,
+                        })
+                        toast({
+                          title: "Pipeline Cohort",
+                          description: `${result.companyName} added to pipeline cohort.`,
+                        })
+                      } catch (error) {
+                        toast({
+                          title: "Pipeline Error",
+                          description: (error as Error).message || "Failed to add to pipeline.",
+                          variant: "destructive",
+                        })
+                      } finally {
+                        setAddingId(null)
+                      }
+                    }}
+                  >
+                    {addingId === result.id ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        Add to Pipeline Cohort
+                      </>
+                    )}
+                  </Button>
+                </Card>
+              </motion.div>
+            )
+            })}
+          </div>
+        )}
+
+        {!isAnalyzing && results.length === 0 && (
+          <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground/70">
+            No lookalikes yet. Expand your seed pool or try again.
+          </div>
+        )}
       </div>
     </div>
   )

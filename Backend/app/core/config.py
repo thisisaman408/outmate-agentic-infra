@@ -87,7 +87,29 @@ class Settings(BaseSettings):
         30,
         description="ContactOut API timeout in seconds"
     )
-    
+
+    # OpenRouter / LLM Configuration
+    OPENROUTER_API_KEY: Optional[str] = Field(
+        None,
+        description="OpenRouter (Anthropic) API key"
+    )
+    OPENROUTER_BASE_URL: str = Field(
+        "https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL"
+    )
+
+    # Serper Search Configuration
+    SERPER_API_KEY: Optional[str] = Field(
+        None,
+        description="Serper API key used for Google-branded search"
+    )
+
+    # Tavily Search Configuration
+    TAVILY_API_KEY: Optional[str] = Field(
+        None,
+        description="Tavily API key used for deep research"
+    )
+
     # Logging Configuration
     LOG_LEVEL: str = Field(
         "INFO",

@@ -680,17 +680,47 @@ class ExploriumService:
                 headers=self._headers(),
                 json=payload,
             )
-            if resp.status_code >= 400:
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = {"message": resp.text}
-                raise httpx.HTTPStatusError(
-                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
-                    request=resp.request,
-                    response=resp,
-                )
-            return resp.json()
+        if resp.status_code >= 400:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"message": resp.text}
+            if isinstance(data, dict):
+                message = data.get("message") or data.get("detail") or data
+            elif isinstance(data, list):
+                message = data or resp.text
+            else:
+                message = data
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} {resp.reason_phrase}: {message}",
+                request=resp.request,
+                response=resp,
+            )
+        return resp.json()
+
+    async def enrich_lookalikes(self, business_id: str) -> Dict[str, Any]:
+        payload = {
+            "business_id": business_id,
+            "request_context": {},
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/lookalikes/enrich",
+                headers=self._headers(),
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"message": resp.text}
+            message = data.get("message") if isinstance(data, dict) else data
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} {resp.reason_phrase}: {message}",
+                request=resp.request,
+                response=resp,
+            )
+        return resp.json()
 
     async def enrich_technographics(self, business_id: str) -> Dict[str, Any]:
         payload = {
@@ -861,6 +891,7 @@ class ExploriumService:
                     response=resp,
                 )
             return resp.json()
+
     @staticmethod
     def normalize_company(raw: Dict[str, Any]) -> Dict[str, Any]:
         def clean(s: Any) -> Optional[str]:

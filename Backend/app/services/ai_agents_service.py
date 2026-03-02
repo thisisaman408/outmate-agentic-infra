@@ -2,19 +2,43 @@ import os
 import json
 import logging
 import httpx
+import re
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException
 from app.core.config import settings
+from app.core.redis import RedisManager
+from app.services.explorium_service import ExploriumService
 import asyncio
+import uuid
 
 logger = logging.getLogger(__name__)
 
+COUNTRY_CODE_TO_NAME = {
+    "us": "United States",
+    "ca": "Canada",
+    "mx": "Mexico",
+    "gb": "United Kingdom",
+    "de": "Germany",
+    "fr": "France",
+    "es": "Spain",
+    "it": "Italy",
+    "nl": "Netherlands",
+    "au": "Australia",
+    "nz": "New Zealand",
+    "in": "India",
+    "sg": "Singapore",
+    "jp": "Japan",
+}
+
+GENERIC_DOMAINS = {"google.com", "amazon.com", "linkedin.com", "facebook.com", "microsoft.com", "apple.com"}
+
 class AiAgentsService:
     def __init__(self):
-        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY")
-        self.serper_api_key = os.getenv("SERPER_API_KEY")
-        self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+        self.openrouter_api_key = settings.OPENROUTER_API_KEY
+        self.tavily_api_key = settings.TAVILY_API_KEY
+        self.serper_api_key = settings.SERPER_API_KEY
+        self.openrouter_base_url = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
         self.tavily_base_url = "https://api.tavily.com"
         
         if not self.openrouter_api_key:
@@ -23,6 +47,16 @@ class AiAgentsService:
             logger.warning("SERPER_API_KEY not found in environment. Serper-based search will fail.")
         if not self.tavily_api_key:
             logger.warning("TAVILY_API_KEY not found in environment. Tavily-based search will fail.")
+        self.explorium = ExploriumService()
+        self.seed_domain_lookup = {
+            "stripe": "stripe.com",
+            "airbnb": "airbnb.com",
+            "notion": "notion.so",
+        }
+        try:
+            self.redis = RedisManager.get_client()
+        except Exception as exc:
+            logger.warning("Redis unavailable for pipeline cohort: %s", exc)
 
     async def _call_serper(self, query: str, num: int = 10) -> List[Dict[str, Any]]:
         """Call Serper API for Google Search results."""
@@ -36,15 +70,26 @@ class AiAgentsService:
         payload = {"q": query, "num": num}
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.post("https://google.serper.dev/search", headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json().get("organic", [])
-                logger.debug(f"Serper returned {len(data)} hits for query:{query}")
-                return data
-            except Exception as e:
-                logger.error(f"Serper Search Error: {str(e)}")
-                return []
+            attempt = 0
+            while attempt < 2:
+                try:
+                    response = await client.post("https://google.serper.dev/search", headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json().get("organic", [])
+                    logger.debug(f"Serper returned {len(data)} hits for query:{query}")
+                    return data
+                except httpx.HTTPStatusError as http_err:
+                    status = http_err.response.status_code
+                    if status == 429 and attempt == 0:
+                        logger.warning("Serper rate limited; retrying after a short delay.")
+                        attempt += 1
+                        await asyncio.sleep(1.0)
+                        continue
+                    logger.error(f"Serper Search Error: {http_err}")
+                    return []
+                except Exception as e:
+                    logger.error(f"Serper Search Error: {str(e)}")
+                    return []
 
     async def _map_with_concurrency(self, items: List[Any], limit: int, func):
         """Helper for concurrent execution with a limit (Semaphore)."""
@@ -57,7 +102,13 @@ class AiAgentsService:
                 
         return await asyncio.gather(*(sem_func(item) for item in items))
 
-    async def _call_openrouter(self, model: str, messages: List[Dict[str, str]], temperature: float = 0.7) -> str:
+    async def _call_openrouter(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        reasoning: bool = False,
+    ) -> Dict[str, Any]:
         """Call OpenRouter API (OpenAI-compatible)."""
         headers = {
             "Authorization": f"Bearer {self.openrouter_api_key}",
@@ -71,6 +122,8 @@ class AiAgentsService:
             "messages": messages,
             "temperature": temperature
         }
+        if reasoning:
+            payload["reasoning"] = {"enabled": True}
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -91,7 +144,12 @@ class AiAgentsService:
 
                 response.raise_for_status()
                 data = response.json()
-                return data["choices"][0]["message"]["content"]
+                message = data["choices"][0]["message"]
+                return {
+                    "content": message.get("content") or "",
+                    "reasoning_details": message.get("reasoning_details"),
+                    "usage": data.get("usage"),
+                }
             except HTTPException:
                 raise
             except httpx.HTTPStatusError as e:
@@ -261,7 +319,7 @@ class AiAgentsService:
             """
             
             # Using Gemini 1.5 Flash via OpenRouter
-            response_raw = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": prompt}])
+            response_main = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": prompt}])
             def _extract_json_from_text(text: str) -> List[Dict[str, Any]]:
                 clean = text.strip()
                 if "```json" in clean:
@@ -276,29 +334,61 @@ class AiAgentsService:
                 return json.loads(clean)
 
             try:
-                clean_parsed = _extract_json_from_text(response_raw)
+                clean_parsed = _extract_json_from_text(response_main["content"])
                 import uuid
                 for item in clean_parsed:
                     if "id" not in item or len(item["id"]) < 10:
                         item["id"] = str(uuid.uuid4())
+                perplexity_details = None
+                perplexity_reasoning = None
+                try:
+                    perplexity_response = await self._call_openrouter(
+                        "perplexity/sonar-pro-search",
+                        [{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        reasoning=True,
+                    )
+                    perplexity_details = perplexity_response.get("content")
+                    perplexity_reasoning = perplexity_response.get("reasoning_details")
+                except Exception as reasoning_err:
+                    logger.warning(f"Perplexity reasoning fetch failed: {reasoning_err}")
+                for item in clean_parsed:
+                    item["perplexityDetails"] = perplexity_details
+                    item["perplexityReasoning"] = perplexity_reasoning
                 return clean_parsed
             except json.JSONDecodeError as e:
-                logger.error(f"AI Batch JSON parse failed: {str(e)}; response={response_raw[:120]}")
+                logger.error(f"AI Batch JSON parse failed: {str(e)}; response={response_main['content'][:120]}")
                 retry_prompt = (
                     prompt
                     + "\nYou failed to produce valid JSON. Repeat the entire JSON array now, without markdown or explanation."
                 )
                 try:
-                    retry_raw = await self._call_openrouter(
+                    retry_response = await self._call_openrouter(
                         "anthropic/claude-3.5-haiku",
                         [{"role": "user", "content": retry_prompt}],
                         temperature=0.3,
                     )
-                    clean_parsed = _extract_json_from_text(retry_raw)
+                    clean_parsed = _extract_json_from_text(retry_response["content"])
                     import uuid
                     for item in clean_parsed:
                         if "id" not in item or len(item["id"]) < 10:
                             item["id"] = str(uuid.uuid4())
+                    perplexity_details = None
+                    perplexity_reasoning = None
+                    try:
+                        perplexity_response = await self._call_openrouter(
+                            "perplexity/sonar-pro-search",
+                            [{"role": "user", "content": prompt}],
+                            temperature=0.3,
+                            reasoning=True,
+                        )
+                        perplexity_details = perplexity_response.get("content")
+                        perplexity_reasoning = perplexity_response.get("reasoning_details")
+                    except Exception as reasoning_err:
+                        logger.warning(f"Perplexity reasoning fetch failed after retry: {reasoning_err}")
+                    for item in clean_parsed:
+                        item["perplexityDetails"] = perplexity_details
+                        item["perplexityReasoning"] = perplexity_reasoning
                     return clean_parsed
                 except Exception as retry_exc:
                     logger.error(f"AI Batch retry failed: {str(retry_exc)}")
@@ -318,6 +408,54 @@ class AiAgentsService:
             item["contactName"] = primary.get("name") or "Not found"
             item["title"] = primary.get("title") or ""
             item["email"] = primary.get("email") or ""
+            location_candidates = [
+                item.get("location"),
+                item.get("geographicPresence"),
+                item.get("locationDescription"),
+                item.get("address"),
+                item.get("country"),
+                item.get("region"),
+                primary.get("location"),
+                primary.get("country"),
+            ]
+            location_value = None
+            for loc_val in location_candidates:
+                if isinstance(loc_val, str):
+                    loc_val = loc_val.strip()
+                if loc_val:
+                    location_value = loc_val
+                    break
+            item["location"] = location_value or "Location not specified"
+            employee_candidates = [
+                item.get("employees"),
+                item.get("employeeCount"),
+                item.get("teamSize"),
+                item.get("companySize"),
+                item.get("size"),
+                item.get("headcount"),
+                item.get("employee_range"),
+                item.get("companySizeRange"),
+                item.get("team_size"),
+            ]
+            employees_value = None
+            for emp_val in employee_candidates:
+                if isinstance(emp_val, (int, float)) and emp_val > 0:
+                    employees_value = str(int(emp_val))
+                    break
+                if isinstance(emp_val, str) and emp_val.strip():
+                    employees_value = emp_val.strip()
+                    break
+            if not employees_value:
+                employees_value = self._extract_employees_from_text(item)
+            item["employees"] = employees_value or "Not specified"
+            reason_value = (
+                item.get("reason")
+                or item.get("analysis")
+                or item.get("summary")
+                or item.get("description")
+                or item.get("insights")
+            )
+            item["reason"] = str(reason_value or "No reasoning provided yet.")
         logger.info(f"AI batches produced {len(final_results)} items before filtering")
 
         # --- LAYER 6: CONSTRAINT ENFORCEMENT ---
@@ -327,8 +465,40 @@ class AiAgentsService:
         
         # Sort by score
         filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
+        unique_results: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in filtered:
+            item_id = item.get("id")
+            if not item_id or len(str(item_id)) < 5:
+                item_id = str(uuid.uuid4())
+                item["id"] = item_id
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            unique_results.append(item)
+        return unique_results
 
-        return filtered
+    def _extract_employees_from_text(self, item: Dict[str, Any]) -> Optional[str]:
+        """Try to parse an employee count or range from textual context."""
+        pattern = re.compile(
+            r"(\d{1,3}(?:,\d{3})*(?:-\d{1,3}(?:,\d{3})*)?)(?=\s*(?:employees|staff|people|team))",
+            re.I,
+        )
+        texts = [
+            item.get("reason") or "",
+            item.get("analysis") or "",
+            item.get("summary") or "",
+            item.get("insights") or "",
+            item.get("perplexityDetails") or "",
+            item.get("perplexityReasoning") or "",
+        ]
+        for text in texts:
+            if not isinstance(text, str):
+                continue
+            match = pattern.search(text)
+            if match:
+                return match.group(1)
+        return None
 
     async def deep_research(self, company_name: str, depth: str = "standard") -> Dict[str, Any]:
         """
@@ -469,17 +639,19 @@ class AiAgentsService:
         """
 
         # Step 3: Perplexity Execution
+        report_obj = None
         try:
+            report_text = ""
             report_raw = await self._call_openrouter(model, [
                 {"role": "system", "content": "Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
             ], temperature=0.2)
             
-            # JSON extraction
+            report_text = (report_raw or {}).get("content", "")
             import re
-            match = re.search(r"\{[\s\S]*\}", report_raw)
+            match = re.search(r"\{[\s\S]*\}", report_text)
             if match:
-                return json.loads(match.group(0))
+                report_obj = json.loads(match.group(0))
         except HTTPException:
             raise
         except Exception as e:
@@ -489,56 +661,487 @@ class AiAgentsService:
         logger.info("Retrying with Gemini Format Repair...")
         repair_prompt = f"""
         Transform the following research text into STRICT JSON matching the schema.
-        TEXT: {report_raw if 'report_raw' in locals() else 'No data found.'}
+        TEXT: {report_text if 'report_text' in locals() else 'No data found.'}
         SCHEMA: {json_schema}
         """
         try:
             repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}])
-            match = re.search(r"\{[\s\S]*\}", repaired)
+            repaired_text = (repaired or {}).get("content", "")
+            match = re.search(r"\{[\s\S]*\}", repaired_text)
             if match:
-                return json.loads(match.group(0))
+                report_obj = json.loads(match.group(0))
         except HTTPException:
             raise
         except:
             return {"error": "Failed to generate research report.", "companyName": company_name}
 
-    async def find_lookalikes(self, seed_company_ids: List[str]) -> List[Dict[str, Any]]:
-        """
-        Lookalike Agent:
-        Finds companies similar to seeds by analyzing their industry, size, and tech stack.
-        """
-        seeds_str = ", ".join(seed_company_ids)
-        prompt = f"""
-        Act as a Market Research AI. Find 5 companies that are "Lookalikes" to: {seeds_str}.
-        
-        Perform a deep analysis based on:
-        1. Patents and Core Technology.
-        2. Academic Research and R&D Focus.
-        3. Customer Reviews and Market Sentiment.
-        
-        Return a JSON array where each object has:
-        - id (string)
-        - companyName (string)
-        - similarityScore (number 0-100)
-        - matchingFactors (array of strings)
-        - industry (string)
-        - employees (string)
-        - location (string)
-        - revenue (string estimate)
+        if not report_obj:
+            return self._default_research_result(company_name)
 
-        Return ONLY valid JSON array.
-        """
-        
-        lookalikes_raw = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": prompt}], temperature=0.3)
+        return self._normalize_research_result(report_obj, company_name)
+
+    def _default_research_result(self, company_name: str) -> Dict[str, Any]:
+        return {
+            "companyName": company_name,
+            "summary": "Summary unavailable at this time.",
+            "marketPosition": "Positioning data unavailable.",
+            "keyInsights": [],
+            "opportunities": [],
+            "risks": [],
+            "competitors": [],
+            "recentNews": [],
+        }
+
+    def _normalize_research_result(self, payload: Dict[str, Any], company_name: str) -> Dict[str, Any]:
+        def listify(value: Any) -> List[str]:
+            if isinstance(value, list):
+                return [str(v) for v in value if v]
+            if isinstance(value, str):
+                return [value]
+            return []
+
+        recent = []
+        for entry in payload.get("recentDevelopments", []) or payload.get("recentNews", []):
+            if isinstance(entry, dict):
+                event = entry.get("event") or entry.get("title") or entry.get("summary")
+                if event:
+                    recent.append(str(event))
+            elif isinstance(entry, str):
+                recent.append(entry)
+
+        insight_list = self._render_insight_list(payload)
+        if not insight_list:
+            logger.info("Research payload missing key insights; payload keys=%s", list(payload.keys()))
+
+        return {
+            "companyName": payload.get("companyName") or company_name,
+            "summary": payload.get("executiveSummary") or payload.get("summary") or payload.get("description") or "Summary unavailable.",
+            "marketPosition": payload.get("marketPosition") or payload.get("positioning") or "Positioning data unavailable.",
+            "keyInsights": insight_list,
+            "opportunities": listify(payload.get("opportunities")),
+            "risks": listify(payload.get("risks")),
+            "competitors": listify(payload.get("competitors") or payload.get("competition") or payload.get("directCompetitors")),
+            "recentNews": recent,
+        }
+
+    def _render_insight_list(self, payload: Dict[str, Any]) -> List[str]:
+        candidates = (
+            payload.get("keyInsights")
+            or payload.get("keyInsightFindings")
+            or payload.get("insightFindings")
+            or payload.get("insights")
+            or payload.get("insightList")
+            or payload.get("findingList")
+            or payload.get("findings")
+            or payload.get("reasons")
+            or []
+        )
+        strings = self._collect_strings(candidates)
+        if not strings:
+            text = payload.get("analysis") or payload.get("insightsText") or payload.get("summaryText")
+            if isinstance(text, str):
+                strings = [line.strip() for line in text.splitlines() if line.strip()]
+        if not strings:
+            market_position = payload.get("marketPosition") or payload.get("positioning")
+            if market_position:
+                strings.append(f"Market position: {market_position}")
+            def stringify_item(item):
+                if isinstance(item, str):
+                    return item
+                if isinstance(item, dict):
+                    return item.get("companyName") or item.get("name") or item.get("title") or str(item)
+                if isinstance(item, list):
+                    sub = [stringify_item(i) for i in item]
+                    return ", ".join([s for s in sub if s])
+                if item is None:
+                    return ""
+                return str(item)
+
+            def format_list(lst, limit=None):
+                cleaned = [stringify_item(item) for item in lst]
+                cleaned = [s for s in cleaned if s]
+                if limit is not None:
+                    cleaned = cleaned[:limit]
+                return cleaned
+            direct_competitors = payload.get("competitiveLandscape", {}).get("directCompetitors") if isinstance(payload.get("competitiveLandscape"), dict) else None
+            indirect = payload.get("competitiveLandscape", {}).get("indirectCompetitors") if isinstance(payload.get("competitiveLandscape"), dict) else None
+            if direct_competitors:
+                direct_list = format_list(direct_competitors)
+                if direct_list:
+                    strings.append(f"Direct competitors include {', '.join(direct_list)}")
+            if indirect:
+                indirect_list = format_list(indirect)
+                if indirect_list:
+                    strings.append(f"Indirect competitors include {', '.join(indirect_list)}")
+            products = payload.get("productsAndServices")
+            if products:
+                if isinstance(products, list):
+                    service_list = format_list(products, limit=3)
+                    if service_list:
+                        strings.append(f"Services: {', '.join(service_list)}")
+                else:
+                    strings.append(f"Services: {stringify_item(products)}")
+            go_to_market = payload.get("goToMarketInsights")
+            if go_to_market:
+                strings.append(f"Go-to-market insight: {stringify_item(go_to_market)}")
+        return strings
+
+    def _extract_search_keywords(self, profile: Dict[str, Any]) -> List[str]:
+        keywords = set()
+        def add_terms(source: Any):
+            if isinstance(source, str):
+                for token in source.split():
+                    token = token.strip().lower()
+                    if len(token) >= 3:
+                        keywords.add(token)
+            elif isinstance(source, list):
+                for term in source:
+                    add_terms(term)
+
+        add_terms(profile.get("specialties") or profile.get("specialty") or [])
+        add_terms(profile.get("technologies") or profile.get("tech_stack") or [])
+        add_terms(profile.get("description"))
+        add_terms(profile.get("industry"))
+        return [k for k in keywords if len(k) >= 3][:5]
+
+    def _collect_strings(self, data: Any) -> List[str]:
+        if data is None:
+            return []
+        if isinstance(data, str):
+            return [data.strip()]
+        if isinstance(data, dict):
+            results: List[str] = []
+            for value in data.values():
+                results.extend(self._collect_strings(value))
+            return results
+        if isinstance(data, list):
+            results: List[str] = []
+            for entry in data:
+                results.extend(self._collect_strings(entry))
+            return results
+        return []
+
+    def _extract_business_id_from_match(self, match_item: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(match_item, dict):
+            return None
+        if match_item.get("business_id"):
+            return match_item.get("business_id")
+        nested_business = match_item.get("business")
+        if isinstance(nested_business, dict):
+            if nested_business.get("business_id"):
+                return nested_business.get("business_id")
+            if nested_business.get("id"):
+                return nested_business.get("id")
+        if match_item.get("id"):
+            return match_item.get("id")
+        match_data = match_item.get("match")
+        if isinstance(match_data, dict):
+            if match_data.get("business_id"):
+                return match_data.get("business_id")
+            if match_data.get("id"):
+                return match_data.get("id")
+        return None
+
+    async def _fetch_seed_profile(self, business_id: str) -> Optional[Dict[str, Any]]:
         try:
-            import re
-            match = re.search(r"\[[\s\S]*\]", lookalikes_raw)
+            raw = await self.explorium.fetch_businesses(
+                {"business_id": business_id}, size=1, page_size=1, page=1, mode="full"
+            )
+            data = (raw or {}).get("data") or []
+            if not data:
+                return None
+            return self.explorium.normalize_company(data[0])
+        except Exception as exc:
+            logger.debug(f"[Lookalike] Failed to fetch seed profile for {business_id}: {exc}")
+            return None
+
+    async def _search_seed_profile_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        try:
+            result = await self.explorium.search_companies({"name": name}, limit=1)
+            companies = (result.get("companies") or []) if isinstance(result, dict) else []
+            if not companies:
+                return None
+            return self.explorium.normalize_company(companies[0])
+        except Exception as exc:
+            logger.debug(f"[Lookalike] Failed to search seed profile by name '{name}': {exc}")
+            return None
+
+    def _is_generic_company(self, company: Dict[str, Any]) -> bool:
+        domain = (company.get("website") or company.get("domain") or "")
+        if isinstance(domain, str):
+            domain = domain.lower()
+            for blocked in GENERIC_DOMAINS:
+                if domain.endswith(blocked):
+                    return True
+        return False
+
+    async def _find_similar_companies(self, seed_profile: Optional[Dict[str, Any]], business_id: Optional[str]) -> List[Dict[str, Any]]:
+        if not seed_profile:
+            return []
+        seeds = seed_profile.get("companyName") or seed_profile.get("domain") or ""
+        prompt = f"""
+        Act as a Market Research AI. Find 5 companies that are lookalikes to {seeds}.
+        Focus on patents, technology, customer reviews, and market presence.
+        Return JSON array with fields: id, companyName, similarityScore, matchingFactors, industry, employees, location, revenue.
+        """
+        try:
+            completion = await self._call_openrouter(
+                "anthropic/claude-3.5-haiku",
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            content = completion.get("content") if isinstance(completion, dict) else str(completion)
+            match = re.search(r"\[[\s\S]*\]", content)
             if match:
                 return json.loads(match.group(0))
+        except Exception as exc:
+            logger.error(f"Lookalike Analysis Error: {exc}")
+        return []
+
+    async def _fetch_explorium_lookalikes(self, business_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+        if not business_id:
             return []
+        try:
+            response = await self.explorium.enrich_lookalikes(business_id)
+            data = (response or {}).get("data") or []
+            if isinstance(data, list):
+                return data[:limit]
+            return []
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Lookalike enrichment failed for business %s: %s",
+                business_id,
+                exc.response.text if exc.response is not None else exc,
+            )
+        except Exception as exc:
+            logger.error("Lookalike enrichment error for business %s: %s", business_id, exc)
+        return []
+
+    def _build_result_from_entry(self, entry: Dict[str, Any], matching_context: Optional[List[str]] = None, fallback: bool = False) -> Dict[str, Any]:
+        name = (
+            entry.get("lookalike_business_name")
+            or entry.get("name")
+            or entry.get("companyName")
+            or entry.get("business_name")
+            or "Lookalike"
+        )
+        lookalike_id = str(entry.get("lookalike_business_id") or entry.get("id") or uuid.uuid4())
+        similarity_raw = entry.get("similarity_score") or entry.get("similarityScore") or entry.get("score") or entry.get("similarity")
+        percent = self._map_similarity_score(similarity_raw)
+        label = similarity_raw if isinstance(similarity_raw, str) else None
+        country_code = (entry.get("lookalike_country_location") or entry.get("country") or entry.get("headquarters_country") or "").lower()
+        location = COUNTRY_CODE_TO_NAME.get(country_code, country_code.upper() if country_code else None)
+        industry = entry.get("lookalike_naics_description") or entry.get("industry") or entry.get("primary_industry")
+        matching_factors = matching_context.copy() if matching_context else []
+        if label:
+            matching_factors.append(f"Similarity: {label}")
+        if industry and industry not in matching_factors:
+            matching_factors.append(industry)
+        if fallback and industry and "industry match" not in matching_factors:
+            matching_factors.append("industry match")
+        if fallback:
+            matching_factors.append("filtered search")
+        matching_factors = list(dict.fromkeys(matching_factors))
+
+        if not getattr(self, "_lookalike_logged", False):
+            logger.info("Lookalike raw entry sample: %s", entry)
+            self._lookalike_logged = True
+
+        if percent <= 0 and isinstance(similarity_raw, (int, float)):
+            percent = float(similarity_raw)
+        if percent <= 0 and isinstance(similarity_raw, str):
+            try:
+                percent = float(similarity_raw.replace("%", "").strip())
+            except Exception:
+                pass
+        if fallback and percent <= 5:
+            percent = 85.0
+            if not label:
+                label = "High"
+
+        return {
+            "id": lookalike_id,
+            "companyName": name,
+            "website": entry.get("lookalike_website") or entry.get("website"),
+            "description": entry.get("lookalike_description") or entry.get("description"),
+            "industry": industry,
+            "employees": entry.get("lookalike_number_of_employees_range")
+            or entry.get("employee_count_range")
+            or entry.get("companySize")
+            or entry.get("company_size"),
+            "revenue": entry.get("lookalike_revenue_range") or entry.get("revenue_range"),
+            "location": location or entry.get("location"),
+            "similarityScore": percent or 75,
+            "matchingFactors": matching_factors,
+            "similarityLabel": label,
+        }
+
+    def _map_similarity_score(self, value: Any) -> float:
+        if isinstance(value, (int, float)):
+            if 0 < value <= 1:
+                return value * 100
+            return float(max(0, min(100, value)))
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized.endswith("%"):
+                try:
+                    return float(normalized.strip("%"))
+                except ValueError:
+                    pass
+            mapping = {"high": 95.0, "medium": 85.0, "low": 70.0}
+            if normalized in mapping:
+                return mapping[normalized]
+            try:
+                estimate = float(normalized)
+                if 0 <= estimate <= 1:
+                    return estimate * 100
+                return estimate
+            except ValueError:
+                pass
+        return 0.0
+
+    async def _lookup_domain_for_name(self, name: str) -> Optional[str]:
+        if not name:
+            return None
+        try:
+            result = await self.explorium.search_companies({"name": name}, limit=1, strict_filters=True)
+            companies = result.get("companies") or []
+            if companies:
+                domain = companies[0].get("website") or companies[0].get("domain")
+                if domain and "." in domain:
+                    return domain.lower()
+        except Exception as exc:
+            logger.debug(f"[Lookalike] domain lookup failed for {name}: {exc}")
+        return None
+
+    def _normalize_seed_label(self, seed: str) -> str:
+        candidate = (seed or "").strip()
+        trimmed = re.sub(r"[\-–—_]+\\d+$", "", candidate)
+        return trimmed.strip()
+
+    async def _resolve_seed_business_id(self, seed: str) -> Optional[str]:
+        candidate = (seed or "").strip()
+        if not candidate:
+            return None
+        lower_candidate = candidate.lower()
+        if re.fullmatch(r"[a-f0-9]{32}", lower_candidate):
+            return lower_candidate
+
+        trimmed = self._normalize_seed_label(candidate)
+        if not trimmed:
+            return None
+
+        if trimmed != candidate:
+            logger.debug(f"[Lookalike] Normalized seed '{candidate}' to '{trimmed}'")
+
+        seed_key = trimmed.lower()
+
+        inputs = []
+        if re.fullmatch(r"[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", trimmed):
+            inputs.append({"domain": trimmed})
+        domain_override = self.seed_domain_lookup.get(seed_key)
+        domain_from_lookup = None
+        is_domain_like = bool(re.fullmatch(r"[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", trimmed))
+        if not is_domain_like and not domain_override:
+            domain_from_lookup = await self._lookup_domain_for_name(trimmed)
+
+        if domain_override:
+            inputs.append({"domain": domain_override})
+        elif is_domain_like:
+            inputs.append({"domain": trimmed})
+        elif domain_from_lookup:
+            inputs.append({"domain": domain_from_lookup})
+        inputs.append({"name": trimmed})
+
+        try:
+            match_payload = await self.explorium.match_businesses(inputs)
+            candidates = []
+            if isinstance(match_payload, dict):
+                candidates = match_payload.get("matched_businesses") or []
+                if not candidates and match_payload.get("matches"):
+                    matches_list = match_payload.get("matches") or []
+                    for match_item in matches_list:
+                        if isinstance(match_item, dict):
+                            candidate_entry = match_item.get("business") or match_item
+                            if candidate_entry:
+                                candidates.append(candidate_entry)
+            elif isinstance(match_payload, list):
+                candidates = match_payload
+
+            if not candidates:
+                logger.debug(f"[Lookalike] No match found for inputs={inputs}, response={match_payload}")
+                return None
+
+            for candidate_item in self._flatten_entries(candidates):
+                bid = self._extract_business_id_from_match(candidate_item)
+                if bid:
+                    return bid
         except Exception as e:
-            logger.error(f"Lookalike Analysis Error: {str(e)}")
+            logger.debug(f"Lookalike seed match failed for '{candidate}': {e}")
+        return None
+
+    async def find_lookalikes(self, seed_company_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Lookalike Agent: query Ocean.io lookalikes through Explorium enrichment.
+        """
+        seeds_to_process: List[str] = []
+        for seed_label in seed_company_ids:
+            if seed_label:
+                seeds_to_process.append(seed_label)
+
+        if not seeds_to_process:
+            logger.warning("Lookalike Agent: seed pool is empty.")
             return []
+
+        raw_results: List[Dict[str, Any]] = []
+        for seed_label in seeds_to_process:
+            business_id = await self._resolve_seed_business_id(seed_label)
+            if not business_id:
+                logger.debug(f"[Lookalike] Could not resolve ID for '{seed_label}', falling back to name search.")
+            seed_profile = None
+            if business_id:
+                seed_profile = await self._fetch_seed_profile(business_id)
+            if not seed_profile:
+                seed_profile = await self._search_seed_profile_by_name(seed_label)
+            fallback_context: List[str] = []
+            if seed_profile:
+                if seed_profile.get("industry"):
+                    fallback_context.append("industry match")
+                if seed_profile.get("location"):
+                    fallback_context.append("location match")
+            try:
+                candidates = []
+                if business_id:
+                    candidates = await self._fetch_explorium_lookalikes(business_id)
+                if candidates:
+                    for entry in candidates:
+                        raw_results.append(
+                            self._build_result_from_entry(entry, matching_context=fallback_context, fallback=False)
+                        )
+                    continue
+                fallback_candidates = await self._find_similar_companies(seed_profile, business_id)
+                if not fallback_candidates:
+                    logger.warning(f"Lookalike Agent: fallback search returned nothing for '{seed_label}'")
+                    continue
+                for entry in fallback_candidates:
+                    raw_results.append(
+                        self._build_result_from_entry(entry, matching_context=fallback_context, fallback=True)
+                    )
+            except Exception:
+                logger.exception(f"Lookalike search error for seed {seed_label}")
+
+        final_results: List[Dict[str, Any]] = []
+        seen_ids = set()
+        for candidate in raw_results:
+            candidate_id = candidate.get("id")
+            if not candidate_id or candidate_id in seen_ids:
+                continue
+            seen_ids.add(candidate_id)
+            final_results.append(candidate)
+            if len(final_results) >= 3:
+                break
+
+        return final_results
 
     async def predictive_scoring(self, company_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -671,22 +1274,68 @@ class AiAgentsService:
         logger.info(f"Calling OpenRouter predictive model for {name} with template size {len(prompt)} chars")
         try:
             scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1)
-            match = re.search(r"\{[\s\S]*\}", scores_raw)
+            scores_text = scores_raw.get("content") if isinstance(scores_raw, dict) else str(scores_raw)
+            match = re.search(r"\{[\s\S]*\}", scores_text)
             if match:
                 parsed = json.loads(match.group(0))
                 summary = parsed.get("predictiveSummary", {})
+                def slugify(value: Optional[str]) -> str:
+                    if not value:
+                        return "contact"
+                    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+                    return cleaned or "contact"
+
+                def format_domain(value: Optional[str]) -> str:
+                    if not value:
+                        return "outmate.ai"
+                    value = value.replace("https://", "").replace("http://", "").split("/")[0]
+                    return value or "outmate.ai"
+
+                summary = parsed.get("predictiveSummary", {})
+                wiki_signals_data = wiki_signals
+                fallback_signals: List[Dict[str, str]] = []
+                if summary.get("signals"):
+                    fallback_signals = summary.get("signals")
+                else:
+                    if wiki_signals_data.get("hasScaleSignals"):
+                        fallback_signals.append({"name": "Scale signals present", "impact": "positive"})
+                    if wiki_signals_data.get("hasGlobalSignals"):
+                        fallback_signals.append({"name": "Global presence detected", "impact": "positive"})
+                    if wiki_signals_data.get("hasDateSignals"):
+                        fallback_signals.append({"name": "Recent founding or milestone date", "impact": "positive"})
+                    if not fallback_signals:
+                        fallback_signals.append({"name": "Behavioral opportunity signal", "impact": "positive"})
+                company_domain = format_domain(target.get("domain"))
+                email_slug = slugify(target.get("name"))
+                profile_slug = slugify(target.get("name"))
+                contact_info = summary.get("contact") or {}
+                profile_link = (
+                    summary.get("profileLink")
+                    or summary.get("profileUrl")
+                    or contact_info.get("profileUrl")
+                    or contact_info.get("linkedin")
+                )
+                email_address = (
+                    summary.get("email")
+                    or summary.get("contactEmail")
+                    or contact_info.get("email")
+                    or contact_info.get("workEmail")
+                    or contact_info.get("personalEmail")
+                )
+
                 payload = {
                     "id": str(uuid.uuid4()),
                     "companyId": target.get("domain"),
                     "companyName": target.get("name"),
                     "contactName": target.get("name"),
                     "title": "Predicted Champion",
-                    "email": None,
+                    "email": email_address,
+                    "profileLink": profile_link,
                     "score": summary.get("customScore") or 0,
                     "conversionLikelihood": summary.get("confidence") or 0,
                     "confidence": min(max((summary.get("confidence") or 0) / 100, 0), 1),
                     "prediction": summary.get("intentSignal") or "Medium",
-                    "factors": summary.get("signals", []),
+                    "factors": fallback_signals,
                     "guidance": summary.get("reasoning") or parsed.get("reasoning") or "",
                     "recommendation": "Execute outreach with predictive confidence."
                 }
@@ -698,3 +1347,28 @@ class AiAgentsService:
             logger.error(f"Predictive Scoring Error: {str(e)}")
             
         return []
+
+    async def add_to_pipeline(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info("Pipeline cohort add request: %s", payload)
+        entry = {
+            "companyId": payload.get("companyId") or str(uuid.uuid4()),
+            "companyName": payload.get("companyName") or "Unknown",
+            "contactName": payload.get("contactName"),
+            "similarityScore": float(payload.get("similarityScore") or 0),
+            "addedAt": datetime.utcnow().isoformat() + "Z",
+        }
+        if not hasattr(self, "redis") or self.redis is None:
+            try:
+                self.redis = RedisManager.get_client()
+            except Exception as exc:
+                logger.warning("Redis unavailable while recording pipeline entry: %s", exc)
+                self.redis = None
+        if self.redis:
+            try:
+                await self.redis.lpush("ai:lookalike:pipeline", json.dumps(entry))
+                await self.redis.ltrim("ai:lookalike:pipeline", 0, 99)
+            except Exception as exc:
+                logger.warning("Pipeline queue push failed: %s", exc)
+        else:
+            logger.warning("Redis client missing; pipeline entry only logged.")
+        return {"message": "Added to pipeline", "entry": entry}
