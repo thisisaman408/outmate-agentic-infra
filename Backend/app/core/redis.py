@@ -1,51 +1,101 @@
 import redis.asyncio as redis
-from app.core.config import REDIS_URL
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
+from typing import Optional
+from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class RedisManager:
-    client: redis.Redis = None
+    """Singleton manager for async Redis client with production-grade retry and TLS.
+
+    - Supports Upstash Redis with rediss:// (TLS) protocol
+    - Implements exponential backoff retry strategy
+    - Health check interval for detecting outages
+    - Gracefully handles connection failures
+    """
+
+    client: Optional[redis.Redis] = None
+    ready: bool = False
 
     @classmethod
     def connect(cls) -> bool:
+        """Create async Redis client with TLS and retry strategy."""
         if cls.client is None:
-            import redis as sync_redis
-            from app.core.config import REDIS_URL
-            
-            # Use synchronous client for initial ping check to avoid blocking
-            connected = False
+            # Quick synchronous health check (non-blocking for startup)
             try:
-                checker = sync_redis.from_url(REDIS_URL, socket_timeout=1)
-                checker.ping()
-                print("Connected to Redis")
-                connected = True
+                import redis as sync_redis
+
+                sync_client = sync_redis.from_url(
+                    settings.REDIS_URL,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                    decode_responses=True,
+                )
+                sync_client.ping()
+                cls.ready = True
+                logger.info("Redis sync health check passed")
             except Exception as e:
-                print(f"ERROR: Could not connect to Redis at {REDIS_URL}: {e}")
-                print("PLEASE ENSURE REDIS SERVER IS RUNNING.")
-                # We still create the client but it will fail on use
-            
-            cls.client = redis.from_url(
-                REDIS_URL,
-                decode_responses=True,
-                encoding="utf-8",
-            )
-            return connected
-        return True
+                cls.ready = False
+                logger.warning(f"Redis sync health check failed: {e}")
+
+            # Create async client with exponential backoff retry
+            try:
+                retry = Retry(ExponentialBackoff(), 3)
+                cls.client = redis.from_url(
+                    settings.REDIS_URL,
+                    retry=retry,
+                    health_check_interval=30,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                    decode_responses=True,
+                    ssl=True,  # Required for Upstash rediss://
+                )
+                logger.info("Redis async client created with retry strategy")
+            except Exception as e:
+                logger.error(f"Failed to create async redis client: {e}")
+
+            return cls.ready
+
+        return cls.ready
 
     @classmethod
     async def close(cls):
         if cls.client:
-            await cls.client.close()
+            try:
+                await cls.client.close()
+            except Exception as e:
+                logger.warning(f"Error closing Redis connection: {e}")
             cls.client = None
-            print("Closed Redis connection")
+            cls.ready = False
+            logger.info("Redis connection closed")
 
     @classmethod
     def get_client(cls) -> redis.Redis:
+        """Return async Redis client, creating it if missing.
+
+        Note: Callers should handle exceptions for transient failures.
+        """
         if cls.client is None:
             cls.connect()
         return cls.client
 
-# Dependency for FastAPI
+    @classmethod
+    async def health_check(cls) -> bool:
+        """Check if Redis is available. Returns True if ping succeeds."""
+        try:
+            client = cls.get_client()
+            await client.ping()
+            return True
+        except Exception as e:
+            logger.warning(f"Redis health check failed: {e}")
+            return False
+
+
+# FastAPI dependency helper (for async injection)
 async def get_redis() -> redis.Redis:
     if RedisManager.client is None:
-         RedisManager.connect()
+        RedisManager.connect()
     return RedisManager.client
-

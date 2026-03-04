@@ -10,10 +10,15 @@ class RedisService:
         """
         Get cached response for specific filters.
         'filter_key' should be a unique hash or string representing the filter state.
+        Returns ``None`` if Redis is unavailable or key does not exist.
         """
-        data = await self.redis.get(f"filter:{filter_key}")
-        if data:
-            return json.loads(data)
+        try:
+            data = await self.redis.get(f"filter:{filter_key}")
+            if data:
+                return json.loads(data)
+        except Exception as exc:
+            # Redis is optional; log and return None so application continues.
+            logging.warning(f"Redis get_cached_filter_result failed: {exc}")
         return None
 
     async def set_cached_filter_result(self, filter_key: str, value: Any, ttl: int = 3600):
@@ -21,15 +26,21 @@ class RedisService:
         Cache filter response to ensure instant response for same filters.
         Default TTL: 1 hour.
         """
-        await self.redis.setex(f"filter:{filter_key}", ttl, json.dumps(value))
+        try:
+            await self.redis.setex(f"filter:{filter_key}", ttl, json.dumps(value))
+        except Exception as exc:
+            logging.warning(f"Redis set_cached_filter_result failed: {exc}")
 
     async def get_crustdata(self, identifier: str) -> Optional[Any]:
         """
         Retrieve Crustdata if it has been called once already.
         """
-        data = await self.redis.get(f"crustdata:{identifier}")
-        if data:
-            return json.loads(data)
+        try:
+            data = await self.redis.get(f"crustdata:{identifier}")
+            if data:
+                return json.loads(data)
+        except Exception as exc:
+            logging.warning(f"Redis get_crustdata failed: {exc}")
         return None
 
     async def set_crustdata(self, identifier: str, data: Any, ttl: int = 86400):
@@ -37,16 +48,26 @@ class RedisService:
         Store Crustdata response to prevent re-fetching.
         Default TTL: 24 hours (or longer/indefinite as needed).
         """
-        await self.redis.setex(f"crustdata:{identifier}", ttl, json.dumps(data))
+        try:
+            await self.redis.setex(f"crustdata:{identifier}", ttl, json.dumps(data))
+        except Exception as exc:
+            logging.warning(f"Redis set_crustdata failed: {exc}")
 
     async def initialize_user_credits(self, user_id: str, amount: int):
         """Set initial credits for a user if not exists."""
-        await self.redis.setnx(f"credits:{user_id}", amount)
+        try:
+            await self.redis.setnx(f"credits:{user_id}", amount)
+        except Exception as exc:
+            logging.warning(f"Redis initialize_user_credits failed: {exc}")
 
     async def get_user_credits(self, user_id: str) -> int:
         """Get available credits."""
-        val = await self.redis.get(f"credits:{user_id}")
-        return int(val) if val else 0
+        try:
+            val = await self.redis.get(f"credits:{user_id}")
+            return int(val) if val else 0
+        except Exception as exc:
+            logging.warning(f"Redis get_user_credits failed: {exc}")
+            return 0
 
     async def consume_credit(self, user_id: str, cost: int = 1) -> bool:
         """
@@ -64,5 +85,9 @@ class RedisService:
         end
         """
         # keys=[key_name], args=[cost]
-        result = await self.redis.eval(lua_script, 1, f"credits:{user_id}", cost)
-        return bool(result)
+        try:
+            result = await self.redis.eval(lua_script, 1, f"credits:{user_id}", cost)
+            return bool(result)
+        except Exception as exc:
+            logging.warning(f"Redis consume_credit failed: {exc}")
+            return False

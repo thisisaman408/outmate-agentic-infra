@@ -110,15 +110,17 @@ async def track_visitor(
             dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
             if dedupe_seconds > 0:
                 redis_client = RedisManager.get_client()
-                domain = urlparse(url).netloc
-                dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-                
-                if await redis_client.get(dedupe_key):
-                    return {"status": "deduplicated"}
-                
-                await redis_client.setex(dedupe_key, dedupe_seconds, "1")
+                # if redis is not available, get_client will attempt to reconnect but
+                # may still raise; catch it and continue to avoid failing the track
+                if redis_client is not None:
+                    domain = urlparse(url).netloc
+                    dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
+                    if await redis_client.get(dedupe_key):
+                        return {"status": "deduplicated"}
+                    await redis_client.setex(dedupe_key, dedupe_seconds, "1")
         except Exception as e:
-            logger.error(f"Redis deduplication failed: {e}")
+            # log the error but don't prevent tracking
+            logger.warning(f"Redis deduplication failed: {e}")
 
         # 5. Process Visitor (Async via Celery)
         from app.tasks.visitors import process_visitor_task, _process_visitor_data
@@ -322,16 +324,25 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
 async def stream_visitors(org_id: str = "all"):
     """
     Server-Sent Events stream for realtime visitor updates.
-    Requires Redis (pubsub). Falls back to 503 if Redis unavailable.
+    Requires Redis (pubsub); if the client is not connected we respond with 503
+    and a helpful JSON message that the front end can display.
     """
-    redis_client = RedisManager.get_client()
+    try:
+        redis_client = RedisManager.get_client()
+        # test ping to verify the connection is still alive
+        await redis_client.ping()
+    except Exception as exc:
+        logger.error(f"Redis unavailable for stream: {exc}")
+        return JSONResponse(status_code=503, content={
+            "error": "Realtime stream unavailable - Redis connection failed."
+        })
+
     channel = "visitors:all" if org_id == "all" else f"visitors:{org_id}"
     pubsub = redis_client.pubsub()
 
     async def event_generator():
         try:
             await pubsub.subscribe(channel)
-            # Initial comment to open the stream
             yield f": subscribed {channel}\n\n"
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
@@ -340,12 +351,12 @@ async def stream_visitors(org_id: str = "all"):
                     if data is not None:
                         yield f"data: {data}\n\n"
                 else:
-                    # heartbeat
                     yield ": heartbeat\n\n"
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            logger.error(f"Error in SSE generator: {e}")
             yield f"event: error\ndata: {str(e)}\n\n"
         finally:
             try:

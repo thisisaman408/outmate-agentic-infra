@@ -1,13 +1,21 @@
 // Database connection utilities
 import { Pool } from 'pg'
-import Redis from 'ioredis'
+import Redis, { RedisOptions } from 'ioredis'
+
+// NOTE: the code in this file **must only run on the server** (Next.js Node
+// environment).  We guard later against accidental client‑side execution
+// so that e.g. React components imported into the browser don't attempt to
+// open TCP sockets.
 
 // Database configuration from environment variables
-// Parse DATABASE_URL for Supabase PostgreSQL
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres:Mayank%401232617@db.sikcffedycienprvobow.supabase.co:5432/postgres'
+// (Supabase uses a normal PostgreSQL URL with TLS requirements.)
+const databaseUrl = process.env.DATABASE_URL || ''
 
-// Parse DATABASE_URL to extract connection details
+// helper to parse a postgres URL into connection parameters.  When the
+// environment variable is missing we simply return an empty object; callers
+// should handle the lack of configuration gracefully.
 const parseDatabaseUrl = (url: string) => {
+  if (!url) return {}
   try {
     const urlObj = new URL(url)
     return {
@@ -16,19 +24,11 @@ const parseDatabaseUrl = (url: string) => {
       database: urlObj.pathname.slice(1), // Remove leading slash
       user: urlObj.username,
       password: decodeURIComponent(urlObj.password),
-      ssl: { rejectUnauthorized: false } // Required for Supabase
+      ssl: { rejectUnauthorized: false } // Supabase requires TLS
     }
   } catch (error) {
     console.error('Error parsing DATABASE_URL:', error)
-    // Fallback to default values
-    return {
-      host: 'db.sikcffedycienprvobow.supabase.co',
-      port: 5432,
-      database: 'postgres',
-      user: 'postgres',
-      password: 'Mayank@1232617',
-      ssl: { rejectUnauthorized: false }
-    }
+    return {}
   }
 }
 
@@ -39,28 +39,67 @@ const dbConfig = {
   connectionTimeoutMillis: 10000, // how long to wait when connecting a new client
 }
 
-// Redis configuration from environment variables
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD || undefined,
-  db: parseInt(process.env.REDIS_DB || '0'),
-  retryDelayOnFailover: 100,
-  maxRetriesPerRequest: 3,
+// Redis configuration from environment variables.  We keep the simple host/
+// port form for Next.js, but we also support a full REDIS_URL which is the
+// recommended way to configure managed Redis providers.
+const redisUrl = process.env.REDIS_URL || ''
+const redisOpts: RedisOptions = redisUrl
+  ? { url: redisUrl } as any
+  : {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD || undefined,
+      db: parseInt(process.env.REDIS_DB || '0'),
+    }
+
+// add robust retry strategy and debug event handlers
+const baseRedisOptions: RedisOptions = {
+  ...redisOpts,
+  // Connection and retry tuning to make server-side reconnects more resilient
+  connectTimeout: 5000,
+  maxRetriesPerRequest: 5,
+  enableReadyCheck: true,
+  // stop after 10 attempts
+  retryStrategy(times) {
+    if (times > 10) return null
+    // linear backoff capped at 2s
+    return Math.min(times * 50, 2000)
+  },
+  reconnectOnError(err) {
+    // allow reconnection for common transient errors
+    try {
+      const msg = String(err && (err as Error).message || '')
+      if (/ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT|READONLY|CONNECTION_BROKEN/i.test(msg)) {
+        console.warn('Redis transient error, will attempt reconnect:', msg)
+        return true
+      }
+    } catch (_) {
+      // fallthrough to allow reconnect
+    }
+    return true
+  },
 }
 
 // PostgreSQL connection pool
 let pool: Pool | null = null
 
 export const getDatabasePool = (): Pool => {
+  if (typeof window !== 'undefined') {
+    throw new Error('Database pool should only be created on the server side')
+  }
+
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not configured; cannot create pool')
+  }
+
   if (!pool) {
     pool = new Pool(dbConfig)
-    
+
     // Handle pool errors
     pool.on('error', (err) => {
       console.error('Unexpected error on idle client', err)
     })
-    
+
     // Handle connection errors
     pool.on('connect', async (client) => {
       console.log('New database client connected')
@@ -70,7 +109,7 @@ export const getDatabasePool = (): Pool => {
         console.error('Failed to set statement_timeout:', timeoutError)
       }
     })
-    
+
     console.log('Database pool created with config:', dbConfig)
   }
   return pool
@@ -80,19 +119,32 @@ export const getDatabasePool = (): Pool => {
 let redisClient: Redis | null = null
 
 export const getRedisClient = (): Redis => {
+  if (typeof window !== 'undefined') {
+    // this function should not be invoked on the browser
+    throw new Error('Redis client must only be accessed on the server side')
+  }
+
   if (!redisClient) {
-    redisClient = new Redis(redisConfig)
-    
+    if (!redisUrl && !process.env.REDIS_HOST) {
+      throw new Error('Redis configuration missing (set REDIS_URL or REDIS_HOST)')
+    }
+
+    redisClient = new Redis(baseRedisOptions)
+
     redisClient.on('connect', () => {
       console.log('Redis client connected')
     })
-    
+    redisClient.on('ready', () => {
+      console.log('Redis client ready')
+    })
     redisClient.on('error', (err) => {
       console.error('Redis client error:', err)
     })
-    
     redisClient.on('close', () => {
-      console.log('Redis client disconnected')
+      console.warn('Redis client disconnected')
+    })
+    redisClient.on('reconnecting', (delay) => {
+      console.log(`Redis client reconnecting in ${delay}ms`)
     })
   }
   return redisClient
@@ -100,6 +152,11 @@ export const getRedisClient = (): Redis => {
 
 // Test database connection
 export const testDatabaseConnection = async (): Promise<boolean> => {
+  if (typeof window !== 'undefined') return false
+  if (!databaseUrl) {
+    console.error('DATABASE_URL not set; cannot test connection')
+    return false
+  }
   try {
     const pool = getDatabasePool()
     const client = await pool.connect()
@@ -115,10 +172,11 @@ export const testDatabaseConnection = async (): Promise<boolean> => {
 
 // Test Redis connection
 export const testRedisConnection = async (): Promise<boolean> => {
+  if (typeof window !== 'undefined') return false
   try {
     const redis = getRedisClient()
-    await redis.ping()
-    console.log('Redis connection successful')
+    const resp = await redis.ping()
+    console.log('Redis connection successful', resp)
     return true
   } catch (error) {
     console.error('Redis connection failed:', error)
@@ -126,15 +184,18 @@ export const testRedisConnection = async (): Promise<boolean> => {
   }
 }
 
-// Initialize connections
+// Initialize connections (only server side)
 export const initializeConnections = async (): Promise<{ db: boolean; redis: boolean }> => {
+  if (typeof window !== 'undefined') {
+    return { db: false, redis: false }
+  }
   const dbConnected = await testDatabaseConnection()
   const redisConnected = await testRedisConnection()
   
   return { db: dbConnected, redis: redisConnected }
 }
 
-// Close connections
+// Close connections (clean up when running in long-lived process)
 export const closeConnections = async (): Promise<void> => {
   if (pool) {
     await pool.end()
@@ -143,7 +204,11 @@ export const closeConnections = async (): Promise<void> => {
   }
   
   if (redisClient) {
-    await redisClient.quit()
+    try {
+      await redisClient.quit()
+    } catch (e) {
+      console.warn('Failed to quit Redis client', e)
+    }
     redisClient = null
     console.log('Redis client closed')
   }

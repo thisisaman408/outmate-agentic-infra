@@ -37,6 +37,7 @@ from app.api.routes import enrichment_routes
 from app.api.routes import ai_agents
 from app.api.routes import gtm_agents
 from app.api.routes import visitors
+from app.api.routes import diagnostics
 
 # Register routers
 
@@ -151,21 +152,40 @@ logger.info("GTM Agents router registered")
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "ok",
+    """Production health endpoint with database and Redis checks."""
+    db_ready = bool(getattr(app.state, "db_ready", False))
+    redis_ready = await RedisManager.health_check()
+    
+    status = "healthy" if (db_ready and redis_ready) else "degraded"
+    status_code = 200 if (db_ready and redis_ready) else 503
+    
+    response = {
+        "status": status,
         "service": "outmate-backend",
         "version": settings.APP_VERSION,
-        "database": {"ready": bool(getattr(app.state, "db_ready", False))},
-        "redis": {"ready": bool(getattr(app.state, "redis_ready", False))},
+        "database": {"ready": db_ready},
+        "redis": {"ready": redis_ready},
     }
+    
+    if status_code == 503:
+        return JSONResponse(status_code=status_code, content=response)
+    return response
 
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
 
+# Diagnostics endpoints for health checks
+app.include_router(diagnostics.router, prefix="/api/diagnostics", tags=["diagnostics"])
+logger.info("Diagnostics router registered")
+
 @app.on_event("startup")
 async def startup_event():
+    logger.info("================================")
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Database URL (masked): {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'redacted'}")
+    logger.info(f"Redis URL (masked): {settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted'}")
+    logger.info("================================")
     
     app.state.db_ready = False
     app.state.redis_ready = False
@@ -180,33 +200,35 @@ async def startup_event():
             logger.info("Added missing users.hashed_password column")
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
-        logger.info("Database tables ensured")
+        logger.info("✓ Database tables ensured")
     except Exception as e:
-        logger.error(f"Database init failed (app will start without DB): {e}")
+        logger.error(f"✗ Database init failed (app will start without DB): {e}")
 
     try:
         connected = RedisManager.connect()
         app.state.redis_ready = bool(connected)
         if connected:
-            logger.info("Redis connection established")
+            logger.info("✓ Redis connection established")
         else:
-            logger.warning("Redis unavailable (continuing without Redis)")
+            logger.warning("⚠ Redis unavailable (continuing without Redis)")
     except Exception as e:
-        logger.error(f"Redis init failed (app will start without Redis): {e}")
+        logger.error(f"✗ Redis init failed (app will start without Redis): {e}")
     
     # Initialize Vector Database in the background
     async def run_setup():
         try:
             await setup_vector_database()
-            logger.info("Vector database setup finished")
+            logger.info("✓ Vector database setup finished")
         except Exception as e:
-            logger.error(f"Vector database setup failed: {e}")
+            logger.error(f"✗ Vector database setup failed: {e}")
 
     import asyncio
     asyncio.create_task(run_setup())
     logger.info("Vector database initialization started in background")
     
+    logger.info("================================")
     logger.info("Application startup complete")
+    logger.info("================================")
 
 
 @app.on_event("shutdown")

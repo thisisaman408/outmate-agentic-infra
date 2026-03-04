@@ -4,6 +4,10 @@ import { initializeConnections, testDatabaseConnection, testRedisConnection } fr
 import { companyService } from '@/lib/database/services'
 
 export async function GET() {
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ success: false, error: 'Not allowed' }, { status: 403 })
+  }
+
   try {
     console.log('Initializing database connections...')
     
