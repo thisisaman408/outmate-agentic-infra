@@ -30,7 +30,6 @@ import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-re
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { CsvImportButton } from "@/components/shared/csv-import-button"
 import { normalizeCsvRecord } from "@/lib/utils/csv"
 
@@ -329,7 +328,10 @@ export default function DatabaseFinderPage() {
   const handleConnectGmail = async () => {
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/gmail/auth-url`)
+      const returnPath = window.location.pathname || "/ai-powered-search"
+      const res = await fetch(
+        `${API}/api/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+      )
       const data = await res.json()
       if (data.auth_url) {
         window.location.href = data.auth_url
@@ -1337,7 +1339,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         },
         {
           title: "Search Execution",
-          tool: "Explorium Search Workflow",
+          tool: "Signal Search Workflow",
           endpoint: "/api/explorium/search",
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
@@ -1805,7 +1807,9 @@ const syncChatWithServer = async (session: ChatSession) => {
         setClarification("No results to enrich. Please run a search first.")
         return
       }
-      setClarification(`Enriching ${currentResults.length} ${currentIntent === "prospect" ? "prospects" : "companies"} with technographic data... This will use the Explorium enrichment API.`)
+      setClarification(
+        `Enriching ${currentResults.length} ${currentIntent === "prospect" ? "prospects" : "companies"} with technographic data... This will use the enrichment API.`
+      )
       // Trigger signal detection which includes technographic enrichment
       handleDetectSignals(currentResults, currentIntent)
       return
@@ -2217,7 +2221,6 @@ const syncChatWithServer = async (session: ChatSession) => {
             <CardHeader>
               <CardTitle className="text-sm font-medium">Workspace</CardTitle>
               <Button onClick={startNewChat} size="sm" className="w-full">
-                <Plus className="mr-2 h-4 w-4" />
                 New Chat
               </Button>
             </CardHeader>
@@ -2348,58 +2351,52 @@ const syncChatWithServer = async (session: ChatSession) => {
                 rows={2}
                 className="resize-none"
               />
-              <div className="flex gap-2 items-center">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem onSelect={() => handleGenerateLeadList()}>
-                      <Sparkles className="mr-2 h-4 w-4 text-purple-500" /> Generate leads
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={handleSummarizeResults}>
-                      <Library className="mr-2 h-4 w-4 text-foreground" /> Summarize results
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={handleGenerateCampaign}>
-                      <Mail className="mr-2 h-4 w-4 text-foreground" /> Draft campaign
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => handleDetectSignals(results, intent)}>
-                      <Zap className="mr-2 h-4 w-4 text-yellow-500" /> Detect signals
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <div className="w-full">
-                        <CsvImportButton
-                          label="Import CSV filters"
-                          onRecordsParsed={handleImportedFilters}
-                          className="w-full justify-start text-left"
-                        />
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={toggleVoiceListening}>
-                      {isVoiceListening ? (
-                        <>
-                          <MicOff className="mr-2 h-4 w-4 text-red-500" />
-                          Stop voice input
-                        </>
-                      ) : (
-                        <>
-                          <Mic className="mr-2 h-4 w-4 text-green-500" />
-                          Voice mode
-                        </>
-                      )}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              <div className="flex gap-2 items-center text-xs text-muted-foreground mb-2">
+                <Sparkles className="h-3 w-3 text-purple-500" />
+                <span>AI search is listening for intent while you write.</span>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <Button variant="outline" size="sm" onClick={() => handleGenerateLeadList()}>
+                  <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
+                  Generate leads
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleSummarizeResults}>
+                  <Library className="mr-2 h-4 w-4 text-foreground" />
+                  Summarize results
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleGenerateCampaign}>
+                  <Mail className="mr-2 h-4 w-4 text-foreground" />
+                  Draft campaign
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => handleDetectSignals(results, intent)}>
+                  <Zap className="mr-2 h-4 w-4 text-yellow-500" />
+                  Detect signals
+                </Button>
+                <CsvImportButton
+                  label="Import CSV filters"
+                  onRecordsParsed={handleImportedFilters}
+                  className="h-9 px-3 text-sm"
+                />
+                <Button variant="outline" size="sm" onClick={toggleVoiceListening}>
+                  {isVoiceListening ? (
+                    <>
+                      <MicOff className="mr-2 h-4 w-4 text-red-500" />
+                      Stop voice input
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="mr-2 h-4 w-4 text-green-500" />
+                      Voice mode
+                    </>
+                  )}
+                </Button>
                 {isImportingFilters && (
                   <span className="text-xs text-muted-foreground">Applying imported filters...</span>
                 )}
                 <Button
                   onClick={handleNaturalSearch}
                   disabled={isSearching || isAgentResponding || !naturalLanguageQuery.trim()}
-                  className="flex-1"
+                  className="ml-auto flex-1 min-w-[160px]"
                 >
                   {isSearching ? (
                     <>

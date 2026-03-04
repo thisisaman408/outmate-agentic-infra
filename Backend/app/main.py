@@ -19,6 +19,7 @@ load_dotenv()
 from app.db.vector_setup import setup_vector_database
 from app.db.base import Base
 from app.db.session import engine
+from sqlalchemy import inspect, text
 
 from app.db.deps import get_db
 from app.db.models.user import User
@@ -26,6 +27,7 @@ from app.core.redis import RedisManager
 
 from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
+from app.api.routes import auth
 from app.api.routes import signals
 from app.api.routes import campaigns
 from app.api.routes import chat
@@ -43,10 +45,14 @@ from app.core.config import settings
 
 # Import API routes
 from app.api.routes import prospects, companies
+from app.api.deps.auth import get_current_user
 
 # Setup logging first (before any logging occurs)
 setup_logging(log_level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
+
+# Dependency shortcuts
+auth_dependencies = [Depends(get_current_user)]
 
 # Create FastAPI app with metadata
 app = FastAPI(
@@ -109,33 +115,38 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     )
 
 # Register API routers
-app.include_router(prospects.router)
+app.include_router(prospects.router, dependencies=auth_dependencies)
 logger.info("Prospects router registered")
 
-app.include_router(companies.router)
+app.include_router(companies.router, dependencies=auth_dependencies)
 logger.info("Companies router registered")
 
-app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
-app.include_router(contactout_routes.router, prefix="/api/contactout", tags=["contactout"])
-app.include_router(crustdata_routes.router, prefix="/api/crustdata", tags=["crustdata"])
-app.include_router(explorium_routes.router, prefix="/api/explorium", tags=["explorium"])
-app.include_router(signals.router, prefix="/api/signals", tags=["signals"])
+app.include_router(auth.router)
+logger.info("Auth router registered")
+
+app.include_router(leads.router, prefix="/api/leads", tags=["leads"], dependencies=auth_dependencies)
+app.include_router(contactout_routes.router, prefix="/api/contactout", tags=["contactout"], dependencies=auth_dependencies)
+app.include_router(crustdata_routes.router, prefix="/api/crustdata", tags=["crustdata"], dependencies=auth_dependencies)
+app.include_router(explorium_routes.router, prefix="/api/explorium", tags=["explorium"], dependencies=auth_dependencies)
+app.include_router(signals.router, prefix="/api/signals", tags=["signals"], dependencies=auth_dependencies)
 logger.info("Signals router registered")
-app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
+app.include_router(campaigns.public_router, prefix="/api/campaigns", tags=["campaigns"])
+logger.info("Campaigns public router registered")
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"], dependencies=auth_dependencies)
 logger.info("Campaigns router registered")
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=auth_dependencies)
 logger.info("Chat router registered")
 
 # Integrated routes from both branches
-app.include_router(chat_history.router)
+app.include_router(chat_history.router, dependencies=auth_dependencies)
 logger.info("Chat history router registered")
-app.include_router(bettercontact_routes.router, prefix="/api/bettercontact", tags=["bettercontact"])
+app.include_router(bettercontact_routes.router, prefix="/api/bettercontact", tags=["bettercontact"], dependencies=auth_dependencies)
 logger.info("BetterContact router registered")
-app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrichment"])
+app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrichment"], dependencies=auth_dependencies)
 logger.info("Enrichment router registered")
-app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"])
+app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"], dependencies=auth_dependencies)
 logger.info("AI Agents router registered")
-app.include_router(gtm_agents.router)
+app.include_router(gtm_agents.router, dependencies=auth_dependencies)
 logger.info("GTM Agents router registered")
 
 @app.get("/health")
@@ -148,7 +159,7 @@ async def health_check():
         "redis": {"ready": bool(getattr(app.state, "redis_ready", False))},
     }
 
-app.include_router(visitors.router)
+app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
 
 @app.on_event("startup")
@@ -161,6 +172,12 @@ async def startup_event():
 
     # DB boot should never crash the whole app; routes can return 503 if unavailable.
     try:
+        inspector = inspect(engine)
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        if "hashed_password" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
+            logger.info("Added missing users.hashed_password column")
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
         logger.info("Database tables ensured")

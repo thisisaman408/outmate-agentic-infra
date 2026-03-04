@@ -2,21 +2,24 @@
 
 import { useEffect, useState } from "react"
 import { SignalsList } from "@/components/signals/signals-list"
-import Link from "next/link"
+import { CreateSignalDialog } from "@/components/signals/create-signal-dialog"
 import { signalsApi, type Signal } from "@/lib/api/signals"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
 
-export default function SignalsPage() {
+export default function WebsightsPage() {
     const [signals, setSignals] = useState<Signal[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [isDialogOpen, setIsDialogOpen] = useState(false)
 
     const fetchSignals = async () => {
         try {
             setIsLoading(true)
             const data = await signalsApi.getSignals()
-            setSignals(data)
+            // Filter for Websights signals (Brand Mentions for now)
+            const filtered = data.filter(s => s.type === 'brand_mention')
+            setSignals(filtered)
         } catch (error) {
             console.error("Failed to fetch signals:", error)
             toast.error("Failed to load signals. Is the backend running?")
@@ -29,14 +32,27 @@ export default function SignalsPage() {
         fetchSignals()
     }, [])
 
-
+    const handleCreateSignal = async (data: { name: string; type: string; target: string }) => {
+        try {
+            await signalsApi.createSignal({
+                name: data.name,
+                type: data.type as any,
+                configuration: { target: data.target },
+                status: 'active'
+            })
+            toast.success("Signal created successfully")
+            fetchSignals()
+        } catch (error) {
+            console.error("Failed to create signal:", error)
+            toast.error("Failed to create signal")
+        }
+    }
 
     const handleRunSignal = async (id: string) => {
         try {
             toast.info("Starting signal run...")
             await signalsApi.runSignal(id)
             toast.success("Signal run triggered")
-            // Refresh list to show updated last_run time (might need delay or socket)
             setTimeout(fetchSignals, 1000)
         } catch (error) {
             console.error("Failed to run signal:", error)
@@ -48,14 +64,12 @@ export default function SignalsPage() {
         <div className="space-y-6 p-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Signals</h1>
-                    <p className="text-muted-foreground">Monitor key accounts, news, and intents across various networks.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Websights</h1>
+                    <p className="text-muted-foreground">Identify companies visiting your website and brand mentions.</p>
                 </div>
-                <Link href="/signals/new">
-                    <Button className="gap-2">
-                        <Plus className="h-4 w-4" /> New Signal
-                    </Button>
-                </Link>
+                <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
+                    <Plus className="h-4 w-4" /> New Signal
+                </Button>
             </div>
 
             <SignalsList
@@ -64,7 +78,11 @@ export default function SignalsPage() {
                 onRunSignal={handleRunSignal}
             />
 
-
+            <CreateSignalDialog
+                open={isDialogOpen}
+                onOpenChange={setIsDialogOpen}
+                onSubmit={handleCreateSignal}
+            />
         </div>
     )
 }

@@ -3,11 +3,15 @@ Campaign Draft Generation & Send API Routes
 """
 
 import httpx
+import os
+from urllib.parse import quote_plus
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Literal, List, Dict, Any
 import logging
+import json
+import re
 
 from app.services.campaign_service import CampaignService, CampaignDraftRequest, CampaignDraftResponse
 from app.services.gmail_service import GmailService
@@ -18,7 +22,23 @@ from app.services.openrouter_service import OpenRouterService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["campaigns"])
+public_router = APIRouter(tags=["campaigns"])
 dashboard_service = CampaignDashboardService()
+
+
+def _normalize_return_path(path: Optional[str]) -> str:
+    default_path = "/ai-powered-search"
+    if not path:
+        return default_path
+    cleaned = path.strip()
+    if not cleaned:
+        return default_path
+    # Disallow absolute URLs for safety.
+    if "://" in cleaned:
+        return default_path
+    if not cleaned.startswith("/"):
+        cleaned = f"/{cleaned}"
+    return cleaned
 
 
 # --- Draft Generation ---
@@ -43,6 +63,18 @@ async def generate_campaign_draft(request: CampaignDraftRequest):
 
 @router.post("/generate-message")
 async def generate_campaign_message(request: OpenRouterMessageRequest):
+    def _extract_json_payload(text: str) -> Dict[str, Any]:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]+\}", text)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+        return {}
+
     try:
         openrouter = OpenRouterService()
         prompt_lines = [
@@ -56,7 +88,13 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
         ]
         prompt = "\n".join(prompt_lines)
         response = await openrouter.chat_completion(prompt)
-        return {"message": response}
+        extracted = _extract_json_payload(response)
+        return {
+            "subject": extracted.get("subject", ""),
+            "email_body": extracted.get("email_body", extracted.get("body", response)),
+            "linkedin_message": extracted.get("linkedin_message", extracted.get("linkedin", "")),
+            "raw": response,
+        }
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
     except Exception as exc:
@@ -65,33 +103,35 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
 
 # --- Gmail OAuth2 ---
 
-@router.get("/gmail/auth-url")
-async def gmail_auth_url():
+@public_router.get("/gmail/auth-url")
+async def gmail_auth_url(return_to: str = Query("/ai-powered-search")):
     """Get the Google OAuth2 authorization URL for Gmail."""
     try:
         service = GmailService()
-        url = service.get_auth_url(state="campaign")
+        safe_path = _normalize_return_path(return_to)
+        url = service.get_auth_url(state=safe_path)
         return {"auth_url": url}
     except Exception as e:
         logger.error(f"Gmail auth URL error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/gmail/callback")
+@public_router.get("/gmail/callback")
 async def gmail_callback(code: str = Query(...), state: str = Query("")):
     """Handle Google OAuth2 callback - exchange code for tokens."""
+    safe_path = _normalize_return_path(state)
+    frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+    redirect_prefix = f"{frontend_base}{safe_path}"
     try:
         service = GmailService()
         result = await service.exchange_code(code)
         # Redirect back to the frontend with success
-        return RedirectResponse(
-            url=f"http://localhost:3000/ai-powered-search?gmail_connected=true&gmail_email={result['email']}"
-        )
+        redirect_url = f"{redirect_prefix}?gmail_connected=true&gmail_email={quote_plus(result['email'])}"
+        return RedirectResponse(url=redirect_url)
     except Exception as e:
         logger.error(f"Gmail callback error: {e}")
-        return RedirectResponse(
-            url=f"http://localhost:3000/ai-powered-search?gmail_connected=false&gmail_error={str(e)}"
-        )
+        redirect_url = f"{redirect_prefix}?gmail_connected=false&gmail_error={quote_plus(str(e))}"
+        return RedirectResponse(url=redirect_url)
 
 
 @router.get("/gmail/status")

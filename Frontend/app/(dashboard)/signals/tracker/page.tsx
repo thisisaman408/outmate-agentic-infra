@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { SignalsList } from "@/components/signals/signals-list"
-import Link from "next/link"
 import { signalsApi, type Signal } from "@/lib/api/signals"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
 
-export default function SignalsPage() {
+export default function TrackerPage() {
     const [signals, setSignals] = useState<Signal[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
@@ -16,7 +16,9 @@ export default function SignalsPage() {
         try {
             setIsLoading(true)
             const data = await signalsApi.getSignals()
-            setSignals(data)
+            // Filter for Tracker signals (Jobs, Hires)
+            const filtered = data.filter(s => ['job_change', 'new_hire', 'job_posting'].includes(s.type))
+            setSignals(filtered)
         } catch (error) {
             console.error("Failed to fetch signals:", error)
             toast.error("Failed to load signals. Is the backend running?")
@@ -36,7 +38,6 @@ export default function SignalsPage() {
             toast.info("Starting signal run...")
             await signalsApi.runSignal(id)
             toast.success("Signal run triggered")
-            // Refresh list to show updated last_run time (might need delay or socket)
             setTimeout(fetchSignals, 1000)
         } catch (error) {
             console.error("Failed to run signal:", error)
@@ -48,8 +49,8 @@ export default function SignalsPage() {
         <div className="space-y-6 p-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Signals</h1>
-                    <p className="text-muted-foreground">Monitor key accounts, news, and intents across various networks.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Job Tracker</h1>
+                    <p className="text-muted-foreground">Monitor key accounts for job changes and hiring.</p>
                 </div>
                 <Link href="/signals/new">
                     <Button className="gap-2">

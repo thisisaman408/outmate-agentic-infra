@@ -73,6 +73,20 @@ async def natural_language_search(payload: Dict[str, Any]):
         print(f">>> [NLP Search] Error: {str(e)}", flush=True)
         return {"success": False, "error": {"message": f"NLP search failed: {str(e)}"}}
 
+
+@router.get("/autocomplete")
+async def autocomplete(field: str, query: str, limit: int | None = None):
+    svc = ExploriumService()
+    result = await svc.autocomplete_businesses(field, query)
+    suggestions = []
+    if isinstance(result, dict):
+        suggestions = result.get("data") or result.get("suggestions") or []
+    elif isinstance(result, list):
+        suggestions = result
+    if limit and isinstance(limit, int):
+        suggestions = suggestions[:limit]
+    return {"field": field, "query": query, "suggestions": suggestions}
+
 @router.post("/company/search")
 async def search_company(payload: Dict[str, Any]):
     try:

@@ -22,3 +22,5 @@ ipinfo>=5.0.0
 redis>=4.6.0
 crewai[tools]==1.9.3
 openai
+pyjwt>=2.6.0
+passlib[bcrypt]>=1.7.4

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -27,6 +27,47 @@ export default function CampaignsPage() {
   })
   const [inboxFeed, setInboxFeed] = useState<any[]>([])
   const [analyticsFeed, setAnalyticsFeed] = useState<any[]>([])
+
+  const derivedInboxFeed = useMemo(() => {
+    return sequences.slice(0, 3).map((seq) => ({
+      id: seq.id,
+      title: seq.name,
+      message: `Status ${seq.status} · ${seq.leads ?? 0} leads · Bounce ${seq.bounce_rate ?? "N/A"}%`,
+      timestamp: seq.last_modified ?? new Date().toISOString(),
+      source: "Sequence monitor",
+    }))
+  }, [sequences])
+
+  const derivedAnalyticsFeed = useMemo(() => {
+    if (campaigns.length === 0) return []
+    const totalLeads = campaigns.reduce((sum, campaign) => sum + (campaign.leadsCount || 0), 0)
+    const runningCount = campaigns.filter((campaign) => campaign.status === "running").length
+    const averageOpenRate =
+      campaigns.reduce((sum, campaign) => sum + (campaign.stats?.openRate || 0), 0) / campaigns.length
+    return [
+      {
+        id: "lead-count",
+        label: "Leads captured",
+        value: `${totalLeads.toLocaleString()} targets`,
+        trend: totalLeads > 0 ? "positive" : "steady",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "running-campaigns",
+        label: "Running campaigns",
+        value: `${runningCount} live`,
+        trend: runningCount > 0 ? "positive" : "steady",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "open-rate",
+        label: "Avg. open rate",
+        value: `${averageOpenRate.toFixed(1)}%`,
+        trend: averageOpenRate >= 30 ? "positive" : "steady",
+        timestamp: new Date().toISOString(),
+      },
+    ]
+  }, [campaigns])
 
   useEffect(() => {
     fetchCampaigns()
@@ -259,11 +300,9 @@ export default function CampaignsPage() {
             <CardDescription>Live alerts that surfaced using the signal rules you defined.</CardDescription>
           </CardHeader>
           <CardContent>
-            {inboxFeed.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center">Inbox is empty.</p>
-            ) : (
+            {inboxFeed.length || derivedInboxFeed.length ? (
               <div className="space-y-3">
-                {inboxFeed.map((entry) => (
+                {(inboxFeed.length ? inboxFeed : derivedInboxFeed).map((entry) => (
                   <div key={entry.id} className="rounded border border-border/60 p-3">
                     <p className="text-sm font-semibold">{entry.title}</p>
                     <p className="text-xs text-muted-foreground mb-1">{entry.source}</p>
@@ -274,6 +313,10 @@ export default function CampaignsPage() {
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center">
+                No inbox alerts yet. Refresh Global Inbox to surface the latest signals.
+              </p>
             )}
           </CardContent>
         </Card>
@@ -284,11 +327,9 @@ export default function CampaignsPage() {
             <CardDescription>Snapshots that capture momentum shifts.</CardDescription>
           </CardHeader>
           <CardContent>
-            {analyticsFeed.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center">No analytics yet.</p>
-            ) : (
+            {analyticsFeed.length || derivedAnalyticsFeed.length ? (
               <div className="space-y-3">
-                {analyticsFeed.map((snapshot) => (
+                {(analyticsFeed.length ? analyticsFeed : derivedAnalyticsFeed).map((snapshot) => (
                   <div key={snapshot.id} className="rounded border border-border/60 p-3">
                     <p className="text-sm font-semibold">{snapshot.label}</p>
                     <p className="text-sm">{snapshot.value}</p>
@@ -302,6 +343,10 @@ export default function CampaignsPage() {
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center">
+                No analytics snapshots yet. Trigger Global Analytics to capture a snapshot.
+              </p>
             )}
           </CardContent>
         </Card>

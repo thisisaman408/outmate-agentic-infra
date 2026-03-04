@@ -182,6 +182,16 @@ class FilterMappingService:
             normalized = [COUNTRY_REGION_MAP.get(str(v).lower(), str(v)) for v in values]
             return {"filter_type": "hq_country", "type": "in", "value": normalized}
 
+        if filter_key == "region_country_code":
+             values = filter_value if isinstance(filter_value, list) else [filter_value]
+             normalized = [str(v).lower() for v in values if v]
+             return {"filter_type": "region_country_code", "type": "in", "value": normalized}
+
+        if filter_key == "region_country_code":
+             values = filter_value if isinstance(filter_value, list) else [filter_value]
+             normalized = [str(v).lower() for v in values if v]
+             return {"filter_type": "region_country_code", "type": "in", "value": normalized}
+
         # --- INDUSTRIES & TECHNOLOGIES ---
         
         # Industry (LinkedIn Industries)
@@ -426,4 +436,22 @@ class FilterMappingService:
         Transform frontend filters to Explorium-compatible format.
         ExploriumService performs internal mapping, so we just return the dict.
         """
-        return filters
+        normalized: Dict[str, Any] = {}
+        for key, value in filters.items():
+            if key == "location":
+                if isinstance(value, dict):
+                    if value.get("country"):
+                        normalized["location"] = value["country"]
+                    elif value.get("city") and value.get("state"):
+                        normalized["location"] = f"{value['city']}, {value['state']}"
+                    else:
+                        normalized["location"] = value.get("city") or value.get("state") or value.get("region")
+                else:
+                    normalized["location"] = value
+            elif key == "employees" and "company_size" not in filters:
+                normalized["company_size"] = value
+            elif key == "region_country_code":
+                normalized["region_country_code"] = value
+            else:
+                normalized[key] = value
+        return normalized

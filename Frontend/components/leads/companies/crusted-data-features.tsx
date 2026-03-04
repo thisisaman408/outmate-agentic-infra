@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 
-export function CrustdataFeatures() {
+export function CompanySignalsFeatures() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -74,7 +74,7 @@ export function CrustdataFeatures() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Crustdata Features</CardTitle>
+        <CardTitle>Company Signals Features</CardTitle>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="identification">

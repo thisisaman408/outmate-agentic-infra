@@ -7,13 +7,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Sparkles, Loader2, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react"
+import { Sparkles, Loader2, CheckCircle2, Check, ChevronLeft, ChevronRight, ExternalLink, Send, Mail, Copy } from "lucide-react"
 import { campaignsApi, type CreateCampaignRequest } from "@/lib/api/campaigns"
-import { leadsApi, type Lead } from "@/lib/api/leads"
+import { transformCompanyToLead, type Lead } from "@/lib/api/leads"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
 
 const STEPS = ["Campaign Details", "Select Leads", "Generate Message", "Schedule & Launch"]
+const MAX_LEADS = 3
+
+const WIZARD_STATE_KEY = "campaign-wizard-state"
+
+const AI_LEADS_PROMPT =
+  "Find B2B SaaS companies in the US and Canada that raised Series A or Series B funding with 50 to 500 employees."
 
 export function CampaignCreationWizard() {
   const router = useRouter()
@@ -27,10 +33,18 @@ export function CampaignCreationWizard() {
     name: "",
     objective: "",
     leads: [] as string[],
+    subject: "",
     message: "",
+    linkedinMessage: "",
     startDate: "",
     signals: "",
   })
+  const [gmailConnected, setGmailConnected] = useState(false)
+  const [gmailEmail, setGmailEmail] = useState("")
+  const [linkedinConnected, setLinkedinConnected] = useState(false)
+  const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "linkedin">>({})
+  const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "linkedin" | "both">>({})
+  const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
 
   const handleGenerateMessage = async () => {
     if (!formData.objective) {
@@ -48,12 +62,17 @@ export function CampaignCreationWizard() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
-      const message = await campaignsApi.generateMessage({
+      const generated = await campaignsApi.generateMessage({
         objective: formData.objective,
         leads: formData.leads,
         signals,
       })
-      setFormData({ ...formData, message })
+      setFormData({
+        ...formData,
+        subject: generated.subject || formData.subject,
+        message: generated.email_body || formData.message,
+        linkedinMessage: generated.linkedin_message || formData.linkedinMessage,
+      })
       toast({
         title: "Success",
         description: "AI-generated message is ready",
@@ -101,7 +120,16 @@ export function CampaignCreationWizard() {
 
   const toggleLeadSelection = (leadId: string) => {
     setFormData((prev) => {
-      const nextLeads = prev.leads.includes(leadId)
+      const alreadySelected = prev.leads.includes(leadId)
+      if (!alreadySelected && prev.leads.length >= MAX_LEADS) {
+        toast({
+          title: "Lead limit",
+          description: `You can select up to ${MAX_LEADS} leads.`,
+          variant: "destructive",
+        })
+        return prev
+      }
+      const nextLeads = alreadySelected
         ? prev.leads.filter((id) => id !== leadId)
         : [...prev.leads, leadId]
       return { ...prev, leads: nextLeads }
@@ -111,13 +139,19 @@ export function CampaignCreationWizard() {
   const loadLeads = async () => {
     setIsLeadLoading(true)
     try {
-      const leads = await leadsApi.getLeads({
-        prompt: "",
-        filters: {
-          industry: ["software"],
-        },
-        limit: 3,
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${API}/api/explorium/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: AI_LEADS_PROMPT }),
       })
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText)
+        throw new Error(errText || "Explorium search failed")
+      }
+      const payload = await response.json()
+      const companies: any[] = payload?.results?.data || []
+      const leads = companies.slice(0, MAX_LEADS).map(transformCompanyToLead)
       setLeadPool(leads)
     } catch (error) {
       toast({
@@ -136,11 +170,177 @@ export function CampaignCreationWizard() {
     }
   }, [currentStep, leadPool.length])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const cached = window.sessionStorage.getItem(WIZARD_STATE_KEY)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (parsed.formData) setFormData(parsed.formData)
+        if (parsed.leadPool) setLeadPool(parsed.leadPool)
+        if (typeof parsed.currentStep === "number") setCurrentStep(parsed.currentStep)
+      } finally {
+        window.sessionStorage.removeItem(WIZARD_STATE_KEY)
+      }
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("gmail_connected") === "true") {
+      setGmailConnected(true)
+      setGmailEmail(params.get("gmail_email") || "")
+      toast({
+        title: "Gmail connected",
+        description: `Connected as ${params.get("gmail_email")}`,
+      })
+      window.history.replaceState({}, "", window.location.pathname)
+    }
+
+    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    fetch(`${API}/api/campaigns/gmail/status`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.connected) {
+          setGmailConnected(true)
+          setGmailEmail(data.email || "")
+        }
+      })
+      .catch(() => {})
+    fetch(`${API}/api/campaigns/linkedin/status`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.connected) setLinkedinConnected(true)
+      })
+      .catch(() => {})
+  }, [toast])
+
   const canGoNext = () => {
     if (currentStep === 0) return formData.name && formData.objective
     if (currentStep === 1) return formData.leads.length > 0
     if (currentStep === 2) return formData.message
     return true
+  }
+
+  const selectedLeadDetails = leadPool.filter((lead) => formData.leads.includes(lead.id))
+  const defaultEmailSubject = formData.subject || `${formData.name || "Campaign"} Outreach`
+  const defaultLinkedInMessage = formData.linkedinMessage || formData.message
+
+  const handleConnectGmail = async () => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(
+        WIZARD_STATE_KEY,
+        JSON.stringify({ currentStep, formData, leadPool })
+      )
+    }
+    try {
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const returnPath = "/campaigns/new"
+      const res = await fetch(
+        `${API}/api/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+      )
+      const data = await res.json()
+      if (data.auth_url) {
+        window.location.href = data.auth_url
+      }
+    } catch (error) {
+      toast({
+        title: "Gmail connection failed",
+        description: "Unable to start Gmail OAuth flow.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const getFirstName = (lead: Lead) => {
+    if (lead.contactName) {
+      return lead.contactName.split(" ")[0]
+    }
+    if (lead.companyName) {
+      return lead.companyName.split(" ")[0]
+    }
+    return "there"
+  }
+
+  const personalizetext = (template: string, lead: Lead) => {
+    const firstName = getFirstName(lead)
+    const companyName = lead.companyName || lead.domain || "your company"
+    return template
+      .replace(/\{\{firstName\}\}/g, firstName)
+      .replace(/\{\{companyName\}\}/g, companyName)
+  }
+
+  const handleSendEmail = async (recipientIdx: number, toEmail: string, subject: string, body: string) => {
+    setSendingRecipients((prev) => ({ ...prev, [recipientIdx]: "email" }))
+    setSendErrors((prev) => {
+      const next = { ...prev }
+      delete next[recipientIdx]
+      return next
+    })
+    try {
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const res = await fetch(`${API}/api/campaigns/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_email: toEmail, subject, body }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || "Send failed")
+      }
+      setSentRecipients((prev) => ({
+        ...prev,
+        [recipientIdx]: prev[recipientIdx] === "linkedin" ? "both" : "email",
+      }))
+      toast({
+        title: "Email sent",
+        description: "Message delivered via Gmail.",
+      })
+    } catch (error: any) {
+      setSendErrors((prev) => ({ ...prev, [recipientIdx]: error.message || "Email send failed" }))
+    } finally {
+      setSendingRecipients((prev) => {
+        const next = { ...prev }
+        delete next[recipientIdx]
+        return next
+      })
+    }
+  }
+
+  const handleSendLinkedIn = async (recipientIdx: number, linkedinUrl: string, message: string) => {
+    setSendingRecipients((prev) => ({ ...prev, [recipientIdx]: "linkedin" }))
+    setSendErrors((prev) => {
+      const next = { ...prev }
+      delete next[recipientIdx]
+      return next
+    })
+    try {
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const res = await fetch(`${API}/api/campaigns/send-linkedin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linkedin_url: linkedinUrl, message }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || "Send failed")
+      }
+      setSentRecipients((prev) => ({
+        ...prev,
+        [recipientIdx]: prev[recipientIdx] === "email" ? "both" : "linkedin",
+      }))
+      toast({
+        title: "LinkedIn message sent",
+        description: "Message delivered via Unipile.",
+      })
+    } catch (error: any) {
+      setSendErrors((prev) => ({ ...prev, [recipientIdx]: error.message || "LinkedIn send failed" }))
+    } finally {
+      setSendingRecipients((prev) => {
+        const next = { ...prev }
+        delete next[recipientIdx]
+        return next
+      })
+    }
   }
 
   return (
@@ -295,6 +495,16 @@ export function CampaignCreationWizard() {
                   )}
                 </Button>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="subject">Email Subject</Label>
+                <Input
+                  id="subject"
+                  placeholder="Campaign subject line"
+                  value={formData.subject}
+                  onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                  disabled={isGenerating}
+                />
+              </div>
               <Textarea
                 id="message"
                 placeholder="Your campaign message will appear here..."
@@ -302,6 +512,19 @@ export function CampaignCreationWizard() {
                 onChange={(e) => setFormData({ ...formData, message: e.target.value })}
                 rows={12}
               />
+              <div className="space-y-2">
+                <Label htmlFor="linkedinMessage">LinkedIn Message</Label>
+                <Textarea
+                  id="linkedinMessage"
+                  placeholder="LinkedIn touch copy..."
+                  value={formData.linkedinMessage}
+                  onChange={(e) => setFormData({ ...formData, linkedinMessage: e.target.value })}
+                  rows={6}
+                />
+                <p className="text-xs text-muted-foreground">
+                  If blank, the email body will be reused for LinkedIn outreach.
+                </p>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Use variables like {`{{firstName}}`}, {`{{companyName}}`} to personalize messages
               </p>
@@ -332,6 +555,114 @@ export function CampaignCreationWizard() {
                   <p>
                     <span className="text-muted-foreground">Status:</span> Draft
                   </p>
+                </div>
+              </div>
+              <div className="rounded-lg border p-4 bg-muted/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold">Send via Gmail / LinkedIn</p>
+                    <p className="text-xs text-muted-foreground">
+                      Connect Gmail to send email and Unipile for LinkedIn outreach.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant={gmailConnected ? "secondary" : "outline"}>
+                      <Mail className="mr-1 h-3 w-3" />
+                      {gmailConnected ? `Gmail ready (${gmailEmail || "connected"})` : "Gmail not connected"}
+                    </Badge>
+                    <Badge variant={linkedinConnected ? "secondary" : "outline"}>
+                      <ExternalLink className="mr-1 h-3 w-3" />
+                      {linkedinConnected ? "LinkedIn ready" : "LinkedIn unavailable"}
+                    </Badge>
+                    {!gmailConnected && (
+                      <Button size="xs" variant="outline" onClick={handleConnectGmail}>
+                        Connect Gmail
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {selectedLeadDetails.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Select leads in the previous step to start sending outreach.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedLeadDetails.map((lead, idx) => {
+                        const personalizedSubject = personalizetext(defaultEmailSubject, lead)
+                        const personalizedBody = personalizetext(formData.message, lead)
+                        const personalizedLinkedIn = personalizetext(defaultLinkedInMessage, lead)
+                        const sending = sendingRecipients[idx]
+                        const sent = sentRecipients[idx]
+                        const error = sendErrors[idx]
+                        return (
+                          <div key={lead.id} className="rounded-lg border px-3 py-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <div>
+                                <p className="font-medium">{lead.companyName || lead.domain || "Lead"}</p>
+                                <p className="text-xs text-muted-foreground">{lead.industry}</p>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs">
+                                {sent && (
+                                  <Badge variant="outline" className="text-xs">
+                                    <Check className="mr-1 h-3 w-3" />
+                                    {sent === "both" ? "Email + LinkedIn sent" : `${sent} sent`}
+                                  </Badge>
+                                )}
+                                {sending && (
+                                  <Badge variant="outline" className="text-xs">
+                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                    Sending...
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={!gmailConnected || !lead.email || !!sending}
+                                onClick={() => handleSendEmail(idx, lead.email, personalizedSubject, personalizedBody)}
+                                title={
+                                  !gmailConnected ? "Connect Gmail first" : !lead.email ? "No email available" : "Send email"
+                                }
+                                className="gap-1"
+                              >
+                                <Mail className="h-3 w-3" /> Email
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={!linkedinConnected || !lead.linkedin}
+                                onClick={() => handleSendLinkedIn(idx, lead.linkedin || "", personalizedLinkedIn)}
+                                title={!linkedinConnected ? "LinkedIn not connected" : !lead.linkedin ? "No LinkedIn URL" : "Send LinkedIn message"}
+                                className="gap-1"
+                              >
+                                <ExternalLink className="h-3 w-3" /> LinkedIn
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(
+                                    `Subject: ${personalizedSubject}\n\n${personalizedBody}`
+                                  )
+                                  toast({
+                                    title: "Copied",
+                                    description: "Email body copied to clipboard.",
+                                  })
+                                }}
+                                className="gap-1"
+                              >
+                                <Copy className="h-3 w-3" /> Copy Email
+                              </Button>
+                            </div>
+                            {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -129,6 +129,7 @@ class Settings(BaseSettings):
 
     # Logging Configuration
     LOG_LEVEL: str = Field(
+        "INFO",
         description="Application log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     )
     
@@ -153,6 +154,20 @@ class Settings(BaseSettings):
             "http://127.0.0.1:3001",
         ],
         description="Front-end origins allowed to make cross-origin requests"
+    )
+
+    # JWT Authentication Settings
+    JWT_SECRET: str = Field(
+        "super_secret_jwt_key",
+        description="Secret used to sign JWT tokens for user authentication"
+    )
+    JWT_ALGORITHM: str = Field(
+        "HS256",
+        description="JWT signing algorithm"
+    )
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        60,
+        description="Access token time-to-live in minutes"
     )
     
     @field_validator('CRUSTDATA_API_KEY', 'EXPLORIUM_API_KEY', 'CONTACTOUT_API_KEY')
@@ -189,6 +204,12 @@ class Settings(BaseSettings):
                 f"LOG_LEVEL must be one of {valid_levels}. Got: {v}"
             )
         return v_upper
+
+    @field_validator("JWT_SECRET")
+    def validate_jwt_secret(cls, v):
+        if not v or v.strip() == "":
+            raise ValueError("JWT_SECRET must be set")
+        return v
     
     class Config:
         """Pydantic configuration"""
