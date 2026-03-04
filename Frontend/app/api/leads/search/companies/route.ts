@@ -43,8 +43,13 @@ export async function POST(request: NextRequest) {
 
     console.log('Backend response companies:', responseData?.data?.companies?.length || 0)
 
-    // Store enriched company data in database
-    if (responseData?.data?.companies && Array.isArray(responseData.data.companies)) {
+    // Optionally store enriched company data in database.  This is only
+    // enabled in development or when the feature flag is explicitly set.
+    const allowDbWrites =
+      process.env.NODE_ENV === 'development' ||
+      process.env.ENABLE_FRONTEND_DB === 'true'
+
+    if (allowDbWrites && responseData?.data?.companies && Array.isArray(responseData.data.companies)) {
       try {
         for (const company of responseData.data.companies) {
           await companyService.upsertCompany(company)
@@ -54,6 +59,8 @@ export async function POST(request: NextRequest) {
         console.error('Error storing company in database:', dbError)
         // Continue with response even if database storage fails
       }
+    } else if (!allowDbWrites) {
+      console.debug('Database write skipped (not in development or feature flag off)')
     }
 
     return NextResponse.json({

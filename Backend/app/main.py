@@ -35,6 +35,7 @@ from app.api.routes import enrichment_routes
 from app.api.routes import ai_agents
 from app.api.routes import gtm_agents
 from app.api.routes import visitors
+from app.api.routes import diagnostics
 
 # Register routers
 
@@ -150,6 +151,10 @@ async def health_check():
 
 app.include_router(visitors.router)
 logger.info("Visitors router registered")
+
+# Diagnostics endpoints for health checks
+app.include_router(diagnostics.router, prefix="/api/diagnostics", tags=["diagnostics"])
+logger.info("Diagnostics router registered")
 
 @app.on_event("startup")
 async def startup_event():
