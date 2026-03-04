@@ -1,0 +1,87 @@
+name: Deploy Backend to Azure Container Apps
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Backend/**'
+      - '.github/workflows/deploy-backend.yml'
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: outmate-prod
+  AZURE_CONTAINER_APP: outmate-api
+  AZURE_CONTAINER_REGISTRY: outmateacr
+  REGISTRY_LOGIN_SERVER: outmateacr.azurecr.io
+  IMAGE_NAME: outmate-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          cd Backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          cd Backend
+          pip install flake8
+          flake8 .
+
+      - name: Run tests
+        run: |
+          cd Backend
+          pytest --maxfail=1 --disable-warnings -q
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build Docker image
+        run: |
+          cd Backend
+          docker build -t ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest .
+
+      - name: Push image to ACR
+        run: |
+          az acr login --name ${{ env.AZURE_CONTAINER_REGISTRY }}
+          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_CONTAINER_APP }} \
+            --image ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Health check
+        run: |
+          URL=$(az containerapp show \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_CONTAINER_APP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          for i in {1..20}; do
+            if curl -sSf https://$URL/health; then
+              echo "Health ok"; exit 0;
+            fi
+            sleep 3
+          done
+          exit 1

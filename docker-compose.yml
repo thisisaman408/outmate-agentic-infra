@@ -1,0 +1,209 @@
+# ============================================================================
+# DOCKER COMPOSE - LOCAL DEVELOPMENT ENVIRONMENT
+# ============================================================================
+# Provides a complete local development stack:
+# - Frontend (Next.js)
+# - Backend API (FastAPI)
+# - PostgreSQL Database
+# - Redis Cache
+#
+# Usage:
+# docker-compose up -d          # Start all services
+# docker-compose down           # Stop all services
+# docker-compose logs -f api    # View backend logs
+# docker-compose logs -f web    # View frontend logs
+#
+# Access:
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8000
+# Docs:     http://localhost:8000/docs
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ========================================================================
+  # PostgreSQL Database Service
+  # ========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: outmate-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: outmate
+    volumes:
+      # Persist database between container restarts
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - outmate-network
+
+
+  # ========================================================================
+  # Redis Cache Service
+  # ========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: outmate-cache
+    volumes:
+      # Persist cache between container restarts
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - outmate-network
+
+
+  # ========================================================================
+  # FastAPI Backend Service
+  # ========================================================================
+  api:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: outmate-api
+    environment:
+      # Database (local PostgreSQL)
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/outmate
+      
+      # Redis (local)
+      REDIS_URL: redis://redis:6379/0
+      
+      # Environment
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      DEBUG: "true"
+      
+      # Database pool sizing for local dev
+      DATABASE_POOL_SIZE: 5
+      DATABASE_MAX_OVERFLOW: 10
+      
+      # CORS for local development
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      
+      # API Keys (use .env.local file or environment)
+      # Note: For development, you can use placeholder keys
+      # For production, use real API keys from Azure KeyVault
+      JWT_SECRET: your_development_jwt_secret_minimum_32_bytes_long
+      CRUSTDATA_API_KEY: your_crustdata_key
+      EXPLORIUM_API_KEY: your_explorium_key
+      CONTACTOUT_API_KEY: your_contactout_key
+      OPENROUTER_API_KEY: your_openrouter_key
+      
+      # Optional - set to skip validations in dev
+      SKIP_VALIDATION: "${SKIP_VALIDATION:-false}"
+    
+    # Load additional env vars from file
+    env_file:
+      - ./Backend/.env.local
+    
+    ports:
+      - "8000:8000"
+    
+    # Volume mounts for development (hot reload)
+    volumes:
+      - ./Backend:/app
+      # Exclude .env from volume mount to use image env
+      - /app/.env
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    networks:
+      - outmate-network
+
+
+  # ========================================================================
+  # Next.js Frontend Service
+  # ========================================================================
+  web:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: outmate-web
+    environment:
+      # Backend API URL (internal to Docker network)
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      
+      # Environment
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+    
+    ports:
+      - "3000:3000"
+    
+    # Volume mounts for development (hot reload)
+    volumes:
+      - ./Frontend:/app
+      # Exclude node_modules to prevent conflicts
+      - /app/node_modules
+      - /app/.next
+    
+    depends_on:
+      - api
+    
+    networks:
+      - outmate-network
+
+
+# ============================================================================
+# VOLUMES - Persist data between container restarts
+# ============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+
+# ============================================================================
+# NETWORKS - Services communicate over this network
+# ============================================================================
+networks:
+  outmate-network:
+    driver: bridge
+
+
+# ============================================================================
+# USEFUL COMMANDS
+# ============================================================================
+# 
+# Start services:
+#   docker-compose up -d
+#
+# Stop services:
+#   docker-compose down
+#
+# View logs:
+#   docker-compose logs -f api         # Backend logs
+#   docker-compose logs -f web         # Frontend logs
+#   docker-compose logs -f postgres    # Database logs
+#
+# Database access:
+#   docker-compose exec postgres psql -U postgres -d outmate
+#
+# Redis access:
+#   docker-compose exec redis redis-cli
+#
+# Rebuild images:
+#   docker-compose up -d --build
+#
+# Clean up everything:
+#   docker-compose down -v
+#
+# ============================================================================

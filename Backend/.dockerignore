@@ -1,0 +1,19 @@
+# Dockerignore for backend image
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+.git
+.gitignore
+venv/
+*.db
+*.sqlite3
+
+# exclude tests and docs to keep image small
+tests/
+docs/
+
+# node modules (if accidentally present)
+node_modules/

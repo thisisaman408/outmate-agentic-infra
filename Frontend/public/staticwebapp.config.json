@@ -1,0 +1,17 @@
+{
+  "routes": [
+    {
+      "route": "/api/*",
+      "rewrite": "https://api.outmate.ai/api/*"
+    },
+    {
+      "route": "/health",
+      "rewrite": "https://api.outmate.ai/health"
+    },
+    {
+      "route": "/*",
+      "serve": "/index.html",
+      "statusCode": 200
+    }
+  ]
+}
