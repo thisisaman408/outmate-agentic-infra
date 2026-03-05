@@ -9,6 +9,7 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=True)
     full_name = Column(String(255))
     company_name = Column(String(255))
     credits_balance = Column(Integer, default=100)  # Give 100 free credits

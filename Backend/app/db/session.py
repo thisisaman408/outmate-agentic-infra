@@ -38,8 +38,6 @@ engine = create_engine(
     },
     # Echo SQL in development (disable in production)
     echo=settings.DEBUG,
-    # Connection pool event handlers
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,        # Recycle stale connections
 )
 
 

@@ -2,15 +2,55 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { AgenticSearchPanel } from "@/components/ai-agents/agentic-search-panel"
+import { LookalikePanel } from "@/components/ai-agents/lookalike-panel"
+import { ResearchPanel } from "@/components/ai-agents/research-panel"
+import { PredictivePanel } from "@/components/ai-agents/predictive-panel"
 import { CrossfirePanel } from "@/components/ai-agents/crossfire-panel"
 import { ComplianceOraclePanel } from "@/components/ai-agents/compliance-oracle-panel"
 import { ViralityEnginePanel } from "@/components/ai-agents/virality-engine-panel"
 import { TalentRadarPanel } from "@/components/ai-agents/talent-radar-panel"
 import { RegimeShifterPanel } from "@/components/ai-agents/regime-shifter-panel"
-import { Sparkles, ShieldCheck, Network, Radar, Globe, Cpu, Target } from "lucide-react"
+import { Sparkles, Users, Search, TrendingUp, Cpu, Target, ShieldCheck, Network, Radar, Globe } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const AGENTS = [
+  {
+    id: "search",
+    name: "Agentic Search",
+    description: "Multi-step prospect identification",
+    icon: Sparkles,
+    component: AgenticSearchPanel,
+    color: "text-blue-400",
+    bg: "bg-blue-400/10",
+  },
+  {
+    id: "lookalike",
+    name: "Lookalike",
+    description: "Mirror your best customers",
+    icon: Users,
+    component: LookalikePanel,
+    color: "text-purple-400",
+    bg: "bg-purple-400/10",
+  },
+  {
+    id: "research",
+    name: "Research",
+    description: "Deep company intelligence",
+    icon: Search,
+    component: ResearchPanel,
+    color: "text-emerald-400",
+    bg: "bg-emerald-400/10",
+  },
+  {
+    id: "predictive",
+    name: "Predictive",
+    description: "Lead conversion scoring",
+    icon: TrendingUp,
+    component: PredictivePanel,
+    color: "text-orange-400",
+    bg: "bg-orange-400/10",
+  },
   {
     id: "crossfire",
     name: "Crossfire Agent",
@@ -80,14 +120,14 @@ export default function AIAgentsPage() {
           </div>
           <h1 className="text-5xl font-black tracking-tight text-gradient">AI Agents</h1>
           <p className="text-xl text-muted-foreground max-w-2xl leading-relaxed">
-            Deploy Outmate&apos;s 5 GTM agents to orchestrate competitive poaching, compliance, virality, churn defence, and geo-adaptive ICP.
+            Deploy specialized autonomous agents to automate your GTM workflow with surgical precision.
           </p>
         </div>
 
         <div className="flex items-center gap-4 bg-muted/30 p-2 rounded-2xl border border-white/5 glass-effect">
           <div className="px-4 py-2 border-r border-white/10">
             <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/50">Active Agents</p>
-            <p className="text-lg font-mono font-bold">04</p>
+            <p className="text-lg font-mono font-bold">09</p>
           </div>
           <div className="px-4 py-2">
             <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/50">Tasks Today</p>
@@ -97,7 +137,7 @@ export default function AIAgentsPage() {
       </motion.div>
 
       {/* Agent Selector Tabs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {AGENTS.map((agent) => {
           const Icon = agent.icon
           const isActive = activeTab === agent.id

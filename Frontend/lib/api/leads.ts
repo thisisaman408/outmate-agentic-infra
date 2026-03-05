@@ -1,13 +1,13 @@
 // API service for leads management - integrated with Product 4 backend
 
+import { authService } from "@/lib/auth"
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const DEFAULT_LEADS_LIMIT = 3
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
   industry: "software",
   companySize: "11-50",
   country_code: "us",
-  google_category: "software company",
-  linkedin_category: "software development",
 }
 
 export interface Lead {
@@ -31,13 +31,17 @@ export interface Lead {
 
 export interface LeadFilters {
   location?: string
+  region_country_code?: string | string[]
   industry?: string | string[]
-  companySize?: string
+  companySize?: string | string[]
   techStack?: string | string[]
   minScore?: number
   country_code?: string | string[]
   google_category?: string | string[]
   linkedin_category?: string | string[]
+  company_type?: string | string[]
+  funding_stage?: string | string[]
+  keywords?: string | string[]
 }
 
 export interface GenerateLeadsRequest {
@@ -83,8 +87,31 @@ interface CompanySearchResponse {
   }
 }
 
+const fetchWithAuth = (url: string, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers ?? {})
+  const authHeaders = authService.getAuthHeaders()
+  Object.entries(authHeaders).forEach(([key, value]) => {
+    if (value) {
+      headers.set(key, value)
+    }
+  })
+  return fetch(url, { ...init, headers })
+}
+
+const ensureArray = (value?: string | string[] | undefined): string[] | undefined => {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  const arr = Array.isArray(value) ? value : [value]
+  const normalized = arr
+    .map((v) => (typeof v === "string" ? v.trim() : String(v).trim()))
+    .filter((v) => v)
+  return normalized.length > 0 ? normalized : undefined
+}
+
+
 // Transform backend company data to frontend Lead format
-function transformCompanyToLead(company: any): Lead {
+export function transformCompanyToLead(company: any): Lead {
   const location = company.location
     ? `${company.location.city || ''}${company.location.city && company.location.state ? ', ' : ''}${company.location.state || ''}${(company.location.city || company.location.state) && company.location.country ? ', ' : ''}${company.location.country || ''}`
     : "Unknown"
@@ -135,77 +162,70 @@ function transformCompanyToLead(company: any): Lead {
 export const leadsApi = {
   generateLeads: async (request: GenerateLeadsRequest): Promise<Lead[]> => {
     try {
-      // Transform frontend filters to backend format
-      const backendFilters: Record<string, any> = {}
+      const inputFilters = request.filters ?? {}
+      const backendFilters: Record<string, any> = { ...inputFilters }
 
-      if (request.filters?.industry) {
-        backendFilters.industry = Array.isArray(request.filters.industry)
-          ? request.filters.industry
-          : [request.filters.industry]
+      const industryValues = ensureArray(inputFilters.industry)
+      if (industryValues) {
+        backendFilters.industry = industryValues
       }
 
-      if (request.filters?.location) {
-        // Parse location string (e.g., "San Francisco, CA")
-        const locationParts = request.filters.location.split(',').map(s => s.trim())
-        if (locationParts.length >= 2) {
-          backendFilters.location = {
-            city: locationParts[0],
-            state: locationParts[1]
-          }
-        } else if (locationParts.length === 1) {
-          backendFilters.location = {
-            country: locationParts[0]
-          }
-        }
+      const location = inputFilters.location
+      if (location) {
+        backendFilters.location = location
       }
 
-      if (request.filters?.companySize) {
-        backendFilters.company_size = [request.filters.companySize]
-        backendFilters.employees = [request.filters.companySize]
+      const sizeValues = ensureArray(inputFilters.companySize)
+      if (sizeValues) {
+        backendFilters.company_size = sizeValues
+        backendFilters.employees = sizeValues
+        delete backendFilters.companySize
       }
 
-      if (request.filters?.techStack) {
-        backendFilters.technologies = request.filters.techStack.split(',').map(s => s.trim())
+      const regionValues = ensureArray(inputFilters.region_country_code)
+      if (regionValues) {
+        backendFilters.region_country_code = regionValues
       }
 
-      if (request.filters?.country_code) {
-        backendFilters.country_code = Array.isArray(request.filters.country_code)
-          ? request.filters.country_code.map((v) => String(v))
-          : [String(request.filters.country_code)]
+      const countryValues = ensureArray(inputFilters.country_code)
+      if (countryValues) {
+        backendFilters.country_code = countryValues
       }
 
-      if (request.filters?.google_category) {
-        backendFilters.google_category = Array.isArray(request.filters.google_category)
-          ? request.filters.google_category
-          : [request.filters.google_category]
+      const googleCategory = ensureArray(inputFilters.google_category)
+      if (googleCategory) {
+        backendFilters.google_category = googleCategory
       }
 
-      if (request.filters?.linkedin_category) {
-        backendFilters.linkedin_category = Array.isArray(request.filters.linkedin_category)
-          ? request.filters.linkedin_category
-          : [request.filters.linkedin_category]
+      const linkedinCategory = ensureArray(inputFilters.linkedin_category)
+      if (linkedinCategory) {
+        backendFilters.linkedin_category = linkedinCategory
       }
 
-      if (request.filters?.country_code) {
-        backendFilters.country_code = Array.isArray(request.filters.country_code)
-          ? request.filters.country_code
-          : [request.filters.country_code]
+      const keywords = ensureArray(inputFilters.keywords)
+      if (keywords) {
+        backendFilters.keywords = keywords
       }
 
-      if (request.filters?.google_category) {
-        backendFilters.google_category = Array.isArray(request.filters.google_category)
-          ? request.filters.google_category
-          : [request.filters.google_category]
+      const companyType = ensureArray(inputFilters.company_type)
+      if (companyType) {
+        backendFilters.company_type = companyType
       }
 
-      if (request.filters?.linkedin_category) {
-        backendFilters.linkedin_category = Array.isArray(request.filters.linkedin_category)
-          ? request.filters.linkedin_category
-          : [request.filters.linkedin_category]
+      const fundingStages = ensureArray(inputFilters.funding_stage)
+      if (fundingStages) {
+        backendFilters.funding_stage = fundingStages
+      }
+
+      const techStack = inputFilters.techStack
+      if (techStack) {
+        backendFilters.technologies = Array.isArray(techStack)
+          ? techStack
+          : techStack.split(',').map((s) => s.trim()).filter((s) => s)
       }
 
       // Call backend API
-      const response = await fetch(`${API_BASE_URL}/api/leads/search/companies`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/leads/search/companies`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -238,22 +258,25 @@ export const leadsApi = {
   },
 
   getLeads: async (request?: GenerateLeadsRequest): Promise<Lead[]> => {
-    const filterInput = request?.filters
     const mergedFilters: LeadFilters = {
-      industry: filterInput?.industry ?? DEFAULT_LEAD_FILTERS.industry,
-      location: filterInput?.location ?? DEFAULT_LEAD_FILTERS.location,
-      companySize: filterInput?.companySize,
-      techStack: filterInput?.techStack,
-      minScore: filterInput?.minScore,
+      ...(request?.filters ?? {}),
     }
 
-    const finalRequest: GenerateLeadsRequest = {
+    if (!mergedFilters.industry) {
+      mergedFilters.industry = DEFAULT_LEAD_FILTERS.industry
+    }
+    if (!mergedFilters.companySize) {
+      mergedFilters.companySize = DEFAULT_LEAD_FILTERS.companySize
+    }
+    if (!mergedFilters.country_code) {
+      mergedFilters.country_code = DEFAULT_LEAD_FILTERS.country_code
+    }
+
+    return leadsApi.generateLeads({
       prompt: request?.prompt ?? "",
       filters: mergedFilters,
       limit: request?.limit ?? DEFAULT_LEADS_LIMIT,
-    }
-
-    return leadsApi.generateLeads(finalRequest)
+    })
   },
 
   updateLeadStatus: async (leadId: string, status: Lead["status"]): Promise<void> => {

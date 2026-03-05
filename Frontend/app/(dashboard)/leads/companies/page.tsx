@@ -38,7 +38,7 @@ const apiSections = [
   {
     id: "search",
     title: "In-DB: Company Search",
-    description: "Search and filter companies from Crustdata's database",
+    description: "Search and filter companies from our curated intelligence dataset",
     icon: Database,
     color: "bg-purple-500",
     href: "/leads/companies/search",
@@ -64,7 +64,7 @@ const apiSections = [
   }
 ]
 
-export default function CrustdataApisPage() {
+export default function CompanyIntelligencePage() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}

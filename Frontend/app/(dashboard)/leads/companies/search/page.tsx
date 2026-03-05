@@ -427,7 +427,7 @@ export default function InDbCompanySearchPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">In-DB Company Search</h1>
             <p className="text-sm text-muted-foreground">
-              Search and filter companies from Explorium&apos;s business dataset. Use the filters on the left or describe what you need below.
+              Search and filter companies from our business intelligence dataset. Use the filters on the left or describe what you need below.
             </p>
           </div>
           <div className="flex items-center gap-2 mt-2">

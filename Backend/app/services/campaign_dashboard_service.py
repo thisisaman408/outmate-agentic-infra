@@ -5,8 +5,9 @@ from typing import List, Dict, Any, Literal, Optional
 
 class CampaignDashboardService:
     def __init__(self):
-        self._sequences = []
-        self._campaigns = []
+        now = datetime.utcnow()
+        self._sequences: List[Dict[str, Any]] = []
+        self._campaigns: List[Dict[str, Any]] = []
         self._email_accounts = []
         self._blocklist = []
         self._global_inbox_last = None
@@ -80,27 +81,60 @@ class CampaignDashboardService:
 
     async def trigger_global_inbox(self) -> Dict[str, Any]:
         self._global_inbox_last = datetime.utcnow()
+        if self._sequences:
+            seq = self._sequences[len(self._inbox_feed) % len(self._sequences)]
+            title = f"{seq['name']} captured {seq['leads']} new leads"
+            message = f"{seq['owner']} refreshed the {seq['status']} sequence · bounce {seq['bounce_rate']}% · sent {seq['sent']} touches"
+            source = "Sequence monitor"
+        else:
+            title = "Inbox refreshed"
+            message = "New activity added to your account."
+            source = "Signal ingestion"
         entry = {
             "id": str(uuid.uuid4()),
-            "title": "Inbox refreshed",
-            "message": "Detected new funding signal matching the active ICP.",
+            "title": title,
+            "message": message,
             "timestamp": self._global_inbox_last.isoformat(),
-            "source": "Signal ingestion",
+            "source": source,
         }
         self._inbox_feed.insert(0, entry)
         return {"message": "Global Inbox refreshed", "last_refreshed": entry["timestamp"]}
 
     async def trigger_global_analytics(self) -> Dict[str, Any]:
         self._global_analytics_last = datetime.utcnow()
-        snapshot = {
-            "id": str(uuid.uuid4()),
-            "label": "Funding velocity score",
-            "value": "2.4x vs last 7 days",
-            "trend": "positive",
-            "timestamp": self._global_analytics_last.isoformat(),
-        }
-        self._analytics_feed.insert(0, snapshot)
-        return {"message": "Global Analytics snapshot captured", "last_refreshed": snapshot["timestamp"]}
+        total_leads = sum(c.get("leadsCount", 0) for c in self._campaigns)
+        avg_open_rate = (
+            sum(c.get("stats", {}).get("openRate", 0) for c in self._campaigns) / max(len(self._campaigns), 1)
+        )
+        avg_reply_rate = (
+            sum(c.get("stats", {}).get("replyRate", 0) for c in self._campaigns) / max(len(self._campaigns), 1)
+        )
+        snapshots = [
+            {
+                "id": str(uuid.uuid4()),
+                "label": "Leads captured",
+                "value": f"{total_leads} open opportunities",
+                "trend": "positive" if total_leads > 0 else "steady",
+                "timestamp": self._global_analytics_last.isoformat(),
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "label": "Average open rate",
+                "value": f"{avg_open_rate:.1f}%",
+                "trend": "positive" if avg_open_rate >= 30 else "steady",
+                "timestamp": self._global_analytics_last.isoformat(),
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "label": "Average reply rate",
+                "value": f"{avg_reply_rate:.1f}%",
+                "trend": "positive" if avg_reply_rate >= 5 else "steady",
+                "timestamp": self._global_analytics_last.isoformat(),
+            },
+        ]
+        for snapshot in snapshots:
+            self._analytics_feed.insert(0, snapshot)
+        return {"message": "Global Analytics snapshot captured", "last_refreshed": snapshots[0]["timestamp"]}
 
     async def get_global_inbox_feed(self) -> List[Dict[str, Any]]:
         return self._inbox_feed.copy()

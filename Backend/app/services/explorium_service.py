@@ -782,7 +782,7 @@ class ExploriumService:
         payload = {
             "business_ids": business_ids,
             "parameters": {
-                "topics": topics,
+                "topics": topics.split(";") if isinstance(topics, str) else topics,
                 "min_score": min_score
             }
         }
@@ -1235,10 +1235,13 @@ class ExploriumService:
                 )
             return resp.json()
 
-    async def bulk_enrich_website_traffic(self, business_ids: List[str]) -> Dict[str, Any]:
+    async def bulk_enrich_website_traffic(self, business_ids: List[str], month_period: Optional[str] = None) -> Dict[str, Any]:
+        from datetime import datetime as _dt
+        if not month_period:
+            month_period = _dt.utcnow().strftime("%Y-%m")
         payload = {
             "business_ids": business_ids,
-            "parameters": {}
+            "parameters": {"month_period": month_period}
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
@@ -1386,6 +1389,66 @@ class ExploriumService:
                 f"{self.base_url}/businesses/autocomplete",
                 headers=self._headers(),
                 params=params,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def fetch_business_events(
+        self,
+        business_ids: List[str],
+        event_types: List[str],
+        timestamp_from: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "business_ids": business_ids,
+            "event_types": event_types,
+        }
+        if timestamp_from:
+            payload["timestamp_from"] = timestamp_from
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/events",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def fetch_prospect_events(
+        self,
+        prospect_ids: List[str],
+        event_types: List[str],
+        timestamp_from: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "prospect_ids": prospect_ids,
+            "event_types": event_types,
+        }
+        if timestamp_from:
+            payload["timestamp_from"] = timestamp_from
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/prospects/events",
+                headers=self._headers(),
+                json=payload,
             )
             if resp.status_code >= 400:
                 try:

@@ -12,15 +12,8 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set) => ({
-  user: {
-    id: "user_1",
-    email: "user@example.com",
-    name: "Demo User",
-    workspace: "Main Workspace",
-    credits: 1000,
-    plan: "basic",
-  },
-  isAuthenticated: true,
+  user: null,
+  isAuthenticated: false,
   sidebarCollapsed: false,
   setUser: (user) => set({ user, isAuthenticated: !!user }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),

@@ -42,8 +42,7 @@ export function Header() {
   const handleLogout = async () => {
     await authService.logout()
     logout()
-    // Redirect to login removed
-    window.location.reload() // Reload to reset state with mock user
+    router.push("/auth/login")
   }
 
   const openSignIn = () => {

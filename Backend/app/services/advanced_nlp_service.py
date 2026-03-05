@@ -10,13 +10,13 @@ import re
 from typing import Dict, Any, List, Optional
 from fastapi import HTTPException
 import httpx
-
-# LangChain imports
-# LangChain Community imports
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import PGVector
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+from app.db.session import SessionLocal
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:  # fallback for environments without langchain_huggingface
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+from app.services.search_service import SearchService
+from app.services.filter_mapping_service import FilterMappingService
 
 # LangGraph imports
 from langgraph.graph import StateGraph, END
@@ -765,46 +765,27 @@ class AdvancedNLPService:
                         raise HTTPException(status_code=500, detail="Prospects service error")
             
             elif service_info["service"] == "companies":
-                # Call companies API with actual extracted filters
-                # The companies search endpoint transforms these to Explorium/ContactOut format
-                payload = {
-                    "filters": {
-                        "industry": filters.get("industry") or [],
-                        "location": filters.get("location") or [],
-                        "employee_count": filters.get("company_size") or [],
-                        "keywords": filters.get("keywords") or []
-                    },
-                    "options": {
-                        "limit": 3,
-                        "enrich": True
-                    }
+                explorium_filters = FilterMappingService.transform_to_explorium_format({
+                    "industry": filters.get("industry"),
+                    "location": filters.get("location"),
+                    "company_size": filters.get("company_size"),
+                    "keywords": filters.get("keywords"),
+                })
+
+                session = SessionLocal()
+                try:
+                    search_service = SearchService(session)
+                    result = await search_service.search_companies_explorium(filters=explorium_filters, limit=3)
+                finally:
+                    session.close()
+
+                companies = result.get("companies", [])
+                print(f">>> [Advanced NLP] Direct Explorium search returned {len(companies)} results", flush=True)
+                return {
+                    "service": "companies",
+                    "results": companies,
+                    "total_count": result.get("total", len(companies))
                 }
-                
-                print(f">>> [Advanced NLP] Companies API payload: {payload}", flush=True)
-                
-                async with httpx.AsyncClient(timeout=60) as client:
-                    response = await client.post(
-                        service_info["api_url"],
-                        json=payload,
-                        headers={"Content-Type": "application/json"}
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        company_data = result.get("data", {})
-                        companies = company_data.get("companies", [])
-                        print(f">>> [Advanced NLP] Companies service returned {len(companies)} results", flush=True)
-                        return {
-                            "service": "companies",
-                            "results": companies,
-                            "total_count": company_data.get("total_count", len(companies))
-                        }
-                    else:
-                        error_detail = response.text
-                        try:
-                            error_detail = response.json().get("detail", response.text)
-                        except: pass
-                        raise HTTPException(status_code=500, detail=f"Companies service error: {error_detail}")
                         
         except Exception as e:
             print(f">>> [Advanced NLP] Service call failed: {e}", flush=True)
