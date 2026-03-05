@@ -5,6 +5,7 @@ Signal Detection API Routes
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Set
+import asyncio
 import logging
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
@@ -14,10 +15,76 @@ from urllib.parse import quote_plus
 
 from app.services.explorium_service import ExploriumService
 from app.services.signal_detection_service import SignalDetectionService
+from app.services.signal_fetcher_service import run_signal as fetcher_run_signal
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["signals"])
+
+
+def _maybe_int(value: str) -> Optional[int]:
+    if value.isdigit():
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_limit(value: Any, default: int = 5) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return default
+
+
+def _normalize_form_filters(configuration: Dict[str, Any]) -> Dict[str, Any]:
+    filters: Dict[str, Any] = {}
+    for key, value in configuration.items():
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            continue
+        if isinstance(value, list):
+            trimmed = [v for v in value if v]
+            if trimmed:
+                filters[key] = trimmed
+            continue
+        if isinstance(value, str) and "," in value:
+            parts = [segment.strip() for segment in value.split(",") if segment.strip()]
+            if parts:
+                filters[key] = parts
+            continue
+        if isinstance(value, str):
+            integer = _maybe_int(value)
+            if integer is not None:
+                filters[key] = integer
+                continue
+        filters[key] = value
+    return filters
+
+
+async def _search_companies_by_filters(
+    service: SignalDetectionService,
+    filters: Dict[str, Any],
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    if not filters:
+        return []
+    try:
+        matches = await service.explorium.search_companies(filters, limit=limit)
+        companies: List[Dict[str, Any]] = []
+        if isinstance(matches, dict):
+            companies = matches.get("companies") or []
+        elif isinstance(matches, list):
+            companies = matches
+        return companies
+    except HTTPStatusError as hse:
+        if hse.response.status_code == 403:
+            raise ExploriumCreditError("Explorium reported insufficient credits for this query.")
+        logger.warning("[Signals API] Explorium search failed: %s - %s", hse.response.status_code, hse.response.text)
+    except Exception as error:
+        logger.warning("[Signals API] search_companies_by_filters error: %s", error)
+    return []
 
 
 def _now_iso() -> str:
@@ -53,6 +120,7 @@ SIGNAL_STORE: List[Dict[str, Any]] = [
         "status": "active",
         "created_at": _now_iso(),
         "last_run_at": _now_iso(),
+        "cursor_state": {},
     },
     {
         "_id": f"signal-{uuid4().hex[:8]}",
@@ -66,6 +134,7 @@ SIGNAL_STORE: List[Dict[str, Any]] = [
         "status": "active",
         "created_at": _now_iso(),
         "last_run_at": None,
+        "cursor_state": {},
     },
     {
         "_id": f"signal-{uuid4().hex[:8]}",
@@ -79,6 +148,7 @@ SIGNAL_STORE: List[Dict[str, Any]] = [
         "status": "paused",
         "created_at": _now_iso(),
         "last_run_at": None,
+        "cursor_state": {},
     },
 ]
 
@@ -160,6 +230,12 @@ class SignalPreviewRequest(BaseModel):
     configuration: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RunSignalRequest(BaseModel):
+    action: str
+    filters: Optional[Dict[str, Any]] = None
+    configuration: Optional[Dict[str, Any]] = None
+
+
 class CreateSignalRequest(BaseModel):
     name: str
     type: str
@@ -169,7 +245,7 @@ class CreateSignalRequest(BaseModel):
 
 @router.get("/")
 async def list_signals():
-    return SIGNAL_STORE
+    return sorted(SIGNAL_STORE, key=lambda s: s.get("created_at", ""), reverse=True)
 
 
 @router.post("/")
@@ -182,41 +258,40 @@ async def create_signal(request: CreateSignalRequest):
         "status": request.status or "active",
         "created_at": _now_iso(),
         "last_run_at": None,
+        "cursor_state": {},
     }
     SIGNAL_STORE.append(new_signal)
+    # Fire-and-forget background run
+    asyncio.create_task(
+        fetcher_run_signal(new_signal, SIGNAL_RESULTS_STORE, SIGNAL_STORE)
+    )
     return new_signal
 
 
 @router.post("/preview")
 async def preview_signal(request: SignalPreviewRequest):
-    target = request.configuration.get("target") or request.type
-    preview_results = [
-        _generate_result("preview", f"{target} signal preview", "Mock preview of signal"),
-        _generate_result("preview", f"{target} alert", "Simulated alert to preview layout"),
-    ]
-    return preview_results
+    mock_signal = {
+        "_id": "",
+        "type": request.type,
+        "configuration": request.configuration or {},
+        "cursor_state": {},
+    }
+    results = await fetcher_run_signal(mock_signal, {}, no_save=True)
+    return results
 
 
 @router.post("/{signal_id}/run")
-async def run_signal(signal_id: str):
+async def run_signal_endpoint(signal_id: str):
     signal = next((s for s in SIGNAL_STORE if s["_id"] == signal_id), None)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
-
-    target = signal["configuration"].get("target") or signal["name"]
-    run_results = [
-        _generate_result(signal_id, f"Live mention of {target}", f"{target} was just detected in news"),
-        _generate_result(signal_id, f"Signal matched for {target}", f"New context matched {target} on X"),
-    ]
-    stored = SIGNAL_RESULTS_STORE.setdefault(signal_id, [])
-    stored.extend(run_results)
-    signal["last_run_at"] = _now_iso()
-    return {"message": "Signal run completed", "newResultsCount": len(run_results)}
-
-
+    results = await fetcher_run_signal(signal, SIGNAL_RESULTS_STORE, SIGNAL_STORE)
+    return {"message": "Signal run completed", "newResultsCount": len(results)}
 @router.get("/{signal_id}/results")
 async def get_signal_results(signal_id: str):
-    return SIGNAL_RESULTS_STORE.get(signal_id, [])
+    results = SIGNAL_RESULTS_STORE.get(signal_id, [])
+    sorted_results = sorted(results, key=lambda r: r.get("found_at", ""), reverse=True)
+    return sorted_results[:100]
 
 
 @router.post("/detect", response_model=SignalDetectionResponse)
@@ -366,11 +441,6 @@ async def build_signal(request: BuildSignalRequest):
     logger.info(f"Queued signal creation: {request.action} ({request.details})")
     signal_id = f"signal-{uuid4().hex[:8]}"
     return {"status": "queued", "signalId": signal_id, "action": request.action}
-
-
-class RunSignalRequest(BaseModel):
-    action: str
-    filters: Optional[Dict[str, Any]] = None
 
 
 class EntitySignalRequest(BaseModel):
