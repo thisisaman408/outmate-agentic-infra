@@ -146,6 +146,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "http://localhost:3000",
             "http://127.0.0.1:3000",
+            "https://outmate-signal-craft.lovable.app",
         ],
         description="Frontend origins allowed for CORS"
     )

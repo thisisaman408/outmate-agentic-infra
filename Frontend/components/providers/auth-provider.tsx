@@ -23,7 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } else if (!normalizedPath.startsWith("/auth")) {
       setUser(null)
-      router.replace("/auth/login")
+      window.location.href = "https://outmate-signal-craft.lovable.app/login"
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, router, setUser])
