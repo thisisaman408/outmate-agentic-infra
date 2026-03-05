@@ -1,6 +1,6 @@
 fastapi
-uvicorn
-sqlalchemy
+uvicorn[standard]
+sqlalchemy>=2.0.0
 psycopg2-binary
 python-dotenv
 redis>=4.2.0
@@ -8,6 +8,10 @@ httpx>=0.25.0
 pydantic>=2.0.0
 python-multipart
 pydantic-settings>=2.0.0
+# Logging and monitoring
+python-json-logger>=2.0.0
+# Rate limiting
+slowapi
 # Advanced NLP and Vector Database
 langchain>=0.1.0
 langchain-community>=0.0.10
@@ -17,11 +21,14 @@ pgvector>=0.2.0
 sentence-transformers>=2.2.0
 numpy>=1.24.0
 faiss-cpu>=1.7.0
+# Task queue
 celery>=5.3.0
+# External service clients
 ipinfo>=5.0.0
-redis>=4.6.0
 crewai[tools]==1.9.3
 openai
 pyjwt>=2.6.0
 passlib[bcrypt]>=1.7.4
 feedparser>=6.0.0
+# Production deployment
+gunicorn>=21.0.0

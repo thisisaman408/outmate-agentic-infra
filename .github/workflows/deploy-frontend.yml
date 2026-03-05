@@ -1,0 +1,49 @@
+name: Deploy Frontend to Azure Static Web Apps
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        working-directory: Frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        working-directory: Frontend
+        run: pnpm build
+
+      - name: Validate build output
+        run: |
+          if [ ! -d "Frontend/.next" ] && [ ! -d "Frontend/out" ]; then
+            echo "Build failed: no .next or out directory"; exit 1
+          fi
+
+      - name: Deploy to Static Web Apps
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "upload"
+          app_location: "Frontend"
+          output_location: "out"
+          skip_app_build: true
