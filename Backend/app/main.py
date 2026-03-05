@@ -77,7 +77,7 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     try:
         body = await request.json()
     except:
-        body = "Could not parse body"r
+        body = "Could not parse body"
     
     logger.error(
         "VALIDATION ERROR DETAILS",
