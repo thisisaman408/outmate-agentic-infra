@@ -40,14 +40,26 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def _parse_expires_in(value: str) -> timedelta:
+    """Parse JWT_EXPIRES_IN string like '24h', '30m', '7d' into timedelta."""
+    value = value.strip().lower()
+    if value.endswith("h"):
+        return timedelta(hours=int(value[:-1]))
+    if value.endswith("m"):
+        return timedelta(minutes=int(value[:-1]))
+    if value.endswith("d"):
+        return timedelta(days=int(value[:-1]))
+    return timedelta(hours=24)
+
+
 def create_access_token(user: User) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.utcnow() + _parse_expires_in(settings.JWT_EXPIRES_IN)
     payload = {
         "sub": str(user.id),
         "email": user.email,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 
 
 def user_response(user: User) -> dict:

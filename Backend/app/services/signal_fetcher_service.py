@@ -228,7 +228,7 @@ async def _dispatch_fetch(
     signal_type: str, config: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """Route a signal type to the correct fetch function."""
-    target = config.get("target") or config.get("keywords") or ""
+    target = config.get("target") or config.get("keywords") or config.get("keyword") or ""
     max_results = int(config.get("maxResults", 20))
     time_frame = config.get("timeFrame", "7d")
 

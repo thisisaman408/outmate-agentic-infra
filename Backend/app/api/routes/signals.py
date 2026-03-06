@@ -107,61 +107,9 @@ def _seed_result_for_signal(signal_id: str, text: str) -> Dict[str, Any]:
     return _generate_result(signal_id, text, f"{text} detected in live feed")
 
 
-SIGNAL_STORE: List[Dict[str, Any]] = [
-    {
-        "_id": f"signal-{uuid4().hex[:8]}",
-        "name": "Realtime X Mentions",
-        "type": "x_mentions",
-        "configuration": {
-            "target": "outmate ai",
-            "maxResults": 12,
-            "timeFrame": "1d",
-        },
-        "status": "active",
-        "created_at": _now_iso(),
-        "last_run_at": _now_iso(),
-        "cursor_state": {},
-    },
-    {
-        "_id": f"signal-{uuid4().hex[:8]}",
-        "name": "LinkedIn Hiring Signals",
-        "type": "monitor_professional_posts",
-        "configuration": {
-            "target": "growth marketing",
-            "maxResults": 10,
-            "platform": "linkedin",
-        },
-        "status": "active",
-        "created_at": _now_iso(),
-        "last_run_at": None,
-        "cursor_state": {},
-    },
-    {
-        "_id": f"signal-{uuid4().hex[:8]}",
-        "name": "RSS Funding Tracker",
-        "type": "monitor_rss_feed",
-        "configuration": {
-            "target": "Series B funding",
-            "maxResults": 6,
-            "timeFrame": "7d",
-        },
-        "status": "paused",
-        "created_at": _now_iso(),
-        "last_run_at": None,
-        "cursor_state": {},
-    },
-]
+SIGNAL_STORE: List[Dict[str, Any]] = []
 
-
-SIGNAL_RESULTS_STORE: Dict[str, List[Dict[str, Any]]] = {
-    SIGNAL_STORE[0]["_id"]: [
-        _seed_result_for_signal(SIGNAL_STORE[0]["_id"], "Outmate AI spotted in a new X thread"),
-        _seed_result_for_signal(SIGNAL_STORE[0]["_id"], "New mention of Outmate on Google News"),
-    ],
-    SIGNAL_STORE[1]["_id"]: [
-        _seed_result_for_signal(SIGNAL_STORE[1]["_id"], "Hiring notice posted for Senior Sales Lead"),
-    ],
-}
+SIGNAL_RESULTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 
 
 class ExploriumCreditError(Exception):
@@ -241,6 +189,7 @@ class CreateSignalRequest(BaseModel):
     type: str
     configuration: Dict[str, Any] = Field(default_factory=dict)
     status: str = "active"
+    category: Optional[str] = None
 
 
 @router.get("/")
@@ -254,6 +203,7 @@ async def create_signal(request: CreateSignalRequest):
         "_id": f"signal-{uuid4().hex[:8]}",
         "name": request.name,
         "type": request.type,
+        "category": request.category or "overview",
         "configuration": request.configuration or {},
         "status": request.status or "active",
         "created_at": _now_iso(),

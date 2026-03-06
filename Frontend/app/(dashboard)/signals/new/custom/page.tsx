@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -93,6 +93,9 @@ const sections = [
 
 export default function CustomSignalPage() {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const category = searchParams.get("category") || ""
+    const categoryParam = category ? `?category=${category}` : ""
 
     return (
         <div className="container mx-auto py-10 max-w-6xl">
@@ -116,7 +119,7 @@ export default function CustomSignalPage() {
                             {section.items.map((item, itemIdx) => (
                                 <Link
                                     key={itemIdx}
-                                    href={`/signals/new/custom/${item.label.toLowerCase().replace(/ /g, '-')}`}
+                                    href={`/signals/new/custom/${item.label.toLowerCase().replace(/ /g, '-')}${categoryParam}`}
                                     className="block h-full"
                                 >
                                     <Card
