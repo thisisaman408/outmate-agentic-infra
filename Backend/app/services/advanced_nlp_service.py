@@ -520,13 +520,13 @@ class AdvancedNLPService:
             "processing_method": "langgraph_workflow"
         }
     
-    async def process_query(self, query: str) -> Dict[str, Any]:
+    async def process_query(self, query: str, auth_token: Optional[str] = None) -> Dict[str, Any]:
         """Process query using consolidated analysis and redirect to appropriate service"""
         try:
             # 1) Use consolidate analyze_query for all metadata (intent, filters, relevance)
             # This avoids redundant calls and ensures all guardrails are applied.
             analysis_result = await self.analyze_query(query)
-            
+
             intent = analysis_result.get("intent", "company")
             filters = analysis_result.get("filters", {})
             confidence = analysis_result.get("confidence", 0)
@@ -547,9 +547,9 @@ class AdvancedNLPService:
                 }
                 print(f">>> [Advanced NLP] Final result (irrelevant): {final_result}", flush=True)
                 return final_result
-            
+
             # 2) Call existing service based on intent using the merged & enhanced filters
-            service_result = await self.call_existing_service(intent, filters)
+            service_result = await self.call_existing_service(intent, filters, auth_token=auth_token)
             
             # 3) Synthesize final response
             final_result = {
@@ -651,10 +651,10 @@ class AdvancedNLPService:
             # Default fallback
             return {"api_url": None, "service": None}
     
-    async def call_existing_service(self, intent: str, filters: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_existing_service(self, intent: str, filters: Dict[str, Any], auth_token: Optional[str] = None) -> Dict[str, Any]:
         """Call existing prospect or company service with extracted filters"""
         service_info = self._get_service_urls(intent, filters)
-        
+
         if not service_info["api_url"]:
             raise HTTPException(status_code=400, detail="Invalid search intent")
         
@@ -706,11 +706,15 @@ class AdvancedNLPService:
                 elif not has_column_filters and isinstance(keywords, str) and keywords.strip():
                     payload["keyword"] = keywords.strip()
                 
+                request_headers = {"Content-Type": "application/json"}
+                if auth_token:
+                    request_headers["Authorization"] = f"Bearer {auth_token}"
+
                 async with httpx.AsyncClient(timeout=90) as client:
                     response = await client.post(
                         service_info["api_url"],
                         json=payload,
-                        headers={"Content-Type": "application/json"}
+                        headers=request_headers
                     )
                     
                     if response.status_code == 200:
@@ -727,7 +731,7 @@ class AdvancedNLPService:
                             retry_response = await client.post(
                                 service_info["api_url"],
                                 json=retry_payload,
-                                headers={"Content-Type": "application/json"}
+                                headers=request_headers
                             )
                             if retry_response.status_code == 200:
                                 retry_result = _normalize_prospect_response(retry_response.json())
@@ -746,7 +750,7 @@ class AdvancedNLPService:
                                 retry_response = await client.post(
                                     service_info["api_url"],
                                     json=retry_payload,
-                                    headers={"Content-Type": "application/json"}
+                                    headers=request_headers
                                 )
                                 if retry_response.status_code == 200:
                                     retry_result = _normalize_prospect_response(retry_response.json())

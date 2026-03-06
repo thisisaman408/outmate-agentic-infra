@@ -1,6 +1,6 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from app.services.explorium_service import ExploriumService
 from app.services.contactout_service import ContactOutService
 from app.services.crustdata_service import CrustdataService
@@ -19,7 +19,7 @@ def get_advanced_nlp_service() -> AdvancedNLPService:
     return _advanced_nlp_service
 
 @router.post("/search")
-async def natural_language_search(payload: Dict[str, Any]):
+async def natural_language_search(payload: Dict[str, Any], request: Request):
     """
     Natural language search endpoint with NLP categorization and filter extraction.
     Uses OpenRouter for intelligent query processing.
@@ -28,17 +28,23 @@ async def natural_language_search(payload: Dict[str, Any]):
         query = payload.get("query", "")
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
-        
+
         print(f">>> [NLP Search] Processing query: '{query}'", flush=True)
-        
+
+        # Extract auth token from the incoming request to forward to internal service calls
+        auth_token: Optional[str] = None
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            auth_token = auth_header[7:]
+
         # Reuse one NLP service instance to avoid repeated model loads
         advanced_nlp_service = get_advanced_nlp_service()
-        
+
         print(f">>> [Advanced NLP] Processing query: '{query}'", flush=True)
         print(f">>> [Advanced NLP] API Key present: {bool(advanced_nlp_service.openrouter_api_key)}", flush=True)
-        
+
         # Process query using LangGraph workflow
-        nlp_result = await advanced_nlp_service.process_query(query)
+        nlp_result = await advanced_nlp_service.process_query(query, auth_token=auth_token)
         
         intent = nlp_result.get("intent", "company")
         filters = nlp_result.get("filters", {})
