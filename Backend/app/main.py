@@ -8,13 +8,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
+from typing import Annotated
 
 # Load environment variables from .env file
 load_dotenv()
+
+SEPARATOR = "================================"
 
 from app.db.vector_setup import setup_vector_database
 from app.db.base import Base
@@ -64,6 +69,18 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Security Headers Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
@@ -82,7 +99,7 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     """
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = "Could not parse body"
     
     logger.error(
@@ -180,12 +197,12 @@ logger.info("Diagnostics router registered")
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("================================")
+    logger.info(SEPARATOR)
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Database URL (masked): {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'redacted'}")
     logger.info(f"Redis URL (masked): {settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted'}")
-    logger.info("================================")
+    logger.info(SEPARATOR)
     
     app.state.db_ready = False
     app.state.redis_ready = False
@@ -223,7 +240,7 @@ async def startup_event():
             logger.error(f"✗ Vector database setup failed: {e}")
 
     import asyncio
-    asyncio.create_task(run_setup())
+    app.state.setup_task = asyncio.create_task(run_setup())
     logger.info("Vector database initialization started in background")
     
     logger.info("================================")
@@ -257,7 +274,7 @@ async def root():
 
 
 @app.get("/health/db")
-def health_db(db: Session = Depends(get_db)):
+def health_db(db: Annotated[Session, Depends(get_db)]):
     try:
         user_count = db.query(User).count()
         db_status = "connected"

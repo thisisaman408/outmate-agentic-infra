@@ -19,7 +19,7 @@
 # Run:   docker run -p 3000:3000 outmate-web:latest
 # ============================================================================
 
-FROM node:18-alpine as base
+FROM node:18-alpine AS base
 
 # Set environment variables for Next.js
 ENV NEXT_TELEMETRY_DISABLED=1 \
@@ -34,7 +34,7 @@ RUN npm install -g pnpm
 # ============================================================================
 # Builder stage - Build Next.js application
 # ============================================================================
-FROM base as builder
+FROM base AS builder
 
 # Copy package files
 COPY pnpm-lock.yaml .
@@ -54,7 +54,7 @@ RUN pnpm build
 # ============================================================================
 # Runtime stage - Minimal production image
 # ============================================================================
-FROM base as runtime
+FROM base AS runtime
 
 # Install production dependencies only
 COPY pnpm-lock.yaml .

@@ -18,7 +18,7 @@
 # Run:   docker run -p 8000:8000 --env-file .env outmate-api:latest
 # ============================================================================
 
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -42,7 +42,7 @@ WORKDIR /app
 # ============================================================================
 # Builder stage - Install Python dependencies
 # ============================================================================
-FROM base as builder
+FROM base AS builder
 
 # Copy requirements file
 COPY requirements.txt .
@@ -54,7 +54,7 @@ RUN pip install --user --no-warn-script-location -r requirements.txt
 # ============================================================================
 # Runtime stage - Final production image
 # ============================================================================
-FROM base as runtime
+FROM base AS runtime
 
 # Copy only necessary Python packages from builder
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local

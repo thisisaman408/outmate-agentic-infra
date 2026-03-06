@@ -146,6 +146,8 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "http://localhost:3000",
             "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
             "https://outmate-signal-craft.lovable.app",
         ],
         description="Frontend origins allowed for CORS"
@@ -406,7 +408,7 @@ class Settings(BaseSettings):
             protocol = parts[0]
             rest = parts[1]
             if "@" in rest:
-                creds, host = rest.rsplit("@", 1)
+                _, host = rest.rsplit("@", 1)
                 return f"{protocol}://****:****@{host}"
             return self.REDIS_URL
         return "****"
