@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, use, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -1591,6 +1591,8 @@ const MultiSelect = ({ label, options, source, value, onChange }: {
 export default function SignalWizardPage({ params }: SignalWizardPageProps) {
     const { signalId } = use(params)
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const category = searchParams.get("category") || "overview"
 
     const [step, setStep] = useState(2)
     const [isLoading, setIsLoading] = useState(false)
@@ -1659,11 +1661,19 @@ export default function SignalWizardPage({ params }: SignalWizardPageProps) {
             await signalsApi.createSignal({
                 name: `Signal: ${config.title}`,
                 type: type as any,
+                category,
                 configuration: formData,
                 status: 'active'
             })
             toast.success("Signal created and run successfully!")
-            router.push('/signals')
+            const returnPages: Record<string, string> = {
+                events: '/signals/events',
+                tracker: '/signals/tracker',
+                intent: '/signals/intent',
+                websights: '/signals/websights',
+                formcomplete: '/signals/formcomplete',
+            }
+            router.push(returnPages[category] || '/signals')
         } catch (error) {
             console.error(error)
             toast.error("Failed to create signal")

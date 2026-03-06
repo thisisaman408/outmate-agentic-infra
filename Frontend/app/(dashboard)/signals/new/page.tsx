@@ -84,12 +84,8 @@ export default function NewSignalPage() {
     const router = useRouter()
 
     const handleSelect = (id: string) => {
-        if (id === 'custom') {
-            router.push('/signals/new/custom')
-        } else {
-            // Placeholder for other routes
-            router.push(`/signals/new/${id}`)
-        }
+        // All signal types route through the custom flow
+        router.push('/signals/new/custom')
     }
 
     return (

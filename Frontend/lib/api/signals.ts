@@ -50,6 +50,7 @@ export interface Signal {
         removeRetweets?: boolean;
         [key: string]: any;
     };
+    category?: string;
     status: string;
     created_at: string;
     last_run_at: string | null;

@@ -16,8 +16,7 @@ export default function TrackerPage() {
         try {
             setIsLoading(true)
             const data = await signalsApi.getSignals()
-            // Filter for Tracker signals (Jobs, Hires)
-            const filtered = data.filter(s => ['job_change', 'new_hire', 'job_posting'].includes(s.type))
+            const filtered = data.filter(s => s.category === 'tracker')
             setSignals(filtered)
         } catch (error) {
             console.error("Failed to fetch signals:", error)
@@ -30,8 +29,6 @@ export default function TrackerPage() {
     useEffect(() => {
         fetchSignals()
     }, [])
-
-
 
     const handleRunSignal = async (id: string) => {
         try {
@@ -52,7 +49,7 @@ export default function TrackerPage() {
                     <h1 className="text-3xl font-bold tracking-tight">Job Tracker</h1>
                     <p className="text-muted-foreground">Monitor key accounts for job changes and hiring.</p>
                 </div>
-                <Link href="/signals/new">
+                <Link href="/signals/new/custom?category=tracker">
                     <Button className="gap-2">
                         <Plus className="h-4 w-4" /> New Signal
                     </Button>
@@ -64,8 +61,6 @@ export default function TrackerPage() {
                 isLoading={isLoading}
                 onRunSignal={handleRunSignal}
             />
-
-
         </div>
     )
 }

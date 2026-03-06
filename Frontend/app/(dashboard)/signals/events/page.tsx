@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { SignalsList } from "@/components/signals/signals-list"
-import { CreateSignalDialog } from "@/components/signals/create-signal-dialog"
 import { signalsApi, type Signal } from "@/lib/api/signals"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -11,14 +11,12 @@ import { toast } from "sonner"
 export default function EventsPage() {
     const [signals, setSignals] = useState<Signal[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const [isDialogOpen, setIsDialogOpen] = useState(false)
 
     const fetchSignals = async () => {
         try {
             setIsLoading(true)
             const data = await signalsApi.getSignals()
-            // Filter for Events signals (News, Fundraising)
-            const filtered = data.filter(s => ['news', 'fundraising'].includes(s.type))
+            const filtered = data.filter(s => s.category === 'events')
             setSignals(filtered)
         } catch (error) {
             console.error("Failed to fetch signals:", error)
@@ -31,22 +29,6 @@ export default function EventsPage() {
     useEffect(() => {
         fetchSignals()
     }, [])
-
-    const handleCreateSignal = async (data: { name: string; type: string; target: string }) => {
-        try {
-            await signalsApi.createSignal({
-                name: data.name,
-                type: data.type as any,
-                configuration: { target: data.target },
-                status: 'active'
-            })
-            toast.success("Signal created successfully")
-            fetchSignals()
-        } catch (error) {
-            console.error("Failed to create signal:", error)
-            toast.error("Failed to create signal")
-        }
-    }
 
     const handleRunSignal = async (id: string) => {
         try {
@@ -67,21 +49,17 @@ export default function EventsPage() {
                     <h1 className="text-3xl font-bold tracking-tight">Events</h1>
                     <p className="text-muted-foreground">Track industry events, news, and fundraising.</p>
                 </div>
-                <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
-                    <Plus className="h-4 w-4" /> New Signal
-                </Button>
+                <Link href="/signals/new/custom?category=events">
+                    <Button className="gap-2">
+                        <Plus className="h-4 w-4" /> New Signal
+                    </Button>
+                </Link>
             </div>
 
             <SignalsList
                 signals={signals}
                 isLoading={isLoading}
                 onRunSignal={handleRunSignal}
-            />
-
-            <CreateSignalDialog
-                open={isDialogOpen}
-                onOpenChange={setIsDialogOpen}
-                onSubmit={handleCreateSignal}
             />
         </div>
     )
