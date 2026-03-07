@@ -6,8 +6,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-import { gtmAgentsApi } from "@/lib/api/gtm-agents"
+import { gtmAgentsApi, type GTMAgentRunResponse } from "@/lib/api/gtm-agents"
 import { Loader2, Target, Globe2, Sparkles } from "lucide-react"
+
+function extractResultText(res: GTMAgentRunResponse): string {
+  if (res.result && typeof res.result === "string") return res.result
+  if (res.results) return typeof res.results === "string" ? res.results : JSON.stringify(res.results, null, 2)
+  const keys = Object.keys(res).filter(k => k !== "result" && k !== "results")
+  if (keys.length > 0) return keys.map(k => `${k}: ${JSON.stringify(res[k])}`).join("\n\n")
+  return "Agent completed — no output returned."
+}
 
 export function CrossfirePanel() {
   const { toast } = useToast()
@@ -35,7 +43,7 @@ export function CrossfirePanel() {
         target_region: targetRegion.trim() || undefined,
         notes: notes.trim() || undefined,
       })
-      setOutput(JSON.stringify(res, null, 2))
+      setOutput(extractResultText(res))
       toast({
         title: "Crossfire deployed",
         description: "Competitive intelligence run completed.",
@@ -133,13 +141,13 @@ export function CrossfirePanel() {
       {output && (
         <Card className="glass-effect border-white/10">
           <CardHeader>
-            <CardTitle className="text-sm font-semibold">Crossfire Output</CardTitle>
-            <CardDescription>Raw structured response from the GTM agent.</CardDescription>
+            <CardTitle className="text-sm font-semibold">Crossfire Intelligence Report</CardTitle>
+            <CardDescription>Competitive analysis and stealable account recommendations.</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="text-xs text-muted-foreground bg-black/40 rounded-xl p-4 overflow-x-auto max-h-[360px]">
+            <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[480px] overflow-y-auto">
               {output}
-            </pre>
+            </div>
           </CardContent>
         </Card>
       )}

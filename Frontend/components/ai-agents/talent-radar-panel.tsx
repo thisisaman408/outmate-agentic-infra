@@ -6,7 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
-import { gtmAgentsApi } from "@/lib/api/gtm-agents"
+import { gtmAgentsApi, type GTMAgentRunResponse } from "@/lib/api/gtm-agents"
+
+function extractResultText(res: GTMAgentRunResponse): string {
+  if (res.result && typeof res.result === "string") return res.result
+  if (res.results) return typeof res.results === "string" ? res.results : JSON.stringify(res.results, null, 2)
+  const keys = Object.keys(res).filter(k => k !== "result" && k !== "results")
+  if (keys.length > 0) return keys.map(k => `${k}: ${JSON.stringify(res[k])}`).join("\n\n")
+  return "Agent completed — no output returned."
+}
 import { Loader2, Radar } from "lucide-react"
 
 export function TalentRadarPanel() {
@@ -32,7 +40,7 @@ export function TalentRadarPanel() {
         accounts: accounts.trim(),
         lookback_days: lookback,
       })
-      setOutput(JSON.stringify(res, null, 2))
+      setOutput(extractResultText(res))
       toast({
         title: "Talent Radar signal map ready",
         description: "Review early churn risk and retention plays.",
@@ -116,9 +124,9 @@ export function TalentRadarPanel() {
             <CardDescription>Accounts, risk levels, and retention plays.</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="text-xs text-muted-foreground bg-black/40 rounded-xl p-4 overflow-x-auto max-h-[360px]">
+            <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[480px] overflow-y-auto">
               {output}
-            </pre>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -62,6 +62,14 @@ class Settings(BaseSettings):
         "24h",
         description="JWT token expiration time"
     )
+    JWT_ALGORITHM: str = Field(
+        "HS256",
+        description="JWT signing algorithm"
+    )
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        1440,
+        description="JWT access token expiry in minutes (default: 24h = 1440 min)"
+    )
 
     # API Keys - Core Services
     CRUSTDATA_API_KEY: str = Field(

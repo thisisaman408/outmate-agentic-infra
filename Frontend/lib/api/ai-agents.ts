@@ -13,9 +13,9 @@ export interface AgenticSearchResult {
   industry: string
   employees: string
   location: string
-  contactName: string
-  title: string
-  email: string
+  contactName?: string
+  title?: string
+  email?: string
   perplexityDetails?: string
   perplexityReasoning?: any
 }
@@ -102,11 +102,11 @@ export const aiAgentsApi = {
   },
 
   // Predictive Agent
-  scoreLeads: async (leadIds: string[]): Promise<PredictiveScore[]> => {
+  scoreLeads: async (company: { name: string; domain?: string; industry?: string; country?: string }): Promise<PredictiveScore[]> => {
     const response = await fetch(`${API_BASE_URL}/api/ai-agents/predictive`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadIds }),
+      body: JSON.stringify({ company }),
     });
     if (!response.ok) {
       let detail = `Failed to score leads (${response.status})`

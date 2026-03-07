@@ -17,7 +17,7 @@ export default function AuthCallbackPage() {
     const userParam = searchParams.get("user")
 
     if (!token || !userParam) {
-      router.replace("https://outmate-signal-craft.lovable.app/login")
+      router.replace("/auth/login")
       return
     }
 
@@ -31,7 +31,7 @@ export default function AuthCallbackPage() {
 
       router.replace("/dashboard")
     } catch {
-      router.replace("https://outmate-signal-craft.lovable.app/login")
+      router.replace("/auth/login")
     }
   }, [searchParams, router, setUser])
 

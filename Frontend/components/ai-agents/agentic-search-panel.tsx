@@ -149,7 +149,7 @@ export function AgenticSearchPanel() {
                 />
                 <div className="absolute right-4 top-5 flex items-center gap-2 px-2 py-1 rounded-lg bg-white/5 text-[10px] font-bold text-muted-foreground/50 border border-white/5">
                   <Zap className="h-3 w-3" />
-                  POWERED BY GPT-4O
+                  AI POWERED
                 </div>
               </div>
               <Button
@@ -228,10 +228,10 @@ export function AgenticSearchPanel() {
                 size="sm"
                 className="h-8 border-white/10 hover:border-blue-500/30"
                 onClick={() => {
-                  const headers = ["Company Name", "Score", "Contact Name", "Title", "Email", "Location", "Industry", "Employees", "Reason"]
+                  const headers = ["Company Name", "Score", "Contact Name", "Title", "Location", "Industry", "Employees", "Reason"]
                   const rows = results.map(r => [
                     r.companyName || "", String(r.score ?? ""), r.contactName || "", r.title || "",
-                    r.email || "", r.location || "", r.industry || "", r.employees || "", r.reason || ""
+                    r.location || "", r.industry || "", r.employees || "", r.reason || ""
                   ])
                   exportToCSV(`agentic_search_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
                 }}
@@ -298,7 +298,7 @@ export function AgenticSearchPanel() {
                                   </div>
                                 </div>
                               </div>
-                              {engagedHref ? (
+                              {engagedHref && (
                                 <a
                                   href={engagedHref}
                                   className="rounded-xl px-6 h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground transition-all inline-flex items-center justify-center gap-2"
@@ -306,11 +306,6 @@ export function AgenticSearchPanel() {
                                   <Mail className="mr-2 h-4 w-4" />
                                   Engage Now
                                 </a>
-                              ) : (
-                                <span className="rounded-xl px-6 h-12 bg-muted/70 border border-white/10 text-muted-foreground flex items-center justify-center gap-2">
-                                  <Mail className="mr-2 h-4 w-4" />
-                                  Email not available
-                                </span>
                               )}
                             </div>
 
@@ -324,7 +319,7 @@ export function AgenticSearchPanel() {
                               </p>
                               {result.perplexityDetails && (
                                 <p className="mt-3 text-xs text-blue-100 leading-relaxed line-clamp-3">
-                                  <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Perplexity:</span>
+                                  <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Intelligence:</span>
                                   {result.perplexityDetails}
                                 </p>
                               )}
@@ -349,12 +344,14 @@ export function AgenticSearchPanel() {
                               <p className="text-sm font-medium text-blue-400/80">{contactTitle}</p>
                             </div>
                             <div className="space-y-3 pt-2">
-                              <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
-                                <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
-                                <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">
-                                  {contactEmail}
-                                </span>
-                              </div>
+                                  {rawEmail.includes("@") && (
+                                <div className="flex items-center gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer group/mail">
+                                  <Mail className="h-4 w-4 text-muted-foreground group-hover/mail:text-blue-400" />
+                                  <span className="text-[11px] font-mono text-muted-foreground group-hover/mail:text-foreground line-clamp-1">
+                                    {rawEmail}
+                                  </span>
+                                </div>
+                              )}
                               <Button
                                 variant="outline"
                                 className="w-full py-2.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors border-t border-white/5 mt-2"
@@ -377,7 +374,7 @@ export function AgenticSearchPanel() {
               key="active-record"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-white/10 bg-white/5 p-6 space-y-3"
+              className="rounded-2xl border border-white/10 bg-white/5 p-6 space-y-5"
             >
               <div className="flex items-center justify-between">
                 <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Intelligence Record</p>
@@ -388,19 +385,52 @@ export function AgenticSearchPanel() {
                   Close
                 </button>
               </div>
-              <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
-              <p className="text-sm text-muted-foreground line-clamp-3">{activeRecord.reason}</p>
+              <div className="flex items-center gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-2xl">
+                  {(activeRecord.companyName?.charAt(0) || "?").toUpperCase()}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    {activeRecord.industry && (
+                      <Badge className="bg-white/10 text-muted-foreground border-0 text-[10px] font-bold">{activeRecord.industry}</Badge>
+                    )}
+                    {activeRecord.location && (
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />{activeRecord.location}
+                      </span>
+                    )}
+                    {activeRecord.employees && (
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Users className="h-3 w-3" />{activeRecord.employees} employees
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">ICP Match Score</p>
+                  <div className="text-3xl font-black text-blue-400">{activeRecord.score ?? 0}%</div>
+                </div>
+                {activeRecord.contactName && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Target Stakeholder</p>
+                    <p className="font-bold text-sm">{activeRecord.contactName}</p>
+                    {activeRecord.title && <p className="text-xs text-blue-400/80">{activeRecord.title}</p>}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Agent Reasoning</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{activeRecord.reason}</p>
+              </div>
               {activeRecord.perplexityDetails && (
-                <p className="text-sm text-blue-100 line-clamp-3">{activeRecord.perplexityDetails}</p>
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Deep Intelligence</p>
+                  <p className="text-sm text-blue-100 leading-relaxed">{activeRecord.perplexityDetails}</p>
+                </div>
               )}
-              {activeRecord.perplexityReasoning && (
-                <p className="text-[10px] text-muted-foreground">
-                  Reasoning details: {JSON.stringify(activeRecord.perplexityReasoning)}
-                </p>
-              )}
-              <pre className="text-xs text-muted-foreground bg-black/40 p-4 rounded-2xl overflow-x-auto">
-                {JSON.stringify(activeRecord, null, 2)}
-              </pre>
             </motion.div>
           )}
           {!isSearching && results.length === 0 && (
@@ -410,18 +440,7 @@ export function AgenticSearchPanel() {
               animate={{ opacity: 1 }}
               className="p-6 rounded-2xl bg-white/5 border border-white/10 text-muted-foreground text-sm text-center"
             >
-              No prospects found yet. The model may still be processing - check the console log for the raw response.
-            </motion.div>
-          )}
-          {!isSearching && results.length > 0 && (
-            <motion.div
-              key="results-json"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              <pre className="text-xs text-muted-foreground bg-black/30 p-4 rounded-2xl overflow-x-auto">
-                {JSON.stringify(results, null, 2)}
-              </pre>
+              No prospects found. Try refining your query with more specific criteria like industry, stage, or location.
             </motion.div>
           )}
         </AnimatePresence>

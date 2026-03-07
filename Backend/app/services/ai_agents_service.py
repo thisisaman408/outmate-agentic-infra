@@ -108,6 +108,7 @@ class AiAgentsService:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         reasoning: bool = False,
+        max_tokens: int = 3000,
     ) -> Dict[str, Any]:
         """Call OpenRouter API (OpenAI-compatible)."""
         headers = {
@@ -116,14 +117,15 @@ class AiAgentsService:
             "X-Title": "Outmate AI",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": temperature
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         if reasoning:
-            payload["reasoning"] = {"enabled": True}
+            payload["reasoning"] = {"effort": "high"}
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -347,6 +349,7 @@ class AiAgentsService:
                         [{"role": "user", "content": prompt}],
                         temperature=0.3,
                         reasoning=True,
+                        max_tokens=2000,
                     )
                     perplexity_details = perplexity_response.get("content")
                     perplexity_reasoning = perplexity_response.get("reasoning_details")
@@ -381,6 +384,7 @@ class AiAgentsService:
                             [{"role": "user", "content": prompt}],
                             temperature=0.3,
                             reasoning=True,
+                            max_tokens=2000,
                         )
                         perplexity_details = perplexity_response.get("content")
                         perplexity_reasoning = perplexity_response.get("reasoning_details")
@@ -528,12 +532,14 @@ class AiAgentsService:
             logger.error(f"Tavily Research Error: {str(e)}")
             research_context = "Tavily lookup failed. Using internal knowledge."
 
-        # Step 2: Determine Model and Schema
+        # Step 2: Determine Model, Token Budget, and Schema
         model = "perplexity/sonar-reasoning-pro"
+        research_max_tokens = 6000  # standard depth
         json_schema = ""
 
         if depth == "quick":
             model = "perplexity/sonar-pro"
+            research_max_tokens = 4000
             json_schema = """{
               "companyName": "string",
               "executiveSummary": "string",
@@ -556,6 +562,7 @@ class AiAgentsService:
             }"""
         elif depth == "deep":
             model = "perplexity/sonar-deep-research"
+            research_max_tokens = 8000
             json_schema = """{
               "companyName": "string",
               "executiveSummary": "string",
@@ -645,7 +652,7 @@ class AiAgentsService:
             report_raw = await self._call_openrouter(model, [
                 {"role": "system", "content": "Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
-            ], temperature=0.2)
+            ], temperature=0.2, max_tokens=research_max_tokens)
             
             report_text = (report_raw or {}).get("content", "")
             import re
@@ -665,7 +672,7 @@ class AiAgentsService:
         SCHEMA: {json_schema}
         """
         try:
-            repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}])
+            repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}], max_tokens=3000)
             repaired_text = (repaired or {}).get("content", "")
             match = re.search(r"\{[\s\S]*\}", repaired_text)
             if match:
@@ -1150,12 +1157,12 @@ class AiAgentsService:
         2. SEC EDGAR Verification (US Only)
         3. Unified Predictive Prompt (OpenRouter/Claude)
         """
-        target = company_data.get("company") or {
-            "name": "Stripe",
-            "domain": "stripe.com",
-            "industry": "Fintech",
-            "country": "US"
-        }
+        target = company_data.get("company")
+        if not target or not target.get("name"):
+            raise HTTPException(
+                status_code=422,
+                detail="Company name is required. Provide: {company: {name, domain, industry, country}}"
+            )
         name = target.get("name")
         country = target.get("country", "US")
 
@@ -1273,7 +1280,7 @@ class AiAgentsService:
         import uuid, re
         logger.info(f"Calling OpenRouter predictive model for {name} with template size {len(prompt)} chars")
         try:
-            scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1)
+            scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4000)
             scores_text = scores_raw.get("content") if isinstance(scores_raw, dict) else str(scores_raw)
             match = re.search(r"\{[\s\S]*\}", scores_text)
             if match:

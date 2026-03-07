@@ -56,8 +56,10 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
 
     try {
       const user = await authService.signup(email, password, name, workspace)
-      setUser(user)
-      onOpenChange(false)
+      if (user) {
+        setUser(user)
+        onOpenChange(false)
+      }
     } catch (err) {
       setError("Failed to create account")
     } finally {
