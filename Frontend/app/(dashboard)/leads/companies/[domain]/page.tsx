@@ -48,9 +48,14 @@ export default function CompanyProfilePage() {
 
 // Fetch profile-specific data (decision makers, LinkedIn posts, insights, etc.)
 const fetchProfileSpecificData = async (companyData: any) => {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+  const authHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  }
   try {
     // Fetch decision makers
-    const decisionMakersResponse = await fetch(`/api/contactout/decision-makers/${encodeURIComponent(companyData.domain)}?page=1`);
+    const decisionMakersResponse = await fetch(`/api/contactout/decision-makers/${encodeURIComponent(companyData.domain)}?page=1`, { headers: authHeaders });
     if (decisionMakersResponse.ok) {
       const decisionMakersData = await decisionMakersResponse.json();
       if (decisionMakersData.success && decisionMakersData.data) {
@@ -59,7 +64,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
     }
 
     // Fetch LinkedIn posts
-    const linkedinPostsResponse = await fetch(`/api/explorium/linkedin-posts?company_domain=${encodeURIComponent(companyData.domain)}`);
+    const linkedinPostsResponse = await fetch(`/api/explorium/linkedin-posts?company_domain=${encodeURIComponent(companyData.domain)}`, { headers: authHeaders });
     if (linkedinPostsResponse.ok) {
       const linkedinPostsData = await linkedinPostsResponse.json();
       if (linkedinPostsData.success && linkedinPostsData.data) {
@@ -68,7 +73,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
     }
 
     // Fetch LinkedIn insights
-    const linkedinInsightsResponse = await fetch(`/api/explorium/linkedin-insights?company_domain=${encodeURIComponent(companyData.domain)}`);
+    const linkedinInsightsResponse = await fetch(`/api/explorium/linkedin-insights?company_domain=${encodeURIComponent(companyData.domain)}`, { headers: authHeaders });
     if (linkedinInsightsResponse.ok) {
       const linkedinInsightsData = await linkedinInsightsResponse.json();
       if (linkedinInsightsData.success && linkedinInsightsData.data) {
@@ -137,7 +142,9 @@ const fetchProfileSpecificData = async (companyData: any) => {
           // If explorium failed, try ContactOut API
           if (!companyData) {
             try {
-              const contactOutResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`);
+              const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+              const fetchHeaders: Record<string, string> = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+              const contactOutResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`, { headers: fetchHeaders });
               if (contactOutResponse.ok) {
                 const contactOutData = await contactOutResponse.json();
                 if (contactOutData.success && contactOutData.data) {
@@ -172,7 +179,8 @@ const fetchProfileSpecificData = async (companyData: any) => {
           // Fetch decision makers from ContactOut API (using company endpoint which returns both company + decision makers)
           try {
             console.log('Fetching decision makers from company endpoint for domain:', domain);
-            const companyResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`);
+            const token2 = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+            const companyResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`, { headers: { 'Content-Type': 'application/json', ...(token2 ? { 'Authorization': `Bearer ${token2}` } : {}) } });
             console.log('Company response status:', companyResponse.status);
             
             if (companyResponse.ok) {
@@ -462,10 +470,12 @@ const fetchProfileSpecificData = async (companyData: any) => {
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
       const response = await fetch(`/api/contactout/linkedin-enrich`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           linkedin_url: person.linkedin_url,
@@ -500,9 +510,13 @@ const fetchProfileSpecificData = async (companyData: any) => {
         throw new Error('No LinkedIn profile available');
       }
 
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
       const revealRes = await fetch('/api/contactout/reveal-contact', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           linkedin_url: person.linkedin_url,
           include_phone: type === 'phone',

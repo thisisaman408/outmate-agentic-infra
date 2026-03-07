@@ -3,20 +3,17 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { linkedin_url, include_phone = false } = body
-    
-    if (!linkedin_url) {
+    const { domain, include_phone = false } = body
+
+    if (!domain) {
       return NextResponse.json(
-        { success: false, error: { message: 'LinkedIn URL is required' } },
+        { success: false, error: { message: 'Domain is required' } },
         { status: 400 }
       )
     }
 
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/contactout/reveal-contact`)
-
-    // Forward the Authorization header from the incoming request
     const authHeader = request.headers.get('Authorization')
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -25,13 +22,10 @@ export async function POST(request: NextRequest) {
       headers['Authorization'] = authHeader
     }
 
-    const response = await fetch(`${backendUrl}/api/contactout/reveal-contact`, {
+    const response = await fetch(`${backendUrl}/api/contactout/reveal-company-contact`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        linkedin_url,
-        include_phone
-      }),
+      body: JSON.stringify({ domain, include_phone }),
     })
 
     const responseData = await response.json()
@@ -39,14 +33,14 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       console.error('Backend error:', responseData)
       return NextResponse.json(
-        { success: false, error: responseData?.error || { message: 'Failed to reveal contact' } },
+        { success: false, error: responseData?.error || { message: 'Failed to reveal company contact' } },
         { status: response.status }
       )
     }
 
     return NextResponse.json(responseData)
   } catch (error) {
-    console.error('ContactOut reveal contact proxy error:', error)
+    console.error('ContactOut reveal company contact proxy error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
       { success: false, error: { message } },

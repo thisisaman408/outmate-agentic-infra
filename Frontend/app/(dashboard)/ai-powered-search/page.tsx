@@ -28,6 +28,7 @@ import { CompaniesResultsTable } from "@/components/leads/companies/companies-re
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
+import { enrichCompany, type CompanyEnrichmentResult } from "@/lib/services/betterContactService"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { CsvImportButton } from "@/components/shared/csv-import-button"
@@ -208,6 +209,9 @@ export default function DatabaseFinderPage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [detectedSignals, setDetectedSignals] = useState<any[]>([])
   const [isDetectingSignals, setIsDetectingSignals] = useState(false)
+  const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
+  const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
+  const [waterfallAttempts, setWaterfallAttempts] = useState<Record<string, { email?: boolean; phone?: boolean }>>({})
   const [showSignals, setShowSignals] = useState(false)
   const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([])
   const [campaignDraft, setCampaignDraft] = useState<{
@@ -2889,6 +2893,36 @@ const syncChatWithServer = async (session: ChatSession) => {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
+                        onEnrichReveal={async (companyId, field) => {
+                          if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
+                          const company = results.find((c: any) => (c.domain || c.id) === companyId)
+                          if (!company) return
+                          setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
+                          const result = await enrichCompany(company.name, company.domain, field)
+                          setEnrichedData(prev => {
+                            const existing = prev[companyId] || {}
+                            const updated = { ...existing, success: result.success, not_found: result.not_found }
+                            if (result.email) updated.email = { email: result.email, credits_consumed: result.credits_consumed }
+                            if (result.phone) updated.phone = { phone: result.phone, credits_consumed: result.credits_consumed }
+                            return { ...prev, [companyId]: updated }
+                          })
+                          setWaterfallAttempts(prev => ({ ...prev, [companyId]: { ...prev[companyId], [field]: true } }))
+                          setEnrichingRows(prev => ({ ...prev, [companyId]: false }))
+                        }}
+                        enrichCache={Object.fromEntries(
+                          Object.entries(enrichedData).map(([key, data]) => [
+                            key,
+                            enrichingRows[key]
+                              ? { loading: true }
+                              : data?.success && !data?.not_found
+                                ? {
+                                  email: data.email || undefined,
+                                  phone: data.phone || undefined,
+                                }
+                                : {}
+                          ])
+                        )}
+                        waterfallAttempts={waterfallAttempts}
                       />
                     ) : (
                       <div className="text-center py-8 text-muted-foreground">

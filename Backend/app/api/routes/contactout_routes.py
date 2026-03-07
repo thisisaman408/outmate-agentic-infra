@@ -28,6 +28,11 @@ class RevealContactRequest(BaseModel):
     include_phone: bool = True
 
 
+class RevealCompanyContactRequest(BaseModel):
+    domain: str
+    include_phone: bool = True
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 @router.get("/company/{domain}")
 async def get_company_profile(
@@ -142,6 +147,63 @@ async def reveal_contact(
             "success": False,
             "error": msg
         }
+
+@router.post("/reveal-company-contact")
+async def reveal_company_contact(
+    request: RevealCompanyContactRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Reveal contact info for a company by fetching decision makers with reveal_info=True.
+    Returns emails/phones from the first decision maker.
+    """
+    try:
+        contactout = ContactOutService()
+        print(f">>> [Reveal Company Contact] domain={request.domain}, include_phone={request.include_phone}", flush=True)
+
+        dm_data = await contactout.get_decision_makers(
+            domain=request.domain,
+            reveal_info=True,
+            page=1
+        )
+
+        profiles = dm_data.get("profiles", {})
+        if not profiles:
+            return {
+                "success": False,
+                "error": f"No decision makers found for domain '{request.domain}'"
+            }
+
+        # Take the first decision maker's contact info
+        first_profile = next(iter(profiles.values()))
+        contact_info = first_profile.get("contact_info", {})
+
+        emails = contact_info.get("email", []) or []
+        work_emails = contact_info.get("work_email", []) or []
+        personal_emails = contact_info.get("personal_email", []) or []
+        phones = (contact_info.get("phone", []) or []) if request.include_phone else []
+
+        # Combine all emails if the specific lists are empty
+        all_emails = emails if emails else (work_emails + personal_emails)
+
+        return {
+            "success": True,
+            "data": {
+                "domain": request.domain,
+                "emails": all_emails,
+                "work_emails": work_emails,
+                "personal_emails": personal_emails,
+                "phones": phones,
+            }
+        }
+    except Exception as e:
+        msg = str(e)
+        logger.error(f"Reveal company contact error: {msg}", exc_info=True)
+        return {
+            "success": False,
+            "error": msg
+        }
+
 
 @router.get("/decision-makers/{domain}")
 async def get_decision_makers(

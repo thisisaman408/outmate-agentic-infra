@@ -179,8 +179,8 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
     { key: 'zip_code', label: 'Zip', visible: true, width: '80px', category: 'location' },
     { key: 'locations', label: 'Locations', visible: false, width: '150px', category: 'location' },
     { key: 'locations_distribution_count', label: '#Locations', visible: true, width: '100px', category: 'location' },
-    { key: 'phone', label: 'Phone', visible: true, width: '140px', category: 'location' },
-    { key: 'email', label: 'Email', visible: true, width: '180px', category: 'location' },
+    { key: 'phone', label: 'Phone', visible: true, width: '220px', category: 'location' },
+    { key: 'email', label: 'Email', visible: true, width: '240px', category: 'location' },
     { key: 'linkedin_url', label: 'LinkedIn', visible: true, width: '100px', category: 'social' },
 
     // Funding
@@ -355,7 +355,7 @@ const RenderCell = ({
                                     e.stopPropagation()
                                     await onContactReveal?.(company, field)
                                 }}
-                                disabled={!company.linkedin_url}
+                                disabled={!company.linkedin_url && !company.domain}
                             >
                                 <Lock className="h-3 w-3 mr-1" />
                                 Reveal again
@@ -383,7 +383,7 @@ const RenderCell = ({
                                     e.stopPropagation()
                                     await onContactReveal?.(company, field)
                                 }}
-                                disabled={!company.linkedin_url}
+                                disabled={!company.linkedin_url && !company.domain}
                             >
                                 <Lock className="h-3 w-3 mr-1" />
                                 Tap to Reveal · {field === "email" ? formatCreditsLabel(CONTACTOUT_EMAIL_COST) : formatCreditsLabel(CONTACTOUT_PHONE_COST)}
@@ -395,6 +395,7 @@ const RenderCell = ({
                                 className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                                 onClick={(e) => {
                                     e.stopPropagation()
+                                    console.log('[Zap] clicked', { companyId, field, hasHandler: !!onEnrichReveal })
                                     onEnrichReveal?.(companyId, field)
                                 }}
                                 title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
@@ -734,7 +735,16 @@ export function CompaniesResultsTable({
 
     const handleContactReveal = async (company: CompanyData, field: 'email' | 'phone') => {
         const linkedinUrl = company.linkedin_url
-        if (!linkedinUrl) return
+        const isCompanyPage = !linkedinUrl || linkedinUrl.includes('/company/') || linkedinUrl.includes('/school/')
+
+        // For company pages, we need a domain to use the decision-makers API
+        if (isCompanyPage && !company.domain) {
+            console.warn('No domain available to reveal company contact')
+            return
+        }
+        // For personal profiles, we need a LinkedIn URL
+        if (!isCompanyPage && !linkedinUrl) return
+
         const revealKey = `${company.id}-${field}`
 
         setContactCache(prev => ({
@@ -747,14 +757,34 @@ export function CompaniesResultsTable({
         }))
 
         try {
-            const response = await fetch('/api/contactout/reveal-contact', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    linkedin_url: linkedinUrl,
-                    include_phone: field === 'phone',
-                }),
-            })
+            const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            }
+
+            let response: Response
+            if (isCompanyPage) {
+                // Use decision-makers API for company pages
+                response = await fetch('/api/contactout/reveal-company-contact', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        domain: company.domain,
+                        include_phone: field === 'phone',
+                    }),
+                })
+            } else {
+                // Use personal profile reveal for individual LinkedIn URLs
+                response = await fetch('/api/contactout/reveal-contact', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        linkedin_url: linkedinUrl,
+                        include_phone: field === 'phone',
+                    }),
+                })
+            }
 
             if (!response.ok) throw new Error('ContactOut reveal failed')
 

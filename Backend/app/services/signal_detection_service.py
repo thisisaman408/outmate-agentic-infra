@@ -413,54 +413,86 @@ class SignalDetectionService:
         
         # Bulk enrich all matched businesses
         enrichment_data = {}
+        def _extract_bulk_data(result: Any, label: str) -> Dict[str, Any]:
+            """
+            Extract per-business-id data from bulk enrichment responses.
+            Handles: dict with 'data' key, list of dicts, direct dict keyed by bid, or None.
+            """
+            print(f">>> [Signals] _extract_bulk_data({label}): type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}", flush=True)
+            if result is None:
+                return {}
+            # If result has a "data" key, use it
+            raw = result.get("data", result) if isinstance(result, dict) else result
+            if raw is None:
+                return {}
+            # If it's already a dict keyed by business_id, return it
+            if isinstance(raw, dict):
+                return raw
+            # If it's a list, try to build a dict keyed by business_id
+            if isinstance(raw, list):
+                out = {}
+                for item in raw:
+                    if isinstance(item, dict):
+                        bid = item.get("business_id") or item.get("id")
+                        if bid:
+                            out[bid] = item
+                        else:
+                            # List of enrichment results matching input order
+                            for i, b in enumerate(business_ids):
+                                if i < len(raw) and isinstance(raw[i], dict):
+                                    out[b] = raw[i]
+                            break
+                return out
+            return {}
+
         try:
             # Intent signals
             intent_result = await self.explorium.bulk_enrich_bombora_intent(business_ids, "training & development: corporate universities;training & development: career management;information technology: cloud computing;information technology: cybersecurity;marketing: content marketing;marketing: social media marketing;sales: sales automation;sales: crm software;finance: financial planning;finance: accounting software")
-            intent_data = intent_result.get("data", {})
+            intent_data = _extract_bulk_data(intent_result, "intent")
             for bid, data in intent_data.items():
                 if bid not in enrichment_data:
                     enrichment_data[bid] = {}
                 enrichment_data[bid]["intent"] = data
         except Exception as e:
             print(f">>> [Signals] Intent enrichment error: {e}", flush=True)
-        
+
         try:
             # Firmographics
             fg_result = await self.explorium.bulk_enrich_firmographics(business_ids)
-            fg_data = fg_result.get("data", {})
+            fg_data = _extract_bulk_data(fg_result, "firmographics")
             for bid, data in fg_data.items():
                 if bid not in enrichment_data:
                     enrichment_data[bid] = {}
                 enrichment_data[bid]["firmographics"] = data
         except Exception as e:
             print(f">>> [Signals] Firmographics enrichment error: {e}", flush=True)
-        
+
         try:
             # Website traffic
             traffic_result = await self.explorium.bulk_enrich_website_traffic(business_ids)
-            traffic_data = traffic_result.get("data", {})
+            traffic_data = _extract_bulk_data(traffic_result, "traffic")
             for bid, data in traffic_data.items():
                 if bid not in enrichment_data:
                     enrichment_data[bid] = {}
                 enrichment_data[bid]["traffic"] = data
         except Exception as e:
             print(f">>> [Signals] Traffic enrichment error: {e}", flush=True)
-        
+
         try:
             # Business challenges
             challenges_result = await self.explorium.bulk_enrich_business_challenges(business_ids)
-            challenges_data = challenges_result.get("data", {})
+            challenges_data = _extract_bulk_data(challenges_result, "challenges")
             for bid, data in challenges_data.items():
                 if bid not in enrichment_data:
                     enrichment_data[bid] = {}
                 enrichment_data[bid]["challenges"] = data
         except Exception as e:
             print(f">>> [Signals] Challenges enrichment error: {e}", flush=True)
-        
+
         try:
             # Financial indicators
             financial_result = await self.explorium.bulk_enrich_financial_indicators(business_ids)
-            financial_data = financial_result.get("data", {})
+            financial_data = _extract_bulk_data(financial_result, "financial")
             for bid, data in financial_data.items():
                 if bid not in enrichment_data:
                     enrichment_data[bid] = {}
@@ -468,6 +500,11 @@ class SignalDetectionService:
         except Exception as e:
             print(f">>> [Signals] Financial enrichment error: {e}", flush=True)
         
+        # If no enrichment data was collected, ensure all matched companies still get processed
+        if not enrichment_data:
+            for bid in business_ids:
+                enrichment_data[bid] = {}
+
         # Process enrichment data into signals
         for business_id, data in enrichment_data.items():
             company = business_to_company.get(business_id, {})

@@ -26,11 +26,17 @@ export async function POST(request: NextRequest) {
 
     console.log('Calling backend LinkedIn enrich API:', backendUrl, requestBody);
 
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
+
     const response = await fetch(backendUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(requestBody)
     });
 
