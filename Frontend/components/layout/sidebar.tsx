@@ -26,7 +26,7 @@ import {
   CheckSquare,
   Radar,
   Globe,
-  Plus,
+  Eye,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -51,6 +51,7 @@ const navItems: NavItem[] = [
     children: [
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "Prospects", href: "/leads/prospects", icon: UserCircle },
+      { name: "Watcher", href: "/leads/watcher", icon: Eye },
       { name: "History", href: "/leads/history", icon: Clock },
     ],
   },
