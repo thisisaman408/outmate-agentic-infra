@@ -266,6 +266,28 @@ class Settings(BaseSettings):
         description="Unipile DSN endpoint"
     )
 
+    # SMTP / Email Notifications
+    SMTP_HOST: Optional[str] = Field(
+        None,
+        description="SMTP host for outbound email notifications"
+    )
+    SMTP_PORT: int = Field(
+        587,
+        description="SMTP port (587 for STARTTLS, 465 for SSL)"
+    )
+    SMTP_USER: Optional[str] = Field(
+        None,
+        description="SMTP username / sender email address"
+    )
+    SMTP_PASSWORD: Optional[str] = Field(
+        None,
+        description="SMTP password"
+    )
+    SMTP_FROM_EMAIL: Optional[str] = Field(
+        None,
+        description="From address used in outgoing emails (defaults to SMTP_USER)"
+    )
+
     # Visitor Tracking
     VISITOR_DEDUPE_SECONDS: int = Field(
         3600,

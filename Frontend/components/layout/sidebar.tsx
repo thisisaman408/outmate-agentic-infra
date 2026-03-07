@@ -27,6 +27,7 @@ import {
   Radar,
   Globe,
   Plus,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -70,6 +71,7 @@ const navItems: NavItem[] = [
   { name: "Scoring", href: "/scoring", icon: Target },
   { name: "Campaigns", href: "/campaigns", icon: Send },
   { name: "Workflows", href: "/workflows", icon: Workflow },
+  { name: "Co-Pilot", href: "/copilot", icon: Sparkles },
   { name: "AI Agents", href: "/ai-agents", icon: Bot },
   { name: "Prompt Search", href: "/prompt-search", icon: Search },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },

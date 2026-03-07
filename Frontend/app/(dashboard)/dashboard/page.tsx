@@ -8,6 +8,7 @@ import { ActiveSignalsCard } from "@/components/dashboard/active-signals-card"
 import { CampaignPerformanceCard } from "@/components/dashboard/campaign-performance-card"
 import { AIAgentActivityCard } from "@/components/dashboard/ai-agent-activity-card"
 import { TimeSeriesChart } from "@/components/dashboard/time-series-chart"
+import { DailyBriefWidget } from "@/components/copilot/daily-brief-widget"
 import {
   dashboardApi,
   type KPIData,
@@ -94,10 +95,11 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts */}
+      {/* Charts + Daily Brief */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <TimeSeriesChart data={timeSeriesData} isLoading={isLoading} />
         <AIAgentActivityCard activities={activities} isLoading={isLoading} />
+        <DailyBriefWidget />
       </div>
 
       {/* Tables and Cards */}

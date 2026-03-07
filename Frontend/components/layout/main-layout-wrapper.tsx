@@ -3,6 +3,7 @@
 import React from "react"
 import { useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
+import { CopilotSidebar } from "@/components/copilot/copilot-sidebar"
 
 export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
     const { sidebarCollapsed } = useStore()
@@ -15,6 +16,7 @@ export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
             )}
         >
             {children}
+            <CopilotSidebar />
         </div>
     )
 }
