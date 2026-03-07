@@ -451,7 +451,9 @@ const RenderCell = ({
                         </div>
                     ) : (
                         <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0">
-                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-semibold text-base text-foreground">
+                                {(company.name || company.domain || "C").charAt(0).toUpperCase()}
+                            </span>
                         </div>
                     )}
                     <div className="flex flex-col">

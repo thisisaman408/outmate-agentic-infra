@@ -11,6 +11,8 @@ from app.core.redis import RedisManager
 from app.services.explorium_service import ExploriumService
 import asyncio
 import uuid
+from app.db.session import SessionLocal
+from app.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,7 @@ class AiAgentsService:
             response.raise_for_status()
             return response.json()
 
+
     async def agentic_search(self, query: str) -> List[Dict[str, Any]]:
         """
         7-Layer Agentic Prospect Search:
@@ -250,7 +253,7 @@ class AiAgentsService:
             domain = c["domain"]
             # Parallel deep search for specific company signals and contacts
             signals_task = self._call_serper(f"site:{domain} (hiring OR careers OR \"product launch\" OR funding OR \"press release\")", num=10)
-            contacts_task = self._call_serper(f"site:{domain} (email OR \"@{domain}\" OR \"contact us\" OR \"leadership\" OR \"team\")", num=10)
+            contacts_task = self._call_serper(f"site:{domain} (email OR \"@{domain}\" OR \"leadership\" OR \"team\")", num=10)
             
             signals, contacts = await asyncio.gather(signals_task, contacts_task)
             
@@ -276,15 +279,17 @@ class AiAgentsService:
         # --- LAYER 5: AI INTERPRETATION ---
         async def analyze_batch(batch):
             prompt = f"""
-            SYSTEM: You are a B2B Data Enrichment Agent.
+            SYSTEM: You are a professional B2B Data Enrichment Agent.
             QUERY: "{topic}" (Mode: {query_mode})
 
             INSTRUCTIONS:
             1. Analyze the 'evidence' for each company.
             2. Generate a valid JSON Array following the SCHEMA strictly.
-            3. **Do not hallucinate**: If email/contact is not found, write "Not found" or null.
-            4. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
-            5. **Reason**: Briefly explain why this company fits the query.
+            3. **Identification**: DO NOT identify as Perplexity, an AI, or any other assistant. Act ONLY as a B2B Data Enrichment Agent.
+            4. **Refusal**: NEVER state that you cannot fulfill a request. If data is missing, provide what you can or leave the field null.
+            5. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
+            6. **Reason**: Briefly explain why this company fits the query.
+            7. **Data Quality**: Ensure 'location' and 'employees' (count or range) are extracted from evidence or inferred.
 
             INPUT DATA:
             {json.dumps(batch)}
@@ -297,7 +302,8 @@ class AiAgentsService:
                 "website": "string",
                 "domain": "string",
                 "industry": "string (infer from context)",
-                "location": "string (infer from context)",
+                "location": "string (infer from context or evidence)",
+                "employees": "string (count or range, e.g. '11-50' or '500')",
                 "score": number,
                 "reason": "string",
                 "signals": {{
@@ -462,8 +468,7 @@ class AiAgentsService:
         filtered = final_results
         if query_mode == "STRICT":
             filtered = [c for c in final_results if c.get("signals", {}).get("hiring") in ["Active", "Moderate"]]
-        
-        # Sort by score
+
         filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
         unique_results: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -477,7 +482,6 @@ class AiAgentsService:
             seen_ids.add(item_id)
             unique_results.append(item)
         return unique_results
-
     def _extract_employees_from_text(self, item: Dict[str, Any]) -> Optional[str]:
         """Try to parse an employee count or range from textual context."""
         pattern = re.compile(
@@ -499,6 +503,63 @@ class AiAgentsService:
             if match:
                 return match.group(1)
         return None
+
+    async def _fetch_company_metadata(self, domain: str) -> Optional[Dict[str, Any]]:
+        session = SessionLocal()
+        try:
+            search_service = SearchService(session)
+            result = await search_service.search_companies_explorium(
+                filters={"domain": [domain]},
+                limit=1,
+                allow_crust_fallback=True,
+                include_crust_linkedin_posts=False,
+            )
+            companies = result.get("companies", [])
+            return companies[0] if companies else None
+        except Exception as exc:
+            logger.warning("Failed to enrich domain %s: %s", domain, exc)
+            return None
+        finally:
+            session.close()
+
+    async def _enrich_with_live_metadata(self, items: List[Dict[str, Any]]):
+        metadata_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        for item in items:
+            domain = item.get("domain")
+            if not domain:
+                continue
+            if domain not in metadata_cache:
+                metadata_cache[domain] = await self._fetch_company_metadata(domain)
+            metadata = metadata_cache[domain]
+            if not metadata:
+                continue
+            if not item.get("location") or item["location"].startswith("Location not specified"):
+                candidates = [
+                    metadata.get("location_display"),
+                    metadata.get("location"),
+                    metadata.get("headquarters_city"),
+                    metadata.get("headquarters_state"),
+                    metadata.get("headquarters_country"),
+                ]
+                for candidate in candidates:
+                    if isinstance(candidate, str) and candidate.strip():
+                        item["location"] = candidate.strip()
+                        break
+            employees = item.get("employees")
+            if not employees or str(employees).lower().startswith("not"):
+                emp_candidates = [
+                    metadata.get("employee_count_display"),
+                    metadata.get("employee_count_range"),
+                    metadata.get("employee_count_exact"),
+                    metadata.get("headcount"),
+                ]
+                for emp in emp_candidates:
+                    if isinstance(emp, (int, float)) and emp > 0:
+                        item["employees"] = str(int(emp))
+                        break
+                    if isinstance(emp, str) and emp.strip():
+                        item["employees"] = emp.strip()
+                        break
 
     async def deep_research(self, company_name: str, depth: str = "standard") -> Dict[str, Any]:
         """

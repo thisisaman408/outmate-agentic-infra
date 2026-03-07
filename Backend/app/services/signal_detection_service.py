@@ -30,6 +30,10 @@ class SignalDetectionService:
     def __init__(self):
         self.crustdata = CrustdataService()
         self.explorium = ExploriumService()
+
+    @staticmethod
+    def _dict_or_empty(value: Any) -> Dict[str, Any]:
+        return value if isinstance(value, dict) else {}
     
     async def detect_signals(
         self,
@@ -394,11 +398,11 @@ class SignalDetectionService:
                 continue
             
             try:
-                match_result = await self.explorium.match_businesses([{
+                raw_match = await self.explorium.match_businesses([{
                     "domain": domain,
                     "name": company_name
                 }])
-                
+                match_result = self._dict_or_empty(raw_match)
                 matched = match_result.get("matched_businesses") or match_result.get("matches") or []
                 if matched:
                     business_id = matched[0].get("business_id")
@@ -411,99 +415,57 @@ class SignalDetectionService:
         if not business_ids:
             return self._fallback_signal_detection(companies)
         
-        # Bulk enrich all matched businesses
+        # Enrich each business individually using single-enrich APIs (reliable, known response shape)
         enrichment_data = {}
-        def _extract_bulk_data(result: Any, label: str) -> Dict[str, Any]:
-            """
-            Extract per-business-id data from bulk enrichment responses.
-            Handles: dict with 'data' key, list of dicts, direct dict keyed by bid, or None.
-            """
-            print(f">>> [Signals] _extract_bulk_data({label}): type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}", flush=True)
-            if result is None:
-                return {}
-            # If result has a "data" key, use it
-            raw = result.get("data", result) if isinstance(result, dict) else result
-            if raw is None:
-                return {}
-            # If it's already a dict keyed by business_id, return it
-            if isinstance(raw, dict):
-                return raw
-            # If it's a list, try to build a dict keyed by business_id
-            if isinstance(raw, list):
-                out = {}
-                for item in raw:
-                    if isinstance(item, dict):
-                        bid = item.get("business_id") or item.get("id")
-                        if bid:
-                            out[bid] = item
-                        else:
-                            # List of enrichment results matching input order
-                            for i, b in enumerate(business_ids):
-                                if i < len(raw) and isinstance(raw[i], dict):
-                                    out[b] = raw[i]
-                            break
-                return out
-            return {}
+        for bid in business_ids:
+            enrichment_data[bid] = {}
+            company_name = business_to_company.get(bid, {}).get("name", bid)
 
-        try:
-            # Intent signals
-            intent_result = await self.explorium.bulk_enrich_bombora_intent(business_ids, "training & development: corporate universities;training & development: career management;information technology: cloud computing;information technology: cybersecurity;marketing: content marketing;marketing: social media marketing;sales: sales automation;sales: crm software;finance: financial planning;finance: accounting software")
-            intent_data = _extract_bulk_data(intent_result, "intent")
-            for bid, data in intent_data.items():
-                if bid not in enrichment_data:
-                    enrichment_data[bid] = {}
-                enrichment_data[bid]["intent"] = data
-        except Exception as e:
-            print(f">>> [Signals] Intent enrichment error: {e}", flush=True)
+            # 1. Firmographics
+            try:
+                fg_data = self._dict_or_empty(await self.explorium.enrich_firmographics(bid)).get("data") or {}
+                if fg_data:
+                    enrichment_data[bid]["firmographics"] = fg_data
+                    print(f">>> [Signals] Firmographics OK for {company_name}: revenue={fg_data.get('yearly_revenue_exact')}, employees={fg_data.get('number_of_employees_range')}", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Firmographics error for {company_name}: {e}", flush=True)
 
-        try:
-            # Firmographics
-            fg_result = await self.explorium.bulk_enrich_firmographics(business_ids)
-            fg_data = _extract_bulk_data(fg_result, "firmographics")
-            for bid, data in fg_data.items():
-                if bid not in enrichment_data:
-                    enrichment_data[bid] = {}
-                enrichment_data[bid]["firmographics"] = data
-        except Exception as e:
-            print(f">>> [Signals] Firmographics enrichment error: {e}", flush=True)
+            # 2. Bombora intent
+            try:
+                intent_data = self._dict_or_empty(await self.explorium.enrich_bombora_intent(bid)).get("data") or {}
+                if intent_data:
+                    enrichment_data[bid]["intent"] = intent_data
+                    topics_count = len(intent_data.get("intent_topics", []))
+                    print(f">>> [Signals] Intent OK for {company_name}: {topics_count} topics", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Intent error for {company_name}: {e}", flush=True)
 
-        try:
-            # Website traffic
-            traffic_result = await self.explorium.bulk_enrich_website_traffic(business_ids)
-            traffic_data = _extract_bulk_data(traffic_result, "traffic")
-            for bid, data in traffic_data.items():
-                if bid not in enrichment_data:
-                    enrichment_data[bid] = {}
-                enrichment_data[bid]["traffic"] = data
-        except Exception as e:
-            print(f">>> [Signals] Traffic enrichment error: {e}", flush=True)
+            # 3. Business challenges
+            try:
+                challenges_data = self._dict_or_empty(await self.explorium.enrich_business_challenges(bid)).get("data") or {}
+                if challenges_data:
+                    enrichment_data[bid]["challenges"] = challenges_data
+                    print(f">>> [Signals] Challenges OK for {company_name}", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Challenges error for {company_name}: {e}", flush=True)
 
-        try:
-            # Business challenges
-            challenges_result = await self.explorium.bulk_enrich_business_challenges(business_ids)
-            challenges_data = _extract_bulk_data(challenges_result, "challenges")
-            for bid, data in challenges_data.items():
-                if bid not in enrichment_data:
-                    enrichment_data[bid] = {}
-                enrichment_data[bid]["challenges"] = data
-        except Exception as e:
-            print(f">>> [Signals] Challenges enrichment error: {e}", flush=True)
+            # 4. Financial indicators
+            try:
+                financial_data = self._dict_or_empty(await self.explorium.enrich_financial_indicators(bid)).get("data") or {}
+                if financial_data:
+                    enrichment_data[bid]["financial"] = financial_data
+                    print(f">>> [Signals] Financial OK for {company_name}: revenue_growth={financial_data.get('revenue_growth_percentage')}", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Financial error for {company_name}: {e}", flush=True)
 
-        try:
-            # Financial indicators
-            financial_result = await self.explorium.bulk_enrich_financial_indicators(business_ids)
-            financial_data = _extract_bulk_data(financial_result, "financial")
-            for bid, data in financial_data.items():
-                if bid not in enrichment_data:
-                    enrichment_data[bid] = {}
-                enrichment_data[bid]["financial"] = data
-        except Exception as e:
-            print(f">>> [Signals] Financial enrichment error: {e}", flush=True)
-        
-        # If no enrichment data was collected, ensure all matched companies still get processed
-        if not enrichment_data:
-            for bid in business_ids:
-                enrichment_data[bid] = {}
+            # 5. LinkedIn posts (for activity signals)
+            try:
+                posts_data = (self._dict_or_empty(await self.explorium.enrich_linkedin_posts(bid)).get("data") or {})
+                if posts_data:
+                    enrichment_data[bid]["linkedin_posts"] = posts_data
+                    print(f">>> [Signals] LinkedIn posts OK for {company_name}", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] LinkedIn posts error for {company_name}: {e}", flush=True)
 
         # Process enrichment data into signals
         for business_id, data in enrichment_data.items():
@@ -531,60 +493,136 @@ class SignalDetectionService:
                     "confidence": confidence
                 })
             
-            # Process firmographics signals
+            # Process firmographics signals — extract any available data
             fg = data.get("firmographics", {})
-            revenue = fg.get("yearly_revenue_exact")
-            if revenue and revenue > 10000000:  # $10M+
-                company_signals.append({
-                    "type": "revenue_signal",
-                    "description": f"High revenue company (${revenue:,})",
-                    "urgency": "medium",
-                    "confidence": 85
-                })
-            
-            employee_range = fg.get("number_of_employees_range")
-            if employee_range and "1001-5000" in employee_range:
-                company_signals.append({
-                    "type": "size_signal",
-                    "description": f"Mid-sized company ({employee_range} employees)",
-                    "urgency": "medium",
-                    "confidence": 80
-                })
-            
-            # Process traffic signals
-            traffic = data.get("traffic", {})
-            visits = traffic.get("visits")
-            if visits and visits > 10000:
-                company_signals.append({
-                    "type": "traffic_signal",
-                    "description": f"High website traffic ({visits:,} visits)",
-                    "urgency": "medium",
-                    "confidence": 75
-                })
-            
+            revenue = fg.get("yearly_revenue_exact") or fg.get("yearly_revenue") or fg.get("revenue_usd")
+            if revenue:
+                try:
+                    revenue = float(revenue)
+                    if revenue > 10_000_000:
+                        company_signals.append({"type": "revenue_signal", "description": f"High revenue company (${revenue:,.0f})", "urgency": "high", "confidence": 85})
+                    elif revenue > 1_000_000:
+                        company_signals.append({"type": "revenue_signal", "description": f"Growing company (${revenue:,.0f} revenue)", "urgency": "medium", "confidence": 75})
+                except (ValueError, TypeError):
+                    pass
+
+            employee_range = fg.get("number_of_employees_range") or fg.get("employees_range")
+            if employee_range:
+                company_signals.append({"type": "size_signal", "description": f"Company size: {employee_range} employees", "urgency": "medium", "confidence": 80})
+
+            industry = fg.get("naics_description") or fg.get("linkedin_industry_category") or fg.get("primary_industry") or fg.get("industry")
+            if industry:
+                company_signals.append({"type": "industry_signal", "description": f"Industry: {industry}", "urgency": "low", "confidence": 85})
+
+            founded = fg.get("year_founded") or fg.get("founded_year")
+            if founded:
+                try:
+                    from datetime import datetime
+                    age = datetime.now().year - int(founded)
+                    if age <= 3:
+                        company_signals.append({"type": "startup_signal", "description": f"Early-stage company (founded {founded})", "urgency": "high", "confidence": 80})
+                    elif age <= 7:
+                        company_signals.append({"type": "growth_stage", "description": f"Growth-stage company (founded {founded})", "urgency": "medium", "confidence": 75})
+                except (ValueError, TypeError):
+                    pass
+
+            country = fg.get("country_name") or fg.get("country")
+            city = fg.get("city_name") or fg.get("city")
+            if country or city:
+                location = ", ".join(filter(None, [city, country]))
+                company_signals.append({"type": "location_signal", "description": f"Headquartered in {location}", "urgency": "low", "confidence": 90})
+
             # Process challenges signals
             challenges = data.get("challenges", {})
-            challenge_categories = challenges.get("challenge_categories", [])
+            # Handle both dict and list shapes
+            if isinstance(challenges, dict):
+                challenge_categories = challenges.get("challenge_categories", []) or challenges.get("challenges", [])
+            elif isinstance(challenges, list):
+                challenge_categories = challenges
+            else:
+                challenge_categories = []
             for cat in challenge_categories[:3]:
-                category_name = cat.get("category", "")
-                company_signals.append({
-                    "type": "challenge_signal",
-                    "description": f"Business challenge: {category_name}",
-                    "urgency": "high",
-                    "confidence": 70
+                if isinstance(cat, dict):
+                    category_name = cat.get("category", "") or cat.get("challenge", "") or cat.get("name", "")
+                elif isinstance(cat, str):
+                    category_name = cat
+                else:
+                    continue
+                if category_name:
+                    company_signals.append({
+                        "type": "challenge_signal",
+                        "description": f"Business challenge: {category_name}",
+                        "urgency": "high",
+                        "confidence": 70
                 })
             
             # Process financial signals
             financial = data.get("financial", {})
-            revenue_growth = financial.get("revenue_growth_percentage")
-            if revenue_growth and revenue_growth > 20:
-                company_signals.append({
-                    "type": "growth_signal",
-                    "description": f"Strong revenue growth ({revenue_growth}%)",
-                    "urgency": "high",
-                    "confidence": 90
-                })
-            
+            if isinstance(financial, dict):
+                revenue_growth = financial.get("revenue_growth_percentage") or financial.get("revenue_growth")
+                if revenue_growth:
+                    try:
+                        rg = float(revenue_growth)
+                        if rg > 20:
+                            company_signals.append({"type": "growth_signal", "description": f"Strong revenue growth ({rg:.0f}%)", "urgency": "high", "confidence": 90})
+                        elif rg > 0:
+                            company_signals.append({"type": "growth_signal", "description": f"Positive revenue growth ({rg:.0f}%)", "urgency": "medium", "confidence": 75})
+                    except (ValueError, TypeError):
+                        pass
+
+                # Check for other financial indicators
+                for key in ["total_funding", "latest_funding_amount", "funding_total"]:
+                    funding = financial.get(key)
+                    if funding:
+                        try:
+                            funding_val = float(funding)
+                            if funding_val > 0:
+                                company_signals.append({"type": "funding_signal", "description": f"Funding: ${funding_val:,.0f}", "urgency": "high", "confidence": 85})
+                                break
+                        except (ValueError, TypeError):
+                            pass
+
+            # Process LinkedIn posts for activity signals
+            linkedin_posts = data.get("linkedin_posts", {})
+            if isinstance(linkedin_posts, dict):
+                posts = linkedin_posts.get("posts", []) or linkedin_posts.get("recent_posts", [])
+                if posts and len(posts) > 0:
+                    company_signals.append({
+                        "type": "social_activity",
+                        "description": f"Active on LinkedIn ({len(posts)} recent posts)",
+                        "urgency": "low",
+                        "confidence": 70
+                    })
+                    # Check post content for specific signals
+                    for post in posts[:5]:
+                        text = (post.get("text", "") or post.get("content", "") or "").lower()
+                        if any(w in text for w in ["hiring", "join our team", "open role", "job opening"]):
+                            company_signals.append({"type": "hiring_signal", "description": "Posting about job openings on LinkedIn", "urgency": "high", "confidence": 80})
+                            break
+                    for post in posts[:5]:
+                        text = (post.get("text", "") or post.get("content", "") or "").lower()
+                        if any(w in text for w in ["launch", "announcing", "new product", "released", "excited to share"]):
+                            company_signals.append({"type": "product_launch", "description": "Recently announced product/feature launch", "urgency": "high", "confidence": 75})
+                            break
+
+            # Also extract signals from the company data passed in from search results
+            company_data = business_to_company.get(business_id, {})
+            if company_data.get("funding_stage"):
+                stage = str(company_data["funding_stage"]).lower()
+                if any(s in stage for s in ["series a", "series b", "series c", "seed"]):
+                    company_signals.append({"type": "funding_stage", "description": f"Funding stage: {company_data['funding_stage']}", "urgency": "high", "confidence": 85})
+            tech = company_data.get("technologies", [])
+            if tech and isinstance(tech, list) and len(tech) > 0:
+                company_signals.append({"type": "tech_stack", "description": f"Tech stack includes: {', '.join(str(t) for t in tech[:5])}", "urgency": "medium", "confidence": 75})
+            growth = company_data.get("employee_growth_6m_percent") or company_data.get("employee_growth_12m_percent")
+            if growth:
+                try:
+                    g = float(growth)
+                    if g > 20:
+                        company_signals.append({"type": "rapid_growth", "description": f"Rapid employee growth ({g:.0f}%)", "urgency": "high", "confidence": 85})
+                except (ValueError, TypeError):
+                    pass
+
             # Deduplicate signals
             seen_descriptions = set()
             unique_signals = []

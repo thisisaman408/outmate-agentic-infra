@@ -76,7 +76,23 @@ type ChatSession = {
 
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
 const CHAT_STORAGE_USER_KEY = "nlp_enrichment_user_id"
+const CAMPAIGN_STATE_KEY = "nlp_enrichment_campaign_state_v2"
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+const CREDIT_LABELS: Record<string, string> = {
+  explorium_searches: "Explorium searches",
+  contactout_company_enrichments: "ContactOut company enrichments",
+  contactout_decision_makers: "ContactOut decision makers",
+}
+
+const formatCreditLabel = (key: string) => {
+  if (CREDIT_LABELS[key]) return CREDIT_LABELS[key]
+  return key
+    .replace(/_/g, " ")
+    .split(" ")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ")
+}
 
 const PROMPT_LIBRARY: PromptLibraryItem[] = [
   // --- Build Lead Lists ---
@@ -241,6 +257,10 @@ export default function DatabaseFinderPage() {
   const [isImportingFilters, setIsImportingFilters] = useState(false)
   const [isVoiceListening, setIsVoiceListening] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
+  const [creditUsage, setCreditUsage] = useState<Record<string, number> | null>(null)
+  const creditUsageEntries = creditUsage ? Object.entries(creditUsage) : []
+  const totalCreditsUsed = creditUsageEntries.reduce((sum, [, value]) => sum + (value ?? 0), 0)
+  const hasHydratedCampaignState = useRef(false)
 
   // Agent conversation state
   const [agentMessages, setAgentMessages] = useState<Array<{role: "user" | "assistant", content: string}>>([])
@@ -328,6 +348,45 @@ export default function DatabaseFinderPage() {
       if (data.connected) setLinkedinConnected(true)
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || hasHydratedCampaignState.current) return
+    const stored = window.localStorage.getItem(CAMPAIGN_STATE_KEY)
+    if (!stored) {
+      hasHydratedCampaignState.current = true
+      return
+    }
+    try {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed.detectedSignals)) setDetectedSignals(parsed.detectedSignals)
+      if (parsed.campaignDraft) setCampaignDraft(parsed.campaignDraft)
+      if (parsed.campaignApproved) setCampaignApproved(parsed.campaignApproved)
+      if (parsed.selectedRecipients) setSelectedRecipients(new Set(parsed.selectedRecipients))
+      if (parsed.sentRecipients) setSentRecipients(parsed.sentRecipients)
+      if (parsed.sendingRecipients) setSendingRecipients(parsed.sendingRecipients)
+      if (parsed.sendErrors) setSendErrors(parsed.sendErrors)
+      if (parsed.creditUsage) setCreditUsage(parsed.creditUsage)
+    } catch (err) {
+      console.error("Failed to hydrate campaign state:", err)
+    } finally {
+      hasHydratedCampaignState.current = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const payload = {
+      detectedSignals,
+      campaignDraft,
+      campaignApproved,
+      selectedRecipients: Array.from(selectedRecipients),
+      sentRecipients,
+      sendingRecipients,
+      sendErrors,
+      creditUsage,
+    }
+    window.localStorage.setItem(CAMPAIGN_STATE_KEY, JSON.stringify(payload))
+  }, [detectedSignals, campaignDraft, campaignApproved, selectedRecipients, sentRecipients, sendingRecipients, sendErrors, creditUsage])
 
   const handleConnectGmail = async () => {
     try {
@@ -1299,6 +1358,15 @@ const syncChatWithServer = async (session: ChatSession) => {
       console.log("Search API Response:", data)
       console.log("API Response Keys:", Object.keys(data))
       console.log("Intent from API:", data.nlp_analysis?.categorized_intent || data.intent)
+
+      const returnedCreditUsage =
+        data.service_results?.credit_usage ||
+        data.credit_usage ||
+        data.data?.credit_usage ||
+        null
+      setCreditUsage(
+        returnedCreditUsage && Object.keys(returnedCreditUsage).length ? returnedCreditUsage : null
+      )
 
       let mappedResults = []
       const searchIntent = data.nlp_analysis?.categorized_intent === "prospect" ? "prospect" : "business"
@@ -3043,6 +3111,29 @@ const syncChatWithServer = async (session: ChatSession) => {
                     )}
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {creditUsageEntries.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Credit usage</CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Credits consumed for the latest search run
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Total: {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {creditUsageEntries.map(([key, value]) => (
+                    <Badge key={key} variant="outline">
+                      {formatCreditLabel(key)}: {value}
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
