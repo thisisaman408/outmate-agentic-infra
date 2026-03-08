@@ -144,7 +144,12 @@ class SearchService:
             }
         }
 
-    async def _comprehensive_enrichment(self, companies: List[Dict[str, Any]]):
+    async def _comprehensive_enrichment(
+        self,
+        companies: List[Dict[str, Any]],
+        include_crust_linkedin_posts: bool = True,
+        credit_usage: Optional[Dict[str, int]] = None,
+    ):
         """
         Parallel enrichment from:
         1. ContactOut (Company + DMs)
@@ -163,19 +168,25 @@ class SearchService:
             name = company.get("name")
             
             # 1. ContactOut (Company + DMs)
-            tasks.append(self._enrich_company_from_contactout(company, contactout))
-            tasks.append(self._enrich_decision_makers(company, contactout))
+            tasks.append(self._enrich_company_from_contactout(company, contactout, credit_usage))
+            tasks.append(self._enrich_decision_makers(company, contactout, credit_usage))
             
             # 2. Explorium (Match)
             tasks.append(self._enrich_company_from_explorium(company, explorium))
             
             # 3. Crustdata (LinkedIn Posts)
-            tasks.append(self._enrich_from_linkedin_posts(company))
+            if include_crust_linkedin_posts:
+                tasks.append(self._enrich_from_linkedin_posts(company))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _enrich_company_from_contactout(self, company: Dict[str, Any], service: ContactOutService):
+    async def _enrich_company_from_contactout(
+        self,
+        company: Dict[str, Any],
+        service: ContactOutService,
+        credit_usage: Optional[Dict[str, int]] = None,
+    ):
         domain = company.get("domain")
         if not domain: return
         # Guard: if original query was a pure name and similarity to domain is low, skip mega-brand enrichment
@@ -232,8 +243,16 @@ class SearchService:
             print(f">>> [SearchService] Merged {len(merged_keys)} fields from ContactOut: {merged_keys}", flush=True)
         except Exception as e:
             logger.warning(f"ContactOut enrichment failed for {domain}: {e}")
+        finally:
+            if credit_usage is not None:
+                credit_usage["contactout_company_enrichments"] = credit_usage.get("contactout_company_enrichments", 0) + 1
 
-    async def _enrich_decision_makers(self, company: Dict[str, Any], service: ContactOutService):
+    async def _enrich_decision_makers(
+        self,
+        company: Dict[str, Any],
+        service: ContactOutService,
+        credit_usage: Optional[Dict[str, int]] = None,
+    ):
         domain = company.get("domain")
         if not domain: return
         try:
@@ -246,6 +265,9 @@ class SearchService:
             company["decision_makers"] = [service.normalize_decision_maker(p) for p in profiles]
         except Exception as e:
             logger.warning(f"Decision makers fetch failed for {domain}: {e}")
+        finally:
+            if credit_usage is not None:
+                credit_usage["contactout_decision_makers"] = credit_usage.get("contactout_decision_makers", 0) + 1
 
     async def _enrich_company_from_explorium(self, company: Dict[str, Any], service: ExploriumService):
         try:
@@ -441,7 +463,13 @@ class SearchService:
         parts = [p for p in [n.get("headquarters_city"), n.get("headquarters_state"), n.get("headquarters_country")] if p]
         return ", ".join(parts) if parts else (n.get("location") or "N/A")
 
-    async def search_companies_explorium(self, filters: Dict[str, Any], limit: int = 3) -> Dict[str, Any]:
+    async def search_companies_explorium(
+        self,
+        filters: Dict[str, Any],
+        limit: int = 3,
+        allow_crust_fallback: bool = True,
+        include_crust_linkedin_posts: bool = True,
+    ) -> Dict[str, Any]:
         """
         Search companies using Explorium API + ContactOut enrichment.
         This replaces the Crustdata-based search to avoid 401 errors.
@@ -450,6 +478,12 @@ class SearchService:
         print(f">>> [SearchService] search_companies_explorium called with filters: {filters}, limit: {limit}", flush=True)
         try:
             explorium = ExploriumService()
+
+            credit_usage = {
+                "explorium_searches": 1,
+                "contactout_company_enrichments": 0,
+                "contactout_decision_makers": 0,
+            }
             
             # Call Explorium API
             # Relax strict_filters to allow internal broadening
@@ -460,15 +494,20 @@ class SearchService:
             print(f">>> [SearchService] Explorium returned {len(result.get('companies', []))} companies", flush=True)
             
             if not result or not result.get("companies"):
-                fallback = await self._fetch_random_crustdata_companies(filters, limit)
-                if fallback:
-                    return {"companies": fallback[:limit], "sources_used": ["crustdata_fallback"]}
+                if allow_crust_fallback:
+                    fallback = await self._fetch_random_crustdata_companies(filters, limit)
+                    if fallback:
+                        return {"companies": fallback[:limit], "sources_used": ["crustdata_fallback"]}
                 return {"companies": [], "sources_used": ["explorium"]}
 
             companies = result.get("companies", [])
             
             # Enrich with ContactOut data
-            await self._comprehensive_enrichment(companies)
+            await self._comprehensive_enrichment(
+                companies,
+                include_crust_linkedin_posts=include_crust_linkedin_posts,
+                credit_usage=credit_usage,
+            )
 
             # STRICT: Enforce location filter to prevent broader geographic results
             location_filters = filters.get("location")
@@ -554,15 +593,17 @@ class SearchService:
                 # If after mega-brand filtering we have nothing, it indicates a bad batch from provider
                 if not companies:
                     print(">>> [SearchService] All results were mega-brands for B2B query. Returning empty.", flush=True)
-                    fallback = await self._fetch_random_crustdata_companies(filters, limit)
-                    if fallback:
-                        return {"companies": fallback[:limit], "sources_used": ["crustdata_fallback"]}
+                    if allow_crust_fallback:
+                        fallback = await self._fetch_random_crustdata_companies(filters, limit)
+                        if fallback:
+                            return {"companies": fallback[:limit], "sources_used": ["crustdata_fallback"]}
                     return {"companies": [], "sources_used": ["explorium"]}
 
             
             return {
                 "companies": companies,
-                "sources_used": ["explorium", "contactout"]
+                "sources_used": ["explorium", "contactout"],
+                "credit_usage": credit_usage,
             }
             
         except Exception as e:

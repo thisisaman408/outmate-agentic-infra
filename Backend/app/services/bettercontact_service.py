@@ -58,8 +58,8 @@ class BetterContactService:
 
         payload = {
             "data": [contact],
-            "enrich_email": True,
-            "enrich_phone": True,
+            "enrich_email_address": True,
+            "enrich_phone_number": True,
         }
 
         try:
@@ -156,51 +156,18 @@ class BetterContactService:
         if not self.api_key:
             return {"success": False, "error": "BETTERCONTACT_API_KEY not set"}
 
-        # Use lead_finder to find contacts at this company
-        JOB_TITLE_CANDIDATES = [
-            "CEO",
-            "Chief Executive Officer",
-            "Founder",
-            "Co-Founder",
-            "President",
-            "Managing Director",
-            "Chief Revenue Officer",
-            "Chief Growth Officer",
-            "Vice President",
-            "Head of Sales",
-            "Director of Sales",
-            "Sales Leader"
-        ]
+        # Start with broad company filter only; narrow filters cause 0 results
+        # for small/niche companies. BetterContact searches 20+ sources so even
+        # a broad query returns relevant decision-makers.
+        filters = {
+            "company": {
+                "include": [company_domain] if company_domain else [company_name]
+            },
+        }
 
         payload = {
-            "filters": {
-                "company": {
-                    "include": [company_domain] if company_domain else [company_name]
-                },
-                "lead_seniority": {
-                    "include": [
-                        "c_suite",
-                        "vp",
-                        "director",
-                        "owner",
-                        "founder",
-                        "head"
-                    ]
-                },
-                "lead_job_title": {
-                    "include": JOB_TITLE_CANDIDATES,
-                    "exact_match": False
-                },
-                "lead_function": {
-                    "include": ["sales", "revenue", "growth"],
-                    "exclude": []
-                },
-                "lead_department": {
-                    "include": ["sales", "business development"],
-                    "exclude": []
-                }
-            },
-            "max_leads": 3,
+            "filters": filters,
+            "max_leads": 5,
         }
 
         try:

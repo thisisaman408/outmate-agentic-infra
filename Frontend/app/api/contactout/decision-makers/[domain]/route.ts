@@ -29,11 +29,17 @@ export async function GET(
     const url = `${backendUrl}/api/contactout/decision-makers/${encodeURIComponent(domain)}?page=${page}`
     console.log('Proxying to backend:', url)
 
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
+
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     })
 
     const responseData = await response.json()

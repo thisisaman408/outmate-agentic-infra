@@ -13,6 +13,72 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { exportToCSV } from "@/lib/export-csv"
 
+const formatEmployeesDisplay = (value?: string | number) => {
+  if (value === undefined || value === null) return "Employees not available"
+  const text = typeof value === "number" ? `${value}` : value
+  const trimmed = text.trim()
+  if (!trimmed) return "Employees not available"
+  if (/^(not\s+specified|n\/a|unknown|tbd)/i.test(trimmed)) return "Employees not available"
+  const sanitized = trimmed.replace(/\bemployees?\b\.?/gi, "").trim()
+  const display = sanitized || trimmed
+  return `${display} employees`
+}
+
+const cleanPerplexityJson = (raw?: string) => {
+  if (!raw) return null
+  let payload = raw.trim()
+  if (payload.startsWith("Perplexity:")) {
+    payload = payload.replace(/^Perplexity:\s*/i, "")
+  }
+  if (payload.includes("```json")) {
+    const sections = payload.split("```json")
+    if (sections.length > 1) {
+      payload = sections[1].split("```")[0] || payload
+    }
+  } else {
+    const start = payload.indexOf("[")
+    const end = payload.lastIndexOf("]")
+    if (start !== -1 && end !== -1 && end > start) {
+      payload = payload.slice(start, end + 1)
+    } else if (payload.startsWith("{")) {
+      const braceEnd = payload.lastIndexOf("}")
+      if (braceEnd !== -1) {
+        payload = payload.slice(0, braceEnd + 1)
+      }
+    }
+  }
+  return payload
+}
+
+const parsePerplexityPayload = (details?: string) => {
+  const cleaned = cleanPerplexityJson(details)
+  if (!cleaned) return null
+  try {
+    const parsed = JSON.parse(cleaned)
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed[0]
+    if (parsed && typeof parsed === "object") return parsed
+  } catch (error) {
+    // ignore
+  }
+  return null
+}
+
+const extractPerplexityReason = (details?: string, preExtractedReason?: string) => {
+  if (preExtractedReason && preExtractedReason.trim()) return preExtractedReason.trim()
+  const payload = parsePerplexityPayload(details)
+  if (payload && typeof payload.reason === "string" && payload.reason.trim()) {
+    return payload.reason.trim()
+  }
+  if (!details) return null
+  const cleaned = cleanPerplexityJson(details)
+  if (cleaned && cleaned.length < details.trim().length) {
+    if (cleaned.startsWith("[") || cleaned.startsWith("{")) return null
+    return cleaned.trim()
+  }
+  if (details.trim().startsWith("[") || details.trim().startsWith("{")) return null
+  return details.trim()
+}
+
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
   const allMessages = [
@@ -78,6 +144,8 @@ export function AgenticSearchPanel() {
   const activeRecord = activeRecordId
     ? results.find((result, idx) => getCardKey(result, idx) === activeRecordId)
     : null
+  const activePerplexityPayload = activeRecord ? parsePerplexityPayload(activeRecord.perplexityDetails) : null
+  const activePerplexityReason = activeRecord ? extractPerplexityReason(activeRecord.perplexityDetails, activeRecord.perplexityReason) : null
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -255,16 +323,24 @@ export function AgenticSearchPanel() {
               {results.map((result, idx) => {
                 const cardKey = getCardKey(result, idx)
                 const isActiveCard = activeRecordId === cardKey
-                const contactName = result.contactName?.trim() || "Not found"
-                const contactTitle = result.title?.trim() || "N/A"
+                const perplexityPayload = parsePerplexityPayload(result.perplexityDetails)
+                const fallbackContacts = result.contacts || perplexityPayload?.contacts
+                const fallbackContact = fallbackContacts?.[0]
+                const contactFromPayload = fallbackContact?.name?.trim()
+                const titleFromPayload = fallbackContact?.title?.trim() || fallbackContact?.role?.trim()
+                const contactName = result.contactName?.trim() || contactFromPayload || "Not found"
+                const contactTitle = (result.title?.trim() || titleFromPayload) || "N/A"
                 const rawEmail = result.email?.trim() || ""
                 const contactEmail = rawEmail || "Email not available"
-                const employeesLabel = result.employees?.trim()
+                const employeesDisplay = formatEmployeesDisplay(
+                  result.employees || perplexityPayload?.employees || perplexityPayload?.teamSize
+                )
                 const companyName = result.companyName?.trim() || "Unnamed company"
                 const matchScore = result.score ?? 0
-                const locationLabel = result.location?.trim() || "Location not specified"
+                const locationLabel = (result.location || perplexityPayload?.location)?.trim() || "Location not specified"
                 const reasonText = result.reason?.trim() || "No reasoning provided yet."
                 const industryLabel = result.industry || "Industry Unknown"
+                const perplexityReason = extractPerplexityReason(result.perplexityDetails, result.perplexityReason)
                 const initialLetter = (companyName.charAt(0) || "?").toUpperCase()
                 const engagedHref = rawEmail.includes("@") ? `mailto:${rawEmail}` : undefined
 
@@ -317,12 +393,12 @@ export function AgenticSearchPanel() {
                                 <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
                                 {reasonText}
                               </p>
-                              {result.perplexityDetails && (
-                                <p className="mt-3 text-xs text-blue-100 leading-relaxed line-clamp-3">
-                                  <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Intelligence:</span>
-                                  {result.perplexityDetails}
-                                </p>
-                              )}
+                            {perplexityReason && (
+                              <p className="mt-3 text-xs text-blue-100 leading-relaxed line-clamp-3">
+                                <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Perplexity:</span>
+                                {perplexityReason}
+                              </p>
+                            )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
@@ -332,7 +408,7 @@ export function AgenticSearchPanel() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <Users className="h-4 w-4 text-muted-foreground/60" />
-                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{employeesLabel} Employees</span>
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{employeesDisplay}</span>
                               </div>
                             </div>
                           </div>
@@ -385,51 +461,10 @@ export function AgenticSearchPanel() {
                   Close
                 </button>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-2xl">
-                  {(activeRecord.companyName?.charAt(0) || "?").toUpperCase()}
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    {activeRecord.industry && (
-                      <Badge className="bg-white/10 text-muted-foreground border-0 text-[10px] font-bold">{activeRecord.industry}</Badge>
-                    )}
-                    {activeRecord.location && (
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />{activeRecord.location}
-                      </span>
-                    )}
-                    {activeRecord.employees && (
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                        <Users className="h-3 w-3" />{activeRecord.employees} employees
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">ICP Match Score</p>
-                  <div className="text-3xl font-black text-blue-400">{activeRecord.score ?? 0}%</div>
-                </div>
-                {activeRecord.contactName && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Target Stakeholder</p>
-                    <p className="font-bold text-sm">{activeRecord.contactName}</p>
-                    {activeRecord.title && <p className="text-xs text-blue-400/80">{activeRecord.title}</p>}
-                  </div>
-                )}
-              </div>
-              <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Agent Reasoning</p>
-                <p className="text-sm text-muted-foreground leading-relaxed">{activeRecord.reason}</p>
-              </div>
-              {activeRecord.perplexityDetails && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Deep Intelligence</p>
-                  <p className="text-sm text-blue-100 leading-relaxed">{activeRecord.perplexityDetails}</p>
-                </div>
+              <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
+              <p className="text-sm text-muted-foreground line-clamp-3">{activeRecord.reason}</p>
+              {activePerplexityReason && (
+                <p className="text-sm text-blue-100 line-clamp-3">{activePerplexityReason}</p>
               )}
             </motion.div>
           )}

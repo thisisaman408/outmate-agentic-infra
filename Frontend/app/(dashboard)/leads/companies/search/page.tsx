@@ -356,7 +356,7 @@ export default function InDbCompanySearchPage() {
     if (!companyId || !result) return
     setEnrichedData(prev => {
       const existing = prev[companyId] || {}
-      const updated = { ...existing }
+      const updated = { ...existing, success: result.success, not_found: result.not_found }
       if (result.email) {
         updated.email = {
           email: result.email,
@@ -368,12 +368,6 @@ export default function InDbCompanySearchPage() {
           phone: result.phone,
           credits_consumed: result.credits_consumed,
         }
-      }
-      if (!result.email && field === 'email') {
-        updated.email = result
-      }
-      if (!result.phone && field === 'phone') {
-        updated.phone = result
       }
       return {
         ...prev,
@@ -452,8 +446,10 @@ export default function InDbCompanySearchPage() {
           isLoading={isLoading}
           hasSearched={hasSearched}
           onEnrichReveal={async (companyId, field) => {
+            console.log('[Zap] onEnrichReveal called', { companyId, field, alreadyEnriched: !!enrichedData[companyId]?.[field], enriching: !!enrichingRows[companyId] })
             if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
             const company = companies.find(c => (c.domain || c.id) === companyId)
+            console.log('[Zap] company found:', !!company, company?.name, company?.domain)
             if (!company) return
             setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
             const result = await enrichCompany(company.name, company.domain, field)
@@ -467,8 +463,8 @@ export default function InDbCompanySearchPage() {
                 ? { loading: true }
                 : data?.success && !data?.not_found
                   ? {
-                    email: data.email ? { email: data.email, credits_consumed: data.credits_consumed } : undefined,
-                    phone: data.phone ? { phone: data.phone, credits_consumed: data.credits_consumed } : undefined,
+                    email: data.email || undefined,
+                    phone: data.phone || undefined,
                     contact_name: data.contact_name,
                     contact_title: data.contact_title,
                   }

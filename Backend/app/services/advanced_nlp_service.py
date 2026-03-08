@@ -7,8 +7,25 @@ import os
 import json
 import asyncio
 import re
+import warnings
 from typing import Dict, Any, List, Optional
 from fastapi import HTTPException
+
+# Silence Deprecation/PendingDeprecation warnings from libraries
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+try:
+    from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
+    warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
+except ImportError:
+    pass
+
+# Silence TensorFlow and oneDNN logs/warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+import logging
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
+
 import httpx
 from app.db.session import SessionLocal
 try:
@@ -17,6 +34,25 @@ except ImportError:  # fallback for environments without langchain_huggingface
     from langchain_community.embeddings import HuggingFaceEmbeddings
 from app.services.search_service import SearchService
 from app.services.filter_mapping_service import FilterMappingService
+
+try:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain.schema import Document
+except ImportError:
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_core.documents import Document
+    except ImportError:
+        RecursiveCharacterTextSplitter = None
+        Document = None
+
+try:
+    from langchain_postgres import PGVector
+except ImportError:
+    try:
+        from langchain_community.vectorstores import PGVector
+    except ImportError:
+        PGVector = None
 
 # LangGraph imports
 from langgraph.graph import StateGraph, END
@@ -491,14 +527,15 @@ class AdvancedNLPService:
             vector_store = PGVector(
                 embedding_function=self.embeddings,
                 collection_name="search_queries",
-                connection_string=self.db_url
+                connection_string=self.db_url,
+                use_jsonb=True,
             )
             
             # Search for similar queries
             similar_docs = vector_store.similarity_search(
                 query,
                 k=5,
-                filter={"type": "user_query"}
+                filter={"metadata": {"$contains": {"type": "user_query"}}}
             )
             
             similar_queries = [doc.page_content for doc in similar_docs]
@@ -779,16 +816,23 @@ class AdvancedNLPService:
                 session = SessionLocal()
                 try:
                     search_service = SearchService(session)
-                    result = await search_service.search_companies_explorium(filters=explorium_filters, limit=3)
+                    result = await search_service.search_companies_explorium(
+                        filters=explorium_filters,
+                        limit=3,
+                        allow_crust_fallback=False,
+                        include_crust_linkedin_posts=False,
+                    )
                 finally:
                     session.close()
 
                 companies = result.get("companies", [])
+                total_count = result.get("total", len(companies))
                 print(f">>> [Advanced NLP] Direct Explorium search returned {len(companies)} results", flush=True)
                 return {
                     "service": "companies",
                     "results": companies,
-                    "total_count": result.get("total", len(companies))
+                    "total_count": total_count,
+                    "credit_usage": result.get("credit_usage"),
                 }
                         
         except Exception as e:
@@ -815,9 +859,20 @@ class AdvancedNLPService:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    suggestions = data.get("suggestions", [])
+                    if isinstance(data, list):
+                        suggestions = data
+                    elif isinstance(data, dict):
+                        suggestions = data.get("suggestions", []) or data.get("data", [])
+                    else:
+                        suggestions = []
                     # Return top 5 suggestions
-                    return [s.get("value", "") for s in suggestions[:5] if s.get("value")]
+                    result = []
+                    for s in suggestions[:5]:
+                        if isinstance(s, dict) and s.get("value"):
+                            result.append(s["value"])
+                        elif isinstance(s, str) and s:
+                            result.append(s)
+                    return result
                     
         except Exception as e:
             print(f">>> [Advanced NLP] Autocomplete failed for {field}: {e}", flush=True)
@@ -855,7 +910,8 @@ class AdvancedNLPService:
             vector_store = PGVector(
                 embedding_function=self.embeddings,
                 collection_name="search_queries",
-                connection_string=self.db_url
+                connection_string=self.db_url,
+                use_jsonb=True,
             )
             
             # Store the query

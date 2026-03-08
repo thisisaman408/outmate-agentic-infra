@@ -245,6 +245,9 @@ class ExploriumService:
                     if not norm_sizes:
                         continue
                     mapped[dst] = {"values": norm_sizes}
+                elif dst in ["domain", "website", "country_code"]:
+                    # These filters often do not accept the {"values": [...]} wrap in some Explorium endpoints
+                    mapped[dst] = vals
                 else:
                     mapped[dst] = {"values": vals}
 
@@ -330,7 +333,10 @@ class ExploriumService:
 
         if domain or name:
             try:
-                inputs = [{"name": name, "domain": domain}]
+                # Ensure values are strings, not lists
+                d_val = domain[0] if isinstance(domain, list) and domain else domain
+                n_val = name[0] if isinstance(name, list) and name else name
+                inputs = [{"name": n_val, "domain": d_val}]
                 print(f">>> [ExploriumService] Attempting Explorium match with: {inputs}", flush=True)
                 match_res = await self.match_businesses(inputs)
                 print(f">>> [ExploriumService] Explorium match response status: {match_res.keys() if isinstance(match_res, dict) else type(match_res)}", flush=True)
@@ -705,6 +711,8 @@ class ExploriumService:
                     response=resp,
                 )
             return resp.json()
+
+    async def enrich_technographics(self, business_id: str) -> Dict[str, Any]:
         payload = {
             "business_id": business_id,
             "parameters": {},

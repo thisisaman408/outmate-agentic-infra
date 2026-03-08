@@ -56,6 +56,7 @@ async def natural_language_search(payload: Dict[str, Any], request: Request):
         service_results = nlp_result.get("service_results") or {}
         results = service_results.get("results", []) if isinstance(service_results, dict) else []
         total_count = service_results.get("total_count", len(results)) if isinstance(service_results, dict) else len(results)
+        credit_usage = service_results.get("credit_usage") if isinstance(service_results, dict) else None
         
         print(f">>> [NLP] Found {len(results)} results using {intent} search", flush=True)
         
@@ -63,8 +64,11 @@ async def natural_language_search(payload: Dict[str, Any], request: Request):
             "success": True,
             "results": {
                 "data": results,
-                "total_results": total_count
+                "total_results": total_count,
+                "credit_usage": credit_usage,
             },
+            "service_results": service_results,
+            "credit_usage": credit_usage,
             "intent": intent,
             "nlp_analysis": {
                 "categorized_intent": intent,
