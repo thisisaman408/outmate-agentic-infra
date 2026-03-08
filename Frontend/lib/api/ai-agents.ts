@@ -13,9 +13,11 @@ export interface AgenticSearchResult {
   industry: string
   employees: string
   location: string
-  contactName?: string
-  title?: string
-  email?: string
+  contactName: string
+  title: string
+  email: string
+  linkedin?: string
+  perplexityReason?: string
   perplexityDetails?: string
   perplexityReasoning?: any
 }

@@ -234,6 +234,13 @@ class ContactOutService:
         Called when user clicks "Reveal Contact" button.
         """
         try:
+            # Validate: ContactOut /people/linkedin only works with personal profiles, not company pages
+            if "/company/" in linkedin_url or "/school/" in linkedin_url:
+                raise ValueError(
+                    f"Cannot reveal contact info for a company/school LinkedIn page. "
+                    f"A personal LinkedIn profile URL (linkedin.com/in/...) is required."
+                )
+
             params = {
                 "profile": linkedin_url,
                 "include_phone": str(include_phone).lower()

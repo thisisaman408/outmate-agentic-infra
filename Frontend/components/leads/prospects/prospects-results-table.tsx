@@ -269,9 +269,13 @@ export function ProspectsResultsTable({
         let fieldValues: string[] = []
 
         try {
+            const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ linkedin_url: linkedinUrl }),
             })
             if (response.ok) {

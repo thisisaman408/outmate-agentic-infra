@@ -1,0 +1,14 @@
+const fs = require('fs');
+const path = 'app/(dashboard)/ai-powered-search/page.tsx';
+const content = fs.readFileSync(path, 'utf8');
+const marker = 'Found {tamPreview.count.toLocaleString()}';
+const markerIndex = content.indexOf(marker);
+if (markerIndex === -1) throw new Error('marker not found');
+const closingTag = '                    </CardDescription>';
+const closingIndex = content.indexOf(closingTag, markerIndex);
+if (closingIndex === -1) throw new Error('closing tag not found');
+const insertPos = closingIndex + closingTag.length;
+const addition = '\r\n                    {creditUsage && (\r\n                      <p className= text-[11px] text-muted-foreground mt-1>\r\n                        {summarizeCreditUsage(creditUsage)}\r\n                      </p>\r\n                    )}';
+const before = content.slice(0, insertPos);
+const after = content.slice(insertPos);
+fs.writeFileSync(path, before + addition + after, 'utf8');

@@ -18,11 +18,17 @@ export async function GET(
 
     console.log('Proxying to backend:', `${backendUrl}/api/contactout/company/${encodeURIComponent(domain)}`)
 
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
+
     const response = await fetch(`${backendUrl}/api/contactout/company/${encodeURIComponent(domain)}`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     })
 
     const responseData = await response.json()
