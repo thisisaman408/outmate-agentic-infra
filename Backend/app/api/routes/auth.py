@@ -1,17 +1,21 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import uuid
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.hash import pbkdf2_sha256
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limiting import limiter, RateLimits
+from app.core.redis import get_redis
 from app.db.deps import get_db
 from app.db.models.user import User
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +62,7 @@ def create_access_token(user: User) -> str:
         "sub": str(user.id),
         "email": user.email,
         "exp": expire,
+        "jti": str(uuid.uuid4()),  # unique token ID — used for revocation
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 
@@ -74,19 +79,20 @@ def user_response(user: User) -> dict:
 
 
 @router.post("/register")
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    if len(request.password) < 8:
+@limiter.limit(RateLimits.AUTH)
+async def register(http_request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
+    if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
-    existing = db.query(User).filter(User.email == request.email).first()
+    existing = db.query(User).filter(User.email == body.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already in use")
 
     user = User(
-        email=request.email,
-        full_name=request.name,
-        company_name=request.workspace,
-        hashed_password=hash_password(request.password),
+        email=body.email,
+        full_name=body.name,
+        company_name=body.workspace,
+        hashed_password=hash_password(body.password),
     )
     db.add(user)
     db.commit()
@@ -96,9 +102,10 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-async def login(request: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == request.email).first()
-    if not user or not user.hashed_password or not verify_password(request.password, user.hashed_password):
+@limiter.limit(RateLimits.AUTH)
+async def login(http_request: Request, body: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email).first()
+    if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user.last_login_at = datetime.utcnow()
@@ -106,3 +113,32 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     token = create_access_token(user)
 
     return {"token": token, "user": user_response(user)}
+
+
+_bearer = HTTPBearer()
+
+@router.post("/logout")
+@limiter.limit(RateLimits.AUTH)
+async def logout(
+    http_request: Request,
+    credentials: HTTPAuthorizationCredentials = Security(_bearer),
+    redis=Depends(get_redis),
+):
+    """
+    Revoke the current JWT by storing its jti in Redis until it naturally expires.
+    Subsequent requests using this token will be rejected by get_current_user().
+    """
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        # Token is already invalid — treat as successful logout
+        return {"detail": "Logged out"}
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti and exp and redis is not None:
+        ttl = max(int(exp - datetime.utcnow().timestamp()), 1)
+        await redis.setex(f"revoked_jti:{jti}", ttl, "1")
+
+    return {"detail": "Logged out"}

@@ -96,9 +96,11 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
             "raw": response,
         }
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
+        logger.error(f"Upstream HTTP error: {exc}")
+        raise HTTPException(status_code=exc.response.status_code, detail="Upstream service error")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error(f"Campaign draft error: {exc}")
+        raise HTTPException(status_code=500, detail="An error occurred generating the campaign draft")
 
 
 # --- Gmail OAuth2 ---
@@ -113,7 +115,7 @@ async def gmail_auth_url(return_to: str = Query("/ai-powered-search")):
         return {"auth_url": url}
     except Exception as e:
         logger.error(f"Gmail auth URL error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate auth URL")
 
 
 @public_router.get("/gmail/callback")

@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call backend ContactOut API
-    const backendUrl = `http://localhost:8000/api/contactout/linkedin-enrich`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/v1/contactout/linkedin-enrich`
     
     const requestBody = {
       linkedin_url,

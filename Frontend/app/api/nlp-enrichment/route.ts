@@ -151,14 +151,14 @@ async function routeToFeature(plan: Plan) {
 
 async function fetchSample(target: Target, filters: Record<string, any>, limit: number) {
   if (target === 'prospects') {
-    const r = await fetch(`${BACKEND_BASE}/api/prospects/search`, {
+    const r = await fetch(`${BACKEND_BASE}/api/v1/prospects/search`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters, options: { limit } })
     })
     const data = await r.json().catch(() => ({}))
     return { raw: data, items: data?.data?.prospects || data?.prospects || [] }
   } else {
-    const r = await fetch(`${BACKEND_BASE}/api/leads/search/companies`, {
+    const r = await fetch(`${BACKEND_BASE}/api/v1/leads/search/companies`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters, options: { limit } })
     })
@@ -244,6 +244,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response)
   } catch (e: any) {
     console.error('NLP enrichment error:', e)
-    return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

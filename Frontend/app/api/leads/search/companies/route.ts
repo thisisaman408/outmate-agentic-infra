@@ -6,15 +6,14 @@ export async function POST(request: NextRequest) {
     const url = new URL(request.url)
     const demo = url.searchParams.get('demo') === 'true'
     const body = await request.json()
-    // Use hardcoded backend URL to avoid undefined issues
-    const backendUrl = 'http://localhost:8000'
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
 
-    console.log('=== DEBUG: Using hardcoded backend URL ===')
+    console.log('=== DEBUG: backend URL ===')
     console.log('backendUrl:', backendUrl)
-    console.log('Proxying to backend:', `${backendUrl}/api/leads/search/companies`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/leads/search/companies`)
     console.log('Request body:', body)
 
-    const response = await fetch(`${backendUrl}/api/leads/search/companies`, {
+    const response = await fetch(`${backendUrl}/api/v1/leads/search/companies`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

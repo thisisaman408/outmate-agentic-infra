@@ -11,8 +11,7 @@ This module provides centralized configuration management with:
 No hardcoded secrets - all come from environment variables.
 """
 
-import os
-import json
+import logging
 from pathlib import Path
 from typing import Optional, List
 from pydantic_settings import BaseSettings
@@ -322,11 +321,17 @@ class Settings(BaseSettings):
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:
-        """Ensure JWT secret is cryptographically strong"""
-        if not v or len(v) < 32:
+        """Ensure JWT secret is cryptographically strong (min 64 chars for HS256)."""
+        if not v or len(v) < 64:
             raise ValueError(
-                "JWT_SECRET must be at least 32 characters. "
-                "Generate with: openssl rand -hex 32"
+                "JWT_SECRET must be at least 64 characters for production security. "
+                "Generate with: openssl rand -hex 64"
+            )
+        weak_values = {"super_secret", "secret", "password", "jwt_secret", "outmate"}
+        if any(w in v.lower() for w in weak_values):
+            raise ValueError(
+                "JWT_SECRET appears to be a weak placeholder. "
+                "Use a cryptographically random value: openssl rand -hex 64"
             )
         return v
 
@@ -471,7 +476,7 @@ def load_settings() -> Settings:
             f"For production, use Azure Key Vault or environment variables.\n"
             f"{'='*70}\n"
         )
-        print(error_msg)
+        logging.critical(error_msg)
         raise
 
 

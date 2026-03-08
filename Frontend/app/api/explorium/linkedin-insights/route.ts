@@ -14,10 +14,10 @@ export async function POST(request: NextRequest) {
 
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/explorium/linkedin-insights`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/explorium/linkedin-insights`)
 
     const authHeader = request.headers.get('authorization') || ''
-    const response = await fetch(`${backendUrl}/api/explorium/linkedin-insights`, {
+    const response = await fetch(`${backendUrl}/api/v1/explorium/linkedin-insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

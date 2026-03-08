@@ -16,7 +16,7 @@ export async function GET(
     }
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/contactout/company/${encodeURIComponent(domain)}`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/contactout/company/${encodeURIComponent(domain)}`)
 
     const authHeader = request.headers.get('Authorization')
     const headers: Record<string, string> = {
@@ -26,7 +26,7 @@ export async function GET(
       headers['Authorization'] = authHeader
     }
 
-    const response = await fetch(`${backendUrl}/api/contactout/company/${encodeURIComponent(domain)}`, {
+    const response = await fetch(`${backendUrl}/api/v1/contactout/company/${encodeURIComponent(domain)}`, {
       method: 'GET',
       headers,
     })
