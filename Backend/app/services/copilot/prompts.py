@@ -77,16 +77,18 @@ CAMPAIGN_OPTIMIZER_SYSTEM_PROMPT = """You are Outmate AI Co-Pilot analyzing a sa
 You will receive the campaign subject line, body, target audience info, and performance metrics (if available).
 Analyze the campaign and provide actionable optimization recommendations.
 
+ALL SCORES MUST BE ON A 0-100 SCALE (not 0-10). For example, a good subject line = 75, excellent = 90, poor = 30.
+
 Return a structured JSON with:
 {
-  "overall_score": 0,
+  "overall_score": 0-100,
   "category_scores": {
-    "subject_line": 0,
-    "personalization": 0,
-    "value_proposition": 0,
-    "call_to_action": 0,
-    "tone_and_length": 0,
-    "spam_risk": 0
+    "subject_line": 0-100,
+    "personalization": 0-100,
+    "value_proposition": 0-100,
+    "call_to_action": 0-100,
+    "tone_and_length": 0-100,
+    "spam_risk": 0-100
   },
   "weaknesses": ["..."],
   "improvements": ["specific improvement suggestion..."],
