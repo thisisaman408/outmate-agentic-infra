@@ -1,15 +1,21 @@
 """
 Pipeline Risk Service — detects stuck deals and pipeline health issues.
+Enriches deal companies with real data from Explorium before calling the LLM.
 """
 
 import os
 import uuid
 import logging
+import asyncio
 from datetime import date, datetime
 from sqlalchemy.orm import Session
 
 from app.services.openrouter_service import OpenRouterService
 from app.services.copilot.prompts import PIPELINE_RISK_SYSTEM_PROMPT
+from app.services.copilot.enrichment import (
+    enrich_company,
+    format_company_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +84,26 @@ class PipelineRiskService:
         if self.mock:
             result = MOCK_RESPONSE
         else:
+            # --- Enrich at-risk companies with real data ---
+            company_context_lines = []
+            try:
+                # Limit to top 3 at-risk to avoid too many API calls
+                enrich_tasks = [
+                    enrich_company(d["company"], d.get("domain"))
+                    for d in at_risk[:3]
+                ]
+                if enrich_tasks:
+                    enrich_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+                    for d, res in zip(at_risk[:3], enrich_results):
+                        if isinstance(res, dict) and res:
+                            ctx = format_company_context(res)
+                            if ctx:
+                                company_context_lines.append(f"--- {d['company']} ---\n{ctx}")
+            except Exception as exc:
+                logger.warning("Pipeline enrichment failed, falling back to LLM-only: %s", exc)
+
+            enrichment_block = "\n\n".join(company_context_lines) if company_context_lines else ""
+
             deals_text = "\n".join(
                 f"- {d['company']} | Stage: {d['stage']} | Days stale: {d['days_stale']} | Value: ${d.get('value', 0):,} | Risk: {d['risk_level']}"
                 for d in enriched_deals
@@ -87,8 +113,15 @@ class PipelineRiskService:
                 f"Total deals: {len(deals)}\n"
                 f"At-risk deals: {len(at_risk)}\n"
                 f"Total value at risk: ${total_at_risk_value:,}\n\n"
-                "Analyze this pipeline and generate risk alerts with recommended actions."
             )
+            if enrichment_block:
+                user_prompt += (
+                    "Below is VERIFIED real-time data about the at-risk companies. "
+                    "Use it to provide more specific recommended actions.\n\n"
+                    f"{enrichment_block}\n\n"
+                )
+            user_prompt += "Analyze this pipeline and generate risk alerts with recommended actions."
+
             result = await self.openrouter.chat_completion_structured(
                 system_prompt=PIPELINE_RISK_SYSTEM_PROMPT,
                 user_prompt=user_prompt,

@@ -1,6 +1,6 @@
 # Co-Pilot Feature — AI-Powered Sales Intelligence
 
-The Co-Pilot is an AI-powered sales assistant integrated into the Outmate platform. It provides daily briefs, meeting preparation, campaign optimization, and pipeline risk alerts — all driven by LLM-generated insights via OpenRouter.
+The Co-Pilot is an AI-powered sales assistant integrated into the Outmate platform. It provides daily briefs, meeting preparation, campaign optimization, and pipeline risk alerts — all driven by LLM-generated insights via OpenRouter, enriched with **real-time data** from Explorium and Tavily APIs.
 
 ---
 
@@ -12,22 +12,26 @@ The Co-Pilot is an AI-powered sales assistant integrated into the Outmate platfo
 - New signals detected (funding, hiring, tech changes)
 - Key metrics: leads, open rates, active campaigns
 - Available as a dashboard widget and in the copilot sidebar
+- **Enriched with**: real pipeline alerts from DB, campaign data, trending B2B news (Tavily)
 
 ### 2. Meeting Prep
 - Enter a company name and meeting date
 - Returns company snapshot, prospect profile, talking points, discovery questions
 - Identifies relevant signals, risk factors, and competitor mentions
 - Stores history for future reference
+- **Enriched with**: real company data from Explorium (firmographics, funding, tech stack, headcount), recent news (Tavily), prospect background (Tavily web search)
 
 ### 3. Campaign Optimizer
 - Paste your email subject line and body
 - Gets scored across 6 categories: subject line, personalization, value proposition, CTA, tone/length, spam risk
 - Returns specific weaknesses, improvements, suggested subjects, and predicted lift
+- **Enriched with**: real industry news for the target audience (Tavily)
 
 ### 4. Pipeline Alerts
 - Submit deals (company, stage, last activity, value) for risk scanning
 - Returns health score, risk summary, and at-risk deals with recommended actions
 - Alerts categorized by severity (red/yellow/green)
+- **Enriched with**: real company data for at-risk deals from Explorium (funding, hiring signals, tech stack)
 
 ### 5. Settings & Preferences
 - Toggle daily brief generation on/off
@@ -54,6 +58,7 @@ Backend/
 │   ├── schemas/copilot.py              # Pydantic request/response schemas
 │   ├── services/copilot/
 │   │   ├── copilot_service.py          # Main orchestrator
+│   │   ├── enrichment.py              # Real-time data enrichment (Explorium + Tavily)
 │   │   ├── daily_brief_service.py      # Daily brief generation
 │   │   ├── meeting_prep_service.py     # Meeting prep research
 │   │   ├── campaign_optimizer_service.py # Campaign scoring
@@ -125,11 +130,16 @@ All endpoints require authentication (`Authorization: Bearer <token>`).
 |----------|-------------|---------|
 | `MOCK_LLM` | Use mock responses instead of real LLM calls | `true` |
 | `OPENROUTER_API_KEY` | OpenRouter API key for LLM access | — |
+| `EXPLORIUM_API_KEY` | Explorium API key for company enrichment (firmographics, funding, tech stack) | — |
+| `TAVILY_API_KEY` | Tavily API key for real-time web/news search | — |
+| `SERPER_API_KEY` | Serper API key for Google search (used by AI agents) | — |
 | `SMTP_HOST` | SMTP server for email notifications | `None` |
 | `SMTP_PORT` | SMTP port | `587` |
 | `SMTP_USER` | SMTP username / sender email | `None` |
 | `SMTP_PASSWORD` | SMTP password | `None` |
 | `SMTP_FROM_EMAIL` | From address for outgoing emails | Falls back to `SMTP_USER` |
+
+> **Note**: Explorium and Tavily keys are optional. If missing or if API calls fail, the copilot gracefully falls back to LLM-only generation (without real-time data enrichment).
 
 ---
 
@@ -190,3 +200,39 @@ celery -A app.core.celery_app beat --loglevel=info
 - **Backend**: FastAPI, SQLAlchemy, PostgreSQL (Supabase), Alembic, Celery + Redis
 - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui
 - **AI**: OpenRouter (LLM gateway), structured JSON output parsing
+- **Data Enrichment**: Explorium (company firmographics, funding, tech stack), Tavily (real-time news/web search)
+
+---
+
+## Data Enrichment Architecture
+
+All copilot features follow a **"Enrich First, LLM Second"** pattern:
+
+```
+1. Try Explorium/Tavily APIs → fetch real company/news data
+2. If APIs succeed → inject verified data into LLM prompt → grounded results
+3. If APIs fail (timeout, rate limit, key missing) → fall back to LLM-only generation
+```
+
+### Enrichment Module (`enrichment.py`)
+
+| Function | Data Source | Used By |
+|----------|-----------|---------|
+| `enrich_company()` | Explorium (search + full enrichment) | Meeting Prep, Pipeline Alerts |
+| `fetch_recent_news()` | Tavily web search | Meeting Prep, Daily Brief, Campaign Optimizer |
+| `fetch_prospect_info()` | Tavily web search | Meeting Prep |
+| `format_company_context()` | Formatter | All services |
+| `format_news_context()` | Formatter | All services |
+| `format_prospect_context()` | Formatter | Meeting Prep |
+
+### What data is enriched per feature
+
+| Feature | Explorium | Tavily | DB Data |
+|---------|-----------|--------|---------|
+| **Meeting Prep** | Company firmographics, funding, tech stack, headcount | Company news, prospect background | — |
+| **Daily Brief** | — | Trending B2B news | Pipeline alerts, campaigns |
+| **Pipeline Alerts** | At-risk company data (top 3) | — | Deal data from request |
+| **Campaign Optimizer** | — | Target audience industry news | — |
+
+### Fallback Behavior
+Every enrichment call is wrapped in `try/except`. If any API is unavailable, the service falls back to the same LLM-only behavior as before — no errors are surfaced to the user.

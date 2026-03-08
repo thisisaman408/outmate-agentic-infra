@@ -1,5 +1,6 @@
 """
 Campaign Optimizer Service — scores and suggests improvements for email campaigns.
+Enriches with real target audience data from Explorium/Tavily before calling the LLM.
 """
 
 import os
@@ -9,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.services.openrouter_service import OpenRouterService
 from app.services.copilot.prompts import CAMPAIGN_OPTIMIZER_SYSTEM_PROMPT
+from app.services.copilot.enrichment import (
+    fetch_recent_news,
+    format_news_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,15 @@ class CampaignOptimizerService:
         if self.mock:
             analysis = MOCK_RESPONSE
         else:
+            # --- Enrich: fetch industry news for the target audience ---
+            news_block = ""
+            if target_audience:
+                try:
+                    news = await fetch_recent_news(f"{target_audience} industry trends", max_results=3)
+                    news_block = format_news_context(news)
+                except Exception as exc:
+                    logger.debug("Campaign optimizer news fetch failed: %s", exc)
+
             metrics_text = ""
             if metrics:
                 metrics_text = f"\nPerformance metrics: {metrics}"
@@ -80,8 +94,15 @@ class CampaignOptimizerService:
                 f"Email body:\n{email_body}\n"
                 f"Target audience: {target_audience or 'B2B sales prospects'}"
                 f"{metrics_text}\n\n"
-                "Analyze this campaign and provide optimization recommendations."
             )
+            if news_block:
+                user_prompt += (
+                    "Below is REAL industry news about the target audience. "
+                    "Use it to suggest more relevant and timely subject lines and openers.\n\n"
+                    f"{news_block}\n\n"
+                )
+            user_prompt += "Analyze this campaign and provide optimization recommendations."
+
             analysis = await self.openrouter.chat_completion_structured(
                 system_prompt=CAMPAIGN_OPTIMIZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
