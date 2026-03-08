@@ -77,10 +77,10 @@ export function FilterSidebar({ onSearch }: Props) {
       }
 
       console.log('=== DEBUG: About to call API ===')
-      console.log('API URL:', '/api/leads/search/companies')
+      console.log('API URL:', '/api/v1/leads/search/companies')
       console.log('Request body:', requestBody)
       
-      const response = await fetch('/api/leads/search/companies', {
+      const response = await fetch('/api/v1/leads/search/companies', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

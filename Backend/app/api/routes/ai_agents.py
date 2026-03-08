@@ -47,7 +47,7 @@ class PipelineRequest(BaseModel):
 
 @router.post("/search")
 @limiter.limit(RateLimits.SEARCH)
-async def agentic_search(http_request: Request, body: SearchRequest):
+async def agentic_search(request: Request, body: SearchRequest):
     """Deep agentic search for prospects and companies."""
     try:
         results = await ai_service.agentic_search(body.query)
@@ -60,7 +60,7 @@ async def agentic_search(http_request: Request, body: SearchRequest):
 
 @router.post("/research")
 @limiter.limit(RateLimits.SEARCH)
-async def company_research(http_request: Request, body: ResearchRequest):
+async def company_research(request: Request, body: ResearchRequest):
     """Deep intelligence research on a specific company."""
     try:
         result = await ai_service.deep_research(body.companyName, body.depth)
@@ -73,7 +73,7 @@ async def company_research(http_request: Request, body: ResearchRequest):
 
 @router.post("/lookalike")
 @limiter.limit(RateLimits.SEARCH)
-async def find_lookalikes(http_request: Request, body: LookalikeRequest):
+async def find_lookalikes(request: Request, body: LookalikeRequest):
     """Find lookalike companies based on seed pool."""
     try:
         results = await ai_service.find_lookalikes(body.seedCompanyIds)
@@ -86,7 +86,7 @@ async def find_lookalikes(http_request: Request, body: LookalikeRequest):
 
 @router.post("/predictive")
 @limiter.limit(RateLimits.SEARCH)
-async def score_leads(http_request: Request, body: PredictiveRequest):
+async def score_leads(request: Request, body: PredictiveRequest):
     """Predictive propensity scoring for a company."""
     try:
         results = await ai_service.predictive_scoring(body.model_dump())
@@ -100,7 +100,7 @@ async def score_leads(http_request: Request, body: PredictiveRequest):
 
 @router.post("/pipeline")
 @limiter.limit(RateLimits.DEFAULT)
-async def add_to_pipeline(http_request: Request, body: PipelineRequest):
+async def add_to_pipeline(request: Request, body: PipelineRequest):
     """Record a lookalike company in the pipeline cohort."""
     try:
         return await ai_service.add_to_pipeline(body.model_dump())

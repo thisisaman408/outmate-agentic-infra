@@ -82,7 +82,7 @@ export default function CompanyIdentificationPage() {
         return
       }
 
-      const response = await fetch('http://localhost:8000/api/crustdata/identify', {
+      const response = await fetch('http://localhost:8000/api/v1/crustdata/identify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

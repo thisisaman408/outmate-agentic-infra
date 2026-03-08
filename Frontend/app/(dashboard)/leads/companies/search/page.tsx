@@ -172,7 +172,7 @@ export default function InDbCompanySearchPage() {
     setCompanies([])
 
     try {
-      const response = await fetch(`/api/leads/search/companies`, {
+      const response = await fetch(`/api/v1/leads/search/companies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filters, options: { limit: 3 } }),
@@ -195,7 +195,7 @@ export default function InDbCompanySearchPage() {
 
   // Enrich a single company row
   const fetchCompaniesForFilters = async (filters: Record<string, any>) => {
-    const response = await fetch(`/api/leads/search/companies`, {
+    const response = await fetch(`/api/v1/leads/search/companies`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

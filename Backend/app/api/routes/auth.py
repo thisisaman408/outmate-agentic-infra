@@ -80,7 +80,7 @@ def user_response(user: User) -> dict:
 
 @router.post("/register")
 @limiter.limit(RateLimits.AUTH)
-async def register(http_request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
+async def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
@@ -103,7 +103,7 @@ async def register(http_request: Request, body: RegisterRequest, db: Session = D
 
 @router.post("/login")
 @limiter.limit(RateLimits.AUTH)
-async def login(http_request: Request, body: LoginRequest, db: Session = Depends(get_db)):
+async def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -120,7 +120,7 @@ _bearer = HTTPBearer()
 @router.post("/logout")
 @limiter.limit(RateLimits.AUTH)
 async def logout(
-    http_request: Request,
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Security(_bearer),
     redis=Depends(get_redis),
 ):

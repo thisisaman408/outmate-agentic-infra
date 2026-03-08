@@ -336,7 +336,7 @@ export default function DatabaseFinderPage() {
     }
 
     // Check Gmail status
-    fetch(`${API}/api/campaigns/gmail/status`).then(r => r.json()).then(data => {
+    fetch(`${API}/api/v1/campaigns/gmail/status`).then(r => r.json()).then(data => {
       if (data.connected) {
         setGmailConnected(true)
         setGmailEmail(data.email || "")
@@ -344,7 +344,7 @@ export default function DatabaseFinderPage() {
     }).catch(() => {})
 
     // Check LinkedIn (Unipile) status
-    fetch(`${API}/api/campaigns/linkedin/status`).then(r => r.json()).then(data => {
+    fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setLinkedinConnected(true)
     }).catch(() => {})
   }, [])
@@ -393,7 +393,7 @@ export default function DatabaseFinderPage() {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const returnPath = window.location.pathname || "/ai-powered-search"
       const res = await fetch(
-        `${API}/api/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+        `${API}/api/v1/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
       )
       const data = await res.json()
       if (data.auth_url) {
@@ -410,7 +410,7 @@ export default function DatabaseFinderPage() {
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-email`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to_email: toEmail, subject, body }),
@@ -435,7 +435,7 @@ export default function DatabaseFinderPage() {
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-linkedin`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ linkedin_url: linkedinUrl, message }),
@@ -574,7 +574,7 @@ const syncChatWithServer = async (session: ChatSession) => {
   const userId = getPersistentUserId()
   if (!userId) return
   try {
-    await fetch(`${API_BASE_URL}/api/chat/history`, {
+    await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -781,7 +781,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       try {
         const userId = getPersistentUserId()
         if (!userId) return
-        const response = await fetch(`${API_BASE_URL}/api/chat/history?user_id=${encodeURIComponent(userId)}`)
+        const response = await fetch(`${API_BASE_URL}/api/v1/chat/history?user_id=${encodeURIComponent(userId)}`)
         if (!response.ok) return
         const payload = await response.json()
         const sessions = Array.isArray(payload.sessions) ? payload.sessions.map(normalizeServerSession) : []
@@ -1013,7 +1013,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     setIsSearching(true)
     try {
       const targetLimit = Math.min(Math.max(results.length, 25), 100)
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/leads/search/companies`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/leads/search/companies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1246,7 +1246,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     setLatestExtractedFilters(extractedFilters)
 
     try {
-      const parseRes = await fetch(`${API}/api/chat/parse-query`, {
+      const parseRes = await fetch(`${API}/api/v1/chat/parse-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmedQuery })
@@ -1309,7 +1309,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
     const examples = buildExamples(trimmedQuery)
     setWorkflowSteps([
-      { title: "Categorizing Intent", tool: "LLM (Claude)", endpoint: "/api/chat/parse-query", input: { query: trimmedQuery }, output: { intent: searchIntent, extracted_filters: extractedFilters } },
+      { title: "Categorizing Intent", tool: "LLM (Claude)", endpoint: "/api/v1/chat/parse-query", input: { query: trimmedQuery }, output: { intent: searchIntent, extracted_filters: extractedFilters } },
       { title: "Filter Clarification", tool: "Filter Parser", endpoint: "client-side", input: { query: trimmedQuery, filters: extractedFilters }, output: { clarification_message: clarificationMessage, user_confirmation_required: true } },
     ])
 
@@ -1706,7 +1706,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         filters: latestExtractedFilters || {}
       }
 
-      const res = await fetch(`${API}/api/chat`, {
+      const res = await fetch(`${API}/api/v1/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: updatedMessages, context })
@@ -1981,7 +1981,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
       console.log("Sending for signal detection:", JSON.stringify(dataToSend, null, 2))
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/signals/detect`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2099,7 +2099,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         }
 
         try {
-          const signalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/signals/detect`, {
+          const signalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(signalPayload),
@@ -2119,7 +2119,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
       setClarification("Generating personalized campaign draft based on signals...")
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/campaigns/generate-draft`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/campaigns/generate-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -197,7 +197,7 @@ export function CampaignCreationWizard() {
     }
 
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    fetch(`${API}/api/campaigns/gmail/status`)
+    fetch(`${API}/api/v1/campaigns/gmail/status`)
       .then((res) => res.json())
       .then((data) => {
         if (data.connected) {
@@ -206,7 +206,7 @@ export function CampaignCreationWizard() {
         }
       })
       .catch(() => {})
-    fetch(`${API}/api/campaigns/linkedin/status`)
+    fetch(`${API}/api/v1/campaigns/linkedin/status`)
       .then((res) => res.json())
       .then((data) => {
         if (data.connected) setLinkedinConnected(true)
@@ -236,7 +236,7 @@ export function CampaignCreationWizard() {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const returnPath = "/campaigns/new"
       const res = await fetch(
-        `${API}/api/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+        `${API}/api/v1/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
       )
       const data = await res.json()
       if (data.auth_url) {
@@ -278,7 +278,7 @@ export function CampaignCreationWizard() {
     })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-email`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to_email: toEmail, subject, body }),
@@ -315,7 +315,7 @@ export function CampaignCreationWizard() {
     })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-linkedin`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ linkedin_url: linkedinUrl, message }),

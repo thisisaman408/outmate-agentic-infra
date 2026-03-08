@@ -72,7 +72,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export const aiAgentsApi = {
   // Agentic Search Agent
   searchProspects: async (query: string): Promise<AgenticSearchResult[]> => {
-    const response = await fetch(`${API_BASE_URL}/api/ai-agents/search`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
@@ -83,7 +83,7 @@ export const aiAgentsApi = {
 
   // Lookalike Agent
   findLookalikeCompanies: async (seedCompanyIds: string[]): Promise<LookalikeResult[]> => {
-    const response = await fetch(`${API_BASE_URL}/api/ai-agents/lookalike`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/lookalike`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seedCompanyIds }),
@@ -94,7 +94,7 @@ export const aiAgentsApi = {
 
   // Research Agent
   researchCompany: async (companyName: string, depth: "quick" | "standard" | "deep"): Promise<ResearchResult> => {
-    const response = await fetch(`${API_BASE_URL}/api/ai-agents/research`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/research`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companyName, depth }),
@@ -105,7 +105,7 @@ export const aiAgentsApi = {
 
   // Predictive Agent
   scoreLeads: async (company: { name: string; domain?: string; industry?: string; country?: string }): Promise<PredictiveScore[]> => {
-    const response = await fetch(`${API_BASE_URL}/api/ai-agents/predictive`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/predictive`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ company }),
@@ -123,7 +123,7 @@ export const aiAgentsApi = {
     return response.json();
   },
   addPipelineCompany: async (payload: { companyId: string; companyName: string; contactName?: string; similarityScore?: number }) => {
-    const response = await fetch(`${API_BASE_URL}/api/ai-agents/pipeline`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/pipeline`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
