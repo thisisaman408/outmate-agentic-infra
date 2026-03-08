@@ -25,10 +25,12 @@ export async function POST(request: NextRequest) {
 
     console.log('Calling backend social media presence API:', backendUrl, requestBody);
 
+    const authHeader = request.headers.get('authorization') || ''
     const response = await fetch(backendUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(requestBody)
     });

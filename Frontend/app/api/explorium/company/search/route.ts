@@ -8,10 +8,12 @@ export async function POST(request: NextRequest) {
     console.log('Proxying to backend:', `${backendUrl}/api/explorium/company/search`)
     console.log('Request body:', body)
 
+    const authHeader = request.headers.get('authorization') || ''
     const response = await fetch(`${backendUrl}/api/explorium/company/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(body),
     })

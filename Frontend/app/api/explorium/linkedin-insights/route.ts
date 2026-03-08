@@ -16,10 +16,12 @@ export async function POST(request: NextRequest) {
 
     console.log('Proxying to backend:', `${backendUrl}/api/explorium/linkedin-insights`)
 
+    const authHeader = request.headers.get('authorization') || ''
     const response = await fetch(`${backendUrl}/api/explorium/linkedin-insights`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify({
         domain,
