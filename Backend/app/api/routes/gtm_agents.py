@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/v1/gtm-agents", tags=["gtm-agents"])
 logger = logging.getLogger(__name__)
 
 
-AgentName = Literal["crossfire", "compliance_oracle", "virality_engine", "talent_radar", "regime_shifter"]
+AgentName = Literal["crossfire", "compliance-oracle", "virality-engine", "talent-radar", "regime-shifter"]
 
 
 class CrossfirePayload(BaseModel):
@@ -62,36 +62,6 @@ class GenericRunRequest(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
 
 
-@router.post("/{agent_name}/run")
-async def run_gtm_agent(agent_name: AgentName, request: GenericRunRequest):
-    """
-    Generic GTM agent runner. Prefer the typed endpoints below from the frontend.
-    """
-    try:
-        if agent_name == "crossfire":
-            payload = CrossfirePayload(**request.inputs)
-            return await gtm_agents_service.run_crossfire(payload.model_dump())
-        if agent_name == "compliance_oracle":
-            payload = CompliancePayload(**request.inputs)
-            return await gtm_agents_service.run_compliance_oracle(payload.model_dump())
-        if agent_name == "virality_engine":
-            payload = ViralityPayload(**request.inputs)
-            return await gtm_agents_service.run_virality_engine(payload.model_dump())
-        if agent_name == "talent_radar":
-            payload = TalentRadarPayload(**request.inputs)
-            return await gtm_agents_service.run_talent_radar(payload.model_dump())
-        if agent_name == "regime_shifter":
-            payload = RegimeShifterPayload(**request.inputs)
-            return await gtm_agents_service.run_regime_shifter(payload.model_dump())
-
-        raise HTTPException(status_code=404, detail=f"Unknown GTM agent: {agent_name}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("GTM agent %s failed: %s", agent_name, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/crossfire/run")
 async def run_crossfire_agent(payload: CrossfirePayload):
     return await gtm_agents_service.run_crossfire(payload.model_dump())
@@ -115,4 +85,37 @@ async def run_talent_radar_agent(payload: TalentRadarPayload):
 @router.post("/regime-shifter/run")
 async def run_regime_shifter_agent(payload: RegimeShifterPayload):
     return await gtm_agents_service.run_regime_shifter(payload.model_dump())
+
+
+@router.post("/{agent_name}/run")
+async def run_gtm_agent(agent_name: AgentName, request: GenericRunRequest):
+    """
+    Generic GTM agent runner. 
+    Notes: This serves as a low-level escape hatch. Specific typed endpoints above are preferred.
+    """
+    try:
+        if agent_name == "crossfire":
+            payload = CrossfirePayload(**request.inputs)
+            return await gtm_agents_service.run_crossfire(payload.model_dump())
+        if agent_name == "compliance-oracle":
+            payload = CompliancePayload(**request.inputs)
+            return await gtm_agents_service.run_compliance_oracle(payload.model_dump())
+        if agent_name == "virality-engine":
+            payload = ViralityPayload(**request.inputs)
+            return await gtm_agents_service.run_virality_engine(payload.model_dump())
+        if agent_name == "talent-radar":
+            payload = TalentRadarPayload(**request.inputs)
+            return await gtm_agents_service.run_talent_radar(payload.model_dump())
+        if agent_name == "regime-shifter":
+            payload = RegimeShifterPayload(**request.inputs)
+            return await gtm_agents_service.run_regime_shifter(payload.model_dump())
+
+        raise HTTPException(status_code=404, detail=f"Unknown GTM agent: {agent_name}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("GTM agent %s failed: %s", agent_name, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
