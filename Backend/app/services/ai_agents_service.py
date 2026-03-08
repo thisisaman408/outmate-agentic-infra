@@ -285,11 +285,13 @@ class AiAgentsService:
             INSTRUCTIONS:
             1. Analyze the 'evidence' for each company.
             2. Generate a valid JSON Array following the SCHEMA strictly.
-            3. **Identification**: DO NOT identify as Perplexity, an AI, or any other assistant. Act ONLY as a B2B Data Enrichment Agent.
-            4. **Refusal**: NEVER state that you cannot fulfill a request. If data is missing, provide what you can or leave the field null.
-            5. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
-            6. **Reason**: Briefly explain why this company fits the query.
-            7. **Data Quality**: Ensure 'location' and 'employees' (count or range) are extracted from evidence or inferred.
+            3. **Target Stakeholders**: For each company, aggressively identify a relevant "Target Stakeholder" (e.g. Founder, CEO, VP of Sales, or specific decision maker) based on the query.
+            4. **Contact Details**: Try to extract their official company email, LinkedIn, and precise job title. If email is not found, leave as null.
+            5. **Identification**: DO NOT identify as Perplexity, an AI, or any other assistant. Act ONLY as a B2B Data Enrichment Agent.
+            6. **Refusal**: NEVER state that you cannot fulfill a request. If data is missing, provide what you can or leave the field null.
+            7. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
+            8. **Reason**: Briefly explain why this company AND the identified stakeholder fit the query.
+            9. **Data Quality**: Ensure 'location' and 'employees' (count or range) are extracted from evidence or inferred.
 
             INPUT DATA:
             {json.dumps(batch)}
@@ -314,9 +316,10 @@ class AiAgentsService:
                 }},
                 "contacts": [
                   {{
-                    "name": "string | Not found",
-                    "title": "string | null",
-                    "email": "string | null",
+                    "name": "Full Name | Not found",
+                    "title": "Exact Job Title | null",
+                    "email": "Work Email | null",
+                    "linkedin": "LinkedIn URL | null",
                     "sourceUrl": "string | null"
                   }}
                 ]
@@ -356,6 +359,21 @@ class AiAgentsService:
                     )
                     perplexity_details = perplexity_response.get("content")
                     perplexity_reasoning = perplexity_response.get("reasoning_details")
+                    
+                    # Align Perplexity reasons and contacts with main items
+                    try:
+                        p_json = _extract_json_from_text(perplexity_details)
+                        if isinstance(p_json, list):
+                            for item in clean_parsed:
+                                p_match = next((px for px in p_json if px.get("domain") == item.get("domain") or px.get("companyName") == item.get("companyName")), None)
+                                if p_match:
+                                    item["perplexityReason"] = p_match.get("reason")
+                                    # Also merge contacts if missing in main but present in perplexity
+                                    if not item.get("contacts") or (len(item["contacts"]) > 0 and not item["contacts"][0].get("email")):
+                                        if p_match.get("contacts"):
+                                            item["contacts"] = p_match.get("contacts")
+                    except:
+                        pass
                 except Exception as reasoning_err:
                     logger.warning(f"Perplexity reasoning fetch failed: {reasoning_err}")
                 for item in clean_parsed:
@@ -390,6 +408,20 @@ class AiAgentsService:
                         )
                         perplexity_details = perplexity_response.get("content")
                         perplexity_reasoning = perplexity_response.get("reasoning_details")
+
+                        # Align Perplexity reasons and contacts with main items
+                        try:
+                            p_json = _extract_json_from_text(perplexity_details)
+                            if isinstance(p_json, list):
+                                for item in clean_parsed:
+                                    p_match = next((px for px in p_json if px.get("domain") == item.get("domain") or px.get("companyName") == item.get("companyName")), None)
+                                    if p_match:
+                                        item["perplexityReason"] = p_match.get("reason")
+                                        if not item.get("contacts") or (len(item["contacts"]) > 0 and not item["contacts"][0].get("email")):
+                                            if p_match.get("contacts"):
+                                                item["contacts"] = p_match.get("contacts")
+                        except:
+                            pass
                     except Exception as reasoning_err:
                         logger.warning(f"Perplexity reasoning fetch failed after retry: {reasoning_err}")
                     for item in clean_parsed:
@@ -410,10 +442,22 @@ class AiAgentsService:
         for sublist in batch_results:
             final_results.extend(sublist)
         for item in final_results:
-            primary = (item.get("contacts") or [{}])[0] or {}
-            item["contactName"] = primary.get("name") or "Not found"
-            item["title"] = primary.get("title") or ""
-            item["email"] = primary.get("email") or ""
+            contacts = item.get("contacts") or []
+            if isinstance(contacts, list) and len(contacts) > 0:
+                primary = contacts[0]
+                if not item.get("contactName"):
+                    item["contactName"] = primary.get("name")
+                if not item.get("title"):
+                    item["title"] = primary.get("title")
+                if not item.get("email"):
+                    item["email"] = primary.get("email")
+                if not item.get("linkedin"):
+                    item["linkedin"] = primary.get("linkedin")
+            
+            # Final fallbacks to ensure frontend consistency
+            item["contactName"] = str(item.get("contactName") or "Not found")
+            item["title"] = str(item.get("title") or "N/A")
+            item["email"] = str(item.get("email") or "")
             location_candidates = [
                 item.get("location"),
                 item.get("geographicPresence"),

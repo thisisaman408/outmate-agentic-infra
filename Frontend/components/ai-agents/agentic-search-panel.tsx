@@ -63,7 +63,8 @@ const parsePerplexityPayload = (details?: string) => {
   return null
 }
 
-const extractPerplexityReason = (details?: string) => {
+const extractPerplexityReason = (details?: string, preExtractedReason?: string) => {
+  if (preExtractedReason && preExtractedReason.trim()) return preExtractedReason.trim()
   const payload = parsePerplexityPayload(details)
   if (payload && typeof payload.reason === "string" && payload.reason.trim()) {
     return payload.reason.trim()
@@ -71,8 +72,10 @@ const extractPerplexityReason = (details?: string) => {
   if (!details) return null
   const cleaned = cleanPerplexityJson(details)
   if (cleaned && cleaned.length < details.trim().length) {
+    if (cleaned.startsWith("[") || cleaned.startsWith("{")) return null
     return cleaned.trim()
   }
+  if (details.trim().startsWith("[") || details.trim().startsWith("{")) return null
   return details.trim()
 }
 
@@ -142,7 +145,7 @@ export function AgenticSearchPanel() {
     ? results.find((result, idx) => getCardKey(result, idx) === activeRecordId)
     : null
   const activePerplexityPayload = activeRecord ? parsePerplexityPayload(activeRecord.perplexityDetails) : null
-  const activePerplexityReason = activeRecord ? extractPerplexityReason(activeRecord.perplexityDetails) : null
+  const activePerplexityReason = activeRecord ? extractPerplexityReason(activeRecord.perplexityDetails, activeRecord.perplexityReason) : null
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -337,7 +340,7 @@ export function AgenticSearchPanel() {
                 const locationLabel = (result.location || perplexityPayload?.location)?.trim() || "Location not specified"
                 const reasonText = result.reason?.trim() || "No reasoning provided yet."
                 const industryLabel = result.industry || "Industry Unknown"
-                const perplexityReason = extractPerplexityReason(result.perplexityDetails)
+                const perplexityReason = extractPerplexityReason(result.perplexityDetails, result.perplexityReason)
                 const initialLetter = (companyName.charAt(0) || "?").toUpperCase()
                 const engagedHref = rawEmail.includes("@") ? `mailto:${rawEmail}` : undefined
 
