@@ -291,8 +291,9 @@ function EventWatcherForm({ formData, setFormData, addItem, removeItem }: any) {
     const [selectedDepartment, setSelectedDepartment] = useState("")
 
     const eventTypes = [
-        "Funding Round", "Job Changes", "Technology Adoption", "Leadership Change",
-        "Office Expansion", "Partnership", "Product Launch", "Acquisition"
+        "IPO Announcement", "New Funding Round", "New Investment", 
+        "Merger & Acquisitions", "Cost Cutting", "Team Expansion", 
+        "Team Reduction", "Product Launch", "Acquisition"
     ]
 
     const fundingStages = ["Seed", "Series A", "Series B", "Series C", "Series D+", "IPO"]
@@ -471,8 +472,8 @@ function AccountWatcherForm({ formData, setFormData, addItem, removeItem }: any)
     const [selectedTrigger, setSelectedTrigger] = useState("")
 
     const triggers = [
-        "Funding Events", "Job Changes", "Technology Changes", 
-        "News Mentions", "Web Traffic Changes", "Financial Events"
+        "Website Content Changes", "Funding Events", "Job Changes", 
+        "Technology Changes", "News Mentions", "Web Traffic Changes"
     ]
 
     return (
@@ -548,8 +549,8 @@ function LeadWatcherForm({ formData, setFormData, addItem, removeItem }: any) {
     const [selectedTrigger, setSelectedTrigger] = useState("")
 
     const triggers = [
-        "Job Changes", "Content Published", "Speaking Engagements",
-        "Promotions", "Awards & Recognition", "Social Media Activity"
+        "Role Change", "Company Change", "Job Anniversary",
+        "Content Published", "Speaking Engagements", "Social Media Activity"
     ]
 
     return (

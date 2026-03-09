@@ -23,59 +23,23 @@ import {
     Activity,
     Building2,
     User,
-    Sparkles
+    Sparkles,
+    RefreshCw
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Watcher, WatcherStatus, EventWatcher, AccountWatcher, LeadWatcher } from "./watcher-types"
 
-type WatcherStatus = "active" | "paused" | "draft"
-
-type BaseWatcher = {
-    id: string
-    name: string
-    description: string
-    status: WatcherStatus
-    lastTriggered?: Date
-}
-
-type EventWatcher = BaseWatcher & {
-    type: "event"
-    criteria: Record<string, any>
-    matchCount: number
-    newMatches: number
-}
-
-type AccountWatcher = BaseWatcher & {
-    type: "account"
-    accountName: string
-    accountDomain: string
-    triggers: string[]
-    recentUpdates: Array<{
-        type: string
-        description: string
-        date: Date
-    }>
-}
-
-type LeadWatcher = BaseWatcher & {
-    type: "lead"
-    leadName: string
-    leadTitle: string
-    leadCompany: string
-    triggers: string[]
-    recentUpdates: Array<{
-        type: string
-        description: string
-        date: Date
-    }>
-}
-
-type Watcher = EventWatcher | AccountWatcher | LeadWatcher
+// Types handled by imported Watcher from watcher-types.ts
 
 interface WatcherCardProps {
     watcher: Watcher
+    onToggle: () => void
+    onDelete: () => void
+    onSync: () => void
+    onViewDetails: () => void
 }
 
-export function WatcherCard({ watcher }: WatcherCardProps) {
+export function WatcherCard({ watcher, onToggle, onDelete, onSync, onViewDetails }: WatcherCardProps) {
     const formatDate = (date: Date) => {
         const now = new Date()
         const diff = now.getTime() - date.getTime()
@@ -145,11 +109,15 @@ export function WatcherCard({ watcher }: WatcherCardProps) {
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={onSync}>
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Sync Now
+                            </DropdownMenuItem>
                             <DropdownMenuItem>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit Watcher
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={onToggle}>
                                 {watcher.status === "active" ? (
                                     <>
                                         <Pause className="mr-2 h-4 w-4" />
@@ -166,8 +134,12 @@ export function WatcherCard({ watcher }: WatcherCardProps) {
                                 <Bell className="mr-2 h-4 w-4" />
                                 Notification Settings
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={onViewDetails}>
+                                <Activity className="mr-2 h-4 w-4" />
+                                View Matches
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive">
+                            <DropdownMenuItem className="text-destructive" onClick={onDelete}>
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Delete Watcher
                             </DropdownMenuItem>
@@ -177,25 +149,25 @@ export function WatcherCard({ watcher }: WatcherCardProps) {
 
                 {/* Type-specific content */}
                 {watcher.type === "event" && (
-                    <EventWatcherContent watcher={watcher} />
+                    <EventWatcherContent watcher={watcher} onViewDetails={onViewDetails} />
                 )}
                 {watcher.type === "account" && (
-                    <AccountWatcherContent watcher={watcher} />
+                    <AccountWatcherContent watcher={watcher} onViewDetails={onViewDetails} />
                 )}
                 {watcher.type === "lead" && (
-                    <LeadWatcherContent watcher={watcher} />
+                    <LeadWatcherContent watcher={watcher} onViewDetails={onViewDetails} />
                 )}
 
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-2 border-t border-border/60">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" />
-                        {watcher.lastTriggered ? (
-                            <span>Last updated {formatDate(watcher.lastTriggered)}</span>
-                        ) : (
-                            <span>No updates yet</span>
-                        )}
-                    </div>
+                    <Clock className="h-3 w-3" />
+                    {watcher.last_triggered_at ? (
+                        <span>Last updated {formatDate(new Date(watcher.last_triggered_at))}</span>
+                    ) : (
+                        <span>No updates yet</span>
+                    )}
+                </div>
                     <Badge variant="outline" className={getStatusColor(watcher.status)}>
                         {watcher.status}
                     </Badge>
@@ -205,9 +177,9 @@ export function WatcherCard({ watcher }: WatcherCardProps) {
     )
 }
 
-function EventWatcherContent({ watcher }: { watcher: EventWatcher }) {
+function EventWatcherContent({ watcher, onViewDetails }: { watcher: EventWatcher, onViewDetails: () => void }) {
     return (
-        <div className="space-y-3">
+        <div className="space-y-3" onClick={onViewDetails}>
             {/* Match stats */}
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -215,17 +187,17 @@ function EventWatcherContent({ watcher }: { watcher: EventWatcher }) {
                         <TrendingUp className="h-4 w-4 text-primary" />
                     </div>
                     <div>
-                        <div className="text-sm font-medium">{watcher.matchCount}</div>
+                        <div className="text-sm font-medium">{watcher.match_count}</div>
                         <div className="text-xs text-muted-foreground">Total Matches</div>
                     </div>
                 </div>
-                {watcher.newMatches > 0 && (
+                {watcher.new_matches_count > 0 && (
                     <div className="flex items-center gap-2">
                         <div className="bg-green-500/10 p-2 rounded-md">
                             <Sparkles className="h-4 w-4 text-green-600" />
                         </div>
                         <div>
-                            <div className="text-sm font-medium text-green-600">{watcher.newMatches}</div>
+                            <div className="text-sm font-medium text-green-600">{watcher.new_matches_count}</div>
                             <div className="text-xs text-muted-foreground">New Today</div>
                         </div>
                     </div>
@@ -240,13 +212,17 @@ function EventWatcherContent({ watcher }: { watcher: EventWatcher }) {
                     </Badge>
                 ))}
             </div>
+
+            <Button variant="outline" size="sm" className="w-full text-xs h-7 gap-1 mt-1 opacity-80 hover:opacity-100" onClick={(e) => { e.stopPropagation(); onViewDetails(); }}>
+                View Full Results
+            </Button>
         </div>
     )
 }
 
-function AccountWatcherContent({ watcher }: { watcher: AccountWatcher }) {
+function AccountWatcherContent({ watcher, onViewDetails }: { watcher: AccountWatcher, onViewDetails: () => void }) {
     return (
-        <div className="space-y-3">
+        <div className="space-y-3" onClick={onViewDetails}>
             {/* Account info */}
             <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
                 <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -279,13 +255,17 @@ function AccountWatcherContent({ watcher }: { watcher: AccountWatcher }) {
                     ))}
                 </div>
             )}
+            
+            <Button variant="link" size="sm" className="w-full text-xs h-6 text-muted-foreground" onClick={(e) => { e.stopPropagation(); onViewDetails(); }}>
+                View All Activity
+            </Button>
         </div>
     )
 }
 
-function LeadWatcherContent({ watcher }: { watcher: LeadWatcher }) {
+function LeadWatcherContent({ watcher, onViewDetails }: { watcher: LeadWatcher, onViewDetails: () => void }) {
     return (
-        <div className="space-y-3">
+        <div className="space-y-3" onClick={onViewDetails}>
             {/* Lead info */}
             <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
                 <User className="h-4 w-4 text-muted-foreground" />
@@ -319,6 +299,10 @@ function LeadWatcherContent({ watcher }: { watcher: LeadWatcher }) {
                     ))}
                 </div>
             )}
+
+            <Button variant="link" size="sm" className="w-full text-xs h-6 text-muted-foreground" onClick={(e) => { e.stopPropagation(); onViewDetails(); }}>
+                View All Activity
+            </Button>
         </div>
     )
 }

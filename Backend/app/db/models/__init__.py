@@ -2,6 +2,7 @@ from app.db.models.api_log import ApiUsageLog
 # Keep both lines below
 from app.db.models.chat_session import NLPChatSession
 from app.db.models.visitor import SiteConfig, Visit, Alert
+from app.db.models.watcher import Watcher
 
 __all__ = [
     "User",

@@ -216,6 +216,8 @@ class ExploriumService:
             "employee_count": "company_size",  # Map frontend employee_count to company_size
             "industry": "google_category",
             "keywords": "website_keywords",
+            "event_type": "events",
+            "last_occurrence": "events",
         }
 
         # Enforce single category filter (Explorium requirement)
@@ -248,8 +250,43 @@ class ExploriumService:
                 elif dst in ["domain", "website", "country_code"]:
                     # These filters often do not accept the {"values": [...]} wrap in some Explorium endpoints
                     mapped[dst] = vals
+                elif dst == "events":
+                    # Normalize human-readable event names from frontend to Explorium identifiers
+                    def normalize_event_types(e_list: List[str]) -> List[str]:
+                        ev_map = {
+                            "IPO Announcement": "ipo_announcement",
+                            "New Funding Round": "new_funding_round",
+                            "New Investment": "new_investment",
+                            "Merger & Acquisitions": "merger_and_acquisitions",
+                            "Cost Cutting": "cost_cutting",
+                            "Team Expansion": "increase_in_all_departments",
+                            "Team Reduction": "decrease_in_all_departments",
+                            "Product Launch": "new_product",
+                            "Acquisition": "merger_and_acquisitions",
+                        }
+                        return [ev_map.get(e, e.lower().replace(" ", "_")) for e in e_list]
+
+                    # Special handling for events filter which expects a nested structure
+                    if "events" not in mapped:
+                        mapped["events"] = {}
+                    if src == "event_type":
+                        mapped["events"]["values"] = normalize_event_types(vals)
+                    elif src == "last_occurrence":
+                        try:
+                            mapped["events"]["last_occurrence"] = int(vals[0])
+                        except (ValueError, TypeError):
+                            mapped["events"]["last_occurrence"] = 90
                 else:
                     mapped[dst] = {"values": vals}
+
+        # Ensure events filter has both required fields if present (Explorium requirement)
+        if "events" in mapped:
+            # If values is missing, the filter is invalid
+            if "values" not in mapped["events"]:
+                print(">>> [ExploriumService] Warning: events filter missing 'values', removing to avoid API error.", flush=True)
+                del mapped["events"]
+            elif "last_occurrence" not in mapped["events"]:
+                mapped["events"]["last_occurrence"] = 90
 
         # Map generic location filters to country_code when possible.
         loc_vals = values_of("location")
@@ -1478,6 +1515,38 @@ class ExploriumService:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/businesses/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def enrich_website_changes(
+        self,
+        business_id: str,
+        timestamp_from: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Enrich a business with website content changes using its business_id.
+        """
+        payload: Dict[str, Any] = {
+            "business_id": business_id
+        }
+        if timestamp_from:
+            payload["timestamp_from"] = timestamp_from
+            
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/businesses/website_changes/enrich",
                 headers=self._headers(),
                 json=payload,
             )
