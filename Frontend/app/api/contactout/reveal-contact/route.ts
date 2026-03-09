@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
 
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/contactout/reveal-contact`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/contactout/reveal-contact`)
 
     // Forward the Authorization header from the incoming request
     const authHeader = request.headers.get('Authorization')
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       headers['Authorization'] = authHeader
     }
 
-    const response = await fetch(`${backendUrl}/api/contactout/reveal-contact`, {
+    const response = await fetch(`${backendUrl}/api/v1/contactout/reveal-contact`, {
       method: 'POST',
       headers,
       body: JSON.stringify({

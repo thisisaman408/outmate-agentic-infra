@@ -41,7 +41,7 @@ export function NlpSearchBar({ intent, onFiltersExtracted, placeholder }: NlpSea
     setRedirect(null)
 
     try {
-      const res = await fetch(`${API}/api/chat/parse-query`, {
+      const res = await fetch(`${API}/api/v1/chat/parse-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmed }),

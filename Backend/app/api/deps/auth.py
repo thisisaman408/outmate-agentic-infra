@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import jwt
@@ -6,15 +7,18 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.db.deps import get_db
 from app.db.models.user import User
 
+logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security),
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
 ) -> User:
     token = credentials.credentials
     try:
@@ -27,6 +31,18 @@ def get_current_user(
     user_id: Optional[str] = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token payload invalid")
+
+    # Check token revocation denylist (populated by /logout)
+    jti: Optional[str] = payload.get("jti")
+    if jti and redis is not None:
+        try:
+            if await redis.exists(f"revoked_jti:{jti}"):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+        except HTTPException:
+            raise
+        except Exception:
+            # Redis failure is non-fatal — degrade gracefully but log it
+            logger.warning("Redis denylist check failed; proceeding without revocation check")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:

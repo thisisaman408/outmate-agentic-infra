@@ -105,7 +105,7 @@ export default function ProspectProfilePage() {
         try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`,
+                `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/prospects/reveal-contact`,
                 {
                     method: 'POST',
                     headers: {

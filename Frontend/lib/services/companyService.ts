@@ -62,7 +62,7 @@ export async function searchCompanies(
     try {
         console.log("🚀 [Frontend] Request Config:", JSON.stringify(filters, null, 2));
 
-        const response = await fetch(`${API_BASE_URL}/api/companies/search`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/companies/search`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

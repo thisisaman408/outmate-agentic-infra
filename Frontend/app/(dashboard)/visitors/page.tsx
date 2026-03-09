@@ -98,8 +98,8 @@ export default function VisitorsPage() {
         setError(null)
         try {
             const [visitsRes, statsRes] = await Promise.all([
-                fetch(`${API_BASE}/api/visitors/`),
-                fetch(`${API_BASE}/api/visitors/stats`)
+                fetch(`${API_BASE}/api/v1/visitors/`),
+                fetch(`${API_BASE}/api/v1/visitors/stats`)
             ])
 
             if (visitsRes.ok) {
@@ -134,7 +134,7 @@ export default function VisitorsPage() {
     const fetchAnalytics = async () => {
         setAnalyticsLoading(true)
         try {
-            const res = await fetch(`${API_BASE}/api/visitors/analytics?hours=24&top_n=8`)
+            const res = await fetch(`${API_BASE}/api/v1/visitors/analytics?hours=24&top_n=8`)
             if (!res.ok) {
                 const errData = await res.json().catch(() => null)
                 if (res.status === 503) setError(errData?.error || "Database temporarily unavailable")
@@ -150,7 +150,7 @@ export default function VisitorsPage() {
     }
 
     const copyPixel = () => {
-        const snippet = `<script src="${API_BASE}/api/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`
+        const snippet = `<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`
         navigator.clipboard.writeText(snippet)
         toast.success("Pixel snippet copied to clipboard!")
     }
@@ -164,7 +164,7 @@ export default function VisitorsPage() {
         const analyticsInterval = setInterval(fetchAnalytics, 60000)
 
         // Realtime stream (best-effort; will silently fail if Redis/SSE unavailable)
-        const es = new EventSource(`${API_BASE}/api/visitors/stream`)
+        const es = new EventSource(`${API_BASE}/api/v1/visitors/stream`)
         es.onmessage = (evt) => {
             try {
                 const msg = JSON.parse(evt.data)
@@ -223,7 +223,7 @@ export default function VisitorsPage() {
                         </DialogHeader>
                         <div className="bg-muted p-4 rounded-lg relative font-mono text-sm group">
                             <pre className="whitespace-pre-wrap break-all">
-                                {`<script src="${API_BASE}/api/visitors/pixel.js" \n  data-pixel-key="${pixelKey}">\n</script>`}
+                                {`<script src="${API_BASE}/api/v1/visitors/pixel.js" \n  data-pixel-key="${pixelKey}">\n</script>`}
                             </pre>
                             <Button
                                 size="icon"

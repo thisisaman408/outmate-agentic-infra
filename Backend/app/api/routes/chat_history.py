@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.deps import get_db
 from app.services.chat_history_service import ChatHistoryService
 
-router = APIRouter(prefix="/api/chat/history", tags=["chat_history"])
+router = APIRouter(prefix="/api/v1/chat/history", tags=["chat_history"])
 
 
 class ChatHistoryPayload(BaseModel):

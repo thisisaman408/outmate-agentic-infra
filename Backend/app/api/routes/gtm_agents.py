@@ -5,7 +5,7 @@ import logging
 
 from app.services.gtm_agents_service import gtm_agents_service
 
-router = APIRouter(prefix="/api/gtm-agents", tags=["gtm-agents"])
+router = APIRouter(prefix="/api/v1/gtm-agents", tags=["gtm-agents"])
 logger = logging.getLogger(__name__)
 
 

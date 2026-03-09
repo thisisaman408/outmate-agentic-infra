@@ -118,7 +118,7 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
         try {
             console.log('🔍 Searching with filters:', transformedFilters)
 
-            const response = await fetch(`/api/leads/search/companies`, {
+            const response = await fetch(`/api/v1/leads/search/companies`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

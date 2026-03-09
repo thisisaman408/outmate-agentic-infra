@@ -133,7 +133,7 @@ export async function searchProspects(
     try {
         console.log("🚀 [Frontend] Request Config:", JSON.stringify(filters, null, 2));
 
-        const response = await fetch(`${API_BASE_URL}/api/prospects/search`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/prospects/search`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

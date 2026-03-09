@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       headers['Authorization'] = authHeader
     }
 
-    const response = await fetch(`${backendUrl}/api/contactout/reveal-company-contact`, {
+    const response = await fetch(`${backendUrl}/api/v1/contactout/reveal-company-contact`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ domain, include_phone }),

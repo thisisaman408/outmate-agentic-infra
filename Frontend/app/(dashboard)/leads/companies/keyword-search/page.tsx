@@ -161,7 +161,7 @@ export default function KeywordSearchPage() {
         requestBody.filters = filters
       }
 
-      const response = await fetch('http://localhost:8000/api/leads/linkedin-post-keyword', {
+      const response = await fetch('http://localhost:8000/api/v1/leads/linkedin-post-keyword', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -204,7 +204,7 @@ export default function KeywordSearchPage() {
         if (filters.length > 0) {
           fallbackBody.filters = filters
         }
-        const fbRes = await fetch('http://localhost:8000/api/crustdata/linkedin_posts/keyword_search', {
+        const fbRes = await fetch('http://localhost:8000/api/v1/crustdata/linkedin_posts/keyword_search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(fallbackBody)

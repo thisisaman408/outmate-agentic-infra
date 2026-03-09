@@ -32,24 +32,24 @@ export function CompanySignalsFeatures() {
 
       switch (tab) {
         case 'identification':
-          endpoint = '/api/leads/identify-company';
+          endpoint = '/api/v1/leads/identify-company';
           break;
         case 'enrichment':
-          endpoint = '/api/leads/enrich-company';
+          endpoint = '/api/v1/leads/enrich-company';
           break;
         case 'in-db-search':
-          endpoint = '/api/leads/in-db-search';
+          endpoint = '/api/v1/leads/in-db-search';
           body = { filters: body };
           break;
         case 'realtime-search':
-          endpoint = '/api/leads/realtime-search';
+          endpoint = '/api/v1/leads/realtime-search';
           body = { filters: body };
           break;
         case 'realtime-linkedin-post':
-          endpoint = '/api/leads/realtime-linkedin-post';
+          endpoint = '/api/v1/leads/realtime-linkedin-post';
           break;
         case 'linkedin-post-keyword':
-          endpoint = '/api/leads/linkedin-post-keyword';
+          endpoint = '/api/v1/leads/linkedin-post-keyword';
           break;
       }
 

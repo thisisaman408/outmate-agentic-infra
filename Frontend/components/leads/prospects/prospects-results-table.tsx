@@ -270,7 +270,7 @@ export function ProspectsResultsTable({
 
         try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/prospects/reveal-contact`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -300,7 +300,7 @@ export function ProspectsResultsTable({
             const companyName = employer?.name || ""
             const companyDomain = employer?.company_website_domain || ""
 
-            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/bettercontact/enrich-prospect`, {
+            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/bettercontact/enrich-prospect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

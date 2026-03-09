@@ -225,7 +225,7 @@ export const leadsApi = {
       }
 
       // Call backend API
-      const response = await fetchWithAuth(`${API_BASE_URL}/api/leads/search/companies`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/leads/search/companies`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

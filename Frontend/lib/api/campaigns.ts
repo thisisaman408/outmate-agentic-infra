@@ -60,7 +60,7 @@ const fetchWithAuth = (url: string, init: RequestInit = {}) => {
 
 export const campaignsApi = {
   getCampaigns: async (): Promise<Campaign[]> => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/campaigns`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/campaigns`)
     if (!response.ok) {
       throw new Error("Failed to load campaigns")
     }
@@ -74,7 +74,7 @@ export const campaignsApi = {
   },
 
   createCampaign: async (request: CreateCampaignRequest): Promise<Campaign> => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/campaigns`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/campaigns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -88,7 +88,7 @@ export const campaignsApi = {
   },
 
   updateCampaignStatus: async (id: string, status: Campaign["status"]): Promise<Campaign> => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/campaigns/${id}/status`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/campaigns/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
@@ -101,7 +101,7 @@ export const campaignsApi = {
   },
 
   generateMessage: async (request: GenerateMessageRequest): Promise<GeneratedMessage> => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/generate-message`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/generate-message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -120,14 +120,14 @@ export const campaignsApi = {
   },
 
   getDashboardSequences: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/sequences`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/sequences`)
     if (!response.ok) throw new Error("Sequences unavailable")
     const data = await response.json()
     return data.sequences ?? []
   },
 
   triggerGlobalInbox: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/global-inbox`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/global-inbox`, {
       method: "POST",
     })
     if (!response.ok) throw new Error("Unable to refresh Global Inbox")
@@ -135,7 +135,7 @@ export const campaignsApi = {
   },
 
   triggerGlobalAnalytics: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/global-analytics`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/global-analytics`, {
       method: "POST",
     })
     if (!response.ok) throw new Error("Unable to refresh Global Analytics")
@@ -143,34 +143,34 @@ export const campaignsApi = {
   },
 
   getDashboardGlobalStatus: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/global-status`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/global-status`)
     if (!response.ok) throw new Error("Global status unavailable")
     return response.json()
   },
 
   getGlobalInboxFeed: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/global-inbox-feed`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/global-inbox-feed`)
     if (!response.ok) throw new Error("Inbox feed unavailable")
     const data = await response.json()
     return data.items ?? []
   },
 
   getGlobalAnalyticsFeed: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/global-analytics-feed`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/global-analytics-feed`)
     if (!response.ok) throw new Error("Analytics feed unavailable")
     const data = await response.json()
     return data.items ?? []
   },
 
   getEmailAccounts: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/email-accounts`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/email-accounts`)
     if (!response.ok) throw new Error("Email accounts unavailable")
     const data = await response.json()
     return data.accounts ?? []
   },
 
   addEmailAccount: async (email: string, provider: string) => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/email-accounts`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/email-accounts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, provider }),
@@ -180,14 +180,14 @@ export const campaignsApi = {
   },
 
   getBlocklist: async () => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/blocklist`)
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/blocklist`)
     if (!response.ok) throw new Error("Blocklist unavailable")
     const data = await response.json()
     return data.entries ?? []
   },
 
   addBlocklistEntry: async (domain: string, reason: string) => {
-    const response = await fetchWithAuth(`${BACKEND_BASE}/api/campaigns/dashboard/blocklist`, {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/campaigns/dashboard/blocklist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ domain, reason }),

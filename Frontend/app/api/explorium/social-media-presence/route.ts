@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call backend Explorium API
-    const backendUrl = `http://localhost:8000/api/explorium/social-media-presence`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/v1/explorium/social-media-presence`
     
     const requestBody = {
       domain,
