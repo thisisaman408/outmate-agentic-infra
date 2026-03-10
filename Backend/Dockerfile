@@ -47,7 +47,11 @@ FROM base AS builder
 # Copy requirements file
 COPY requirements.txt .
 
-# Install dependencies
+# Install PyTorch CPU-only first (prevents 6GB+ CUDA/nvidia download)
+RUN pip install --user --no-warn-script-location \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining dependencies
 RUN pip install --user --no-warn-script-location -r requirements.txt
 
 
