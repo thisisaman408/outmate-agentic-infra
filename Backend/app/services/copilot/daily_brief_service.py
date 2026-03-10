@@ -148,7 +148,7 @@ class DailyBriefService:
             content = await self.openrouter.chat_completion_structured(
                 system_prompt=DAILY_BRIEF_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                temperature=0.4,
+                temperature=0.7,
                 max_tokens=1500,
             )
 

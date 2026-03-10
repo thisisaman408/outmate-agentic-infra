@@ -6,6 +6,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Next.js 16 uses Turbopack by default — acknowledge it
+  turbopack: {},
   async rewrites() {
     // In development we may want to proxy requests to a local backend. In
     // production the frontend uses NEXT_PUBLIC_API_URL when making fetch calls,

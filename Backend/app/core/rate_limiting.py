@@ -105,3 +105,7 @@ class RateLimits:
     
     # Health check endpoints
     HEALTH = "1000/minute"
+    
+    # Copilot lead action endpoints
+    COPILOT_LEAD_ACTION = "20/minute"
+    COPILOT_LEAD_SUGGESTIONS = "30/minute"

@@ -4,6 +4,7 @@ import React from "react"
 import { useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { CopilotSidebar } from "@/components/copilot/copilot-sidebar"
+import { LeadCopilotPanel } from "@/components/copilot/lead-copilot-panel"
 
 export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
     const { sidebarCollapsed } = useStore()
@@ -17,6 +18,7 @@ export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
         >
             {children}
             <CopilotSidebar />
+            <LeadCopilotPanel />
         </div>
     )
 }

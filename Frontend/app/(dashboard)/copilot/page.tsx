@@ -1,15 +1,24 @@
 "use client"
 
+import { useEffect } from "react"
 import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Sparkles, Calendar, Target, AlertTriangle, Settings } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Sparkles, Calendar, Target, AlertTriangle, Settings, Coins } from "lucide-react"
+import { useCopilotCredits } from "@/hooks/use-copilot"
 import DailyBriefPage from "./daily-brief/page"
 import MeetingPrepPage from "./meeting-prep/page"
 import CampaignOptimizerPage from "./campaign-optimizer/page"
 import PipelineAlertsPage from "./pipeline-alerts/page"
 
 export default function CopilotPage() {
+  const { credits, fetchCredits } = useCopilotCredits()
+
+  useEffect(() => {
+    fetchCredits()
+  }, [fetchCredits])
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -20,12 +29,20 @@ export default function CopilotPage() {
             <p className="text-sm text-muted-foreground">AI-powered sales intelligence at your fingertips</p>
           </div>
         </div>
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/copilot/settings">
-            <Settings className="h-4 w-4 mr-2" />
-            Settings
-          </Link>
-        </Button>
+        <div className="flex items-center gap-3">
+          {credits && (
+            <Badge variant={credits.credits_remaining > 10 ? "secondary" : "destructive"} className="flex items-center gap-1 px-3 py-1">
+              <Coins className="h-3.5 w-3.5" />
+              {credits.credits_remaining} credits
+            </Badge>
+          )}
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/copilot/settings">
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="daily-brief" className="w-full">

@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Eye, Linkedin, Loader2, Lock, Zap } from "lucide-react"
+import { Eye, Linkedin, Loader2, Lock, Sparkles, Zap } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ProspectProfile } from "@/lib/services/prospectService"
 import { getInitials } from "@/lib/services/prospectService"
+import { useCopilotPanelStore } from "@/hooks/use-copilot-panel"
 
 interface ProspectsResultsTableProps {
     profiles?: ProspectProfile[]
@@ -51,6 +52,7 @@ export function ProspectsResultsTable({
     const actualProfiles = profiles || data || []
     
     const router = useRouter()
+    const { openPanel } = useCopilotPanelStore()
     const [searchTerm, setSearchTerm] = useState("")
     const [revealedEmail, setRevealedEmail] = useState<Record<string, boolean>>({})
     const [revealedPhone, setRevealedPhone] = useState<Record<string, boolean>>({})
@@ -346,7 +348,12 @@ export function ProspectsResultsTable({
         )
     })
 
-    // Handle row click to navigate to profile detail
+    // Handle row click to open AI copilot panel
+    const handleRowClick = (prospect: ProspectProfile) => {
+        openPanel(prospect)
+    }
+
+    // Handle direct navigation to profile detail page
     const handleProfileClick = (personId: number) => {
         router.push(`/leads/prospects/${personId}`)
     }
@@ -444,7 +451,7 @@ export function ProspectsResultsTable({
                                     <TableRow
                                         key={rowKey}
                                         className="cursor-pointer hover:bg-muted/50 transition-colors"
-                                        onClick={() => handleProfileClick(stableId as any)}
+                                        onClick={() => handleRowClick(prospect)}
                                     >
                                         {/* Profile Image */}
                                         <TableCell>
@@ -462,9 +469,16 @@ export function ProspectsResultsTable({
                                         {/* Name & Headline */}
                                         <TableCell>
                                             <div className="flex flex-col">
-                                                <span className="font-medium text-sm truncate max-w-[200px] text-foreground">
-                                                    {displayName}
-                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="font-medium text-sm truncate max-w-[200px] text-foreground">
+                                                        {displayName}
+                                                    </span>
+                                                    {prospect.recently_changed_jobs && (
+                                                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 border-amber-400 text-amber-600 bg-amber-50">
+                                                            Job Change
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                                 <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                                     {(Number(prospect.num_of_connections) || 0).toLocaleString()} connections
                                                 </span>
@@ -651,6 +665,16 @@ export function ProspectsResultsTable({
                                             {/* Actions */}
                                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                                                 <div className="flex justify-end gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-violet-500 hover:text-violet-600"
+                                                        onClick={() => handleRowClick(prospect)}
+                                                        title="Open AI Copilot"
+                                                    >
+                                                        <Sparkles className="h-4 w-4" />
+                                                        <span className="sr-only">AI Copilot</span>
+                                                    </Button>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"

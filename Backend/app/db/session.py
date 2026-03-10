@@ -11,32 +11,23 @@ Features:
 
 from sqlalchemy import create_engine, event, pool
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 import logging
 
 from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Production-grade connection pool for Supabase Session Pooler
-# QueuePool: appropriate for remote managed databases with timeouts/recycling
+# Use NullPool so create_engine does NOT open connections at import time.
+# Each request gets a fresh connection; compatible with Supabase session pooler.
 engine = create_engine(
     settings.DATABASE_URL,
-    # Use QueuePool for better connection management with remote databases
-    poolclass=QueuePool,
-    # Connection pool sizing (tune based on concurrent load)
-    pool_size=settings.DATABASE_POOL_SIZE,              # Persistent connections
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,        # Additional connections when pool full
-    pool_timeout=settings.DATABASE_POOL_TIMEOUT,        # Timeout waiting for connection
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,        # Recycle connections after N seconds
-    pool_pre_ping=True,                                 # Verify connection before use
-    # Connection arguments
+    poolclass=NullPool,
     connect_args={
-        "sslmode": "require",                           # Enforce SSL/TLS
-        "connect_timeout": 10,                          # Connection timeout
-        "options": "-c statement_timeout=30000"         # 30 second statement timeout
+        "sslmode": "require",
+        "connect_timeout": 5,
+        "options": "-c statement_timeout=30000",
     },
-    # Echo SQL in development (disable in production)
     echo=settings.DEBUG,
 )
 

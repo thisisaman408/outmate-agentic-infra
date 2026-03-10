@@ -7,23 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ExternalLink, Building2, Users, DollarSign, TrendingUp, Zap, Loader2, Lock } from "lucide-react"
 
-const WATERFALL_COST_LABEL = "BetterContact"
-  const formatCreditsLabel = (value?: number, fallback?: string) => {
-    if (typeof value === "number") {
-      return `${value} credit${value === 1 ? "" : "s"}`
-    }
-    return fallback || "1 credit"
-  }
-
-  const handleRevealField = (companyId: string, field: "email" | "phone") => {
-    if (field === "email") {
-      setRevealedEmail((prev) => ({ ...prev, [companyId]: true }))
-    } else {
-      setRevealedPhone((prev) => ({ ...prev, [companyId]: true }))
-    }
-    onEnrichReveal?.(companyId, field)
-  }
-
 export interface CompanyData {
   id: string
   name: string
@@ -66,10 +49,10 @@ interface Props {
   enrichingRows?: Record<string, boolean>
 }
 
-export function CompaniesResultsTable({ 
-  companies, 
-  isLoading, 
-  hasSearched, 
+export function CompaniesResultsTable({
+  companies,
+  isLoading,
+  hasSearched,
   viewProfileBasePath = "/leads/companies",
   onEnrichReveal,
   onWaterfallResult,
@@ -78,7 +61,22 @@ export function CompaniesResultsTable({
 }: Props) {
   const [revealedEmail, setRevealedEmail] = useState<Record<string, boolean>>({})
   const [revealedPhone, setRevealedPhone] = useState<Record<string, boolean>>({})
-  console.log('CompaniesResultsTable component called with:', { companies: companies.length, isLoading, hasSearched, enrichCache })
+
+  const formatCreditsLabel = (value?: number, fallback?: string) => {
+    if (typeof value === "number") {
+      return `${value} credit${value === 1 ? "" : "s"}`
+    }
+    return fallback || "1 credit"
+  }
+
+  const handleRevealField = (companyId: string, field: "email" | "phone") => {
+    if (field === "email") {
+      setRevealedEmail((prev) => ({ ...prev, [companyId]: true }))
+    } else {
+      setRevealedPhone((prev) => ({ ...prev, [companyId]: true }))
+    }
+    onEnrichReveal?.(companyId, field)
+  }
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set())
 
   const handleSelectCompany = (companyId: string) => {
@@ -196,203 +194,204 @@ export function CompaniesResultsTable({
                 const waterfallPhone = waterfallEntry?.phone
                 return (
                   <TableRow key={company.id}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      checked={selectedCompanies.has(company.id)}
-                      onChange={() => handleSelectCompany(company.id)}
-                      className="rounded"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      {company.logo_url && (
-                        <img
-                          src={company.logo_url}
-                          alt={company.name}
-                          className="h-8 w-8 rounded object-cover"
-                        />
-                      )}
-                      <div>
-                        <div className="font-medium">{company.name}</div>
-                        {company.domain && (
-                          <div className="text-sm text-muted-foreground">
-                            {company.domain}
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selectedCompanies.has(company.id)}
+                        onChange={() => handleSelectCompany(company.id)}
+                        className="rounded"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        {company.logo_url && (
+                          <img
+                            src={company.logo_url}
+                            alt={company.name}
+                            className="h-8 w-8 rounded object-cover"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">{company.name}</div>
+                          {company.domain && (
+                            <div className="text-sm text-muted-foreground">
+                              {company.domain}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="max-w-32">
+                        <div className="text-sm">{company.industry}</div>
+                        {company.linkedin_industry_category && (
+                          <div className="text-xs text-muted-foreground">
+                            {company.linkedin_industry_category}
                           </div>
                         )}
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="max-w-32">
-                      <div className="text-sm">{company.industry}</div>
-                      {company.linkedin_industry_category && (
-                        <div className="text-xs text-muted-foreground">
-                          {company.linkedin_industry_category}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Users className="h-4 w-4" />
-                      <span className="text-sm">
-                        {company.employee_count_range || 
-                         (company.employee_count && `${company.employee_count}`) || 
-                         "Unknown"}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <DollarSign className="h-4 w-4" />
-                      <span className="text-sm">
-                        {company.revenue_range || "Unknown"}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      {company.funding_stage && (
-                        <Badge variant="outline" className="text-xs">
-                          {company.funding_stage}
-                        </Badge>
-                      )}
-                      {company.funding_total && (
-                        <span className="text-xs text-muted-foreground">
-                          ${company.funding_total.toLocaleString()}M
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm">
-                      {company.headquarters_city && (
-                        <div>{company.headquarters_city}</div>
-                      )}
-                      {company.headquarters_state && (
-                        <div className="text-muted-foreground">
-                          {company.headquarters_state}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-2">
-                      {company.email && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">{company.email}</span>
-                          <div className="text-xs text-green-600 font-medium">✓ Company</div>
-                        </div>
-                      )}
-                      {waterfallEmail?.email && (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs">{waterfallEmail.email}</span>
-                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground">
-                            Cost: {formatCreditsLabel(waterfallEmail?.credits_consumed)}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-7 text-[11px]"
-                            onClick={() => handleRevealField(companyId, "email")}
-                          >
-                            <Lock className="h-3 w-3 mr-1" />
-                            Tap to Reveal
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
-                            onClick={() => onEnrichReveal?.(companyId, "email")}
-                            title={`Waterfall zap: ${formatCreditsLabel(waterfallEmail?.credits_consumed)}`}
-                          >
-                            <Zap className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground">
-                          Reveal cost: {formatCreditsLabel(1)} · Waterfall zap: {formatCreditsLabel(waterfallEmail?.credits_consumed)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Users className="h-4 w-4" />
+                        <span className="text-sm">
+                          {company.employee_count_range ||
+                            (company.employee_count && `${company.employee_count}`) ||
+                            "Unknown"}
                         </span>
                       </div>
-                      {revealedEmail[companyId] && enrichingRows[companyId] && (
-                        <span className="text-[10px] text-muted-foreground">Enriching…</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-2">
-                      {company.phone && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">{company.phone}</span>
-                          <div className="text-xs text-green-600 font-medium">✓ Company</div>
-                        </div>
-                      )}
-                      {waterfallPhone?.phone && (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs">{waterfallPhone.phone}</span>
-                            <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground">
-                            Cost: {formatCreditsLabel(waterfallPhone?.credits_consumed)}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-7 text-[11px]"
-                            onClick={() => handleRevealField(companyId, "phone")}
-                          >
-                            <Lock className="h-3 w-3 mr-1" />
-                            Tap to Reveal
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
-                            onClick={() => onEnrichReveal?.(companyId, "phone")}
-                            title={`Waterfall zap: ${formatCreditsLabel(waterfallPhone?.credits_consumed)}`}
-                          >
-                            <Zap className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground">
-                          Reveal cost: {formatCreditsLabel(1)} · Waterfall zap: {formatCreditsLabel(waterfallPhone?.credits_consumed)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <DollarSign className="h-4 w-4" />
+                        <span className="text-sm">
+                          {company.revenue_range || "Unknown"}
                         </span>
                       </div>
-                      {revealedPhone[companyId] && enrichingRows[companyId] && (
-                        <span className="text-[10px] text-muted-foreground">Enriching…</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        asChild
-                      >
-                        <a
-                          href={`${viewProfileBasePath}/${company.domain || company.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        {company.funding_stage && (
+                          <Badge variant="outline" className="text-xs">
+                            {company.funding_stage}
+                          </Badge>
+                        )}
+                        {company.funding_total && (
+                          <span className="text-xs text-muted-foreground">
+                            ${company.funding_total.toLocaleString()}M
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {company.headquarters_city && (
+                          <div>{company.headquarters_city}</div>
+                        )}
+                        {company.headquarters_state && (
+                          <div className="text-muted-foreground">
+                            {company.headquarters_state}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-2">
+                        {company.email && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs">{company.email}</span>
+                            <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                          </div>
+                        )}
+                        {waterfallEmail?.email && (
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs">{waterfallEmail.email}</span>
+                              <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground">
+                              Cost: {formatCreditsLabel(waterfallEmail?.credits_consumed)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="h-7 text-[11px]"
+                              onClick={() => handleRevealField(companyId, "email")}
+                            >
+                              <Lock className="h-3 w-3 mr-1" />
+                              Tap to Reveal
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                              onClick={() => onEnrichReveal?.(companyId, "email")}
+                              title={`Waterfall zap: ${formatCreditsLabel(waterfallEmail?.credits_consumed)}`}
+                            >
+                              <Zap className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">
+                            Reveal cost: {formatCreditsLabel(1)} · Waterfall zap: {formatCreditsLabel(waterfallEmail?.credits_consumed)}
+                          </span>
+                        </div>
+                        {revealedEmail[companyId] && enrichingRows[companyId] && (
+                          <span className="text-[10px] text-muted-foreground">Enriching…</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-2">
+                        {company.phone && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs">{company.phone}</span>
+                            <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                          </div>
+                        )}
+                        {waterfallPhone?.phone && (
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs">{waterfallPhone.phone}</span>
+                              <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground">
+                              Cost: {formatCreditsLabel(waterfallPhone?.credits_consumed)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="h-7 text-[11px]"
+                              onClick={() => handleRevealField(companyId, "phone")}
+                            >
+                              <Lock className="h-3 w-3 mr-1" />
+                              Tap to Reveal
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                              onClick={() => onEnrichReveal?.(companyId, "phone")}
+                              title={`Waterfall zap: ${formatCreditsLabel(waterfallPhone?.credits_consumed)}`}
+                            >
+                              <Zap className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">
+                            Reveal cost: {formatCreditsLabel(1)} · Waterfall zap: {formatCreditsLabel(waterfallPhone?.credits_consumed)}
+                          </span>
+                        </div>
+                        {revealedPhone[companyId] && enrichingRows[companyId] && (
+                          <span className="text-[10px] text-muted-foreground">Enriching…</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
                         >
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                          <a
+                            href={`${viewProfileBasePath}/${company.domain || company.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
               })}
             </TableBody>
           </Table>
