@@ -5,13 +5,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/explorium/company/search`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/explorium/company/search`)
     console.log('Request body:', body)
 
-    const response = await fetch(`${backendUrl}/api/explorium/company/search`, {
+    const authHeader = request.headers.get('authorization') || ''
+    const response = await fetch(`${backendUrl}/api/v1/explorium/company/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(body),
     })

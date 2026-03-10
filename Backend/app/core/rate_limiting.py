@@ -13,6 +13,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi import FastAPI, Request, HTTPException, status
+
+DEFAULT_RATE_LIMIT = "60/minute"
 import logging
 
 
@@ -47,7 +49,7 @@ def setup_rate_limiting(app: FastAPI, environment: str = "development") -> None:
     # Determine rate limits based on environment
     if environment == "production":
         # Strict limits for production
-        default_limit = "60/minute"
+        default_limit = DEFAULT_RATE_LIMIT
         search_limit = "30/minute"
         auth_limit = "10/minute"
     elif environment == "staging":
@@ -67,7 +69,7 @@ def setup_rate_limiting(app: FastAPI, environment: str = "development") -> None:
     )
 
 
-def get_rate_limit_headers(limits_str: str = "60/minute") -> dict:
+def get_rate_limit_headers(limits_str: str = DEFAULT_RATE_LIMIT) -> dict:
     """
     Get rate limit information for documenting in API responses.
     
@@ -92,7 +94,7 @@ class RateLimits:
     """Common rate limits for different endpoint types"""
     
     # General API endpoint
-    DEFAULT = "60/minute"
+    DEFAULT = DEFAULT_RATE_LIMIT
     
     # Search endpoints (more expensive)
     SEARCH = "30/minute"

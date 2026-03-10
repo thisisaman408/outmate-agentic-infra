@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Create API router
 router = APIRouter(
-    prefix="/api/companies",
+    prefix="/api/v1/companies",
     tags=["companies"],
     responses={
         400: {

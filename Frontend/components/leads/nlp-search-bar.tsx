@@ -49,7 +49,7 @@ export function NlpSearchBar({ intent, onFiltersExtracted, placeholder }: NlpSea
         headers["Authorization"] = `Bearer ${token}`
       }
 
-      const res = await fetch(`${API}/api/chat/parse-query`, {
+      const res = await fetch(`${API}/api/v1/chat/parse-query`, {
         method: "POST",
         headers,
         body: JSON.stringify({ query: trimmed }),

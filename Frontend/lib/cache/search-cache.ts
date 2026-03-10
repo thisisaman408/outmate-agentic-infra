@@ -17,12 +17,13 @@ const CACHE_TTL = 30 * 60 * 1000 // 30 minutes in milliseconds
 export const searchCache: SearchCache = {
   set: (companies: any[]) => {
     try {
-      const cacheKey = `search_results_${Date.now()}`
-      const cacheData: CachedCompany = {
-        data: companies,
-        timestamp: Date.now()
+      const timestamp = Date.now()
+      for (const company of companies) {
+        if (company?.domain) {
+          const cacheKey = `search_results_${company.domain}`
+          sessionStorage.setItem(cacheKey, JSON.stringify({ data: company, timestamp }))
+        }
       }
-      sessionStorage.setItem(cacheKey, JSON.stringify(cacheData))
     } catch (error) {
       console.warn('Failed to cache search results:', error)
     }
@@ -30,25 +31,12 @@ export const searchCache: SearchCache = {
 
   get: (domain: string) => {
     try {
-      const keys = Object.keys(sessionStorage)
-      const searchKeys = keys.filter(key => key.startsWith('search_results_'))
-      
-      // Find the most recent cache entry
-      let latestCache: CachedCompany | null = null
-      let latestTimestamp = 0
-      
-      for (const key of searchKeys) {
-        const cached = sessionStorage.getItem(key)
-        if (cached) {
-          const parsed = JSON.parse(cached) as CachedCompany
-          if (parsed.timestamp > latestTimestamp) {
-            latestTimestamp = parsed.timestamp
-            latestCache = parsed
-          }
-        }
+      const key = `search_results_${domain}`
+      const cached = sessionStorage.getItem(key)
+      if (cached) {
+        return JSON.parse(cached) as CachedCompany
       }
-      
-      return latestCache
+      return null
     } catch (error) {
       console.warn('Failed to retrieve cached search results:', error)
       return null

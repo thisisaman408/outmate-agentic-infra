@@ -13,6 +13,7 @@ See app/core/settings.py for the full Settings class definition.
 """
 
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -24,18 +25,20 @@ if env_file_path.exists():
 # Import production-ready settings
 from app.core.settings import Settings, load_settings
 
+logger = logging.getLogger(__name__)
+
 # Create global settings instance
 try:
     settings = load_settings()
 except Exception as e:
-    print(f"ERROR: Failed to load configuration: {e}")
+    logging.critical(f"ERROR: Failed to load configuration: {e}")
     raise
 
-# Log configuration status
-print(f"Configuration loaded for environment: {settings.ENVIRONMENT}")
-print(f"Database URL (masked): {settings.database_url_masked}")
-print(f"Redis URL (masked): {settings.redis_url_masked}")
-print(f"Debug mode: {settings.DEBUG}")
+# Log configuration status (masked values only — no secrets)
+logger.info(f"Configuration loaded for environment: {settings.ENVIRONMENT}")
+logger.info(f"Database URL (masked): {settings.database_url_masked}")
+logger.info(f"Redis URL (masked): {settings.redis_url_masked}")
+logger.info(f"Debug mode: {settings.DEBUG}")
 
 # Export individual settings for backward compatibility
 DATABASE_URL = settings.DATABASE_URL

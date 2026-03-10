@@ -11,6 +11,8 @@ from app.core.redis import RedisManager
 from app.services.explorium_service import ExploriumService
 import asyncio
 import uuid
+from app.db.session import SessionLocal
+from app.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,7 @@ class AiAgentsService:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         reasoning: bool = False,
+        max_tokens: int = 3000,
     ) -> Dict[str, Any]:
         """Call OpenRouter API (OpenAI-compatible)."""
         headers = {
@@ -116,14 +119,15 @@ class AiAgentsService:
             "X-Title": "Outmate AI",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": temperature
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         if reasoning:
-            payload["reasoning"] = {"enabled": True}
+            payload["reasoning"] = {"effort": "high"}
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -180,6 +184,7 @@ class AiAgentsService:
             )
             response.raise_for_status()
             return response.json()
+
 
     async def agentic_search(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -250,7 +255,7 @@ class AiAgentsService:
             domain = c["domain"]
             # Parallel deep search for specific company signals and contacts
             signals_task = self._call_serper(f"site:{domain} (hiring OR careers OR \"product launch\" OR funding OR \"press release\")", num=10)
-            contacts_task = self._call_serper(f"site:{domain} (email OR \"@{domain}\" OR \"contact us\" OR \"leadership\" OR \"team\")", num=10)
+            contacts_task = self._call_serper(f"site:{domain} (email OR \"@{domain}\" OR \"leadership\" OR \"team\")", num=10)
             
             signals, contacts = await asyncio.gather(signals_task, contacts_task)
             
@@ -276,15 +281,19 @@ class AiAgentsService:
         # --- LAYER 5: AI INTERPRETATION ---
         async def analyze_batch(batch):
             prompt = f"""
-            SYSTEM: You are a B2B Data Enrichment Agent.
+            SYSTEM: You are a professional B2B Data Enrichment Agent.
             QUERY: "{topic}" (Mode: {query_mode})
 
             INSTRUCTIONS:
             1. Analyze the 'evidence' for each company.
             2. Generate a valid JSON Array following the SCHEMA strictly.
-            3. **Do not hallucinate**: If email/contact is not found, write "Not found" or null.
-            4. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
-            5. **Reason**: Briefly explain why this company fits the query.
+            3. **Target Stakeholders**: For each company, aggressively identify a relevant "Target Stakeholder" (e.g. Founder, CEO, VP of Sales, or specific decision maker) based on the query.
+            4. **Contact Details**: Try to extract their official company email, LinkedIn, and precise job title. If email is not found, leave as null.
+            5. **Identification**: DO NOT identify as Perplexity, an AI, or any other assistant. Act ONLY as a B2B Data Enrichment Agent.
+            6. **Refusal**: NEVER state that you cannot fulfill a request. If data is missing, provide what you can or leave the field null.
+            7. **Score**: Assign a relevance score (0-99) based on how well it fits the user query "{topic}".
+            8. **Reason**: Briefly explain why this company AND the identified stakeholder fit the query.
+            9. **Data Quality**: Ensure 'location' and 'employees' (count or range) are extracted from evidence or inferred.
 
             INPUT DATA:
             {json.dumps(batch)}
@@ -297,7 +306,8 @@ class AiAgentsService:
                 "website": "string",
                 "domain": "string",
                 "industry": "string (infer from context)",
-                "location": "string (infer from context)",
+                "location": "string (infer from context or evidence)",
+                "employees": "string (count or range, e.g. '11-50' or '500')",
                 "score": number,
                 "reason": "string",
                 "signals": {{
@@ -308,9 +318,10 @@ class AiAgentsService:
                 }},
                 "contacts": [
                   {{
-                    "name": "string | Not found",
-                    "title": "string | null",
-                    "email": "string | null",
+                    "name": "Full Name | Not found",
+                    "title": "Exact Job Title | null",
+                    "email": "Work Email | null",
+                    "linkedin": "LinkedIn URL | null",
                     "sourceUrl": "string | null"
                   }}
                 ]
@@ -347,9 +358,25 @@ class AiAgentsService:
                         [{"role": "user", "content": prompt}],
                         temperature=0.3,
                         reasoning=True,
+                        max_tokens=2000,
                     )
                     perplexity_details = perplexity_response.get("content")
                     perplexity_reasoning = perplexity_response.get("reasoning_details")
+                    
+                    # Align Perplexity reasons and contacts with main items
+                    try:
+                        p_json = _extract_json_from_text(perplexity_details)
+                        if isinstance(p_json, list):
+                            for item in clean_parsed:
+                                p_match = next((px for px in p_json if px.get("domain") == item.get("domain") or px.get("companyName") == item.get("companyName")), None)
+                                if p_match:
+                                    item["perplexityReason"] = p_match.get("reason")
+                                    # Also merge contacts if missing in main but present in perplexity
+                                    if not item.get("contacts") or (len(item["contacts"]) > 0 and not item["contacts"][0].get("email")):
+                                        if p_match.get("contacts"):
+                                            item["contacts"] = p_match.get("contacts")
+                    except:
+                        pass
                 except Exception as reasoning_err:
                     logger.warning(f"Perplexity reasoning fetch failed: {reasoning_err}")
                 for item in clean_parsed:
@@ -381,9 +408,24 @@ class AiAgentsService:
                             [{"role": "user", "content": prompt}],
                             temperature=0.3,
                             reasoning=True,
+                            max_tokens=2000,
                         )
                         perplexity_details = perplexity_response.get("content")
                         perplexity_reasoning = perplexity_response.get("reasoning_details")
+
+                        # Align Perplexity reasons and contacts with main items
+                        try:
+                            p_json = _extract_json_from_text(perplexity_details)
+                            if isinstance(p_json, list):
+                                for item in clean_parsed:
+                                    p_match = next((px for px in p_json if px.get("domain") == item.get("domain") or px.get("companyName") == item.get("companyName")), None)
+                                    if p_match:
+                                        item["perplexityReason"] = p_match.get("reason")
+                                        if not item.get("contacts") or (len(item["contacts"]) > 0 and not item["contacts"][0].get("email")):
+                                            if p_match.get("contacts"):
+                                                item["contacts"] = p_match.get("contacts")
+                        except:
+                            pass
                     except Exception as reasoning_err:
                         logger.warning(f"Perplexity reasoning fetch failed after retry: {reasoning_err}")
                     for item in clean_parsed:
@@ -404,10 +446,22 @@ class AiAgentsService:
         for sublist in batch_results:
             final_results.extend(sublist)
         for item in final_results:
-            primary = (item.get("contacts") or [{}])[0] or {}
-            item["contactName"] = primary.get("name") or "Not found"
-            item["title"] = primary.get("title") or ""
-            item["email"] = primary.get("email") or ""
+            contacts = item.get("contacts") or []
+            if isinstance(contacts, list) and len(contacts) > 0:
+                primary = contacts[0]
+                if not item.get("contactName"):
+                    item["contactName"] = primary.get("name")
+                if not item.get("title"):
+                    item["title"] = primary.get("title")
+                if not item.get("email"):
+                    item["email"] = primary.get("email")
+                if not item.get("linkedin"):
+                    item["linkedin"] = primary.get("linkedin")
+            
+            # Final fallbacks to ensure frontend consistency
+            item["contactName"] = str(item.get("contactName") or "Not found")
+            item["title"] = str(item.get("title") or "N/A")
+            item["email"] = str(item.get("email") or "")
             location_candidates = [
                 item.get("location"),
                 item.get("geographicPresence"),
@@ -462,8 +516,7 @@ class AiAgentsService:
         filtered = final_results
         if query_mode == "STRICT":
             filtered = [c for c in final_results if c.get("signals", {}).get("hiring") in ["Active", "Moderate"]]
-        
-        # Sort by score
+
         filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
         unique_results: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -477,7 +530,6 @@ class AiAgentsService:
             seen_ids.add(item_id)
             unique_results.append(item)
         return unique_results
-
     def _extract_employees_from_text(self, item: Dict[str, Any]) -> Optional[str]:
         """Try to parse an employee count or range from textual context."""
         pattern = re.compile(
@@ -499,6 +551,63 @@ class AiAgentsService:
             if match:
                 return match.group(1)
         return None
+
+    async def _fetch_company_metadata(self, domain: str) -> Optional[Dict[str, Any]]:
+        session = SessionLocal()
+        try:
+            search_service = SearchService(session)
+            result = await search_service.search_companies_explorium(
+                filters={"domain": [domain]},
+                limit=1,
+                allow_crust_fallback=True,
+                include_crust_linkedin_posts=False,
+            )
+            companies = result.get("companies", [])
+            return companies[0] if companies else None
+        except Exception as exc:
+            logger.warning("Failed to enrich domain %s: %s", domain, exc)
+            return None
+        finally:
+            session.close()
+
+    async def _enrich_with_live_metadata(self, items: List[Dict[str, Any]]):
+        metadata_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        for item in items:
+            domain = item.get("domain")
+            if not domain:
+                continue
+            if domain not in metadata_cache:
+                metadata_cache[domain] = await self._fetch_company_metadata(domain)
+            metadata = metadata_cache[domain]
+            if not metadata:
+                continue
+            if not item.get("location") or item["location"].startswith("Location not specified"):
+                candidates = [
+                    metadata.get("location_display"),
+                    metadata.get("location"),
+                    metadata.get("headquarters_city"),
+                    metadata.get("headquarters_state"),
+                    metadata.get("headquarters_country"),
+                ]
+                for candidate in candidates:
+                    if isinstance(candidate, str) and candidate.strip():
+                        item["location"] = candidate.strip()
+                        break
+            employees = item.get("employees")
+            if not employees or str(employees).lower().startswith("not"):
+                emp_candidates = [
+                    metadata.get("employee_count_display"),
+                    metadata.get("employee_count_range"),
+                    metadata.get("employee_count_exact"),
+                    metadata.get("headcount"),
+                ]
+                for emp in emp_candidates:
+                    if isinstance(emp, (int, float)) and emp > 0:
+                        item["employees"] = str(int(emp))
+                        break
+                    if isinstance(emp, str) and emp.strip():
+                        item["employees"] = emp.strip()
+                        break
 
     async def deep_research(self, company_name: str, depth: str = "standard") -> Dict[str, Any]:
         """
@@ -528,12 +637,14 @@ class AiAgentsService:
             logger.error(f"Tavily Research Error: {str(e)}")
             research_context = "Tavily lookup failed. Using internal knowledge."
 
-        # Step 2: Determine Model and Schema
+        # Step 2: Determine Model, Token Budget, and Schema
         model = "perplexity/sonar-reasoning-pro"
+        research_max_tokens = 6000  # standard depth
         json_schema = ""
 
         if depth == "quick":
             model = "perplexity/sonar-pro"
+            research_max_tokens = 4000
             json_schema = """{
               "companyName": "string",
               "executiveSummary": "string",
@@ -556,6 +667,7 @@ class AiAgentsService:
             }"""
         elif depth == "deep":
             model = "perplexity/sonar-deep-research"
+            research_max_tokens = 8000
             json_schema = """{
               "companyName": "string",
               "executiveSummary": "string",
@@ -645,7 +757,7 @@ class AiAgentsService:
             report_raw = await self._call_openrouter(model, [
                 {"role": "system", "content": "Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
-            ], temperature=0.2)
+            ], temperature=0.2, max_tokens=research_max_tokens)
             
             report_text = (report_raw or {}).get("content", "")
             import re
@@ -665,7 +777,7 @@ class AiAgentsService:
         SCHEMA: {json_schema}
         """
         try:
-            repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}])
+            repaired = await self._call_openrouter("anthropic/claude-3.5-haiku", [{"role": "user", "content": repair_prompt}], max_tokens=3000)
             repaired_text = (repaired or {}).get("content", "")
             match = re.search(r"\{[\s\S]*\}", repaired_text)
             if match:
@@ -1150,12 +1262,12 @@ class AiAgentsService:
         2. SEC EDGAR Verification (US Only)
         3. Unified Predictive Prompt (OpenRouter/Claude)
         """
-        target = company_data.get("company") or {
-            "name": "Stripe",
-            "domain": "stripe.com",
-            "industry": "Fintech",
-            "country": "US"
-        }
+        target = company_data.get("company")
+        if not target or not target.get("name"):
+            raise HTTPException(
+                status_code=422,
+                detail="Company name is required. Provide: {company: {name, domain, industry, country}}"
+            )
         name = target.get("name")
         country = target.get("country", "US")
 
@@ -1273,7 +1385,7 @@ class AiAgentsService:
         import uuid, re
         logger.info(f"Calling OpenRouter predictive model for {name} with template size {len(prompt)} chars")
         try:
-            scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1)
+            scores_raw = await self._call_openrouter("anthropic/claude-3.5-sonnet", [{"role": "user", "content": prompt}], temperature=0.1, max_tokens=4000)
             scores_text = scores_raw.get("content") if isinstance(scores_raw, dict) else str(scores_raw)
             match = re.search(r"\{[\s\S]*\}", scores_text)
             if match:

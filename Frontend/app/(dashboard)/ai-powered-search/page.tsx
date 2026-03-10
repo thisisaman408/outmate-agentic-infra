@@ -28,6 +28,7 @@ import { CompaniesResultsTable } from "@/components/leads/companies/companies-re
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
+import { enrichCompany, type CompanyEnrichmentResult } from "@/lib/services/betterContactService"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { CsvImportButton } from "@/components/shared/csv-import-button"
@@ -75,7 +76,23 @@ type ChatSession = {
 
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
 const CHAT_STORAGE_USER_KEY = "nlp_enrichment_user_id"
+const CAMPAIGN_STATE_KEY = "nlp_enrichment_campaign_state_v2"
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+const CREDIT_LABELS: Record<string, string> = {
+  explorium_searches: "Explorium searches",
+  contactout_company_enrichments: "ContactOut company enrichments",
+  contactout_decision_makers: "ContactOut decision makers",
+}
+
+const formatCreditLabel = (key: string) => {
+  if (CREDIT_LABELS[key]) return CREDIT_LABELS[key]
+  return key
+    .replace(/_/g, " ")
+    .split(" ")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ")
+}
 
 const PROMPT_LIBRARY: PromptLibraryItem[] = [
   // --- Build Lead Lists ---
@@ -208,6 +225,9 @@ export default function DatabaseFinderPage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [detectedSignals, setDetectedSignals] = useState<any[]>([])
   const [isDetectingSignals, setIsDetectingSignals] = useState(false)
+  const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
+  const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
+  const [waterfallAttempts, setWaterfallAttempts] = useState<Record<string, { email?: boolean; phone?: boolean }>>({})
   const [showSignals, setShowSignals] = useState(false)
   const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([])
   const [campaignDraft, setCampaignDraft] = useState<{
@@ -237,6 +257,10 @@ export default function DatabaseFinderPage() {
   const [isImportingFilters, setIsImportingFilters] = useState(false)
   const [isVoiceListening, setIsVoiceListening] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
+  const [creditUsage, setCreditUsage] = useState<Record<string, number> | null>(null)
+  const creditUsageEntries = creditUsage ? Object.entries(creditUsage) : []
+  const totalCreditsUsed = creditUsageEntries.reduce((sum, [, value]) => sum + (value ?? 0), 0)
+  const hasHydratedCampaignState = useRef(false)
 
   // Agent conversation state
   const [agentMessages, setAgentMessages] = useState<Array<{role: "user" | "assistant", content: string}>>([])
@@ -312,7 +336,7 @@ export default function DatabaseFinderPage() {
     }
 
     // Check Gmail status
-    fetch(`${API}/api/campaigns/gmail/status`).then(r => r.json()).then(data => {
+    fetch(`${API}/api/v1/campaigns/gmail/status`).then(r => r.json()).then(data => {
       if (data.connected) {
         setGmailConnected(true)
         setGmailEmail(data.email || "")
@@ -320,17 +344,56 @@ export default function DatabaseFinderPage() {
     }).catch(() => {})
 
     // Check LinkedIn (Unipile) status
-    fetch(`${API}/api/campaigns/linkedin/status`).then(r => r.json()).then(data => {
+    fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setLinkedinConnected(true)
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || hasHydratedCampaignState.current) return
+    const stored = window.localStorage.getItem(CAMPAIGN_STATE_KEY)
+    if (!stored) {
+      hasHydratedCampaignState.current = true
+      return
+    }
+    try {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed.detectedSignals)) setDetectedSignals(parsed.detectedSignals)
+      if (parsed.campaignDraft) setCampaignDraft(parsed.campaignDraft)
+      if (parsed.campaignApproved) setCampaignApproved(parsed.campaignApproved)
+      if (parsed.selectedRecipients) setSelectedRecipients(new Set(parsed.selectedRecipients))
+      if (parsed.sentRecipients) setSentRecipients(parsed.sentRecipients)
+      if (parsed.sendingRecipients) setSendingRecipients(parsed.sendingRecipients)
+      if (parsed.sendErrors) setSendErrors(parsed.sendErrors)
+      if (parsed.creditUsage) setCreditUsage(parsed.creditUsage)
+    } catch (err) {
+      console.error("Failed to hydrate campaign state:", err)
+    } finally {
+      hasHydratedCampaignState.current = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const payload = {
+      detectedSignals,
+      campaignDraft,
+      campaignApproved,
+      selectedRecipients: Array.from(selectedRecipients),
+      sentRecipients,
+      sendingRecipients,
+      sendErrors,
+      creditUsage,
+    }
+    window.localStorage.setItem(CAMPAIGN_STATE_KEY, JSON.stringify(payload))
+  }, [detectedSignals, campaignDraft, campaignApproved, selectedRecipients, sentRecipients, sendingRecipients, sendErrors, creditUsage])
 
   const handleConnectGmail = async () => {
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const returnPath = window.location.pathname || "/ai-powered-search"
       const res = await fetch(
-        `${API}/api/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+        `${API}/api/v1/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
       )
       const data = await res.json()
       if (data.auth_url) {
@@ -347,7 +410,7 @@ export default function DatabaseFinderPage() {
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-email`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to_email: toEmail, subject, body }),
@@ -372,7 +435,7 @@ export default function DatabaseFinderPage() {
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/campaigns/send-linkedin`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ linkedin_url: linkedinUrl, message }),
@@ -511,7 +574,7 @@ const syncChatWithServer = async (session: ChatSession) => {
   const userId = getPersistentUserId()
   if (!userId) return
   try {
-    await fetch(`${API_BASE_URL}/api/chat/history`, {
+    await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -718,7 +781,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       try {
         const userId = getPersistentUserId()
         if (!userId) return
-        const response = await fetch(`${API_BASE_URL}/api/chat/history?user_id=${encodeURIComponent(userId)}`)
+        const response = await fetch(`${API_BASE_URL}/api/v1/chat/history?user_id=${encodeURIComponent(userId)}`)
         if (!response.ok) return
         const payload = await response.json()
         const sessions = Array.isArray(payload.sessions) ? payload.sessions.map(normalizeServerSession) : []
@@ -950,7 +1013,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     setIsSearching(true)
     try {
       const targetLimit = Math.min(Math.max(results.length, 25), 100)
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/leads/search/companies`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/leads/search/companies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1183,7 +1246,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     setLatestExtractedFilters(extractedFilters)
 
     try {
-      const parseRes = await fetch(`${API}/api/chat/parse-query`, {
+      const parseRes = await fetch(`${API}/api/v1/chat/parse-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmedQuery })
@@ -1246,7 +1309,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
     const examples = buildExamples(trimmedQuery)
     setWorkflowSteps([
-      { title: "Categorizing Intent", tool: "LLM (Claude)", endpoint: "/api/chat/parse-query", input: { query: trimmedQuery }, output: { intent: searchIntent, extracted_filters: extractedFilters } },
+      { title: "Categorizing Intent", tool: "LLM (Claude)", endpoint: "/api/v1/chat/parse-query", input: { query: trimmedQuery }, output: { intent: searchIntent, extracted_filters: extractedFilters } },
       { title: "Filter Clarification", tool: "Filter Parser", endpoint: "client-side", input: { query: trimmedQuery, filters: extractedFilters }, output: { clarification_message: clarificationMessage, user_confirmation_required: true } },
     ])
 
@@ -1295,6 +1358,15 @@ const syncChatWithServer = async (session: ChatSession) => {
       console.log("Search API Response:", data)
       console.log("API Response Keys:", Object.keys(data))
       console.log("Intent from API:", data.nlp_analysis?.categorized_intent || data.intent)
+
+      const returnedCreditUsage =
+        data.service_results?.credit_usage ||
+        data.credit_usage ||
+        data.data?.credit_usage ||
+        null
+      setCreditUsage(
+        returnedCreditUsage && Object.keys(returnedCreditUsage).length ? returnedCreditUsage : null
+      )
 
       let mappedResults = []
       const searchIntent = data.nlp_analysis?.categorized_intent === "prospect" ? "prospect" : "business"
@@ -1634,7 +1706,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         filters: latestExtractedFilters || {}
       }
 
-      const res = await fetch(`${API}/api/chat`, {
+      const res = await fetch(`${API}/api/v1/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: updatedMessages, context })
@@ -1909,7 +1981,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
       console.log("Sending for signal detection:", JSON.stringify(dataToSend, null, 2))
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/signals/detect`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2027,7 +2099,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         }
 
         try {
-          const signalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/signals/detect`, {
+          const signalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(signalPayload),
@@ -2047,7 +2119,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
       setClarification("Generating personalized campaign draft based on signals...")
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/campaigns/generate-draft`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/campaigns/generate-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2889,6 +2961,36 @@ const syncChatWithServer = async (session: ChatSession) => {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
+                        onEnrichReveal={async (companyId, field) => {
+                          if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
+                          const company = results.find((c: any) => (c.domain || c.id) === companyId)
+                          if (!company) return
+                          setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
+                          const result = await enrichCompany(company.name, company.domain, field)
+                          setEnrichedData(prev => {
+                            const existing = prev[companyId] || {}
+                            const updated = { ...existing, success: result.success, not_found: result.not_found }
+                            if (result.email) updated.email = { email: result.email, credits_consumed: result.credits_consumed }
+                            if (result.phone) updated.phone = { phone: result.phone, credits_consumed: result.credits_consumed }
+                            return { ...prev, [companyId]: updated }
+                          })
+                          setWaterfallAttempts(prev => ({ ...prev, [companyId]: { ...prev[companyId], [field]: true } }))
+                          setEnrichingRows(prev => ({ ...prev, [companyId]: false }))
+                        }}
+                        enrichCache={Object.fromEntries(
+                          Object.entries(enrichedData).map(([key, data]) => [
+                            key,
+                            enrichingRows[key]
+                              ? { loading: true }
+                              : data?.success && !data?.not_found
+                                ? {
+                                  email: data.email || undefined,
+                                  phone: data.phone || undefined,
+                                }
+                                : {}
+                          ])
+                        )}
+                        waterfallAttempts={waterfallAttempts}
                       />
                     ) : (
                       <div className="text-center py-8 text-muted-foreground">
@@ -3009,6 +3111,29 @@ const syncChatWithServer = async (session: ChatSession) => {
                     )}
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {creditUsageEntries.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Credit usage</CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Credits consumed for the latest search run
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Total: {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {creditUsageEntries.map(([key, value]) => (
+                    <Badge key={key} variant="outline">
+                      {formatCreditLabel(key)}: {value}
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}

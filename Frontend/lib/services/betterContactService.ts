@@ -39,7 +39,7 @@ export async function enrichProspect(
 ): Promise<ProspectEnrichmentResult> {
   console.log('Calling enrichProspect API:', { firstName, lastName, companyName, companyDomain, linkedinUrl, field })
   try {
-    const res = await fetch(`${API}/api/bettercontact/enrich-prospect`, {
+    const res = await fetch(`${API}/api/v1/bettercontact/enrich-prospect`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -70,7 +70,7 @@ export async function enrichCompany(
 ): Promise<CompanyEnrichmentResult> {
   console.log('Calling enrichCompany API:', { companyName, companyDomain, field })
   try {
-    const res = await fetch(`${API}/api/bettercontact/enrich-company`, {
+    const res = await fetch(`${API}/api/v1/bettercontact/enrich-company`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

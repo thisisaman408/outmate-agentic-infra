@@ -14,13 +14,20 @@ export async function POST(request: NextRequest) {
 
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    console.log('Proxying to backend:', `${backendUrl}/api/contactout/reveal-contact`)
+    console.log('Proxying to backend:', `${backendUrl}/api/v1/contactout/reveal-contact`)
 
-    const response = await fetch(`${backendUrl}/api/contactout/reveal-contact`, {
+    // Forward the Authorization header from the incoming request
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
+
+    const response = await fetch(`${backendUrl}/api/v1/contactout/reveal-contact`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         linkedin_url,
         include_phone

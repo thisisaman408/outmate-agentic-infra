@@ -14,7 +14,7 @@ from app.db.session import SessionLocal
 from app.core.redis import RedisManager
 from app.db.models.visitor import SiteConfig, Visit
 
-router = APIRouter(prefix="/api/visitors", tags=["visitors"])
+router = APIRouter(prefix="/api/v1/visitors", tags=["visitors"])
 logger = logging.getLogger(__name__)
 
 # Thread pool for running synchronous DB operations with timeouts

@@ -14,7 +14,7 @@ Used by:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from fastapi import APIRouter, status
@@ -58,7 +58,7 @@ async def health() -> Dict[str, Any]:
     
     return {
         "status": "healthy" if is_healthy else "degraded",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "environment": settings.ENVIRONMENT,
         "version": settings.APP_VERSION,
         "database": db_health,
@@ -109,7 +109,7 @@ async def health_db() -> Dict[str, Any]:
             "status": "unhealthy",
             "database": "postgresql",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -145,7 +145,7 @@ async def check_redis_health() -> Dict[str, Any]:
         pong = await RedisManager.client.ping()
         
         if not pong:
-            raise Exception("Redis PING returned False")
+            raise ValueError("Redis PING returned False")
         
         # Get info
         info = await RedisManager.client.info()
@@ -157,7 +157,7 @@ async def check_redis_health() -> Dict[str, Any]:
             "response": "PONG",
             "memory_mb": info.get("used_memory", 0) / (1024 * 1024),
             "connected_clients": info.get("connected_clients", 0),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -166,7 +166,7 @@ async def check_redis_health() -> Dict[str, Any]:
             "status": "unhealthy",
             "cache": "redis",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -195,7 +195,7 @@ async def readiness() -> Dict[str, Any]:
         
         return {
             "ready": True,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -218,5 +218,5 @@ async def liveness() -> Dict[str, Any]:
     """
     return {
         "alive": True,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }

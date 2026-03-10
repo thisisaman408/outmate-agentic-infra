@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call backend Explorium API
-    const backendUrl = `http://localhost:8000/api/explorium/technographics`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/v1/explorium/technographics`
     
     const requestBody = {
       domain
@@ -23,10 +23,12 @@ export async function POST(request: NextRequest) {
 
     console.log('Calling backend technographics API:', backendUrl, requestBody);
 
+    const authHeader = request.headers.get('authorization') || ''
     const response = await fetch(backendUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(requestBody)
     });

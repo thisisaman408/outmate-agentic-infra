@@ -86,7 +86,7 @@ export default function CompanyEnrichmentPage() {
       if (exactMatch) params.append('exact_match', 'true')
       if (enrichRealtime) params.append('enrich_realtime', 'true')
 
-      const response = await fetch(`http://localhost:8000/api/crustdata/enrich?${params.toString()}`)
+      const response = await fetch(`http://localhost:8000/api/v1/crustdata/enrich?${params.toString()}`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)

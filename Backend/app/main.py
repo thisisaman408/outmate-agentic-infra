@@ -8,13 +8,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
+from typing import Annotated
 
 # Load environment variables from .env file
 load_dotenv()
+
+SEPARATOR = "================================"
 
 from app.db.vector_setup import setup_vector_database
 from app.db.base import Base
@@ -44,6 +49,7 @@ from app.api.routes import copilot
 
 from app.core.logging import setup_logging
 from app.core.config import settings
+from app.core.rate_limiting import setup_rate_limiting
 
 # Import API routes
 from app.api.routes import prospects, companies
@@ -57,63 +63,70 @@ logger = logging.getLogger(__name__)
 auth_dependencies = [Depends(get_current_user)]
 
 # Create FastAPI app with metadata
+# Disable interactive docs in production to prevent API schema exposure
 app = FastAPI(
     title=settings.APP_NAME,
     description="Production-grade API for prospect and company search with CrustData integration",
     version=settings.APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
+# Security Headers Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Rate limiting — must be configured before routes are hit
+setup_rate_limiting(app, environment=settings.ENVIRONMENT)
+
 # CORS Configuration
+# NOTE: allow_origin_regex=".*" was deliberately removed — it bypasses the
+# whitelist entirely and allows any origin to send credentialed requests.
+# Add your production domain(s) to CORS_ALLOWED_ORIGINS in settings instead.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ALLOWED_ORIGINS,
-    allow_origin_regex=".*",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
 
 # Add custom exception handler for validation errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
     """
-    Custom handler for Pydantic validation errors
+    Custom handler for Pydantic validation errors.
+    Logs full detail server-side; returns only field/type info to the client
+    (never echoes the request body back, which could contain credentials).
     """
-    try:
-        body = await request.json()
-    except:
-        body = "Could not parse body"
-    
-    logger.error(
-        "VALIDATION ERROR DETAILS",
+    # Sanitised errors safe to return: only loc + type + msg, no input values
+    safe_errors = [
+        {"field": list(e.get("loc", [])), "type": e.get("type"), "message": e.get("msg")}
+        for e in exc.errors()
+    ]
+
+    logger.warning(
+        "Request validation failed",
         extra={
             "url": str(request.url),
             "method": request.method,
-            "body": body,
-            "errors": exc.errors(),
-            "error_count": len(exc.errors())
+            "error_count": len(exc.errors()),
+            "errors": safe_errors,
         }
     )
-    
-    for i, error in enumerate(exc.errors(), 1):
-        logger.error(
-            f"Validation Error #{i}",
-            extra={
-                "field": error.get('loc'),
-                "error_type": error.get('type'),
-                "error_message": error.get('msg'),
-                "input": error.get('input')
-            }
-        )
-    
+
     return JSONResponse(
         status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": body
-        }
+        content={"detail": safe_errors},
     )
 
 # Register API routers
@@ -126,27 +139,27 @@ logger.info("Companies router registered")
 app.include_router(auth.router)
 logger.info("Auth router registered")
 
-app.include_router(leads.router, prefix="/api/leads", tags=["leads"], dependencies=auth_dependencies)
-app.include_router(contactout_routes.router, prefix="/api/contactout", tags=["contactout"], dependencies=auth_dependencies)
-app.include_router(crustdata_routes.router, prefix="/api/crustdata", tags=["crustdata"], dependencies=auth_dependencies)
-app.include_router(explorium_routes.router, prefix="/api/explorium", tags=["explorium"], dependencies=auth_dependencies)
-app.include_router(signals.router, prefix="/api/signals", tags=["signals"], dependencies=auth_dependencies)
+app.include_router(leads.router, prefix="/api/v1/leads", tags=["leads"], dependencies=auth_dependencies)
+app.include_router(contactout_routes.router, prefix="/api/v1/contactout", tags=["contactout"], dependencies=auth_dependencies)
+app.include_router(crustdata_routes.router, prefix="/api/v1/crustdata", tags=["crustdata"], dependencies=auth_dependencies)
+app.include_router(explorium_routes.router, prefix="/api/v1/explorium", tags=["explorium"], dependencies=auth_dependencies)
+app.include_router(signals.router, prefix="/api/v1/signals", tags=["signals"], dependencies=auth_dependencies)
 logger.info("Signals router registered")
-app.include_router(campaigns.public_router, prefix="/api/campaigns", tags=["campaigns"])
+app.include_router(campaigns.public_router, prefix="/api/v1/campaigns", tags=["campaigns"])
 logger.info("Campaigns public router registered")
-app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"], dependencies=auth_dependencies)
+app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"], dependencies=auth_dependencies)
 logger.info("Campaigns router registered")
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"], dependencies=auth_dependencies)
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"], dependencies=auth_dependencies)
 logger.info("Chat router registered")
 
 # Integrated routes from both branches
 app.include_router(chat_history.router, dependencies=auth_dependencies)
 logger.info("Chat history router registered")
-app.include_router(bettercontact_routes.router, prefix="/api/bettercontact", tags=["bettercontact"], dependencies=auth_dependencies)
+app.include_router(bettercontact_routes.router, prefix="/api/v1/bettercontact", tags=["bettercontact"], dependencies=auth_dependencies)
 logger.info("BetterContact router registered")
-app.include_router(enrichment_routes.router, prefix="/api/enrich", tags=["enrichment"], dependencies=auth_dependencies)
+app.include_router(enrichment_routes.router, prefix="/api/v1/enrich", tags=["enrichment"], dependencies=auth_dependencies)
 logger.info("Enrichment router registered")
-app.include_router(ai_agents.router, prefix="/api/ai-agents", tags=["ai-agents"], dependencies=auth_dependencies)
+app.include_router(ai_agents.router, prefix="/api/v1/ai-agents", tags=["ai-agents"], dependencies=auth_dependencies)
 logger.info("AI Agents router registered")
 app.include_router(gtm_agents.router, dependencies=auth_dependencies)
 logger.info("GTM Agents router registered")
@@ -176,7 +189,7 @@ app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
 
 # Diagnostics endpoints for health checks
-app.include_router(diagnostics.router, prefix="/api/diagnostics", tags=["diagnostics"])
+app.include_router(diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"])
 logger.info("Diagnostics router registered")
 
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
@@ -184,12 +197,12 @@ logger.info("Copilot router registered")
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("================================")
+    logger.info(SEPARATOR)
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Database URL (masked): {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'redacted'}")
     logger.info(f"Redis URL (masked): {settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted'}")
-    logger.info("================================")
+    logger.info(SEPARATOR)
     
     app.state.db_ready = False
     app.state.redis_ready = False
@@ -227,7 +240,7 @@ async def startup_event():
             logger.error(f"✗ Vector database setup failed: {e}")
 
     import asyncio
-    asyncio.create_task(run_setup())
+    app.state.setup_task = asyncio.create_task(run_setup())
     logger.info("Vector database initialization started in background")
     
     logger.info("================================")
@@ -261,7 +274,7 @@ async def root():
 
 
 @app.get("/health/db")
-def health_db(db: Session = Depends(get_db)):
+def health_db(db: Annotated[Session, Depends(get_db)]):
     try:
         user_count = db.query(User).count()
         db_status = "connected"

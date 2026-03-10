@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call backend Explorium API
-    const backendUrl = `http://localhost:8000/api/explorium/social-media-presence`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/v1/explorium/social-media-presence`
     
     const requestBody = {
       domain,
@@ -25,10 +25,12 @@ export async function POST(request: NextRequest) {
 
     console.log('Calling backend social media presence API:', backendUrl, requestBody);
 
+    const authHeader = request.headers.get('authorization') || ''
     const response = await fetch(backendUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(requestBody)
     });

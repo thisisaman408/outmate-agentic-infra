@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call backend ContactOut API
-    const backendUrl = `http://localhost:8000/api/contactout/linkedin-enrich`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/v1/contactout/linkedin-enrich`
     
     const requestBody = {
       linkedin_url,
@@ -26,11 +26,17 @@ export async function POST(request: NextRequest) {
 
     console.log('Calling backend LinkedIn enrich API:', backendUrl, requestBody);
 
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
+
     const response = await fetch(backendUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(requestBody)
     });
 

@@ -34,18 +34,18 @@ async function postJson(path: string, body: unknown) {
 
 export const gtmAgentsApi = {
   runCrossfire: (payload: { competitor_domain: string; target_region?: string; notes?: string }) =>
-    postJson("/api/gtm-agents/crossfire/run", payload),
+    postJson("/api/v1/gtm-agents/crossfire/run", payload),
 
   runComplianceOracle: (payload: { message_template: string; jurisdictions?: string }) =>
-    postJson("/api/gtm-agents/compliance-oracle/run", payload),
+    postJson("/api/v1/gtm-agents/compliance-oracle/run", payload),
 
   runViralityEngine: (payload: { seed_customers: string; channels?: string }) =>
-    postJson("/api/gtm-agents/virality-engine/run", payload),
+    postJson("/api/v1/gtm-agents/virality-engine/run", payload),
 
   runTalentRadar: (payload: { accounts: string; lookback_days?: number }) =>
-    postJson("/api/gtm-agents/talent-radar/run", payload),
+    postJson("/api/v1/gtm-agents/talent-radar/run", payload),
 
   runRegimeShifter: (payload: { geo_focus: string; scenario?: string }) =>
-    postJson("/api/gtm-agents/regime-shifter/run", payload),
+    postJson("/api/v1/gtm-agents/regime-shifter/run", payload),
 }
 

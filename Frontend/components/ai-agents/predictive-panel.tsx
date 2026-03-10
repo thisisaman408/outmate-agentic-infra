@@ -6,12 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { TrendingUp, Loader2, BrainCircuit, Target, ArrowUpRight, ArrowDownRight, Info, Mail, Phone, ExternalLink, Download } from "lucide-react"
+import { TrendingUp, Loader2, BrainCircuit, ArrowUpRight, ArrowDownRight, Info, Mail, ExternalLink, Download } from "lucide-react"
 import { aiAgentsApi, type PredictiveScore } from "@/lib/api/ai-agents"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { exportToCSV } from "@/lib/export-csv"
 
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
@@ -70,25 +70,38 @@ export function PredictivePanel() {
   const { toast } = useToast()
   const [isScoring, setIsScoring] = useState(false)
   const [results, setResults] = useState<PredictiveScore[]>([])
-  const [insightCopy, setInsightCopy] = useState(
-    "Currently analyzing 128 enriched leads from your primary pipeline. The model uses 24+ behavioral and firmographic variables to predict close-won outcomes."
-  )
+  const [companyName, setCompanyName] = useState("")
+  const [companyDomain, setCompanyDomain] = useState("")
+  const [industry, setIndustry] = useState("")
+  const [country, setCountry] = useState("US")
 
   const handleScoreLeads = async () => {
+    if (!companyName.trim()) {
+      toast({
+        title: "Company Required",
+        description: "Enter a company name to run predictive scoring.",
+        variant: "destructive",
+      })
+      return
+    }
     setIsScoring(true)
     setResults([])
     try {
-      const leads = ["1", "2", "3"]
-      const scores = await aiAgentsApi.scoreLeads(leads)
+      const scores = await aiAgentsApi.scoreLeads({
+        name: companyName.trim(),
+        domain: companyDomain.trim() || undefined,
+        industry: industry.trim() || undefined,
+        country: country.trim() || "US",
+      })
       setResults(scores)
       toast({
         title: "Intelligence Model Run",
-        description: `Agent calculated conversion propensity for ${scores.length} leads.`,
+        description: `Agent calculated conversion propensity for ${companyName}.`,
       })
     } catch (error: any) {
       toast({
         title: "Model Execution Error",
-        description: error.message === 'Failed to score leads' ? "Insufficient credits or database issue." : error.message,
+        description: error.message,
         variant: "destructive",
       })
     } finally {
@@ -121,39 +134,82 @@ export function PredictivePanel() {
         </CardHeader>
 
         <CardContent className="pb-10">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-8 p-8 rounded-3xl bg-black/20 border border-white/5">
-            <div className="flex-1 space-y-2">
-              <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 mb-2 block">
-                Summary copy
-              </label>
-              <Textarea
-                value={insightCopy}
-                onChange={(event) => setInsightCopy(event.target.value)}
-                className="h-28 text-sm leading-relaxed font-semibold text-muted-foreground bg-black/20 border border-white/10 focus-visible:border-white/20"
-              />
+          <div className="space-y-6 p-8 rounded-3xl bg-black/20 border border-white/5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 block">
+                  Company Name *
+                </label>
+                <Input
+                  placeholder="e.g. Acme Corp"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleScoreLeads()}
+                  disabled={isScoring}
+                  className="h-12 bg-black/20 border-white/10 focus-visible:border-orange-500/40"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 block">
+                  Domain (optional)
+                </label>
+                <Input
+                  placeholder="e.g. acmecorp.com"
+                  value={companyDomain}
+                  onChange={(e) => setCompanyDomain(e.target.value)}
+                  disabled={isScoring}
+                  className="h-12 bg-black/20 border-white/10 focus-visible:border-orange-500/40"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 block">
+                  Industry (optional)
+                </label>
+                <Input
+                  placeholder="e.g. SaaS, Fintech, Healthcare"
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
+                  disabled={isScoring}
+                  className="h-12 bg-black/20 border-white/10 focus-visible:border-orange-500/40"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase font-black tracking-widest text-muted-foreground/60 block">
+                  Country
+                </label>
+                <Input
+                  placeholder="e.g. US"
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  disabled={isScoring}
+                  className="h-12 bg-black/20 border-white/10 focus-visible:border-orange-500/40"
+                />
+              </div>
             </div>
-            <Button
-              onClick={handleScoreLeads}
-              disabled={isScoring}
-              className={cn(
-                "h-16 px-12 text-lg font-bold rounded-2xl transition-all duration-300 w-full md:w-auto",
-                isScoring
-                  ? "bg-muted"
-                  : "bg-orange-600 hover:bg-orange-500 shadow-2xl shadow-orange-500/20"
-              )}
-            >
-              {isScoring ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Running Inference...
-                </>
-              ) : (
-                <>
-                  <BrainCircuit className="mr-3 h-5 w-5" />
-                  Run Model
-                </>
-              )}
-            </Button>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleScoreLeads}
+                disabled={isScoring}
+                className={cn(
+                  "h-14 px-12 text-base font-bold rounded-2xl transition-all duration-300",
+                  isScoring
+                    ? "bg-muted"
+                    : "bg-orange-600 hover:bg-orange-500 shadow-2xl shadow-orange-500/20"
+                )}
+              >
+                {isScoring ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Running Inference...
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit className="mr-3 h-5 w-5" />
+                    Run Model
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

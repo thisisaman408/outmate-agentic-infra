@@ -1,0 +1,12 @@
+Collecting PyJWT
+  Using cached pyjwt-2.11.0-py3-none-any.whl.metadata (4.0 kB)
+Using cached pyjwt-2.11.0-py3-none-any.whl (28 kB)
+Installing collected packages: PyJWT
+  Attempting uninstall: PyJWT
+    Found existing installation: PyJWT 2.11.0
+    Uninstalling PyJWT-2.11.0:
+      Successfully uninstalled PyJWT-2.11.0
+Successfully installed PyJWT-2.11.0
+
+[notice] A new release of pip is available: 25.2 -> 26.0.1
+[notice] To update, run: C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m pip install --upgrade pip

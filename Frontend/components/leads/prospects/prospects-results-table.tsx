@@ -271,9 +271,13 @@ export function ProspectsResultsTable({
         let fieldValues: string[] = []
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/prospects/reveal-contact`, {
+            const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/prospects/reveal-contact`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ linkedin_url: linkedinUrl }),
             })
             if (response.ok) {
@@ -298,7 +302,7 @@ export function ProspectsResultsTable({
             const companyName = employer?.name || ""
             const companyDomain = employer?.company_website_domain || ""
 
-            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/bettercontact/enrich-prospect`, {
+            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/bettercontact/enrich-prospect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

@@ -46,67 +46,6 @@ export default function CompanyProfilePage() {
   const [revealedContacts, setRevealedContacts] = useState<{ phone?: string; email?: string }>({});
   const [enrichedProfiles, setEnrichedProfiles] = useState<{ [key: string]: any }>({});
 
-// Fetch profile-specific data (decision makers, LinkedIn posts, insights, etc.)
-const fetchProfileSpecificData = async (companyData: any) => {
-  try {
-    // Fetch decision makers
-    const decisionMakersResponse = await fetch(`/api/contactout/decision-makers/${encodeURIComponent(companyData.domain)}?page=1`);
-    if (decisionMakersResponse.ok) {
-      const decisionMakersData = await decisionMakersResponse.json();
-      if (decisionMakersData.success && decisionMakersData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, decisionMakers: decisionMakersData.data }));
-      }
-    }
-
-    // Fetch LinkedIn posts
-    const linkedinPostsResponse = await fetch(`/api/explorium/linkedin-posts?company_domain=${encodeURIComponent(companyData.domain)}`);
-    if (linkedinPostsResponse.ok) {
-      const linkedinPostsData = await linkedinPostsResponse.json();
-      if (linkedinPostsData.success && linkedinPostsData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, linkedinPosts: linkedinPostsData.data }));
-      }
-    }
-
-    // Fetch LinkedIn insights
-    const linkedinInsightsResponse = await fetch(`/api/explorium/linkedin-insights?company_domain=${encodeURIComponent(companyData.domain)}`);
-    if (linkedinInsightsResponse.ok) {
-      const linkedinInsightsData = await linkedinInsightsResponse.json();
-      if (linkedinInsightsData.success && linkedinInsightsData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, linkedinInsights: linkedinInsightsData.data }));
-      }
-    }
-
-    // Fetch technographics
-    const technographicsResponse = await fetch(`/api/explorium/technographics?company_domain=${encodeURIComponent(companyData.domain)}`);
-    if (technographicsResponse.ok) {
-      const technographicsData = await technographicsResponse.json();
-      if (technographicsData.success && technographicsData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, technographics: technographicsData.data }));
-      }
-    }
-
-    // Fetch social media presence
-    const socialMediaResponse = await fetch(`/api/explorium/social-media-presence?company_domain=${encodeURIComponent(companyData.domain)}`);
-    if (socialMediaResponse.ok) {
-      const socialMediaData = await socialMediaResponse.json();
-      if (socialMediaData.success && socialMediaData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, socialMediaPresence: socialMediaData.data }));
-      }
-    }
-
-    // Fetch business intent
-    const businessIntentResponse = await fetch(`/api/explorium/business-intent?company_domain=${encodeURIComponent(companyData.domain)}`);
-    if (businessIntentResponse.ok) {
-      const businessIntentData = await businessIntentResponse.json();
-      if (businessIntentData.success && businessIntentData.data) {
-        setEnrichedProfiles(prev => ({ ...prev, businessIntent: businessIntentData.data }));
-      }
-    }
-  } catch (error) {
-    console.error('Error fetching profile-specific data:', error);
-  }
-};
-
   // Fetch comprehensive company data when domain changes
   useEffect(() => {
     if (domain && domain !== company?.domain) {
@@ -118,6 +57,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           // Check cache first for base company data
           const cachedData = searchCache.get(domain);
           let companyData = null;
+          let cachedHit = false;
           let decisionMakersData: any[] = [];
           let linkedinPostsData: any[] = [];
           let linkedinInsightsData = null;
@@ -125,19 +65,19 @@ const fetchProfileSpecificData = async (companyData: any) => {
           if (cachedData && !searchCache.isExpired(cachedData.timestamp)) {
             console.log('Using cached company data for domain:', domain);
             companyData = cachedData.data;
-            
-            // Fetch only additional profile-specific data if cache hit
-            await fetchProfileSpecificData(companyData);
+            cachedHit = true;
           } else {
             console.log('Cache miss or expired, fetching fresh data for domain:', domain);
-            
+
             // Load ContactOut first, then enrich with Explorium endpoints
           }
 
           // If explorium failed, try ContactOut API
           if (!companyData) {
             try {
-              const contactOutResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`);
+              const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+              const fetchHeaders: Record<string, string> = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+              const contactOutResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`, { headers: fetchHeaders });
               if (contactOutResponse.ok) {
                 const contactOutData = await contactOutResponse.json();
                 if (contactOutData.success && contactOutData.data) {
@@ -172,7 +112,8 @@ const fetchProfileSpecificData = async (companyData: any) => {
           // Fetch decision makers from ContactOut API (using company endpoint which returns both company + decision makers)
           try {
             console.log('Fetching decision makers from company endpoint for domain:', domain);
-            const companyResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`);
+            const token2 = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+            const companyResponse = await fetch(`/api/contactout/company/${encodeURIComponent(domain)}`, { headers: { 'Content-Type': 'application/json', ...(token2 ? { 'Authorization': `Bearer ${token2}` } : {}) } });
             console.log('Company response status:', companyResponse.status);
             
             if (companyResponse.ok) {
@@ -198,11 +139,20 @@ const fetchProfileSpecificData = async (companyData: any) => {
             console.log('Failed to fetch decision makers:', error);
           }
 
+          // Only re-enrich from Explorium if data was not loaded from search cache
+          if (!cachedHit) {
+
+          const enrichToken = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+          const enrichHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...(enrichToken ? { 'Authorization': `Bearer ${enrichToken}` } : {}),
+          }
+
           // Fetch LinkedIn posts via Explorium (insights)
           try {
             const postsResponse = await fetch(`/api/explorium/linkedin-insights`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: enrichHeaders,
               body: JSON.stringify({ domain, include_posts: true, posts_limit: 10 }),
             });
             if (postsResponse.ok) {
@@ -219,9 +169,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           try {
             const insightsResponse = await fetch(`/api/explorium/linkedin-insights`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: enrichHeaders,
               body: JSON.stringify({
                 domain,
                 include_posts: true,
@@ -247,9 +195,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           try {
             const techResponse = await fetch(`/api/explorium/technographics`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: enrichHeaders,
               body: JSON.stringify({
                 domain,
               }),
@@ -276,7 +222,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           try {
             const firmoResponse = await fetch(`/api/explorium/firmographics`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: enrichHeaders,
               body: JSON.stringify({ domain }),
             });
             if (firmoResponse.ok) {
@@ -317,7 +263,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           try {
             const fundingResponse = await fetch(`/api/explorium/funding`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: enrichHeaders,
               body: JSON.stringify({ domain }),
             })
             if (fundingResponse.ok) {
@@ -346,7 +292,7 @@ const fetchProfileSpecificData = async (companyData: any) => {
           try {
             const searchResponse = await fetch(`/api/explorium/company/search`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: enrichHeaders,
               body: JSON.stringify({ filters: { domain }, options: { limit: 1, page: 1 } }),
             })
             if (searchResponse.ok) {
@@ -375,12 +321,16 @@ const fetchProfileSpecificData = async (companyData: any) => {
             console.log('Failed to fetch explorium company profile:', error)
           }
 
+          } // end !cachedHit
+
           // Fetch Social Media Presence from Explorium API
           try {
+            const socialToken = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const socialResponse = await fetch(`/api/explorium/social-media-presence`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                ...(socialToken ? { 'Authorization': `Bearer ${socialToken}` } : {}),
               },
               body: JSON.stringify({
                 domain,
@@ -400,10 +350,12 @@ const fetchProfileSpecificData = async (companyData: any) => {
 
           // Fetch Business Intent Topics from Explorium API
           try {
+            const intentToken = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const intentResponse = await fetch(`/api/explorium/business-intent`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                ...(intentToken ? { 'Authorization': `Bearer ${intentToken}` } : {}),
               },
               body: JSON.stringify({
                 domain,
@@ -462,10 +414,12 @@ const fetchProfileSpecificData = async (companyData: any) => {
     }
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
       const response = await fetch(`/api/contactout/linkedin-enrich`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           linkedin_url: person.linkedin_url,
@@ -500,9 +454,13 @@ const fetchProfileSpecificData = async (companyData: any) => {
         throw new Error('No LinkedIn profile available');
       }
 
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
       const revealRes = await fetch('/api/contactout/reveal-contact', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           linkedin_url: person.linkedin_url,
           include_phone: type === 'phone',

@@ -26,14 +26,20 @@ export async function GET(
     
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    const url = `${backendUrl}/api/contactout/decision-makers/${encodeURIComponent(domain)}?page=${page}`
+    const url = `${backendUrl}/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}?page=${page}`
     console.log('Proxying to backend:', url)
+
+    const authHeader = request.headers.get('Authorization')
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    }
 
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     })
 
     const responseData = await response.json()

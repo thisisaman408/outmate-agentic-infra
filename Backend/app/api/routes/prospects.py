@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Create API router with configuration
 router = APIRouter(
-    prefix="/api/prospects",
+    prefix="/api/v1/prospects",
     tags=["prospects"],
     responses={
         400: {
