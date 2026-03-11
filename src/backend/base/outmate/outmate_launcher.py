@@ -29,7 +29,7 @@ def main():
         # On non-macOS systems, call the main function directly
         from outmate.__main__ import main as outmate_main
 
-        outmate.main()
+        outmate_main()
 
 
 def _launch_with_exec():

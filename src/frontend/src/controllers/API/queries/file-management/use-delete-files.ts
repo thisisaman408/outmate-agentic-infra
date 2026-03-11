@@ -29,13 +29,13 @@ export const useDeleteFilesV2: useMutationFunctionType<
     ["useDeleteFilesV2"],
     deleteFileFn,
     {
-      onSettled: (data, error, variables, context) => {
+      ...options,
+      onSettled: (...args) => {
         queryClient.invalidateQueries({
           queryKey: ["useGetFilesV2"],
         });
-        options?.onSettled?.(data, error, variables, context);
+        options?.onSettled?.(...args);
       },
-      ...options,
     },
   );
 

@@ -287,17 +287,27 @@ export type useQueryFunctionType<
     options?: Omit<UseQueryOptions, "queryFn" | "queryKey"> & O,
   ) => UseQueryResult<R>;
 
-export type QueryFunctionType = (
-  queryKey: UseQueryOptions["queryKey"],
-  queryFn: UseQueryOptions["queryFn"],
-  options?: Omit<UseQueryOptions, "queryKey" | "queryFn">,
-) => UseQueryResult<any>;
+export type QueryFunctionType = <
+  TQueryFnData = unknown,
+  TError = Error,
+  TData = TQueryFnData,
+  TQueryKey extends import("@tanstack/react-query").QueryKey = import("@tanstack/react-query").QueryKey,
+>(
+  queryKey: TQueryKey,
+  queryFn: import("@tanstack/react-query").QueryFunction<TQueryFnData, TQueryKey>,
+  options?: Omit<UseQueryOptions<TQueryFnData, TError, TData, TQueryKey>, "queryKey" | "queryFn">,
+) => UseQueryResult<TData, TError>;
 
-export type MutationFunctionType = (
-  mutationKey: UseMutationOptions["mutationKey"],
-  mutationFn: UseMutationOptions<any, any, any>["mutationFn"],
-  options?: Omit<UseMutationOptions<any, any>, "mutationFn" | "mutationKey">,
-) => UseMutationResult<any, any, any, any>;
+export type MutationFunctionType = <
+  TData = unknown,
+  TError = Error,
+  TVariables = void,
+  TContext = unknown,
+>(
+  mutationKey: import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>["mutationKey"],
+  mutationFn: import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>["mutationFn"],
+  options?: Omit<import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>, "mutationFn" | "mutationKey">,
+) => UseMutationResult<TData, TError, TVariables, TContext>;
 
 export type useMutationFunctionType<
   Params,
