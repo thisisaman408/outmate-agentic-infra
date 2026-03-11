@@ -1,0 +1,42 @@
+networks:
+  dev-outmate:
+
+services:
+  outmate:
+    build:
+      context: ..
+      dockerfile: docker/dev.Dockerfile
+    image: dev-outmate
+    container_name: dev-outmate
+    restart: always
+    ports:
+      - "7860:7860"
+      - "3000:3000"
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - OUTMATE_DATABASE_URL=postgresql://outmate:outmate@postgres:5432/outmate
+      - OUTMATE_SUPERUSER=outmate
+      - OUTMATE_SUPERUSER_PASSWORD=outmate
+      - OUTMATE_CONFIG_DIR=/var/lib/outmate
+    env_file:
+      - ../.env
+    volumes:
+      - ../:/app
+    depends_on:
+      - postgres
+    networks:
+      -  dev-outmate
+
+
+  postgres:
+    container_name: postgres
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: outmate
+      POSTGRES_PASSWORD: outmate
+      POSTGRES_DB: outmate
+    ports:
+      - "5432:5432"
+    networks:
+      -  dev-outmate
+
