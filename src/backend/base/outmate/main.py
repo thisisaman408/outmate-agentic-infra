@@ -419,6 +419,11 @@ def create_app():
     """Create the FastAPI app and include the router."""
     from outmate.utils.version import get_version_info
 
+    # Read config from environment variables set by the CLI launcher
+    static_files_dir_str = os.environ.get("OUTMATE_STATIC_FILES_DIR")
+    static_files_dir: Path | None = Path(static_files_dir_str) if static_files_dir_str else None
+    backend_only = os.environ.get("OUTMATE_BACKEND_ONLY", "false").lower() == "true"
+
     __version__ = get_version_info()["version"]
     configure()
     lifespan = get_lifespan(version=__version__)
@@ -547,6 +552,17 @@ def create_app():
 
     add_pagination(app)
 
+    # get the directory of the current file
+    if not static_files_dir:
+        static_files_dir = get_static_files_dir()
+
+    if not backend_only and (not static_files_dir or not static_files_dir.exists()):
+        msg = f"Static files directory {static_files_dir} does not exist."
+        raise RuntimeError(msg)
+
+    if not backend_only and static_files_dir is not None:
+        setup_static_files(app, static_files_dir)
+
     return app
 
 
@@ -600,22 +616,6 @@ def get_static_files_dir():
     """Get the static files directory relative to Outmate's main.py file."""
     frontend_path = Path(__file__).parent
     return frontend_path / "frontend"
-
-
-def setup_app(static_files_dir: Path | None = None, *, backend_only: bool = False) -> FastAPI:
-    """Setup the FastAPI app."""
-    # get the directory of the current file
-    if not static_files_dir:
-        static_files_dir = get_static_files_dir()
-
-    if not backend_only and (not static_files_dir or not static_files_dir.exists()):
-        msg = f"Static files directory {static_files_dir} does not exist."
-        raise RuntimeError(msg)
-    app = create_app()
-
-    if not backend_only and static_files_dir is not None:
-        setup_static_files(app, static_files_dir)
-    return app
 
 
 if __name__ == "__main__":

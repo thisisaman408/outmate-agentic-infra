@@ -31,7 +31,6 @@ from sqlmodel import select
 
 from outmate.cli.progress import create_outmate_progress
 from outmate.initial_setup.setup import get_or_create_default_folder
-from outmate.main import setup_app
 from outmate.services.auth.utils import get_current_user_from_access_token
 from outmate.services.database.models.api_key.crud import check_key
 from outmate.services.deps import get_db_service, get_settings_service, is_settings_service_initialized, session_scope
@@ -335,7 +334,16 @@ def run(
 
     # Step 2: Starting Core Services
     with progress.step(2):
-        app = setup_app(static_files_dir=static_files_dir, backend_only=bool(backend_only))
+        # We no longer instantiate the app here. We pass the import string to the server.
+        # This allows Gunicorn/Uvicorn to start the worker processes and bind the port immediately.
+        # The app creation and lifespan will handle the heavy initialization in the background.
+        # To support passing variables to create_app via the CLI, we set them in the environment.
+        if static_files_dir:
+            os.environ["OUTMATE_STATIC_FILES_DIR"] = str(static_files_dir)
+        if backend_only:
+            os.environ["OUTMATE_BACKEND_ONLY"] = "true"
+        
+        app_spec = "outmate.main:create_app"
 
     # Step 3: Connecting Database (this happens inside setup_app via dependencies)
     with progress.step(3):
@@ -380,13 +388,14 @@ def run(
             loop_type = "none"  # Preserve pre-configured WindowsSelectorEventLoopPolicy
 
         uvicorn.run(
-            app,
+            app_spec,
             host=host,
             port=port,
             log_level=log_level,
             reload=False,
             workers=get_number_of_workers(workers),
             loop=loop_type,
+            factory=True,
         )
     else:
         with progress.step(6):
@@ -401,7 +410,7 @@ def run(
                 "keyfile": ssl_key_file_path,
                 "log_level": log_level.lower() if log_level is not None else "info",
             }
-            server = outmate_application(app, options)
+            server = outmate_application(app_spec, options)
 
             # Start the webapp process
             process_manager.webapp_process = Process(target=server.run)
