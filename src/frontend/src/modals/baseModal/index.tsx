@@ -263,7 +263,7 @@ function BaseModal({
 
   const modalContent = (
     <>
-      {headerChild && headerChild}
+      {headerChild ? headerChild : <DialogTitle className="sr-only">Dialog</DialogTitle>}
       {ContentChild}
       {ContentFooter && ContentFooter}
     </>
