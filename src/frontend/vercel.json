@@ -16,5 +16,20 @@
             "source": "/(.*)",
             "destination": "/index.html"
         }
+    ],
+    "headers": [
+        {
+            "source": "/api/(.*)",
+            "headers": [
+                {
+                    "key": "Host",
+                    "value": "outmate-agentic-infra.onrender.com"
+                },
+                {
+                    "key": "Origin",
+                    "value": "https://outmate-agentic-infra.onrender.com"
+                }
+            ]
+        }
     ]
 }
