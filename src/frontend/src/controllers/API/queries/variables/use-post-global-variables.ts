@@ -49,17 +49,18 @@ export const usePostGlobalVariables: useMutationFunctionType<
     unknown,
     PostGlobalVariablesParams
   > = mutate(["usePostGlobalVariables"], postGlobalVariablesFunction, {
-    onSettled: (data, error, variables) => {
+    ...options,
+    onSettled: (...args: any[]) => {
+      const variables = args[2] as PostGlobalVariablesParams | undefined;
       queryClient.refetchQueries({ queryKey: ["useGetGlobalVariables"] });
-      if (variables.category) {
+      if (variables?.category) {
         queryClient.refetchQueries({
           queryKey: ["category-variable", variables.category],
         });
       }
     },
     retry: false,
-    ...options,
-  });
+  } as any);
 
   return mutation;
 };

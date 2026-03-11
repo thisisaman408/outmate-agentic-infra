@@ -45,7 +45,9 @@ export const usePatchFlowsMCP: useMutationFunctionType<
     any,
     PatchFlowMCPRequest
   > = mutate(["usePatchFlowsMCP", params.project_id], patchFlowMCP, {
-    onSuccess: (data, variables, context) => {
+    ...options,
+    onSuccess: (...args: any[]) => {
+      const [data, variables] = args;
       const authSettings = (variables as unknown as PatchFlowMCPRequest)
         .auth_settings;
       // Update the auth settings cache immediately to prevent race conditions
@@ -67,9 +69,7 @@ export const usePatchFlowsMCP: useMutationFunctionType<
       });
 
       // Call the original onSuccess if provided
-      if (options?.onSuccess) {
-        options.onSuccess(data, variables, context);
-      }
+      (options?.onSuccess as any)?.(...args);
     },
     onSettled: () => {
       // Invalidate only this specific project's queries to avoid affecting other projects
@@ -77,8 +77,7 @@ export const usePatchFlowsMCP: useMutationFunctionType<
         queryKey: ["useGetFlowsMCP", params.project_id],
       });
     },
-    ...options,
-  });
+  } as any);
 
   return mutation;
 };

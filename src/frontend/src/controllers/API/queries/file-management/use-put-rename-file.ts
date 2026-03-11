@@ -31,14 +31,14 @@ export const usePostRenameFileV2: useMutationFunctionType<
         return res;
       },
       {
-        onSettled: (data, error, variables, context) => {
+        ...options,
+        onSettled: (...args: any[]) => {
           queryClient.invalidateQueries({
             queryKey: ["useGetFilesV2"],
           });
-          options?.onSettled?.(data, error, variables, context);
+          (options?.onSettled as any)?.(...args);
         },
-        ...options,
-      },
+      } as any,
     );
 
   return mutation;

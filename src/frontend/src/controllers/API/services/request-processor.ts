@@ -1,9 +1,7 @@
 import {
   type QueryClient,
   type UseMutationOptions,
-  type UseMutationResult,
   type UseQueryOptions,
-  type UseQueryResult,
   useMutation,
   useQuery,
   useQueryClient,
@@ -20,17 +18,12 @@ export function UseRequestProcessor(): {
 } {
   const queryClient = useQueryClient();
 
-  function query<
-    TQueryFnData = unknown,
-    TError = Error,
-    TData = TQueryFnData,
-    TQueryKey extends import("@tanstack/react-query").QueryKey = import("@tanstack/react-query").QueryKey,
-  >(
-    queryKey: TQueryKey,
-    queryFn: import("@tanstack/react-query").QueryFunction<TQueryFnData, TQueryKey>,
-    options: Omit<UseQueryOptions<TQueryFnData, TError, TData, TQueryKey>, "queryFn" | "queryKey"> = {},
-  ): UseQueryResult<TData, TError> {
-    return useQuery<TQueryFnData, TError, TData, TQueryKey>({
+  function query(
+    queryKey: UseQueryOptions["queryKey"],
+    queryFn: UseQueryOptions["queryFn"],
+    options: Omit<UseQueryOptions, "queryFn" | "queryKey"> = {},
+  ) {
+    return useQuery({
       queryKey,
       queryFn,
       retry: 5,
@@ -39,26 +32,19 @@ export function UseRequestProcessor(): {
     });
   }
 
-  function mutate<
-    TData = unknown,
-    TError = Error,
-    TVariables = void,
-    TContext = unknown,
-  >(
-    mutationKey: import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>["mutationKey"],
-    mutationFn: import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>["mutationFn"],
-    options: Omit<import("@tanstack/react-query").UseMutationOptions<TData, TError, TVariables, TContext>, "mutationFn" | "mutationKey"> = {},
-  ): UseMutationResult<TData, TError, TVariables, TContext> {
-    return useMutation<TData, TError, TVariables, TContext>({
+  function mutate(
+    mutationKey: UseMutationOptions["mutationKey"],
+    mutationFn: UseMutationOptions["mutationFn"],
+    options: Omit<UseMutationOptions, "mutationFn" | "mutationKey"> = {},
+  ) {
+    return useMutation({
       mutationKey,
       mutationFn,
-      ...options,
-      onSettled: (...args) => {
+      onSettled: (...args: any[]) => {
         queryClient.invalidateQueries({ queryKey: mutationKey });
-        if (options.onSettled) {
-          options.onSettled(...args);
-        }
+        (options.onSettled as any)?.(...args);
       },
+      ...options,
       retry: options.retry ?? 3,
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     });

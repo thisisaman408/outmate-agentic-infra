@@ -58,13 +58,13 @@ export const useAddMCPServer: useMutationFunctionType<
     mutate(["useAddMCPServer"], addMCPServer, {
       ...options,
       retry: 0,
-      onSuccess: (data, variables, context) => {
+      onSuccess: (...args: any[]) => {
         queryClient.invalidateQueries({
           queryKey: ["useGetMCPServers"],
         });
-        options?.onSuccess?.(data, variables, context);
+        (options?.onSuccess as any)?.(...args);
       },
-    });
+    } as any);
 
   return mutation;
 };
