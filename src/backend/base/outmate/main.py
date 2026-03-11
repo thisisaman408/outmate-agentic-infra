@@ -199,112 +199,116 @@ def get_lifespan(*, fix_migration=False, version=None):
             get_settings_service().settings.components_path.extend(bundles_components_paths)
             await logger.adebug(f"Bundles loaded in {asyncio.get_event_loop().time() - current_time:.2f}s")
 
-            current_time = asyncio.get_event_loop().time()
-            await logger.adebug("Caching types")
-            all_types_dict = await get_and_cache_all_types_dict(get_settings_service(), telemetry_service)
-            await logger.adebug(f"Types cached in {asyncio.get_event_loop().time() - current_time:.2f}s")
-
-            # Use file-based lock to prevent multiple workers from creating duplicate starter projects concurrently.
-            # Note that it's still possible that one worker may complete this task, release the lock,
-            # then another worker pick it up, but the operation is idempotent so worst case it duplicates
-            # the initialization work.
-            current_time = asyncio.get_event_loop().time()
-            await logger.adebug("Creating/updating starter projects")
-
-            lock_file = Path(tempfile.gettempdir()) / "outmate_starter_projects.lock"
-            lock = FileLock(lock_file, timeout=1)
-            try:
-                with lock:
-                    await create_or_update_starter_projects(all_types_dict)
-                    await logger.adebug(
-                        f"Starter projects created/updated in {asyncio.get_event_loop().time() - current_time:.2f}s"
-                    )
-            except TimeoutError:
-                # Another process has the lock
-                await logger.adebug("Another worker is creating starter projects, skipping")
-            except Exception as e:  # noqa: BLE001
-                await logger.awarning(
-                    f"Failed to acquire lock for starter projects: {e}. Starter projects may not be created or updated."
-                )
-
-            # Initialize agentic global variables early (before MCP server and flows)
-            if get_settings_service().settings.agentic_experience:
-                from outmate.api.utils.mcp.agentic_mcp import initialize_agentic_global_variables
-
-                current_time = asyncio.get_event_loop().time()
-                await logger.ainfo("Initializing agentic global variables...")
+            # Initialize background task for heavy initialization to unblock port binding
+            async def delayed_heavy_init():
                 try:
-                    async with session_scope() as session:
-                        await initialize_agentic_global_variables(session)
+                    await logger.adebug("Starting delayed heavy initialization in background...")
+                    current_time_bg = asyncio.get_event_loop().time()
+                    
+                    await logger.adebug("Caching types")
+                    all_types_dict = await get_and_cache_all_types_dict(get_settings_service(), telemetry_service)
+                    await logger.adebug(f"Types cached in {asyncio.get_event_loop().time() - current_time_bg:.2f}s")
+
+                    # Use file-based lock to prevent multiple workers from creating duplicate starter projects concurrently.
+                    current_time_bg = asyncio.get_event_loop().time()
+                    await logger.adebug("Creating/updating starter projects")
+
+                    lock_file = Path(tempfile.gettempdir()) / "outmate_starter_projects.lock"
+                    lock = FileLock(lock_file, timeout=1)
+                    try:
+                        with lock:
+                            await create_or_update_starter_projects(all_types_dict)
+                            await logger.adebug(
+                                f"Starter projects created/updated in {asyncio.get_event_loop().time() - current_time_bg:.2f}s"
+                            )
+                    except TimeoutError:
+                        await logger.adebug("Another worker is creating starter projects, skipping")
+                    except Exception as e:  # noqa: BLE001
+                        await logger.awarning(
+                            f"Failed to acquire lock for starter projects: {e}. Starter projects may not be created or updated."
+                        )
+
+                    # Initialize agentic global variables early (before MCP server and flows)
+                    if get_settings_service().settings.agentic_experience:
+                        from outmate.api.utils.mcp.agentic_mcp import initialize_agentic_global_variables
+
+                        current_time_bg = asyncio.get_event_loop().time()
+                        await logger.ainfo("Initializing agentic global variables...")
+                        try:
+                            async with session_scope() as session:
+                                await initialize_agentic_global_variables(session)
+                            await logger.adebug(
+                                f"Agentic global variables initialized in {asyncio.get_event_loop().time() - current_time_bg:.2f}s"
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            await logger.awarning(f"Failed to initialize agentic global variables: {e}")
+
+                    current_time_bg = asyncio.get_event_loop().time()
+                    await logger.adebug("Starting telemetry service")
+                    telemetry_service.start()
+                    await logger.adebug(f"started telemetry service in {asyncio.get_event_loop().time() - current_time_bg:.2f}s")
+
+                    current_time_bg = asyncio.get_event_loop().time()
+                    await logger.adebug("Starting MCP Composer service")
+                    mcp_composer_service = cast("MCPComposerService", get_service(ServiceType.MCP_COMPOSER_SERVICE))
+                    await mcp_composer_service.start()
                     await logger.adebug(
-                        f"Agentic global variables initialized in {asyncio.get_event_loop().time() - current_time:.2f}s"
+                        f"started MCP Composer service in {asyncio.get_event_loop().time() - current_time_bg:.2f}s"
                     )
-                except Exception as e:  # noqa: BLE001
-                    await logger.awarning(f"Failed to initialize agentic global variables: {e}")
 
-            current_time = asyncio.get_event_loop().time()
-            await logger.adebug("Starting telemetry service")
-            telemetry_service.start()
-            await logger.adebug(f"started telemetry service in {asyncio.get_event_loop().time() - current_time:.2f}s")
+                    # Auto-configure Agentic MCP server if enabled (after variables are initialized)
+                    if get_settings_service().settings.agentic_experience:
+                        from outmate.api.utils.mcp.agentic_mcp import auto_configure_agentic_mcp_server
 
-            current_time = asyncio.get_event_loop().time()
-            await logger.adebug("Starting MCP Composer service")
-            mcp_composer_service = cast("MCPComposerService", get_service(ServiceType.MCP_COMPOSER_SERVICE))
-            await mcp_composer_service.start()
-            await logger.adebug(
-                f"started MCP Composer service in {asyncio.get_event_loop().time() - current_time:.2f}s"
-            )
+                        current_time_bg = asyncio.get_event_loop().time()
+                        await logger.ainfo("Configuring Agentic MCP server...")
+                        try:
+                            async with session_scope() as session:
+                                await auto_configure_agentic_mcp_server(session)
+                            await logger.adebug(
+                                f"Agentic MCP server configured in {asyncio.get_event_loop().time() - current_time_bg:.2f}s"
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            await logger.awarning(f"Failed to configure agentic MCP server: {e}")
 
-            # Auto-configure Agentic MCP server if enabled (after variables are initialized)
-            if get_settings_service().settings.agentic_experience:
-                from outmate.api.utils.mcp.agentic_mcp import auto_configure_agentic_mcp_server
-
-                current_time = asyncio.get_event_loop().time()
-                await logger.ainfo("Configuring Agentic MCP server...")
-                try:
-                    async with session_scope() as session:
-                        await auto_configure_agentic_mcp_server(session)
-                    await logger.adebug(
-                        f"Agentic MCP server configured in {asyncio.get_event_loop().time() - current_time:.2f}s"
-                    )
-                except Exception as e:  # noqa: BLE001
-                    await logger.awarning(f"Failed to configure agentic MCP server: {e}")
-
-            current_time = asyncio.get_event_loop().time()
-            await logger.adebug("Loading flows")
-            await load_flows_from_directory()
-            sync_flows_from_fs_task = asyncio.create_task(sync_flows_from_fs())
-            queue_service = get_queue_service()
-            if not queue_service.is_started():  # Start if not already started
-                queue_service.start()
-            await logger.adebug(f"Flows loaded in {asyncio.get_event_loop().time() - current_time:.2f}s")
-
-            total_time = asyncio.get_event_loop().time() - start_time
-            await logger.adebug(f"Total initialization time: {total_time:.2f}s")
-
-            async def delayed_init_mcp_servers():
-                await asyncio.sleep(10.0)  # Increased delay to allow starter projects to be created
-                current_time = asyncio.get_event_loop().time()
-                await logger.adebug("Loading MCP servers for projects")
-                try:
-                    await init_mcp_servers()
-                    await logger.adebug(f"MCP servers loaded in {asyncio.get_event_loop().time() - current_time:.2f}s")
-                except Exception as e:  # noqa: BLE001
-                    await logger.awarning(f"First MCP server initialization attempt failed: {e}")
-                    await asyncio.sleep(5.0)  # Increased retry delay
-                    current_time = asyncio.get_event_loop().time()
-                    await logger.adebug("Retrying MCP servers initialization")
+                    current_time_bg = asyncio.get_event_loop().time()
+                    await logger.adebug("Loading flows")
+                    await load_flows_from_directory()
+                    # We start the sync_flows task directly here but don't bind to local var for lifespan cleanup
+                    # because we're already in a background task
+                    asyncio.create_task(sync_flows_from_fs())
+                    queue_service = get_queue_service()
+                    if not queue_service.is_started():  # Start if not already started
+                        queue_service.start()
+                    await logger.adebug(f"Flows loaded in {asyncio.get_event_loop().time() - current_time_bg:.2f}s")
+                    
+                    await asyncio.sleep(10.0)  # Increased delay to allow starter projects to be created
+                    current_time_bg = asyncio.get_event_loop().time()
+                    await logger.adebug("Loading MCP servers for projects")
                     try:
                         await init_mcp_servers()
-                        await logger.adebug(
-                            f"MCP servers loaded on retry in {asyncio.get_event_loop().time() - current_time:.2f}s"
-                        )
-                    except Exception as e2:  # noqa: BLE001
-                        await logger.aexception(f"Failed to initialize MCP servers after retry: {e2}")
+                        await logger.adebug(f"MCP servers loaded in {asyncio.get_event_loop().time() - current_time_bg:.2f}s")
+                    except Exception as e:  # noqa: BLE001
+                        await logger.awarning(f"First MCP server initialization attempt failed: {e}")
+                        await asyncio.sleep(5.0)  # Increased retry delay
+                        current_time_bg = asyncio.get_event_loop().time()
+                        await logger.adebug("Retrying MCP servers initialization")
+                        try:
+                            await init_mcp_servers()
+                            await logger.adebug(
+                                f"MCP servers loaded on retry in {asyncio.get_event_loop().time() - current_time_bg:.2f}s"
+                            )
+                        except Exception as e2:  # noqa: BLE001
+                            await logger.aexception(f"Failed to initialize MCP servers after retry: {e2}")
 
-            # Start the delayed initialization as a background task
-            # Allows the server to start first to avoid race conditions with MCP Server startup
-            mcp_init_task = asyncio.create_task(delayed_init_mcp_servers())
+                except Exception as e:
+                    await logger.aerror(f"Error in delayed heavy initialization: {e}")
+
+            # Fire off the heavy background initialization immediately and allow the app to actually bind the port
+            heavy_init_task = asyncio.create_task(delayed_heavy_init())
+
+            # Maintain task reference to prevent garbage collection and cancel on shutdown
+            mcp_init_task = heavy_init_task
 
             # v1 and project MCP server context managers
             from outmate.api.v1.mcp import start_streamable_http_manager
