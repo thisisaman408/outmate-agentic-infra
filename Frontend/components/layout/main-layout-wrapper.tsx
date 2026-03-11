@@ -3,7 +3,11 @@
 import React from "react"
 import { useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
-import { CopilotSidebar } from "@/components/copilot/copilot-sidebar"
+import dynamic from "next/dynamic"
+const CopilotSidebar = dynamic(
+    () => import("@/components/copilot/copilot-sidebar").then(mod => mod.CopilotSidebar),
+    { ssr: false }
+)
 import { LeadCopilotPanel } from "@/components/copilot/lead-copilot-panel"
 
 export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {

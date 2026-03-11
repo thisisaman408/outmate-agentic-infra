@@ -139,7 +139,7 @@ export function LeadCopilotPanel() {
 
   return (
     <Sheet open={isPanelOpen} onOpenChange={(open) => !open && closePanel()}>
-      <SheetContent side="right" className="w-[480px] sm:w-[480px] p-0 flex flex-col">
+      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
         <SheetHeader className="p-4 pb-0">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -378,17 +378,17 @@ function SuggestionsSection({
 
 function ConversationThread({ messages, isLoading }: { messages: CopilotMessage[]; isLoading: boolean }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 w-full max-w-full overflow-hidden">
       <p className="text-sm font-medium text-muted-foreground">Conversation</p>
       {messages.map((msg) => (
-        <div key={msg.id} className={msg.role === "user" ? "flex justify-end" : ""}>
+        <div key={msg.id} className={msg.role === "user" ? "flex justify-end w-full" : "w-full max-w-full overflow-hidden"}>
           {msg.role === "user" ? (
-            <div className="bg-primary text-primary-foreground rounded-lg px-3 py-2 max-w-[85%]">
-              <p className="text-sm">{msg.prompt}</p>
+            <div className="bg-primary text-primary-foreground rounded-lg px-3 py-2 max-w-[85%] break-words">
+              <p className="text-sm whitespace-pre-wrap break-words">{msg.prompt}</p>
             </div>
           ) : (
-            <div className="bg-muted rounded-lg px-3 py-2 space-y-2">
-              {msg.result && <ActionResult actionType={msg.action_type} result={msg.result} />}
+            <div className="bg-muted rounded-lg px-3 py-2 space-y-2 w-full max-w-full overflow-x-hidden break-words">
+              {msg.result && <div className="w-full max-w-full overflow-hidden pt-1"><ActionResult actionType={msg.action_type} result={msg.result} /></div>}
               {msg.credits_used != null && (
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Coins className="h-2.5 w-2.5" />{msg.credits_used} credit(s) used
@@ -429,13 +429,13 @@ function ActionResult({ actionType, result }: { actionType?: string; result: Rec
 
   if (actionType === "custom" && result.response) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm whitespace-pre-wrap">{result.response}</p>
+      <div className="space-y-2 w-full max-w-full overflow-hidden">
+        <p className="text-sm whitespace-pre-wrap break-words">{result.response}</p>
         {result.action_items?.length > 0 && (
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground">Action Items</p>
             {result.action_items.map((item: string, i: number) => (
-              <p key={i} className="text-xs">• {item}</p>
+              <p key={i} className="text-xs break-words whitespace-pre-wrap">• {item}</p>
             ))}
           </div>
         )}
@@ -466,15 +466,15 @@ function AnnotatedEmailResult({ result }: { result: Record<string, any> }) {
 
   return (
     <TooltipProvider>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium">Subject: {result.subject_line}</p>
-          <Button variant="ghost" size="sm" className="h-6 px-2" onClick={handleCopy}>
+      <div className="space-y-2 w-full max-w-full overflow-hidden">
+        <div className="flex items-start justify-between gap-2 overflow-hidden w-full">
+          <p className="text-xs font-medium break-words whitespace-pre-wrap flex-1">Subject: {result.subject_line}</p>
+          <Button variant="ghost" size="sm" className="h-6 px-2 shrink-0" onClick={handleCopy}>
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             <span className="text-[10px] ml-1">{copied ? "Copied" : "Copy"}</span>
           </Button>
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 w-full max-w-full overflow-hidden break-words text-wrap">
           {(result.segments as AnnotatedEmailSegment[])?.map((seg, i) => (
             <span key={i} className="inline">
               <Tooltip>
@@ -527,34 +527,34 @@ function AnnotatedEmailResult({ result }: { result: Record<string, any> }) {
 
 function ResearchResult({ result }: { result: Record<string, any> }) {
   return (
-    <div className="space-y-2">
-      <p className="text-sm">{result.executive_summary}</p>
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <p className="text-sm break-words whitespace-pre-wrap">{result.executive_summary}</p>
       {result.talking_points?.length > 0 && (
-        <div>
+        <div className="w-full overflow-hidden">
           <p className="text-xs font-medium text-muted-foreground">Talking Points</p>
           {result.talking_points.map((p: string, i: number) => (
-            <p key={i} className="text-xs">• {p}</p>
+            <p key={i} className="text-xs break-words whitespace-pre-wrap">• {p}</p>
           ))}
         </div>
       )}
       {result.engagement_opportunities?.length > 0 && (
-        <div>
+        <div className="w-full overflow-hidden">
           <p className="text-xs font-medium text-muted-foreground">Engagement Opportunities</p>
           {result.engagement_opportunities.map((o: any, i: number) => (
-            <div key={i} className="text-xs">
+            <div key={i} className="text-xs break-words whitespace-pre-wrap">
               <span className="font-medium">{o.type}:</span> {o.detail}
               {o.source_url && (
                 <a href={o.source_url} target="_blank" rel="noopener noreferrer"
-                  className="ml-1 text-blue-500 hover:underline">[source]</a>
+                  className="ml-1 text-blue-500 hover:underline break-all">[source]</a>
               )}
             </div>
           ))}
         </div>
       )}
       {result.recommended_approach && (
-        <div>
+        <div className="w-full overflow-hidden">
           <p className="text-xs font-medium text-muted-foreground">Recommended Approach</p>
-          <p className="text-xs">{result.recommended_approach}</p>
+          <p className="text-xs break-words whitespace-pre-wrap">{result.recommended_approach}</p>
         </div>
       )}
     </div>
@@ -565,17 +565,17 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
 
 function ObjectionResult({ result }: { result: Record<string, any> }) {
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground italic">{result.objection_analysis}</p>
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <p className="text-xs text-muted-foreground italic break-words whitespace-pre-wrap">{result.objection_analysis}</p>
       {result.rebuttals?.map((r: any, i: number) => (
-        <div key={i} className={`p-2 rounded border text-xs ${i === result.recommended_rebuttal ? "border-primary bg-primary/5" : ""}`}>
+        <div key={i} className={`p-2 rounded border text-xs w-full overflow-hidden ${i === result.recommended_rebuttal ? "border-primary bg-primary/5" : ""}`}>
           <Badge variant="outline" className="text-[9px] mb-1">{r.approach}</Badge>
-          <p className="text-sm">{r.response}</p>
-          <p className="text-[10px] text-muted-foreground mt-1">{r.reasoning}</p>
+          <p className="text-sm break-words whitespace-pre-wrap">{r.response}</p>
+          <p className="text-[10px] text-muted-foreground mt-1 break-words whitespace-pre-wrap">{r.reasoning}</p>
         </div>
       ))}
       {result.follow_up_question && (
-        <p className="text-xs"><span className="font-medium">Follow up:</span> {result.follow_up_question}</p>
+        <p className="text-xs break-words whitespace-pre-wrap"><span className="font-medium">Follow up:</span> {result.follow_up_question}</p>
       )}
     </div>
   )
@@ -585,17 +585,17 @@ function ObjectionResult({ result }: { result: Record<string, any> }) {
 
 function FindSimilarResult({ result }: { result: Record<string, any> }) {
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <p className="text-xs text-muted-foreground break-words whitespace-pre-wrap">
         Found {result.total_found} similar companies
       </p>
       {result.similar_companies?.map((c: any, i: number) => (
-        <div key={i} className="p-2 rounded border text-xs">
-          <p className="font-medium">{c.name || c.company_name}</p>
-          <p className="text-muted-foreground">{c.industry} • {c.employee_count || "?"} employees</p>
+        <div key={i} className="p-2 rounded border text-xs w-full overflow-hidden">
+          <p className="font-medium break-words whitespace-pre-wrap">{c.name || c.company_name}</p>
+          <p className="text-muted-foreground break-words whitespace-pre-wrap">{c.industry} • {c.employee_count || "?"} employees</p>
         </div>
       ))}
-      {result.error && <p className="text-xs text-destructive">{result.error}</p>}
+      {result.error && <p className="text-xs text-destructive break-words whitespace-pre-wrap">{result.error}</p>}
     </div>
   )
 }
@@ -604,31 +604,31 @@ function FindSimilarResult({ result }: { result: Record<string, any> }) {
 
 function MeetingPrepResult({ result }: { result: Record<string, any> }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
       {result.company_snapshot && (
         <div>
           <p className="text-xs font-medium text-muted-foreground">Company</p>
-          <p className="text-sm">{result.company_snapshot.name} — {result.company_snapshot.industry}</p>
+          <p className="text-sm break-words whitespace-pre-wrap">{result.company_snapshot.name} — {result.company_snapshot.industry}</p>
         </div>
       )}
       {result.talking_points?.length > 0 && (
-        <div>
+        <div className="w-full overflow-hidden">
           <p className="text-xs font-medium text-muted-foreground">Talking Points</p>
           {result.talking_points.map((p: string, i: number) => (
-            <p key={i} className="text-xs">• {p}</p>
+            <p key={i} className="text-xs break-words whitespace-pre-wrap">• {p}</p>
           ))}
         </div>
       )}
       {result.discovery_questions?.length > 0 && (
-        <div>
+        <div className="w-full overflow-hidden">
           <p className="text-xs font-medium text-muted-foreground">Discovery Questions</p>
           {result.discovery_questions.map((q: string, i: number) => (
-            <p key={i} className="text-xs">• {q}</p>
+            <p key={i} className="text-xs break-words whitespace-pre-wrap">• {q}</p>
           ))}
         </div>
       )}
       {result.recommended_approach && (
-        <p className="text-xs"><span className="font-medium">Approach:</span> {result.recommended_approach}</p>
+        <p className="text-xs break-words whitespace-pre-wrap"><span className="font-medium">Approach:</span> {result.recommended_approach}</p>
       )}
     </div>
   )

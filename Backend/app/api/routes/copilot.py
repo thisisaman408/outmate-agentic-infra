@@ -400,6 +400,7 @@ async def execute_lead_action(
     try:
         service = LeadCopilotService(db)
         result = await service.execute_action(
+            user_id=str(current_user.id),
             prospect_id=request.prospect_id,
             action_type=request.action_type.value,
             prompt=request.prompt,

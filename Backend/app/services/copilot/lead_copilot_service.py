@@ -222,7 +222,7 @@ class LeadCopilotService:
 
     # ── Execute Action ────────────────────────────────────────
 
-    async def execute_action(self, prospect_id: str, action_type: str, prompt: Optional[str] = None, context_overrides: Optional[Dict[str, Any]] = None) -> dict:
+    async def execute_action(self, user_id: str, prospect_id: str, action_type: str, prompt: Optional[str] = None, context_overrides: Optional[Dict[str, Any]] = None) -> dict:
         """Route action to the appropriate handler with prospect context."""
         # Get prospect context from DB
         context = self.get_lead_context(prospect_id)
@@ -250,6 +250,7 @@ class LeadCopilotService:
             raise ValueError(f"Unknown action type: {action_type}")
 
         result = await handler(
+            user_id=user_id,
             name=name,
             company_name=company_name,
             role=role,
@@ -288,10 +289,11 @@ class LeadCopilotService:
     async def _handle_meeting_prep(self, name: str, company_name: str, role: str, domain: Optional[str], prospect: dict, company: dict, **kwargs) -> dict:
         """Delegate to the existing MeetingPrepService with auto-filled data."""
         from app.services.copilot.meeting_prep_service import MeetingPrepService
+        user_id = kwargs.get("user_id")
 
         service = MeetingPrepService(self.db)
         result = await service.generate(
-            user_id="lead_copilot",
+            user_id=user_id,
             company_name=company_name,
             company_domain=domain,
             prospect_name=name,

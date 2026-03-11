@@ -263,7 +263,7 @@ export default function DatabaseFinderPage() {
   const hasHydratedCampaignState = useRef(false)
 
   // Agent conversation state
-  const [agentMessages, setAgentMessages] = useState<Array<{role: "user" | "assistant", content: string}>>([])
+  const [agentMessages, setAgentMessages] = useState<Array<{ role: "user" | "assistant", content: string }>>([])
   const [isAgentResponding, setIsAgentResponding] = useState(false)
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null)
@@ -341,12 +341,12 @@ export default function DatabaseFinderPage() {
         setGmailConnected(true)
         setGmailEmail(data.email || "")
       }
-    }).catch(() => {})
+    }).catch(() => { })
 
     // Check LinkedIn (Unipile) status
     fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setLinkedinConnected(true)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   useEffect(() => {
@@ -498,11 +498,11 @@ export default function DatabaseFinderPage() {
     return words.length < cleaned.length ? `${words}...` : words
   }
 
-const createEmptySession = (): ChatSession => {
-  const now = new Date().toISOString()
-  return {
-    id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: "New Chat",
+  const createEmptySession = (): ChatSession => {
+    const now = new Date().toISOString()
+    return {
+      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: "New Chat",
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -515,78 +515,78 @@ const createEmptySession = (): ChatSession => {
       hasSearched: false,
       clarificationStep: "pending",
       extractedFilters: {},
-    suggestedPrompts: []
-  }
-}
-
-const getPersistentUserId = (): string | null => {
-  if (typeof window === "undefined") return null
-  const user = authService.getCurrentUser()
-  if (user?.id) return user.id
-  let stored = localStorage.getItem(CHAT_STORAGE_USER_KEY)
-  if (!stored) {
-    const randomString =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2)
-    stored = `anon_${randomString}`
-    localStorage.setItem(CHAT_STORAGE_USER_KEY, stored)
-  }
-  return stored
-}
-
-const mergeChatCollections = (existing: ChatSession[], incoming: ChatSession[]): ChatSession[] => {
-  const map = new Map<string, ChatSession>()
-  incoming.forEach((session) => map.set(session.id, session))
-  existing.forEach((session) => {
-    if (!map.has(session.id)) {
-      map.set(session.id, session)
+      suggestedPrompts: []
     }
-  })
-  const merged = Array.from(map.values())
-  merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  return merged
-}
-
-const normalizeServerSession = (record: any): ChatSession => {
-  const data = record.data || {}
-  const now = new Date().toISOString()
-  return {
-    id: data.id || data.sessionId || record.session_id || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: data.title || record.title || "Chat",
-    createdAt: data.createdAt || record.created_at || now,
-    updatedAt: data.updatedAt || record.updated_at || now,
-    messages: Array.isArray(data.messages) ? data.messages : [],
-    query: data.query || "",
-    intent: data.intent || "business",
-    results: Array.isArray(data.results) ? data.results : [],
-    tamPreview: data.tamPreview || { count: 0, cost: 0 },
-    clarification: data.clarification || "",
-    workflowSteps: Array.isArray(data.workflowSteps) ? data.workflowSteps : [],
-    hasSearched: Boolean(data.hasSearched),
-    clarificationStep: data.clarificationStep || "pending",
-    extractedFilters: data.extractedFilters || {},
-    suggestedPrompts: Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
   }
-}
 
-const syncChatWithServer = async (session: ChatSession) => {
-  const userId = getPersistentUserId()
-  if (!userId) return
-  try {
-    await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        session_id: session.id,
-        data: session,
-      }),
+  const getPersistentUserId = (): string | null => {
+    if (typeof window === "undefined") return null
+    const user = authService.getCurrentUser()
+    if (user?.id) return user.id
+    let stored = localStorage.getItem(CHAT_STORAGE_USER_KEY)
+    if (!stored) {
+      const randomString =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2)
+      stored = `anon_${randomString}`
+      localStorage.setItem(CHAT_STORAGE_USER_KEY, stored)
+    }
+    return stored
+  }
+
+  const mergeChatCollections = (existing: ChatSession[], incoming: ChatSession[]): ChatSession[] => {
+    const map = new Map<string, ChatSession>()
+    incoming.forEach((session) => map.set(session.id, session))
+    existing.forEach((session) => {
+      if (!map.has(session.id)) {
+        map.set(session.id, session)
+      }
     })
-  } catch (error) {
-    console.warn("Persisting chat session failed:", error)
+    const merged = Array.from(map.values())
+    merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    return merged
   }
-}
+
+  const normalizeServerSession = (record: any): ChatSession => {
+    const data = record.data || {}
+    const now = new Date().toISOString()
+    return {
+      id: data.id || data.sessionId || record.session_id || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: data.title || record.title || "Chat",
+      createdAt: data.createdAt || record.created_at || now,
+      updatedAt: data.updatedAt || record.updated_at || now,
+      messages: Array.isArray(data.messages) ? data.messages : [],
+      query: data.query || "",
+      intent: data.intent || "business",
+      results: Array.isArray(data.results) ? data.results : [],
+      tamPreview: data.tamPreview || { count: 0, cost: 0 },
+      clarification: data.clarification || "",
+      workflowSteps: Array.isArray(data.workflowSteps) ? data.workflowSteps : [],
+      hasSearched: Boolean(data.hasSearched),
+      clarificationStep: data.clarificationStep || "pending",
+      extractedFilters: data.extractedFilters || {},
+      suggestedPrompts: Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
+    }
+  }
+
+  const syncChatWithServer = async (session: ChatSession) => {
+    const userId = getPersistentUserId()
+    if (!userId) return
+    try {
+      await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: session.id,
+          data: session,
+        }),
+      })
+    } catch (error) {
+      console.warn("Persisting chat session failed:", error)
+    }
+  }
 
   const applySessionToView = (session: ChatSession) => {
     const normalizeLinkedinUrl = (value: any) => {
@@ -766,13 +766,13 @@ const syncChatWithServer = async (session: ChatSession) => {
     try {
       const raw = localStorage.getItem(CHAT_STORAGE_KEY)
       const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : []
-        if (parsed.length > 0) {
-          const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-          setChats(ordered)
-          setActiveChatId(ordered[0].id)
-          initialActiveChatId.current = ordered[0].id
-          applySessionToView(ordered[0])
-        }
+      if (parsed.length > 0) {
+        const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        setChats(ordered)
+        setActiveChatId(ordered[0].id)
+        initialActiveChatId.current = ordered[0].id
+        applySessionToView(ordered[0])
+      }
     } catch (e) {
       console.warn("Failed to load NLP chats", e)
     }
@@ -1334,7 +1334,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       console.log("Query:", trimmedQuery)
 
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const endpoint = `${API}/api/explorium/search`
+      const endpoint = `${API}/api/v1/explorium/company/search`
       const payload = { query: trimmedQuery, filters: extractedFilters }
 
       console.log("Calling endpoint:", endpoint)
@@ -1689,7 +1689,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     if (!trimmedQuery) return
 
     // Add user message to agent messages
-    const userMsg: {role: "user" | "assistant", content: string} = { role: "user", content: trimmedQuery }
+    const userMsg: { role: "user" | "assistant", content: string } = { role: "user", content: trimmedQuery }
     const updatedMessages = [...agentMessages, userMsg]
     setAgentMessages(updatedMessages)
     setNaturalLanguageQuery("") // clear input
@@ -1720,7 +1720,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       const data = await res.json()
 
       // Add assistant reply
-      const assistantMsg: {role: "user" | "assistant", content: string} = { role: "assistant", content: data.reply }
+      const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
       setAgentMessages(prev => [...prev, assistantMsg])
 
       // Persist to chat session
@@ -1738,7 +1738,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       }
     } catch (e: any) {
       console.error("Agent chat error:", e)
-      const errorMsg: {role: "user" | "assistant", content: string} = { role: "assistant", content: "Sorry, I encountered an error. Please try again." }
+      const errorMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: "Sorry, I encountered an error. Please try again." }
       setAgentMessages(prev => [...prev, errorMsg])
     } finally {
       setIsAgentResponding(false)
@@ -3166,11 +3166,10 @@ const syncChatWithServer = async (session: ChatSession) => {
                 {agentMessages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`rounded-lg p-3 text-sm ${
-                      msg.role === "user"
+                    className={`rounded-lg p-3 text-sm ${msg.role === "user"
                         ? "bg-primary/10 ml-8"
                         : "bg-muted mr-8"
-                    }`}
+                      }`}
                   >
                     <div className="font-medium text-xs text-muted-foreground mb-1">
                       {msg.role === "user" ? "You" : "Assistant"}

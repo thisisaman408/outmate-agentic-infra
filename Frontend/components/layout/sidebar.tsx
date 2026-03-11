@@ -27,6 +27,7 @@ import {
   Radar,
   Globe,
   Eye,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -55,19 +56,19 @@ const navItems: NavItem[] = [
       { name: "History", href: "/leads/history", icon: Clock },
     ],
   },
-      {
-        name: "Signals",
-        href: "/signals",
-        icon: Activity,
-        children: [
-          { name: "Overview", href: "/signals", icon: AlertCircle },
-          { name: "Events", href: "/signals/events", icon: AlertCircle },
-          { name: "Intents", href: "/signals/intent", icon: Target },
-          { name: "Trackers", href: "/signals/tracker", icon: Radar },
-          { name: "Websights", href: "/signals/websights", icon: Globe },
-          { name: "Form Complete", href: "/signals/formcomplete", icon: CheckSquare },
-        ],
-      },
+  {
+    name: "Signals",
+    href: "/signals",
+    icon: Activity,
+    children: [
+      { name: "Overview", href: "/signals", icon: AlertCircle },
+      { name: "Events", href: "/signals/events", icon: AlertCircle },
+      { name: "Intents", href: "/signals/intent", icon: Target },
+      { name: "Trackers", href: "/signals/tracker", icon: Radar },
+      { name: "Websights", href: "/signals/websights", icon: Globe },
+      { name: "Form Complete", href: "/signals/formcomplete", icon: CheckSquare },
+    ],
+  },
   { name: "Scoring", href: "/scoring", icon: Target },
   { name: "Campaigns", href: "/campaigns", icon: Send },
   { name: "Workflows", href: "/workflows", icon: Workflow },

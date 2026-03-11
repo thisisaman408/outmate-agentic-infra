@@ -39,6 +39,13 @@ The Co-Pilot is an AI-powered sales assistant integrated into the Outmate platfo
 - Set pipeline alert severity threshold
 - Customize brief delivery time and timezone
 
+### 6. Lead Copilot Panel
+- Context-aware AI assistant built directly into prospect profiles
+- Actionable side panel on any prospect row
+- **Quick Actions**: Draft personalized emails, prepare for meetings, research leads, find similar companies, and handle objections
+- **Proactive Suggestions**: Intelligent prompts based on newly detected signals
+- **Phase 3 Automation (Coming Soon)**: Workflow playbooks, one-click CRM exports, automated follow-ups, and cross-session conversation memory tracking
+
 ---
 
 ## Architecture
@@ -58,7 +65,9 @@ Backend/
 │   ├── schemas/copilot.py              # Pydantic request/response schemas
 │   ├── services/copilot/
 │   │   ├── copilot_service.py          # Main orchestrator
-│   │   ├── enrichment.py              # Real-time data enrichment (Explorium + Tavily)
+│   │   ├── lead_copilot_service.py     # Lead action orchestrator (New)
+│   │   ├── lead_enrichment.py          # Multi-source lead enrichment (New)
+│   │   ├── enrichment.py               # Real-time data enrichment (Explorium + Tavily)
 │   │   ├── daily_brief_service.py      # Daily brief generation
 │   │   ├── meeting_prep_service.py     # Meeting prep research
 │   │   ├── campaign_optimizer_service.py # Campaign scoring
@@ -84,8 +93,12 @@ Frontend/
 │   └── settings/page.tsx              # Preferences UI
 ├── components/copilot/
 │   ├── copilot-sidebar.tsx             # Global floating sidebar panel
-│   └── daily-brief-widget.tsx          # Dashboard widget card
-├── hooks/use-copilot.ts                # React hooks (useDailyBrief, useCopilotPreferences, usePipelineAlerts)
+│   ├── daily-brief-widget.tsx          # Dashboard widget card
+│   ├── lead-copilot-panel.tsx          # Contact-activated side panel (New)
+│   └── copilot-command-input.tsx       # AI natural language command input (New)
+├── hooks/
+│   ├── use-copilot.ts                  # React hooks (useDailyBrief, usePipelineAlerts)
+│   └── use-copilot-panel.ts            # State management for Lead Copilot Profile (New)
 └── lib/api/copilot.ts                  # API client for all copilot endpoints
 ```
 
@@ -107,6 +120,9 @@ All endpoints require authentication (`Authorization: Bearer <token>`).
 | `PUT` | `/api/copilot/pipeline-alerts/{alert_id}/resolve` | Mark an alert as resolved |
 | `GET` | `/api/copilot/preferences` | Get user's copilot preferences |
 | `PUT` | `/api/copilot/preferences` | Update preferences |
+| `GET` | `/api/copilot/lead-context/{prospect_id}` | Aggregate known DB/enrichment data for prospect panel |
+| `POST` | `/api/copilot/lead-action` | Execute AI command on prospect profile |
+| `GET` | `/api/copilot/lead-suggestions/{prospect_id}` | Generate proactive AI suggestions for prospect |
 
 ---
 
