@@ -1,4 +1,4 @@
-"""LangFlow Components module."""
+"""Outmate Components module."""
 
 from __future__ import annotations
 
