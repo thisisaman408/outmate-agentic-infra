@@ -82,7 +82,8 @@ const QUICK_ACTIONS: { type: LeadActionType; label: string; icon: typeof Mail; c
 // ── Helper to get prospect ID ────────────────────────────────
 
 function getProspectId(prospect: any): string | null {
-  return prospect?.person_id || prospect?.id || prospect?.linkedin_profile_urn || null
+  const raw = prospect?.copilot_id || prospect?.person_id || prospect?.id || prospect?.linkedin_profile_urn || null
+  return raw ? String(raw) : null
 }
 
 function getProspectName(prospect: any): string {
@@ -100,10 +101,70 @@ function getProspectTitle(prospect: any): string {
   return employer?.title || prospect?.headline || prospect?.job_title || ""
 }
 
+function buildContextOverrides(prospect: any) {
+  if (!prospect) return undefined
+  if (prospect?.entity_type === "company") {
+    const company = {
+      name: prospect?.name || prospect?.company || "",
+      domain: prospect?.domain || "",
+      industry: prospect?.industry || "",
+      employee_count: prospect?.employee_count_exact ?? prospect?.employee_count ?? prospect?.employee_count_range,
+      revenue_range: prospect?.revenue_range ?? prospect?.revenue_exact,
+      funding_stage: prospect?.funding_stage,
+      funding_total: prospect?.funding_total,
+      technologies: prospect?.technologies || [],
+      headquarters: prospect?.headquarters || prospect?.location_display || prospect?.headquarters_address || prospect?.headquarters_city || "",
+      employee_growth_6m_percent: prospect?.employee_growth_6m_percent,
+    }
+    const contextProspect = {
+      id: getProspectId(prospect),
+      name: prospect?.primary_contact_name || prospect?.name || "Decision Maker",
+      title: prospect?.primary_contact_title || prospect?.title || "Decision Maker",
+      company: company.name,
+      email: prospect?.email,
+      phone: prospect?.phone,
+      linkedin_url: prospect?.linkedin_url,
+      location: company.headquarters || prospect?.location,
+      seniority: prospect?.seniority_level,
+      department: prospect?.department,
+      data_quality_score: prospect?.data_quality_score,
+    }
+    return { prospect: contextProspect, company }
+  }
+  const employer = prospect?.current_employers?.[0] || prospect?.employer?.[0] || {}
+  const company = {
+    name: employer?.name || prospect?.company || "",
+    domain: employer?.company_website_domain || employer?.company_domain || prospect?.domain || "",
+    industry: employer?.company_linkedin_industry || prospect?.industry || "",
+    employee_count: employer?.company_headcount_latest || undefined,
+    revenue_range: prospect?.revenue_range || undefined,
+    funding_stage: prospect?.funding_stage || undefined,
+    funding_total: prospect?.funding_total || undefined,
+    technologies: prospect?.technologies || [],
+    headquarters: employer?.company_hq_location || prospect?.headquarters || "",
+    employee_growth_6m_percent: prospect?.employee_growth_6m_percent || undefined,
+  }
+  const contextProspect = {
+    id: getProspectId(prospect),
+    name: getProspectName(prospect),
+    title: getProspectTitle(prospect),
+    company: company.name,
+    email: prospect?.email || prospect?.work_email || prospect?.personal_email,
+    phone: prospect?.phone,
+    linkedin_url: prospect?.linkedin_profile_url || prospect?.flagship_profile_url || prospect?.linkedin_url,
+    location: prospect?.region || prospect?.location,
+    seniority: prospect?.seniority_level,
+    department: prospect?.department,
+    data_quality_score: prospect?.data_quality_score,
+  }
+  return { prospect: contextProspect, company }
+}
+
 // ── Main Component ───────────────────────────────────────────
 
 export function LeadCopilotPanel() {
   const { isPanelOpen, selectedProspect, messages, closePanel } = useCopilotPanelStore()
+  const isCompanyEntity = selectedProspect?.entity_type === "company"
   const prospectId = selectedProspect ? getProspectId(selectedProspect) : null
   const { context, isLoading: contextLoading, fetchContext } = useLeadContext(prospectId)
   const { isLoading: actionLoading, executeAction } = useLeadAction()
@@ -111,31 +172,46 @@ export function LeadCopilotPanel() {
 
   // Fetch context + suggestions when panel opens
   useEffect(() => {
-    if (isPanelOpen && prospectId) {
+    if (isPanelOpen && prospectId && !isCompanyEntity) {
       fetchContext()
       fetchSuggestions()
     }
-  }, [isPanelOpen, prospectId, fetchContext, fetchSuggestions])
+  }, [isPanelOpen, prospectId, fetchContext, fetchSuggestions, isCompanyEntity])
 
   const handleQuickAction = useCallback(
     (actionType: LeadActionType) => {
       if (!prospectId) return
-      executeAction({ prospect_id: prospectId, action_type: actionType })
+      executeAction({
+        prospect_id: prospectId,
+        action_type: actionType,
+        context_overrides: buildContextOverrides(selectedProspect),
+      })
     },
-    [prospectId, executeAction]
+    [prospectId, executeAction, selectedProspect]
   )
 
   const handleCustomCommand = useCallback(
     (prompt: string) => {
       if (!prospectId) return
-      executeAction({ prospect_id: prospectId, action_type: "custom", prompt })
+      executeAction({
+        prospect_id: prospectId,
+        action_type: "custom",
+        prompt,
+        context_overrides: buildContextOverrides(selectedProspect),
+      })
     },
-    [prospectId, executeAction]
+    [prospectId, executeAction, selectedProspect]
   )
 
-  const name = selectedProspect ? getProspectName(selectedProspect) : ""
-  const title = selectedProspect ? getProspectTitle(selectedProspect) : ""
-  const company = selectedProspect ? getProspectCompany(selectedProspect) : ""
+  const name = selectedProspect ? (isCompanyEntity ? (selectedProspect?.name || "Company") : getProspectName(selectedProspect)) : ""
+  const title = selectedProspect ? (isCompanyEntity ? "Company" : getProspectTitle(selectedProspect)) : ""
+  const company = selectedProspect ? (isCompanyEntity ? "" : getProspectCompany(selectedProspect)) : ""
+  const location = selectedProspect
+    ? (isCompanyEntity
+      ? (selectedProspect?.headquarters || selectedProspect?.location_display || selectedProspect?.headquarters_address || selectedProspect?.headquarters_city || "")
+      : (selectedProspect?.region || selectedProspect?.location))
+    : ""
+  const companyContext = context?.company || (isCompanyEntity ? buildContextOverrides(selectedProspect)?.company : null)
 
   return (
     <Sheet open={isPanelOpen} onOpenChange={(open) => !open && closePanel()}>
@@ -160,13 +236,13 @@ export function LeadCopilotPanel() {
                 email={context?.prospect?.email}
                 phone={context?.prospect?.phone}
                 linkedin={context?.prospect?.linkedin_url || selectedProspect?.linkedin_profile_url}
-                location={context?.prospect?.location || selectedProspect?.region}
+                location={context?.prospect?.location || location}
                 seniority={context?.prospect?.seniority}
               />
             )}
 
             {/* Company Card */}
-            {context?.company && <CompanyCard company={context.company} />}
+            {companyContext && <CompanyCard company={companyContext} />}
 
             {/* AI Suggestions (Phase 2) */}
             {(suggestionsLoading || (suggestions?.suggestions?.length ?? 0) > 0) && (

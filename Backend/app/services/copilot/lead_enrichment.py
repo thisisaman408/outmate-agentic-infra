@@ -187,11 +187,23 @@ class LeadEnrichmentService:
         company: str,
         role: str = "",
         domain: Optional[str] = None,
+        include_company_data: bool = True,
+        include_company_news: bool = True,
     ) -> LeadContext:
         """
         Gather all enrichment data concurrently.
         Every source is independent — individual failures are logged and skipped.
         """
+        async def _maybe_company_data() -> Dict[str, Any]:
+            if not include_company_data:
+                return {}
+            return await _fetch_company_data(company, domain)
+
+        async def _maybe_company_news() -> List[Dict[str, Any]]:
+            if not include_company_news:
+                return []
+            return await _fetch_company_news(company)
+
         (
             google_mentions,
             youtube_appearances,
@@ -202,8 +214,8 @@ class LeadEnrichmentService:
             _fetch_google_mentions(name, company, role),
             _fetch_youtube_appearances(name, company),
             _fetch_linkedin_posts(name, company),
-            _fetch_company_data(company, domain),
-            _fetch_company_news(company),
+            _maybe_company_data(),
+            _maybe_company_news(),
             return_exceptions=True,
         )
 

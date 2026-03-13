@@ -104,7 +104,7 @@ export default function ProspectsPage() {
     }
   }
 
-  const handleProspectImport = async (records: Record<string, string>[]) => {
+    const handleProspectImport = async (records: Record<string, string>[]) => {
     if (!records.length) {
       toast({
         title: "Empty file",
@@ -124,13 +124,14 @@ export default function ProspectsPage() {
 
     try {
       const response = await searchProspects({ ...filters, limit: INITIAL_LIMIT })
-      setProfiles(response.profiles)
+      const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
+      setProfiles(limitedProfiles)
       setTotalCount(response.total_count)
       setNextCursor(response.next_cursor)
       setHasSearched(true)
       toast({
         title: "Import complete",
-        description: `Imported ${response.profiles.length} prospects from CSV filters.`
+        description: `Imported ${limitedProfiles.length} prospects from CSV filters.`
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to import CSV filters."
@@ -153,7 +154,7 @@ export default function ProspectsPage() {
             const historyItem = getSearchHistoryItem(historyId)
             if (historyItem) {
                 // Restore the search results
-                setProfiles(historyItem.results)
+                setProfiles((historyItem.results || []).slice(0, INITIAL_LIMIT))
                 setTotalCount(historyItem.totalCount)
                 setNextCursor(historyItem.nextCursor)
                 setCurrentFilters(historyItem.filters)
@@ -229,25 +230,26 @@ export default function ProspectsPage() {
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
 
-            setProfiles(response.profiles)
+            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
+            setProfiles(limitedProfiles)
             setTotalCount(response.total_count)
             setNextCursor(response.next_cursor || null)
             setEnrichedData({}) // Reset enrichment on new search
 
             // Store in localStorage for profile detail page access
-            localStorage.setItem("prospect_search_results", JSON.stringify(response.profiles))
+            localStorage.setItem("prospect_search_results", JSON.stringify(limitedProfiles))
 
             // Save to search history for easy restoration
             saveSearchToHistory(
                 searchFilters,
-                response.profiles,
+                limitedProfiles,
                 response.total_count,
                 response.next_cursor || null
             )
 
             toast({
                 title: "Search Complete",
-                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${response.profiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
+                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${limitedProfiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
             })
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
@@ -344,8 +346,7 @@ export default function ProspectsPage() {
 
             setCurrentFilters(searchFilters)
             const response = await searchProspects(searchFilters)
-
-            const limitedProfiles = response.profiles.slice(0, 3)
+            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
             setEnrichedData({}) // Reset enrichment on new search
             setProfiles(limitedProfiles)
             setTotalCount(response.total_count)

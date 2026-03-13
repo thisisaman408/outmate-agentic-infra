@@ -445,6 +445,7 @@ export default function InDbCompanySearchPage() {
           companies={companies}
           isLoading={isLoading}
           hasSearched={hasSearched}
+          tableId={restored ? "companies-history" : "companies"}
           onEnrichReveal={async (companyId, field) => {
             console.log('[Zap] onEnrichReveal called', { companyId, field, alreadyEnriched: !!enrichedData[companyId]?.[field], enriching: !!enrichingRows[companyId] })
             if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return

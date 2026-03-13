@@ -1324,7 +1324,9 @@ export default function DatabaseFinderPage() {
     try {
       setClarification("Starting search with your confirmed filters...")
 
-      const extractedFilters = extractFiltersFromQuery(trimmedQuery)
+      const extractedFilters = (latestExtractedFilters && Object.keys(latestExtractedFilters).length > 0)
+        ? latestExtractedFilters
+        : extractFiltersFromQuery(trimmedQuery)
       setLatestExtractedFilters(extractedFilters)
 
       console.log("DEBUG: Final extractedFilters:", extractedFilters)
@@ -1334,8 +1336,24 @@ export default function DatabaseFinderPage() {
       console.log("Query:", trimmedQuery)
 
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const endpoint = `${API}/api/v1/explorium/company/search`
-      const payload = { query: trimmedQuery, filters: extractedFilters }
+      const searchIntent = intent === "prospect" ? "prospect" : "business"
+      const endpoint = searchIntent === "prospect"
+        ? `${API}/api/v1/prospects/search`
+        : `${API}/api/v1/explorium/company/search`
+      const toArray = (value: any) => {
+        if (!value) return undefined
+        if (Array.isArray(value)) return value
+        return [value]
+      }
+      const payload = searchIntent === "prospect"
+        ? {
+          current_title: toArray(extractedFilters.current_title),
+          location: toArray(extractedFilters.location),
+          industry: toArray(extractedFilters.industry),
+          employees: toArray(extractedFilters.company_size),
+          limit: 3,
+        }
+        : { query: trimmedQuery, filters: extractedFilters }
 
       console.log("Calling endpoint:", endpoint)
       console.log("Request body:", JSON.stringify(payload))
@@ -1369,12 +1387,11 @@ export default function DatabaseFinderPage() {
       )
 
       let mappedResults = []
-      const searchIntent = data.nlp_analysis?.categorized_intent === "prospect" ? "prospect" : "business"
-      setIntent(searchIntent);
+      setIntent(searchIntent)
 
       // Handle different response formats from different endpoints
       const rawList = searchIntent === "prospect"
-        ? (data.profiles || data.results?.data || data.data || [])
+        ? (data.profiles || data.data?.profiles || data.results?.data || [])
         : (data.data?.companies || data.companies || data.results?.data || data.data || []);
 
       console.log('Raw List:', rawList);
@@ -1385,11 +1402,12 @@ export default function DatabaseFinderPage() {
         : (data.data?.total_count || data.total_count || data.results?.total_results || (Array.isArray(rawList) ? rawList.length : 0));
 
       const examples = buildExamples(trimmedQuery);
+      const workflowEndpoint = searchIntent === "prospect" ? "/api/v1/prospects/search" : "/api/v1/explorium/company/search"
       setWorkflowSteps([
         {
           title: "Categorizing Filters",
           tool: "NLP Classifier",
-          endpoint: "/api/explorium/search",
+          endpoint: "/api/v1/chat/parse-query",
           input: { query: trimmedQuery },
           output: {
             intent: data.nlp_analysis?.categorized_intent || data.intent || "business",
@@ -1402,7 +1420,7 @@ export default function DatabaseFinderPage() {
         {
           title: "Filter Clarification",
           tool: "LLM Clarification",
-          endpoint: "/api/explorium/search",
+          endpoint: "/api/v1/chat/parse-query",
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
             clarification_message: clarification,
@@ -1411,8 +1429,8 @@ export default function DatabaseFinderPage() {
         },
         {
           title: "Search Execution",
-          tool: "Signal Search Workflow",
-          endpoint: "/api/explorium/search",
+          tool: searchIntent === "prospect" ? "Crustdata People Search" : "Explorium Company Search",
+          endpoint: workflowEndpoint,
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
             total_results: totalCount,
@@ -2274,29 +2292,48 @@ export default function DatabaseFinderPage() {
   }
 
   return (
-    <div className="container mx-auto space-y-6 py-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-6 w-6" />
-            AI-Powered Search
-          </CardTitle>
-          <CardDescription>
-            Use natural language to find companies and prospects, discover signals, and build targeted lists.
-          </CardDescription>
+    <div className="container mx-auto max-w-7xl space-y-6 py-6">
+      <Card className="border-border/60 bg-card/80 backdrop-blur-sm">
+        <CardHeader className="space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-6 w-6" />
+                AI-Powered Search
+              </CardTitle>
+              <CardDescription>
+                Use natural language to find companies and prospects, discover signals, and build targeted lists.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">
+                {intent === "prospect" ? "Prospect search" : "Company search"}
+              </Badge>
+              {hasSearched && (
+                <Badge variant="outline">
+                  {results.length} result{results.length === 1 ? "" : "s"}
+                </Badge>
+              )}
+              {creditUsageEntries.length > 0 && (
+                <Badge variant="outline">
+                  {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                </Badge>
+              )}
+            </div>
+          </div>
         </CardHeader>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
         <div className="lg:col-span-1">
-          <Card>
+          <Card className="lg:sticky lg:top-6 max-h-[calc(100vh-6rem)] overflow-hidden">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Workspace</CardTitle>
               <Button onClick={startNewChat} size="sm" className="w-full">
                 New Chat
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
               <div className="flex gap-2">
                 <Button
                   variant={activePanel === "chats" ? "default" : "outline"}
@@ -2343,7 +2380,7 @@ export default function DatabaseFinderPage() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
                     {(["All", "Build Lead Lists", "Find Contact Info", "Personalize Your Outreach", "Meeting Prep", "Recruiting"] as const).map((item) => (
                       <Badge
@@ -2357,33 +2394,35 @@ export default function DatabaseFinderPage() {
                     ))}
                   </div>
 
-                  {PROMPT_LIBRARY.filter((p) => selectedUseCase === "All" || p.useCase === selectedUseCase).map((prompt) => (
-                    <Card key={prompt.id}>
-                      <CardHeader className="p-3">
-                        <Badge variant="secondary" className="mb-2 w-fit">
-                          {prompt.useCase}
-                        </Badge>
-                        <CardTitle className="text-sm">{prompt.title}</CardTitle>
-                        <CardDescription className="text-xs">{prompt.description}</CardDescription>
-                      </CardHeader>
-                      <CardContent className="flex gap-2 p-3 pt-0">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setNaturalLanguageQuery(prompt.prompt)}
-                        >
-                          Use Prompt
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => navigator.clipboard.writeText(prompt.prompt)}
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
+                  <div className="space-y-2">
+                    {PROMPT_LIBRARY.filter((p) => selectedUseCase === "All" || p.useCase === selectedUseCase).map((prompt) => (
+                      <div key={prompt.id} className="rounded-md border bg-card/80 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs text-muted-foreground">{prompt.useCase}</div>
+                            <div className="text-sm font-medium">{prompt.title}</div>
+                            <div className="text-xs text-muted-foreground mt-1">{prompt.description}</div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setNaturalLanguageQuery(prompt.prompt)}
+                            >
+                              Use
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => navigator.clipboard.writeText(prompt.prompt)}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -2391,7 +2430,7 @@ export default function DatabaseFinderPage() {
         </div>
 
         <div className="space-y-6 lg:col-span-3">
-          <Card>
+          <Card className="border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 {hasSearched && results.length > 0 ? (
@@ -2423,52 +2462,56 @@ export default function DatabaseFinderPage() {
                 rows={2}
                 className="resize-none"
               />
-              <div className="flex gap-2 items-center text-xs text-muted-foreground mb-2">
-                <Sparkles className="h-3 w-3 text-purple-500" />
-                <span>AI search is listening for intent while you write.</span>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <Button variant="outline" size="sm" onClick={() => handleGenerateLeadList()}>
-                  <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
-                  Generate leads
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleSummarizeResults}>
-                  <Library className="mr-2 h-4 w-4 text-foreground" />
-                  Summarize results
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleGenerateCampaign}>
-                  <Mail className="mr-2 h-4 w-4 text-foreground" />
-                  Draft campaign
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleDetectSignals(results, intent)}>
-                  <Zap className="mr-2 h-4 w-4 text-yellow-500" />
-                  Detect signals
-                </Button>
-                <CsvImportButton
-                  label="Import CSV filters"
-                  onRecordsParsed={handleImportedFilters}
-                  className="h-9 px-3 text-sm"
-                />
-                <Button variant="outline" size="sm" onClick={toggleVoiceListening}>
-                  {isVoiceListening ? (
-                    <>
-                      <MicOff className="mr-2 h-4 w-4 text-red-500" />
-                      Stop voice input
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="mr-2 h-4 w-4 text-green-500" />
-                      Voice mode
-                    </>
-                  )}
-                </Button>
+              <div className="flex flex-wrap gap-2 items-center text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <Sparkles className="h-3 w-3 text-purple-500" />
+                  AI is parsing intent as you type
+                </Badge>
                 {isImportingFilters && (
                   <span className="text-xs text-muted-foreground">Applying imported filters...</span>
                 )}
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => handleGenerateLeadList()}>
+                    <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
+                    Generate leads
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleSummarizeResults}>
+                    <Library className="mr-2 h-4 w-4 text-foreground" />
+                    Summarize
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleGenerateCampaign}>
+                    <Mail className="mr-2 h-4 w-4 text-foreground" />
+                    Draft campaign
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleDetectSignals(results, intent)}>
+                    <Zap className="mr-2 h-4 w-4 text-yellow-500" />
+                    Detect signals
+                  </Button>
+                  <CsvImportButton
+                    label="Import CSV filters"
+                    onRecordsParsed={handleImportedFilters}
+                    className="h-9 px-3 text-sm"
+                  />
+                  <Button variant="outline" size="sm" onClick={toggleVoiceListening}>
+                    {isVoiceListening ? (
+                      <>
+                        <MicOff className="mr-2 h-4 w-4 text-red-500" />
+                        Stop voice
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="mr-2 h-4 w-4 text-green-500" />
+                        Voice mode
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <Button
                   onClick={handleNaturalSearch}
                   disabled={isSearching || isAgentResponding || !naturalLanguageQuery.trim()}
-                  className="ml-auto flex-1 min-w-[160px]"
+                  className="ml-auto min-w-[180px]"
                 >
                   {isSearching ? (
                     <>
@@ -2495,13 +2538,14 @@ export default function DatabaseFinderPage() {
               </div>
 
               {clarification && (
-                <Card>
-                  <CardHeader>
+                <Card className="border-primary/30 bg-primary/5">
+                  <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Filter Clarification</CardTitle>
+                    <CardDescription>Confirm or refine the extracted filters.</CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="pt-2">
                     <p className="whitespace-pre-line text-sm">{clarification}</p>
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <Button onClick={handleConfirmFilters} disabled={isSearching} size="sm">
                         {isSearching ? (
                           <>
@@ -2522,9 +2566,51 @@ export default function DatabaseFinderPage() {
             </CardContent>
           </Card>
 
+          {(hasSearched || campaignDraft || detectedSignals.length > 0 || creditUsageEntries.length > 0) && (
+            <Card className="border-border/60 shadow-sm sticky top-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Status</CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Quick snapshot of the current search session.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  {intent === "prospect" ? "Prospect mode" : "Company mode"}
+                </Badge>
+                {hasSearched && (
+                  <Badge variant="outline">
+                    {results.length} result{results.length === 1 ? "" : "s"} shown
+                  </Badge>
+                )}
+                {detectedSignals.length > 0 && (
+                  <Badge variant="outline">
+                    {detectedSignals.length} signal set{detectedSignals.length === 1 ? "" : "s"}
+                  </Badge>
+                )}
+                {campaignDraft && (
+                  <Badge variant={campaignApproved ? "default" : "outline"}>
+                    {campaignApproved ? "Campaign approved" : "Campaign draft ready"}
+                  </Badge>
+                )}
+                {creditUsageEntries.length > 0 && (
+                  <Badge variant="outline">
+                    {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                  </Badge>
+                )}
+                {gmailConnected && (
+                  <Badge variant="outline">Gmail connected</Badge>
+                )}
+                {linkedinConnected && (
+                  <Badge variant="outline">LinkedIn connected</Badge>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Campaign Draft Loading */}
           {isGeneratingCampaign && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardContent className="py-8 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary mb-3" />
                 <p className="font-medium">Generating Campaign Draft...</p>
@@ -2537,7 +2623,7 @@ export default function DatabaseFinderPage() {
 
           {/* Campaign Draft Card */}
           {campaignDraft && !isGeneratingCampaign && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
@@ -2591,7 +2677,7 @@ export default function DatabaseFinderPage() {
                     <p className="text-sm font-medium">Connect your accounts, then approve to send directly</p>
 
                     {/* Gmail Connection */}
-                    <div className="flex items-center justify-between p-3 rounded border bg-background">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <Mail className="h-4 w-4" />
                         <div>
@@ -2615,7 +2701,7 @@ export default function DatabaseFinderPage() {
                     </div>
 
                     {/* LinkedIn Connection */}
-                    <div className="flex items-center justify-between p-3 rounded border bg-background">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <ExternalLink className="h-4 w-4" />
                         <div>
@@ -2638,7 +2724,7 @@ export default function DatabaseFinderPage() {
                       )}
                     </div>
 
-                    <div className="flex gap-2 pt-1">
+                    <div className="flex flex-wrap gap-2 pt-1">
                       <Button
                         size="sm"
                         onClick={() => {
@@ -2827,7 +2913,7 @@ export default function DatabaseFinderPage() {
 
                 {/* Bulk Send Actions */}
                 {campaignApproved && selectedRecipients.size > 0 && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       disabled={!gmailConnected}
@@ -2909,9 +2995,9 @@ export default function DatabaseFinderPage() {
           )}
 
           {hasSearched && results.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>
                       {intent === "prospect" ? "Prospects Found" : "Companies Found"}
@@ -2920,7 +3006,7 @@ export default function DatabaseFinderPage() {
                       Found {tamPreview.count.toLocaleString()} {intent === "prospect" ? "prospects" : "companies"} • Showing {results.length} results
                     </CardDescription>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={onDetectSignalsClick}
                       disabled={isDetectingSignals}
@@ -2953,6 +3039,7 @@ export default function DatabaseFinderPage() {
                     data={results}
                     totalCount={tamPreview.count}
                     enableContactReveal={true}
+                    tableId="ai-powered-prospects"
                   />
                 ) : (
                   <>
@@ -2961,6 +3048,7 @@ export default function DatabaseFinderPage() {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
+                        tableId="ai-powered-companies"
                         onEnrichReveal={async (companyId, field) => {
                           if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
                           const company = results.find((c: any) => (c.domain || c.id) === companyId)
@@ -3000,7 +3088,7 @@ export default function DatabaseFinderPage() {
                   </>
                 )}
                 {intent === "business" && (
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <Button onClick={handlePullAllCompanies} disabled={isSearching} size="sm">
                       <Users className="mr-2 h-4 w-4" />
                       Pull All {tamPreview.count.toLocaleString()} Companies
@@ -3016,7 +3104,7 @@ export default function DatabaseFinderPage() {
 
           {/* Suggested Prompts */}
           {suggestedPrompts.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-purple-500" />
@@ -3046,7 +3134,7 @@ export default function DatabaseFinderPage() {
           )}
 
           {detectedSignals.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Zap className="h-5 w-5 text-yellow-500" />
@@ -3060,7 +3148,7 @@ export default function DatabaseFinderPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {detectedSignals.map((signal: any, idx: number) => (
-                  <div key={idx} className="rounded-lg border p-4">
+                  <div key={idx} className="rounded-lg border bg-card/80 p-4">
                     {intent === "prospect" ? (
                       // Display person info for prospects
                       <div className="flex items-center justify-between">
@@ -3116,7 +3204,7 @@ export default function DatabaseFinderPage() {
           )}
 
           {creditUsageEntries.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-sm">Credit usage</CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
@@ -3124,28 +3212,21 @@ export default function DatabaseFinderPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm font-medium">
                   Total: {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {creditUsageEntries.map(([key, value]) => (
-                    <Badge key={key} variant="outline">
-                      {formatCreditLabel(key)}: {value}
-                    </Badge>
-                  ))}
-                </div>
               </CardContent>
             </Card>
           )}
 
           {workflowSteps.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-sm">Workflow Steps</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {workflowSteps.map((step, idx) => (
-                  <div key={idx} className="rounded border p-2">
+                  <div key={idx} className="rounded border bg-muted/30 p-2">
                     <div className="font-medium text-sm">{step.title}</div>
                     <div className="text-xs text-muted-foreground">{step.tool}</div>
                   </div>
@@ -3155,7 +3236,7 @@ export default function DatabaseFinderPage() {
           )}
 
           {agentMessages.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <MessageSquare className="h-4 w-4" />

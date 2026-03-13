@@ -421,19 +421,40 @@ class ExploriumService:
             except Exception as e:
                 print(f">>> [ExploriumService] Explorium match failed: {e}", flush=True)
         
-        # If no companies from match or no domain/name, fetch a limited batch
-        if not companies:
-            print(f">>> [ExploriumService] No companies found via match, fetching limited results", flush=True)
+        # If no companies from match or fewer than limit, also fetch a broad batch to fill up
+        if len(companies) < limit:
+            remaining = limit - len(companies)
+            print(f">>> [ExploriumService] Have {len(companies)}/{limit} companies, fetching {remaining} more via broad search", flush=True)
             try:
-                raw = await self.fetch_businesses(filters, size=limit, page_size=limit, page=1, mode="full")
+                # Build filters without domain/name to get broader results
+                broad_filters = {k: v for k, v in filters.items() if k not in ("domain", "website", "name", "company_name")}
+                # Use original filters if no broad filters remain
+                fetch_filters = broad_filters if broad_filters else filters
+                raw = await self.fetch_businesses(fetch_filters, size=remaining + 5, page_size=remaining + 5, page=1, mode="full")
                 data_list = raw.get("data") or []
-                print(f">>> [ExploriumService] Explorium fetch returned {len(data_list)} records", flush=True)
-                companies = [self.normalize_company(item) for item in data_list]
-                if name:
-                    for c in companies:
-                        c["__query_name"] = name
+                print(f">>> [ExploriumService] Explorium broad fetch returned {len(data_list)} records", flush=True)
+                existing_domains = {str(c.get("domain", "")).lower() for c in companies}
+                existing_names = {str(c.get("name", "")).lower() for c in companies}
+                for item in data_list:
+                    if len(companies) >= limit:
+                        break
+                    normed = self.normalize_company(item)
+                    # Deduplicate by domain and name
+                    item_domain = str(normed.get("domain", "")).lower()
+                    item_name = str(normed.get("name", "")).lower()
+                    if item_domain and item_domain in existing_domains:
+                        continue
+                    if item_name and item_name in existing_names:
+                        continue
+                    if name:
+                        normed["__query_name"] = name
+                    companies.append(normed)
+                    if item_domain:
+                        existing_domains.add(item_domain)
+                    if item_name:
+                        existing_names.add(item_name)
             except Exception as e:
-                print(f">>> [ExploriumService] Explorium fetch failed: {e}", flush=True)
+                print(f">>> [ExploriumService] Explorium broad fetch failed: {e}", flush=True)
 
         if strict_filters and not companies:
             print(">>> [ExploriumService] strict_filters enabled; returning zero without broadening.", flush=True)

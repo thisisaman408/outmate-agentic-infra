@@ -31,6 +31,7 @@ from app.core.config import settings
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+MAX_PROSPECT_RESULTS = 3
 
 # Create API router with configuration
 router = APIRouter(
@@ -184,13 +185,17 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
         )
         
         
+        # Enforce a hard cap to protect credits and match UI expectations
+        requested_limit = request.limit or MAX_PROSPECT_RESULTS
+        effective_limit = min(requested_limit, MAX_PROSPECT_RESULTS)
+
         # Local database fallback for demo testing
         if settings.CRUSTDATA_API_KEY == "placeholder_for_dev" or not settings.CRUSTDATA_API_KEY:
             logger.info("Using local database demo prospects fallback due to missing CrustData API key")
             from app.db.models.prospect import Prospect
             from app.db.models.company import Company
             
-            prospects = db.query(Prospect).limit(request.limit or 10).all()
+            prospects = db.query(Prospect).limit(effective_limit).all()
             profiles = []
             
             for p in prospects:
@@ -296,11 +301,11 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
             company=request.company,
             # Employees filter
             employees=request.employees,
-            limit=request.limit,
+            limit=effective_limit,
             cursor=request.cursor
         )
 
-        profiles = result.get("profiles", [])
+        profiles = (result.get("profiles", []) or [])[:effective_limit]
         
         # Add ContactOut enrichment for top profiles to meet "Crustdata + ContactOut" constraint
         # Enrich only top 3 results per request to balance richness vs latency

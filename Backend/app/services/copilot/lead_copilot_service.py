@@ -166,7 +166,14 @@ class LeadCopilotService:
         from app.db.models.prospect import Prospect
         from app.db.models.company import Company
 
-        prospect = self.db.query(Prospect).filter(Prospect.id == prospect_id).first()
+        prospect = None
+        # Try UUID lookup first, then fall back to external_id (provider person_id)
+        try:
+            import uuid as _uuid
+            _uuid.UUID(str(prospect_id))
+            prospect = self.db.query(Prospect).filter(Prospect.id == prospect_id).first()
+        except Exception:
+            prospect = self.db.query(Prospect).filter(Prospect.external_id == str(prospect_id)).first()
         if not prospect:
             raise ValueError(f"Prospect not found: {prospect_id}")
 
@@ -224,10 +231,41 @@ class LeadCopilotService:
 
     async def execute_action(self, user_id: str, prospect_id: str, action_type: str, prompt: Optional[str] = None, context_overrides: Optional[Dict[str, Any]] = None) -> dict:
         """Route action to the appropriate handler with prospect context."""
-        # Get prospect context from DB
-        context = self.get_lead_context(prospect_id)
-        prospect = context["prospect"]
-        company = context.get("company") or {}
+        # Get prospect context from DB; fall back to overrides when history results aren't persisted.
+        try:
+            context = self.get_lead_context(prospect_id)
+            prospect = context["prospect"]
+            company = context.get("company") or {}
+        except ValueError:
+            if not context_overrides:
+                raise
+            override_prospect = context_overrides.get("prospect") or {}
+            override_company = context_overrides.get("company") or {}
+            prospect = {
+                "id": override_prospect.get("id") or prospect_id,
+                "name": override_prospect.get("name"),
+                "title": override_prospect.get("title"),
+                "email": override_prospect.get("email"),
+                "phone": override_prospect.get("phone"),
+                "linkedin_url": override_prospect.get("linkedin_url"),
+                "location": override_prospect.get("location"),
+                "seniority": override_prospect.get("seniority"),
+                "department": override_prospect.get("department"),
+                "data_quality_score": override_prospect.get("data_quality_score"),
+                "company": override_company.get("name") or override_prospect.get("company"),
+            }
+            company = {
+                "name": override_company.get("name"),
+                "domain": override_company.get("domain"),
+                "industry": override_company.get("industry"),
+                "employee_count": override_company.get("employee_count"),
+                "revenue_range": override_company.get("revenue_range"),
+                "funding_stage": override_company.get("funding_stage"),
+                "funding_total": override_company.get("funding_total"),
+                "technologies": override_company.get("technologies") or [],
+                "headquarters": override_company.get("headquarters"),
+                "employee_growth_6m_percent": override_company.get("employee_growth_6m_percent"),
+            }
 
         # Prepare enrichment context
         name = prospect.get("name", "")
@@ -271,7 +309,13 @@ class LeadCopilotService:
             return MOCK_ANNOTATED_EMAIL
 
         # Enrich the lead
-        lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
+        lead_context = await LeadEnrichmentService.enrich(
+            name,
+            company_name,
+            role,
+            domain,
+            include_company_data=False,
+        )
 
         user_prompt = self._build_user_prompt(
             prospect, company, lead_context,
@@ -331,8 +375,21 @@ class LeadCopilotService:
         if company.get("employee_count"):
             # Use a range around the employee count
             count = company["employee_count"]
-            filters["employee_count_min"] = max(1, int(count * 0.5))
-            filters["employee_count_max"] = int(count * 2)
+            numeric_count = None
+            if isinstance(count, (int, float)):
+                numeric_count = int(count)
+            elif isinstance(count, str):
+                # Handle ranges like "51-200" or "201-500"
+                match = re.findall(r"\d+", count)
+                if len(match) >= 2:
+                    low = int(match[0])
+                    high = int(match[1])
+                    numeric_count = int((low + high) / 2)
+                elif len(match) == 1:
+                    numeric_count = int(match[0])
+            if numeric_count:
+                filters["employee_count_min"] = max(1, int(numeric_count * 0.5))
+                filters["employee_count_max"] = int(numeric_count * 2)
         if company.get("technologies"):
             techs = company["technologies"]
             if isinstance(techs, list) and techs:
@@ -360,7 +417,13 @@ class LeadCopilotService:
         if self.mock:
             return MOCK_OBJECTION
 
-        lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
+        lead_context = await LeadEnrichmentService.enrich(
+            name,
+            company_name,
+            role,
+            domain,
+            include_company_data=False,
+        )
 
         objection_text = prompt or "Not interested right now"
         user_prompt = self._build_user_prompt(
@@ -368,13 +431,33 @@ class LeadCopilotService:
             extra=f"OBJECTION FROM PROSPECT: <user_command>{objection_text}</user_command>"
         )
 
-        result = await self.openrouter.chat_completion_structured(
-            system_prompt=OBJECTION_HANDLER_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            temperature=0.3,
-            max_tokens=1500,
-        )
-        return result
+        try:
+            result = await self.openrouter.chat_completion_structured(
+                system_prompt=OBJECTION_HANDLER_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            return result
+        except Exception as exc:
+            logger.error("Objection handler LLM failed: %s", exc)
+            return {
+                "objection_analysis": "Prospect is expressing hesitation or concern about moving forward.",
+                "rebuttals": [
+                    {
+                        "approach": "empathize",
+                        "response": "Totally fair — most teams want to be sure this won’t create extra work. We can start with a lightweight pilot so you can see impact quickly without disruption.",
+                        "reasoning": "Acknowledges the concern and reduces perceived risk."
+                    },
+                    {
+                        "approach": "question",
+                        "response": "What would need to be true for this to be worth revisiting in the next few weeks?",
+                        "reasoning": "Keeps the conversation open and uncovers the real blocker."
+                    }
+                ],
+                "follow_up_question": "Is timing the main concern, or is there something specific you’d want to see first?",
+                "recommended_rebuttal": 0,
+            }
 
     async def _handle_custom(self, name: str, company_name: str, role: str, domain: Optional[str], prospect: dict, company: dict, prompt: Optional[str], **kwargs) -> dict:
         """Handle free-form user commands with prospect context."""
