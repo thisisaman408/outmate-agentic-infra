@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, use, useEffect } from "react"
+import { useState, use, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -1588,7 +1588,7 @@ const MultiSelect = ({ label, options, source, value, onChange }: {
     );
 };
 
-export default function SignalWizardPage({ params }: SignalWizardPageProps) {
+function SignalWizardPageContent({ params }: SignalWizardPageProps) {
     const { signalId } = use(params)
     const router = useRouter()
     const searchParams = useSearchParams()
@@ -2051,5 +2051,13 @@ export default function SignalWizardPage({ params }: SignalWizardPageProps) {
                 )}
             </div>
         </div>
+    )
+}
+
+export default function SignalWizardPage({ params }: SignalWizardPageProps) {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <SignalWizardPageContent params={params} />
+        </Suspense>
     )
 }

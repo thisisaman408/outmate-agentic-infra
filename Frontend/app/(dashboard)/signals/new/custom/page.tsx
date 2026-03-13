@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
@@ -91,7 +92,7 @@ const sections = [
     }
 ]
 
-export default function CustomSignalPage() {
+function CustomSignalPageContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const category = searchParams.get("category") || ""
@@ -143,5 +144,13 @@ export default function CustomSignalPage() {
                 )))}
             </div>
         </div>
+    )
+}
+
+export default function CustomSignalPage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <CustomSignalPageContent />
+        </Suspense>
     )
 }

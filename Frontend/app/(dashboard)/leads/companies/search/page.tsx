@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { Database, Sparkles, Zap, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FilterSidebar } from "@/components/leads/companies/filter-sidebar"
@@ -17,7 +17,7 @@ import { CsvImportButton } from "@/components/shared/csv-import-button"
 import { normalizeCsvRecord } from "@/lib/utils/csv"
 import { useToast } from "@/hooks/use-toast"
 
-export default function InDbCompanySearchPage() {
+function InDbCompanySearchPageContent() {
   const params = useSearchParams()
   const historyId = params.get('historyId') || undefined
   const [companies, setCompanies] = useState<CompanyData[]>([])
@@ -477,5 +477,13 @@ export default function InDbCompanySearchPage() {
         />
       </div>
     </div>
+  )
+}
+
+export default function InDbCompanySearchPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <InDbCompanySearchPageContent />
+    </Suspense>
   )
 }
