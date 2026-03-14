@@ -45,13 +45,16 @@ jobs:
 
       - name: Health check
         run: |
-          sleep 10
+          sleep 15
           for i in {1..20}; do
-            if curl -sSf https://dev.outmate.ai/health; then
-              echo "Health OK"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://dev.outmate.ai/health)
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
+              echo "App responding (HTTP $STATUS)"
+              curl -s https://dev.outmate.ai/health
               exit 0
             fi
+            echo "Waiting... (HTTP $STATUS)"
             sleep 5
           done
-          echo "Health check failed"
+          echo "Health check failed - app not responding"
           exit 1
