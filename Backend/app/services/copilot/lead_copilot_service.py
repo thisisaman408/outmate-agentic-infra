@@ -368,32 +368,21 @@ class LeadCopilotService:
         """Extract ICP attributes from prospect and search for similar companies."""
         from app.services.explorium_service import ExploriumService
 
-        # Build filters from prospect/company attributes
+        # Build filters using keys that _map_filters understands
         filters: Dict[str, Any] = {}
         if company.get("industry"):
             filters["industry"] = company["industry"]
-        if company.get("employee_count"):
-            # Use a range around the employee count
-            count = company["employee_count"]
-            numeric_count = None
-            if isinstance(count, (int, float)):
-                numeric_count = int(count)
-            elif isinstance(count, str):
-                # Handle ranges like "51-200" or "201-500"
-                match = re.findall(r"\d+", count)
-                if len(match) >= 2:
-                    low = int(match[0])
-                    high = int(match[1])
-                    numeric_count = int((low + high) / 2)
-                elif len(match) == 1:
-                    numeric_count = int(match[0])
-            if numeric_count:
-                filters["employee_count_min"] = max(1, int(numeric_count * 0.5))
-                filters["employee_count_max"] = int(numeric_count * 2)
+        # Use company_size (mapped by _map_filters to Explorium's company_size)
+        emp = company.get("employee_count") or company.get("employee_count_range")
+        if emp:
+            if isinstance(emp, str):
+                filters["company_size"] = emp
+            elif isinstance(emp, (int, float)):
+                filters["company_size"] = str(int(emp))
         if company.get("technologies"):
             techs = company["technologies"]
             if isinstance(techs, list) and techs:
-                filters["technologies"] = techs[:3]
+                filters["keywords"] = techs[:3]
 
         try:
             explorium = ExploriumService()

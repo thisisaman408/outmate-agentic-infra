@@ -36,6 +36,7 @@ class BetterContactService:
         company_domain: str = "",
         linkedin_url: str = "",
         field: str = "email",
+        _is_fallback: bool = False,
     ) -> Dict[str, Any]:
         """
         Enrich a single prospect to find verified email + phone.
@@ -44,13 +45,13 @@ class BetterContactService:
         if not self.api_key:
             return {"success": False, "error": "BETTERCONTACT_API_KEY not set"}
 
-        # Build the contact payload
+        # Build the contact payload (API uses "company" not "company_name")
         contact = {
             "first_name": first_name,
             "last_name": last_name,
         }
         if company_name:
-            contact["company_name"] = company_name
+            contact["company"] = company_name
         if company_domain:
             contact["company_domain"] = company_domain
         if linkedin_url:
@@ -103,20 +104,12 @@ class BetterContactService:
                             enriched = data_list[0]
                             email = enriched.get("contact_email_address") or ""
                             phone = enriched.get("contact_phone_number") or enriched.get("contact_mobile_phone") or ""
-                            if not email and not phone:
-                                logger.info("BetterContact async returned empty contact, running prospect fallback",
+                            if not email and not phone and not _is_fallback:
+                                logger.info("BetterContact async returned empty contact, skipping recursive fallback",
                                             extra={"name": f"{first_name} {last_name}", "company": company_name})
-                                fallback = await self.enrich_prospect(
-                                    first_name=first_name,
-                                    last_name=last_name,
-                                    company_name=company_name,
-                                    company_domain=company_domain,
-                                    linkedin_url=linkedin_url,
-                                )
-                                email = fallback.get("email") or ""
-                                phone = fallback.get("phone") or ""
-                                credits_consumed = fallback.get("credits_consumed", 0) or poll_data.get("credits_consumed", 0)
-                                credits_left = fallback.get("credits_left", 0) or poll_data.get("credits_left", 0)
+                            if not email and not phone:
+                                credits_consumed = poll_data.get("credits_consumed", 0)
+                                credits_left = poll_data.get("credits_left", 0)
                             else:
                                 credits_consumed = poll_data.get("credits_consumed", 0)
                                 credits_left = poll_data.get("credits_left", 0)
@@ -156,12 +149,13 @@ class BetterContactService:
         if not self.api_key:
             return {"success": False, "error": "BETTERCONTACT_API_KEY not set"}
 
-        # Start with broad company filter only; narrow filters cause 0 results
-        # for small/niche companies. BetterContact searches 20+ sources so even
-        # a broad query returns relevant decision-makers.
+        # Use company domain/name filter with seniority to find decision-makers
         filters = {
             "company": {
                 "include": [company_domain] if company_domain else [company_name]
+            },
+            "lead_seniority": {
+                "include": ["director", "vp", "c-level", "founder", "manager", "senior"]
             },
         }
 
@@ -231,7 +225,8 @@ class BetterContactService:
                                     last_name=prospect_last_name,
                                     company_name=company_name,
                                     company_domain=company_domain,
-                                    linkedin_url=lead.get("contact_linkedin_profile_url", ""),
+                                    linkedin_url=lead.get("contact_linkedin_profile_url") or lead.get("contact_linkedin_url") or "",
+                                    _is_fallback=True,
                                 )
                                 logger.info("BetterContact prospect fallback result triggered",
                                             extra={
@@ -254,7 +249,7 @@ class BetterContactService:
                                 "contact_title": lead.get("contact_job_title") or "",
                                 "email": contact_email,
                                 "phone": contact_phone,
-                                "linkedin_url": lead.get("contact_linkedin_url") or "",
+                                "linkedin_url": lead.get("contact_linkedin_profile_url") or lead.get("contact_linkedin_url") or "",
                                 "credits_consumed": credits_consumed,
                                 "credits_left": credits_left,
                             }
