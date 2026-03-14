@@ -1793,6 +1793,50 @@ export default function DatabaseFinderPage() {
       return
     }
 
+    // Detect if the CSV contains company data (rows of companies) vs filter criteria
+    const firstRow = records[0]
+    const companyDataKeys = ["name", "company_name", "domain", "website", "company"]
+    const hasCompanyData = companyDataKeys.some((k) =>
+      Object.keys(firstRow).some((col) => col.toLowerCase().trim() === k)
+    )
+
+    if (hasCompanyData && records.length > 0) {
+      // CSV contains company data — directly populate the results table
+      setIsImportingFilters(true)
+      setIntent("business")
+      setNaturalLanguageQuery("Imported companies from CSV")
+      setClarification(`Imported ${records.length} companies from CSV`)
+      setHasSearched(true)
+
+      // Normalize CSV column names to match expected company fields
+      const normalizedRecords = records.map((row) => {
+        const normalized: Record<string, any> = {}
+        Object.entries(row).forEach(([key, value]) => {
+          const k = key.toLowerCase().trim()
+          // Map common CSV column names to our internal field names
+          if (k === "company" || k === "company_name") normalized["name"] = value
+          else if (k === "website") normalized["domain"] = value?.replace(/^https?:\/\//, "").replace(/\/$/, "")
+          else normalized[k] = value
+        })
+        // Ensure domain from website if not set
+        if (!normalized["domain"] && normalized["website"]) {
+          normalized["domain"] = normalized["website"].replace(/^https?:\/\//, "").replace(/\/$/, "")
+        }
+        // Generate a logo URL from domain
+        if (normalized["domain"] && !normalized["logo_url"]) {
+          normalized["logo_url"] = `https://logo.clearbit.com/${normalized["domain"]}`
+        }
+        return normalized
+      })
+
+      const mapped = mapCompanyResults(normalizedRecords)
+      console.log("CSV Import: directly mapped", mapped.length, "companies")
+      setResults(mapped)
+      setIsImportingFilters(false)
+      return
+    }
+
+    // Otherwise treat as filter criteria (original behavior)
     const normalized = normalizeCsvRecord(records[0])
     if (Object.keys(normalized).length === 0) {
       toast({
