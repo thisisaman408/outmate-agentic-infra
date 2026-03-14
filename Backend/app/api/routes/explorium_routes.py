@@ -109,6 +109,43 @@ async def search_company(payload: Dict[str, Any]):
         page_size = size
 
         svc = ExploriumService()
+        async def fetch_with_relax(base_filters: Dict[str, Any]) -> list[dict]:
+            # Progressive relax: drop keywords -> industry -> company_size
+            candidates: list[Dict[str, Any]] = []
+            def _drop(keys: list[str]) -> Dict[str, Any]:
+                return {k: v for k, v in base_filters.items() if k not in keys}
+
+            candidates.append(base_filters)
+            if "keywords" in base_filters:
+                candidates.append(_drop(["keywords"]))
+            if "industry" in base_filters:
+                candidates.append(_drop(["industry"]))
+            if "company_size" in base_filters:
+                candidates.append(_drop(["company_size"]))
+            if "keywords" in base_filters and "industry" in base_filters:
+                candidates.append(_drop(["keywords", "industry"]))
+            if "keywords" in base_filters and "company_size" in base_filters:
+                candidates.append(_drop(["keywords", "company_size"]))
+            if "industry" in base_filters and "company_size" in base_filters:
+                candidates.append(_drop(["industry", "company_size"]))
+            if "keywords" in base_filters and "industry" in base_filters and "company_size" in base_filters:
+                candidates.append(_drop(["keywords", "industry", "company_size"]))
+
+            seen = set()
+            for f in candidates:
+                key = tuple(sorted((k, str(v)) for k, v in f.items()))
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    raw = await svc.fetch_businesses(f, size=size, page_size=page_size, page=page, mode="full")
+                    data_list = raw.get("data") or []
+                    companies = [svc.normalize_company(item) for item in data_list][:size]
+                    if companies:
+                        return companies
+                except Exception:
+                    continue
+            return []
         # If searching by a specific domain or name, use match endpoint for high precision
         domain = filters.get("domain")
         name = filters.get("name")
@@ -166,6 +203,8 @@ async def search_company(payload: Dict[str, Any]):
                     raw = await svc.fetch_businesses(filters, size=size, page_size=page_size, page=page, mode="full")
                     data_list = raw.get("data") or []
                     companies = [svc.normalize_company(item) for item in data_list][:size]
+                    if not companies:
+                        companies = await fetch_with_relax(filters)
                 except Exception:
                     # preserve behavior: raise to outer handler
                     raise
@@ -174,6 +213,8 @@ async def search_company(payload: Dict[str, Any]):
                 raw = await svc.fetch_businesses(filters, size=size, page_size=page_size, page=page, mode="full")
                 data_list = raw.get("data") or []
                 companies = [svc.normalize_company(item) for item in data_list][:size]
+                if not companies:
+                    companies = await fetch_with_relax(filters)
             except httpx.HTTPStatusError as e:
                 msg = ""
                 try:

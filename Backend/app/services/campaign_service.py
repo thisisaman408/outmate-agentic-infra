@@ -325,22 +325,16 @@ Return ONLY the JSON object, no other text."""
         if not content or not content.strip():
             return None
 
-        # Try direct parse
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # Try extracting from markdown code fence
-        block = CampaignService._extract_json_block(content)
-        if block:
-            try:
-                parsed = json.loads(block)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
+        # Try direct parse (strict then lenient for unescaped control chars)
+        for candidate in [content, CampaignService._extract_json_block(content)]:
+            if not candidate:
+                continue
+            for strict in [True, False]:
+                try:
+                    parsed = json.loads(candidate, strict=strict)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         return None

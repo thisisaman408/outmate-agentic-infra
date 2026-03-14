@@ -8,7 +8,7 @@ celery_app = Celery(
     "outmate_tasks",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.visitors"]
+    include=["app.tasks.visitors", "app.tasks.copilot_tasks"]
 )
 
 celery_app.conf.update(

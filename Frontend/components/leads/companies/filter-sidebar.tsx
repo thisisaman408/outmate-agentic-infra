@@ -118,10 +118,15 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
         try {
             console.log('🔍 Searching with filters:', transformedFilters)
 
-            const response = await fetch(`/api/v1/leads/search/companies`, {
+            const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+            const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 min timeout
+            const response = await fetch(`${apiBase}/api/v1/leads/search/companies`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
                 },
                 body: JSON.stringify({
                     filters: transformedFilters,
@@ -129,7 +134,9 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
                         limit: 3
                     }
                 }),
+                signal: controller.signal,
             })
+            clearTimeout(timeoutId)
 
             console.log('📡 Response status:', response.status)
 

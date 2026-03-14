@@ -1,0 +1,445 @@
+"""
+Co-Pilot API Routes — Daily Brief, Meeting Prep, Campaign Optimizer, Pipeline Risk Alert.
+"""
+
+from fastapi import APIRouter, HTTPException, Depends
+import logging
+
+from app.services.copilot.copilot_service import CopilotService
+from app.services.copilot.lead_copilot_service import LeadCopilotService
+from app.schemas.copilot import (
+    MeetingPrepRequest,
+    CampaignOptimizerRequest,
+    EmailOptimizerRequest,
+    PipelineScanRequest,
+    CopilotPreferencesRequest,
+    LeadActionRequest,
+)
+from app.api.deps.auth import get_current_user
+from app.db.deps import get_db
+from app.db.models.user import User
+from app.db.utils import get_user_credits, deduct_credits
+from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
+# ── Credit costs per copilot action ───────────────────────────
+COPILOT_CREDIT_COSTS = {
+    "daily_brief": 1,
+    "meeting_prep": 2,
+    "campaign_optimizer": 1,
+    "email_optimizer": 2,
+    "pipeline_scan": 2,
+    # Lead copilot actions
+    "lead_draft_email": 1,
+    "lead_meeting_prep": 2,
+    "lead_research": 2,
+    "lead_find_similar": 1,
+    "lead_objection_handler": 1,
+    "lead_custom": 1,
+    "lead_suggestions": 1,
+}
+
+
+def _check_credits(db: Session, user_id, cost: int):
+    """Raise HTTP 402 if user has insufficient credits."""
+    balance = get_user_credits(db, user_id)
+    if balance < cost:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "message": f"Insufficient credits. This action costs {cost} credit(s), you have {balance}.",
+                "credits_required": cost,
+                "credits_remaining": balance,
+            },
+        )
+
+
+def _deduct(db: Session, user_id, cost: int, description: str, reference_id=None):
+    """Deduct credits after a successful copilot action."""
+    deduct_credits(db, user_id, cost, reference_id, description)
+
+router = APIRouter(tags=["copilot"])
+
+
+# ── Daily Brief ───────────────────────────────────────────────
+
+@router.get("/daily-brief")
+async def get_daily_brief(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get today's daily brief. Generates one if it doesn't exist yet (costs credits only on generation)."""
+    try:
+        service = CopilotService(db)
+        result, was_generated = await service.daily_brief.get_or_generate(str(current_user.id))
+        if was_generated:
+            cost = COPILOT_CREDIT_COSTS["daily_brief"]
+            _deduct(db, current_user.id, cost, "Copilot: Daily brief auto-generated")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Daily brief error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get daily brief: {str(e)}")
+
+
+@router.post("/daily-brief/generate")
+async def regenerate_daily_brief(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Force-regenerate today's daily brief."""
+    cost = COPILOT_CREDIT_COSTS["daily_brief"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = CopilotService(db)
+        result = await service.daily_brief.generate(str(current_user.id))
+        _deduct(db, current_user.id, cost, "Copilot: Daily brief regenerated")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Daily brief regenerate error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate daily brief: {str(e)}")
+
+
+# ── Meeting Prep ──────────────────────────────────────────────
+
+@router.post("/meeting-prep")
+async def generate_meeting_prep(
+    request: MeetingPrepRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a pre-call brief for a company and prospect."""
+    cost = COPILOT_CREDIT_COSTS["meeting_prep"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = CopilotService(db)
+        result = await service.meeting_prep.generate(
+            user_id=str(current_user.id),
+            company_name=request.company_name,
+            company_domain=request.company_domain,
+            prospect_name=request.prospect_name,
+            prospect_title=request.prospect_title,
+            meeting_type=request.meeting_type or "discovery",
+            additional_context=request.additional_context,
+        )
+        _deduct(db, current_user.id, cost, f"Copilot: Meeting prep for {request.company_name}")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Meeting prep error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate meeting prep: {str(e)}")
+
+
+@router.get("/meeting-prep/history")
+async def get_meeting_prep_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List past meeting prep briefs for the current user."""
+    try:
+        service = CopilotService(db)
+        return {"history": service.meeting_prep.get_history(str(current_user.id))}
+    except Exception as e:
+        logger.error(f"Meeting prep history error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch history: {str(e)}")
+
+
+# ── Campaign Optimizer ────────────────────────────────────────
+
+@router.post("/campaign-optimizer")
+async def analyze_campaign(
+    request: CampaignOptimizerRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Analyze a campaign and return score + improvement suggestions."""
+    cost = COPILOT_CREDIT_COSTS["campaign_optimizer"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = CopilotService(db)
+        result = await service.campaign_optimizer.analyze(
+            user_id=str(current_user.id),
+            subject_line=request.subject_line,
+            email_body=request.email_body,
+            target_audience=request.target_audience,
+            campaign_id=request.campaign_id,
+            metrics=request.metrics,
+        )
+        _deduct(db, current_user.id, cost, "Copilot: Campaign optimization")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Campaign optimizer error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze campaign: {str(e)}")
+
+
+# ── Email Optimizer (enriched campaign optimizer) ─────────────
+
+@router.post("/email-optimizer")
+async def optimize_email(
+    request: EmailOptimizerRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Analyze and rewrite an email with lead-specific enrichment.
+
+    Extends campaign-optimizer with deep personalization when lead context
+    (lead_name + lead_company) is provided.  Costs 2 credits because of
+    external enrichment API calls.
+    """
+    cost = COPILOT_CREDIT_COSTS["email_optimizer"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = CopilotService(db)
+        result = await service.campaign_optimizer.analyze(
+            user_id=str(current_user.id),
+            subject_line=request.subject_line,
+            email_body=request.email_body,
+            target_audience=request.target_audience,
+            campaign_id=request.campaign_id,
+            metrics=request.metrics,
+            lead_name=request.lead_name,
+            lead_company=request.lead_company,
+            lead_role=request.lead_role,
+            lead_domain=request.lead_domain,
+        )
+        _deduct(db, current_user.id, cost, "Copilot: Email optimization with enrichment")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Email optimizer error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to optimize email: {str(e)}")
+
+
+# ── Pipeline Risk Alerts ──────────────────────────────────────
+
+@router.get("/pipeline-alerts")
+async def get_pipeline_alerts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List active (unresolved) pipeline alerts for the current user."""
+    try:
+        service = CopilotService(db)
+        alerts = service.pipeline_risk.get_alerts(str(current_user.id), resolved=False)
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as e:
+        logger.error(f"Pipeline alerts error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch alerts: {str(e)}")
+
+
+@router.post("/pipeline-alerts/scan")
+async def scan_pipeline(
+    request: PipelineScanRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Scan a list of deals and generate pipeline risk alerts."""
+    if len(request.deals) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 deals allowed per scan.")
+    cost = COPILOT_CREDIT_COSTS["pipeline_scan"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = CopilotService(db)
+        deals = [d.model_dump() for d in request.deals]
+        result = await service.pipeline_risk.scan(str(current_user.id), deals)
+        _deduct(db, current_user.id, cost, "Copilot: Pipeline risk scan")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Pipeline scan error: {e}")
+        raise HTTPException(status_code=500, detail=f"Pipeline scan failed: {str(e)}")
+
+
+@router.put("/pipeline-alerts/{alert_id}/resolve")
+async def resolve_alert(
+    alert_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a pipeline alert as resolved."""
+    try:
+        service = CopilotService(db)
+        resolved = service.pipeline_risk.resolve_alert(str(current_user.id), alert_id)
+        if not resolved:
+            raise HTTPException(status_code=404, detail="Alert not found.")
+        return {"success": True, "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Resolve alert error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resolve alert: {str(e)}")
+
+
+# ── Preferences ───────────────────────────────────────────────
+
+@router.get("/preferences")
+async def get_preferences(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the current user's Co-Pilot preferences."""
+    try:
+        from app.db.models.copilot_preferences import CopilotUserPreferences
+        prefs = db.query(CopilotUserPreferences).filter(
+            CopilotUserPreferences.user_id == current_user.id
+        ).first()
+        if not prefs:
+            return {
+                "daily_brief_enabled": True,
+                "daily_brief_time": "08:00",
+                "daily_brief_timezone": "UTC",
+                "notify_email": True,
+                "notify_slack": False,
+                "slack_webhook_url": None,
+                "pipeline_alerts_enabled": True,
+                "alert_severity_threshold": "medium",
+            }
+        return {
+            "daily_brief_enabled": prefs.daily_brief_enabled,
+            "daily_brief_time": prefs.daily_brief_time,
+            "daily_brief_timezone": prefs.daily_brief_timezone,
+            "notify_email": prefs.notify_email,
+            "notify_slack": prefs.notify_slack,
+            "slack_webhook_url": prefs.slack_webhook_url,
+            "pipeline_alerts_enabled": prefs.pipeline_alerts_enabled,
+            "alert_severity_threshold": prefs.alert_severity_threshold,
+        }
+    except Exception as e:
+        logger.error(f"Get preferences error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch preferences: {str(e)}")
+
+
+@router.put("/preferences")
+async def update_preferences(
+    request: CopilotPreferencesRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's Co-Pilot preferences."""
+    try:
+        import uuid as _uuid
+        from app.db.models.copilot_preferences import CopilotUserPreferences
+        prefs = db.query(CopilotUserPreferences).filter(
+            CopilotUserPreferences.user_id == current_user.id
+        ).first()
+        if not prefs:
+            prefs = CopilotUserPreferences(id=_uuid.uuid4(), user_id=current_user.id)
+            db.add(prefs)
+
+        for field, value in request.model_dump(exclude_none=True).items():
+            setattr(prefs, field, value)
+
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Update preferences error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update preferences: {str(e)}")
+
+
+# ── Credits ───────────────────────────────────────────────────
+
+@router.get("/credits")
+async def get_credits(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the current user's credit balance and copilot action costs."""
+    balance = get_user_credits(db, current_user.id)
+    return {
+        "credits_remaining": balance,
+        "costs": COPILOT_CREDIT_COSTS,
+    }
+
+
+# ── Lead Copilot ──────────────────────────────────────────────
+
+@router.get("/lead-context/{prospect_id}")
+async def get_lead_context(
+    prospect_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Aggregate all known data for a prospect (DB + company). Free, no credits."""
+    try:
+        service = LeadCopilotService(db)
+        return service.get_lead_context(prospect_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Lead context error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch lead context: {str(e)}")
+
+
+@router.post("/lead-action")
+async def execute_lead_action(
+    request: LeadActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Execute an AI command with prospect context. Credit cost varies by action type."""
+    cost_key = f"lead_{request.action_type.value}"
+    cost = COPILOT_CREDIT_COSTS.get(cost_key, 1)
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = LeadCopilotService(db)
+        result = await service.execute_action(
+            user_id=str(current_user.id),
+            prospect_id=request.prospect_id,
+            action_type=request.action_type.value,
+            prompt=request.prompt,
+            context_overrides=request.context_overrides,
+        )
+        _deduct(db, current_user.id, cost, f"Copilot: Lead {request.action_type.value}")
+        return {
+            "action_type": request.action_type.value,
+            "result": result,
+            "suggestions": [],
+            "credits_used": cost,
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Lead action error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to execute lead action: {str(e)}")
+
+
+@router.get("/lead-suggestions/{prospect_id}")
+async def get_lead_suggestions(
+    prospect_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """AI-generated proactive suggestions for a prospect. Costs 1 credit."""
+    cost = COPILOT_CREDIT_COSTS["lead_suggestions"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = LeadCopilotService(db)
+        result = await service.get_suggestions(prospect_id)
+        _deduct(db, current_user.id, cost, f"Copilot: Lead suggestions for {prospect_id}")
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Lead suggestions error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")

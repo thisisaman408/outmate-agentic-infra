@@ -30,7 +30,7 @@ class GmailService:
         self.client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
         self.redirect_uri = os.getenv(
             "GOOGLE_REDIRECT_URI",
-            "http://localhost:8000/api/campaigns/gmail/callback"
+            "http://localhost:8000/api/v1/campaigns/gmail/callback"
         )
 
     def get_auth_url(self, state: str = "") -> str:

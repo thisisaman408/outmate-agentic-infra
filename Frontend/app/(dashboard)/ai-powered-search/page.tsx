@@ -263,7 +263,7 @@ export default function DatabaseFinderPage() {
   const hasHydratedCampaignState = useRef(false)
 
   // Agent conversation state
-  const [agentMessages, setAgentMessages] = useState<Array<{role: "user" | "assistant", content: string}>>([])
+  const [agentMessages, setAgentMessages] = useState<Array<{ role: "user" | "assistant", content: string }>>([])
   const [isAgentResponding, setIsAgentResponding] = useState(false)
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null)
@@ -341,12 +341,12 @@ export default function DatabaseFinderPage() {
         setGmailConnected(true)
         setGmailEmail(data.email || "")
       }
-    }).catch(() => {})
+    }).catch(() => { })
 
     // Check LinkedIn (Unipile) status
     fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setLinkedinConnected(true)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   useEffect(() => {
@@ -498,11 +498,11 @@ export default function DatabaseFinderPage() {
     return words.length < cleaned.length ? `${words}...` : words
   }
 
-const createEmptySession = (): ChatSession => {
-  const now = new Date().toISOString()
-  return {
-    id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: "New Chat",
+  const createEmptySession = (): ChatSession => {
+    const now = new Date().toISOString()
+    return {
+      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: "New Chat",
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -515,78 +515,78 @@ const createEmptySession = (): ChatSession => {
       hasSearched: false,
       clarificationStep: "pending",
       extractedFilters: {},
-    suggestedPrompts: []
-  }
-}
-
-const getPersistentUserId = (): string | null => {
-  if (typeof window === "undefined") return null
-  const user = authService.getCurrentUser()
-  if (user?.id) return user.id
-  let stored = localStorage.getItem(CHAT_STORAGE_USER_KEY)
-  if (!stored) {
-    const randomString =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2)
-    stored = `anon_${randomString}`
-    localStorage.setItem(CHAT_STORAGE_USER_KEY, stored)
-  }
-  return stored
-}
-
-const mergeChatCollections = (existing: ChatSession[], incoming: ChatSession[]): ChatSession[] => {
-  const map = new Map<string, ChatSession>()
-  incoming.forEach((session) => map.set(session.id, session))
-  existing.forEach((session) => {
-    if (!map.has(session.id)) {
-      map.set(session.id, session)
+      suggestedPrompts: []
     }
-  })
-  const merged = Array.from(map.values())
-  merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  return merged
-}
-
-const normalizeServerSession = (record: any): ChatSession => {
-  const data = record.data || {}
-  const now = new Date().toISOString()
-  return {
-    id: data.id || data.sessionId || record.session_id || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: data.title || record.title || "Chat",
-    createdAt: data.createdAt || record.created_at || now,
-    updatedAt: data.updatedAt || record.updated_at || now,
-    messages: Array.isArray(data.messages) ? data.messages : [],
-    query: data.query || "",
-    intent: data.intent || "business",
-    results: Array.isArray(data.results) ? data.results : [],
-    tamPreview: data.tamPreview || { count: 0, cost: 0 },
-    clarification: data.clarification || "",
-    workflowSteps: Array.isArray(data.workflowSteps) ? data.workflowSteps : [],
-    hasSearched: Boolean(data.hasSearched),
-    clarificationStep: data.clarificationStep || "pending",
-    extractedFilters: data.extractedFilters || {},
-    suggestedPrompts: Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
   }
-}
 
-const syncChatWithServer = async (session: ChatSession) => {
-  const userId = getPersistentUserId()
-  if (!userId) return
-  try {
-    await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        session_id: session.id,
-        data: session,
-      }),
+  const getPersistentUserId = (): string | null => {
+    if (typeof window === "undefined") return null
+    const user = authService.getCurrentUser()
+    if (user?.id) return user.id
+    let stored = localStorage.getItem(CHAT_STORAGE_USER_KEY)
+    if (!stored) {
+      const randomString =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2)
+      stored = `anon_${randomString}`
+      localStorage.setItem(CHAT_STORAGE_USER_KEY, stored)
+    }
+    return stored
+  }
+
+  const mergeChatCollections = (existing: ChatSession[], incoming: ChatSession[]): ChatSession[] => {
+    const map = new Map<string, ChatSession>()
+    incoming.forEach((session) => map.set(session.id, session))
+    existing.forEach((session) => {
+      if (!map.has(session.id)) {
+        map.set(session.id, session)
+      }
     })
-  } catch (error) {
-    console.warn("Persisting chat session failed:", error)
+    const merged = Array.from(map.values())
+    merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    return merged
   }
-}
+
+  const normalizeServerSession = (record: any): ChatSession => {
+    const data = record.data || {}
+    const now = new Date().toISOString()
+    return {
+      id: data.id || data.sessionId || record.session_id || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: data.title || record.title || "Chat",
+      createdAt: data.createdAt || record.created_at || now,
+      updatedAt: data.updatedAt || record.updated_at || now,
+      messages: Array.isArray(data.messages) ? data.messages : [],
+      query: data.query || "",
+      intent: data.intent || "business",
+      results: Array.isArray(data.results) ? data.results : [],
+      tamPreview: data.tamPreview || { count: 0, cost: 0 },
+      clarification: data.clarification || "",
+      workflowSteps: Array.isArray(data.workflowSteps) ? data.workflowSteps : [],
+      hasSearched: Boolean(data.hasSearched),
+      clarificationStep: data.clarificationStep || "pending",
+      extractedFilters: data.extractedFilters || {},
+      suggestedPrompts: Array.isArray(data.suggestedPrompts) ? data.suggestedPrompts : [],
+    }
+  }
+
+  const syncChatWithServer = async (session: ChatSession) => {
+    const userId = getPersistentUserId()
+    if (!userId) return
+    try {
+      await fetch(`${API_BASE_URL}/api/v1/chat/history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: session.id,
+          data: session,
+        }),
+      })
+    } catch (error) {
+      console.warn("Persisting chat session failed:", error)
+    }
+  }
 
   const applySessionToView = (session: ChatSession) => {
     const normalizeLinkedinUrl = (value: any) => {
@@ -766,13 +766,13 @@ const syncChatWithServer = async (session: ChatSession) => {
     try {
       const raw = localStorage.getItem(CHAT_STORAGE_KEY)
       const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : []
-        if (parsed.length > 0) {
-          const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-          setChats(ordered)
-          setActiveChatId(ordered[0].id)
-          initialActiveChatId.current = ordered[0].id
-          applySessionToView(ordered[0])
-        }
+      if (parsed.length > 0) {
+        const ordered = [...parsed].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        setChats(ordered)
+        setActiveChatId(ordered[0].id)
+        initialActiveChatId.current = ordered[0].id
+        applySessionToView(ordered[0])
+      }
     } catch (e) {
       console.warn("Failed to load NLP chats", e)
     }
@@ -1324,7 +1324,9 @@ const syncChatWithServer = async (session: ChatSession) => {
     try {
       setClarification("Starting search with your confirmed filters...")
 
-      const extractedFilters = extractFiltersFromQuery(trimmedQuery)
+      const extractedFilters = (latestExtractedFilters && Object.keys(latestExtractedFilters).length > 0)
+        ? latestExtractedFilters
+        : extractFiltersFromQuery(trimmedQuery)
       setLatestExtractedFilters(extractedFilters)
 
       console.log("DEBUG: Final extractedFilters:", extractedFilters)
@@ -1334,8 +1336,24 @@ const syncChatWithServer = async (session: ChatSession) => {
       console.log("Query:", trimmedQuery)
 
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const endpoint = `${API}/api/explorium/search`
-      const payload = { query: trimmedQuery, filters: extractedFilters }
+      const searchIntent = intent === "prospect" ? "prospect" : "business"
+      const endpoint = searchIntent === "prospect"
+        ? `${API}/api/v1/prospects/search`
+        : `${API}/api/v1/explorium/company/search`
+      const toArray = (value: any) => {
+        if (!value) return undefined
+        if (Array.isArray(value)) return value
+        return [value]
+      }
+      const payload = searchIntent === "prospect"
+        ? {
+          current_title: toArray(extractedFilters.current_title),
+          location: toArray(extractedFilters.location),
+          industry: toArray(extractedFilters.industry),
+          employees: toArray(extractedFilters.company_size),
+          limit: 3,
+        }
+        : { query: trimmedQuery, filters: extractedFilters }
 
       console.log("Calling endpoint:", endpoint)
       console.log("Request body:", JSON.stringify(payload))
@@ -1369,12 +1387,11 @@ const syncChatWithServer = async (session: ChatSession) => {
       )
 
       let mappedResults = []
-      const searchIntent = data.nlp_analysis?.categorized_intent === "prospect" ? "prospect" : "business"
-      setIntent(searchIntent);
+      setIntent(searchIntent)
 
       // Handle different response formats from different endpoints
       const rawList = searchIntent === "prospect"
-        ? (data.profiles || data.results?.data || data.data || [])
+        ? (data.profiles || data.data?.profiles || data.results?.data || [])
         : (data.data?.companies || data.companies || data.results?.data || data.data || []);
 
       console.log('Raw List:', rawList);
@@ -1385,11 +1402,12 @@ const syncChatWithServer = async (session: ChatSession) => {
         : (data.data?.total_count || data.total_count || data.results?.total_results || (Array.isArray(rawList) ? rawList.length : 0));
 
       const examples = buildExamples(trimmedQuery);
+      const workflowEndpoint = searchIntent === "prospect" ? "/api/v1/prospects/search" : "/api/v1/explorium/company/search"
       setWorkflowSteps([
         {
           title: "Categorizing Filters",
           tool: "NLP Classifier",
-          endpoint: "/api/explorium/search",
+          endpoint: "/api/v1/chat/parse-query",
           input: { query: trimmedQuery },
           output: {
             intent: data.nlp_analysis?.categorized_intent || data.intent || "business",
@@ -1402,7 +1420,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         {
           title: "Filter Clarification",
           tool: "LLM Clarification",
-          endpoint: "/api/explorium/search",
+          endpoint: "/api/v1/chat/parse-query",
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
             clarification_message: clarification,
@@ -1411,8 +1429,8 @@ const syncChatWithServer = async (session: ChatSession) => {
         },
         {
           title: "Search Execution",
-          tool: "Signal Search Workflow",
-          endpoint: "/api/explorium/search",
+          tool: searchIntent === "prospect" ? "Crustdata People Search" : "Explorium Company Search",
+          endpoint: workflowEndpoint,
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
             total_results: totalCount,
@@ -1689,7 +1707,7 @@ const syncChatWithServer = async (session: ChatSession) => {
     if (!trimmedQuery) return
 
     // Add user message to agent messages
-    const userMsg: {role: "user" | "assistant", content: string} = { role: "user", content: trimmedQuery }
+    const userMsg: { role: "user" | "assistant", content: string } = { role: "user", content: trimmedQuery }
     const updatedMessages = [...agentMessages, userMsg]
     setAgentMessages(updatedMessages)
     setNaturalLanguageQuery("") // clear input
@@ -1720,7 +1738,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       const data = await res.json()
 
       // Add assistant reply
-      const assistantMsg: {role: "user" | "assistant", content: string} = { role: "assistant", content: data.reply }
+      const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
       setAgentMessages(prev => [...prev, assistantMsg])
 
       // Persist to chat session
@@ -1738,7 +1756,7 @@ const syncChatWithServer = async (session: ChatSession) => {
       }
     } catch (e: any) {
       console.error("Agent chat error:", e)
-      const errorMsg: {role: "user" | "assistant", content: string} = { role: "assistant", content: "Sorry, I encountered an error. Please try again." }
+      const errorMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: "Sorry, I encountered an error. Please try again." }
       setAgentMessages(prev => [...prev, errorMsg])
     } finally {
       setIsAgentResponding(false)
@@ -2274,29 +2292,48 @@ const syncChatWithServer = async (session: ChatSession) => {
   }
 
   return (
-    <div className="container mx-auto space-y-6 py-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-6 w-6" />
-            AI-Powered Search
-          </CardTitle>
-          <CardDescription>
-            Use natural language to find companies and prospects, discover signals, and build targeted lists.
-          </CardDescription>
+    <div className="container mx-auto max-w-7xl space-y-6 py-6">
+      <Card className="border-border/60 bg-card/80 backdrop-blur-sm">
+        <CardHeader className="space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-6 w-6" />
+                AI-Powered Search
+              </CardTitle>
+              <CardDescription>
+                Use natural language to find companies and prospects, discover signals, and build targeted lists.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">
+                {intent === "prospect" ? "Prospect search" : "Company search"}
+              </Badge>
+              {hasSearched && (
+                <Badge variant="outline">
+                  {results.length} result{results.length === 1 ? "" : "s"}
+                </Badge>
+              )}
+              {creditUsageEntries.length > 0 && (
+                <Badge variant="outline">
+                  {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                </Badge>
+              )}
+            </div>
+          </div>
         </CardHeader>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
         <div className="lg:col-span-1">
-          <Card>
+          <Card className="lg:sticky lg:top-6 max-h-[calc(100vh-6rem)] overflow-hidden">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Workspace</CardTitle>
               <Button onClick={startNewChat} size="sm" className="w-full">
                 New Chat
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
               <div className="flex gap-2">
                 <Button
                   variant={activePanel === "chats" ? "default" : "outline"}
@@ -2343,7 +2380,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                   )}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
                     {(["All", "Build Lead Lists", "Find Contact Info", "Personalize Your Outreach", "Meeting Prep", "Recruiting"] as const).map((item) => (
                       <Badge
@@ -2357,33 +2394,35 @@ const syncChatWithServer = async (session: ChatSession) => {
                     ))}
                   </div>
 
-                  {PROMPT_LIBRARY.filter((p) => selectedUseCase === "All" || p.useCase === selectedUseCase).map((prompt) => (
-                    <Card key={prompt.id}>
-                      <CardHeader className="p-3">
-                        <Badge variant="secondary" className="mb-2 w-fit">
-                          {prompt.useCase}
-                        </Badge>
-                        <CardTitle className="text-sm">{prompt.title}</CardTitle>
-                        <CardDescription className="text-xs">{prompt.description}</CardDescription>
-                      </CardHeader>
-                      <CardContent className="flex gap-2 p-3 pt-0">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setNaturalLanguageQuery(prompt.prompt)}
-                        >
-                          Use Prompt
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => navigator.clipboard.writeText(prompt.prompt)}
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
+                  <div className="space-y-2">
+                    {PROMPT_LIBRARY.filter((p) => selectedUseCase === "All" || p.useCase === selectedUseCase).map((prompt) => (
+                      <div key={prompt.id} className="rounded-md border bg-card/80 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs text-muted-foreground">{prompt.useCase}</div>
+                            <div className="text-sm font-medium">{prompt.title}</div>
+                            <div className="text-xs text-muted-foreground mt-1">{prompt.description}</div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setNaturalLanguageQuery(prompt.prompt)}
+                            >
+                              Use
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => navigator.clipboard.writeText(prompt.prompt)}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -2391,7 +2430,7 @@ const syncChatWithServer = async (session: ChatSession) => {
         </div>
 
         <div className="space-y-6 lg:col-span-3">
-          <Card>
+          <Card className="border-border/60 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 {hasSearched && results.length > 0 ? (
@@ -2423,52 +2462,56 @@ const syncChatWithServer = async (session: ChatSession) => {
                 rows={2}
                 className="resize-none"
               />
-              <div className="flex gap-2 items-center text-xs text-muted-foreground mb-2">
-                <Sparkles className="h-3 w-3 text-purple-500" />
-                <span>AI search is listening for intent while you write.</span>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <Button variant="outline" size="sm" onClick={() => handleGenerateLeadList()}>
-                  <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
-                  Generate leads
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleSummarizeResults}>
-                  <Library className="mr-2 h-4 w-4 text-foreground" />
-                  Summarize results
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleGenerateCampaign}>
-                  <Mail className="mr-2 h-4 w-4 text-foreground" />
-                  Draft campaign
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleDetectSignals(results, intent)}>
-                  <Zap className="mr-2 h-4 w-4 text-yellow-500" />
-                  Detect signals
-                </Button>
-                <CsvImportButton
-                  label="Import CSV filters"
-                  onRecordsParsed={handleImportedFilters}
-                  className="h-9 px-3 text-sm"
-                />
-                <Button variant="outline" size="sm" onClick={toggleVoiceListening}>
-                  {isVoiceListening ? (
-                    <>
-                      <MicOff className="mr-2 h-4 w-4 text-red-500" />
-                      Stop voice input
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="mr-2 h-4 w-4 text-green-500" />
-                      Voice mode
-                    </>
-                  )}
-                </Button>
+              <div className="flex flex-wrap gap-2 items-center text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <Sparkles className="h-3 w-3 text-purple-500" />
+                  AI is parsing intent as you type
+                </Badge>
                 {isImportingFilters && (
                   <span className="text-xs text-muted-foreground">Applying imported filters...</span>
                 )}
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => handleGenerateLeadList()}>
+                    <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
+                    Generate leads
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleSummarizeResults}>
+                    <Library className="mr-2 h-4 w-4 text-foreground" />
+                    Summarize
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleGenerateCampaign}>
+                    <Mail className="mr-2 h-4 w-4 text-foreground" />
+                    Draft campaign
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleDetectSignals(results, intent)}>
+                    <Zap className="mr-2 h-4 w-4 text-yellow-500" />
+                    Detect signals
+                  </Button>
+                  <CsvImportButton
+                    label="Import CSV filters"
+                    onRecordsParsed={handleImportedFilters}
+                    className="h-9 px-3 text-sm"
+                  />
+                  <Button variant="outline" size="sm" onClick={toggleVoiceListening}>
+                    {isVoiceListening ? (
+                      <>
+                        <MicOff className="mr-2 h-4 w-4 text-red-500" />
+                        Stop voice
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="mr-2 h-4 w-4 text-green-500" />
+                        Voice mode
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <Button
                   onClick={handleNaturalSearch}
                   disabled={isSearching || isAgentResponding || !naturalLanguageQuery.trim()}
-                  className="ml-auto flex-1 min-w-[160px]"
+                  className="ml-auto min-w-[180px]"
                 >
                   {isSearching ? (
                     <>
@@ -2495,13 +2538,14 @@ const syncChatWithServer = async (session: ChatSession) => {
               </div>
 
               {clarification && (
-                <Card>
-                  <CardHeader>
+                <Card className="border-primary/30 bg-primary/5">
+                  <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Filter Clarification</CardTitle>
+                    <CardDescription>Confirm or refine the extracted filters.</CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="pt-2">
                     <p className="whitespace-pre-line text-sm">{clarification}</p>
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <Button onClick={handleConfirmFilters} disabled={isSearching} size="sm">
                         {isSearching ? (
                           <>
@@ -2522,9 +2566,51 @@ const syncChatWithServer = async (session: ChatSession) => {
             </CardContent>
           </Card>
 
+          {(hasSearched || campaignDraft || detectedSignals.length > 0 || creditUsageEntries.length > 0) && (
+            <Card className="border-border/60 shadow-sm sticky top-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Status</CardTitle>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Quick snapshot of the current search session.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  {intent === "prospect" ? "Prospect mode" : "Company mode"}
+                </Badge>
+                {hasSearched && (
+                  <Badge variant="outline">
+                    {results.length} result{results.length === 1 ? "" : "s"} shown
+                  </Badge>
+                )}
+                {detectedSignals.length > 0 && (
+                  <Badge variant="outline">
+                    {detectedSignals.length} signal set{detectedSignals.length === 1 ? "" : "s"}
+                  </Badge>
+                )}
+                {campaignDraft && (
+                  <Badge variant={campaignApproved ? "default" : "outline"}>
+                    {campaignApproved ? "Campaign approved" : "Campaign draft ready"}
+                  </Badge>
+                )}
+                {creditUsageEntries.length > 0 && (
+                  <Badge variant="outline">
+                    {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
+                  </Badge>
+                )}
+                {gmailConnected && (
+                  <Badge variant="outline">Gmail connected</Badge>
+                )}
+                {linkedinConnected && (
+                  <Badge variant="outline">LinkedIn connected</Badge>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Campaign Draft Loading */}
           {isGeneratingCampaign && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardContent className="py-8 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary mb-3" />
                 <p className="font-medium">Generating Campaign Draft...</p>
@@ -2537,7 +2623,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
           {/* Campaign Draft Card */}
           {campaignDraft && !isGeneratingCampaign && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
@@ -2591,7 +2677,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                     <p className="text-sm font-medium">Connect your accounts, then approve to send directly</p>
 
                     {/* Gmail Connection */}
-                    <div className="flex items-center justify-between p-3 rounded border bg-background">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <Mail className="h-4 w-4" />
                         <div>
@@ -2615,7 +2701,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                     </div>
 
                     {/* LinkedIn Connection */}
-                    <div className="flex items-center justify-between p-3 rounded border bg-background">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <ExternalLink className="h-4 w-4" />
                         <div>
@@ -2638,7 +2724,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                       )}
                     </div>
 
-                    <div className="flex gap-2 pt-1">
+                    <div className="flex flex-wrap gap-2 pt-1">
                       <Button
                         size="sm"
                         onClick={() => {
@@ -2827,7 +2913,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
                 {/* Bulk Send Actions */}
                 {campaignApproved && selectedRecipients.size > 0 && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       disabled={!gmailConnected}
@@ -2909,9 +2995,9 @@ const syncChatWithServer = async (session: ChatSession) => {
           )}
 
           {hasSearched && results.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>
                       {intent === "prospect" ? "Prospects Found" : "Companies Found"}
@@ -2920,7 +3006,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                       Found {tamPreview.count.toLocaleString()} {intent === "prospect" ? "prospects" : "companies"} • Showing {results.length} results
                     </CardDescription>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={onDetectSignalsClick}
                       disabled={isDetectingSignals}
@@ -2953,6 +3039,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                     data={results}
                     totalCount={tamPreview.count}
                     enableContactReveal={true}
+                    tableId="ai-powered-prospects"
                   />
                 ) : (
                   <>
@@ -2961,6 +3048,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
+                        tableId="ai-powered-companies"
                         onEnrichReveal={async (companyId, field) => {
                           if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
                           const company = results.find((c: any) => (c.domain || c.id) === companyId)
@@ -3000,7 +3088,7 @@ const syncChatWithServer = async (session: ChatSession) => {
                   </>
                 )}
                 {intent === "business" && (
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <Button onClick={handlePullAllCompanies} disabled={isSearching} size="sm">
                       <Users className="mr-2 h-4 w-4" />
                       Pull All {tamPreview.count.toLocaleString()} Companies
@@ -3016,7 +3104,7 @@ const syncChatWithServer = async (session: ChatSession) => {
 
           {/* Suggested Prompts */}
           {suggestedPrompts.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-purple-500" />
@@ -3046,7 +3134,7 @@ const syncChatWithServer = async (session: ChatSession) => {
           )}
 
           {detectedSignals.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Zap className="h-5 w-5 text-yellow-500" />
@@ -3060,7 +3148,7 @@ const syncChatWithServer = async (session: ChatSession) => {
               </CardHeader>
               <CardContent className="space-y-4">
                 {detectedSignals.map((signal: any, idx: number) => (
-                  <div key={idx} className="rounded-lg border p-4">
+                  <div key={idx} className="rounded-lg border bg-card/80 p-4">
                     {intent === "prospect" ? (
                       // Display person info for prospects
                       <div className="flex items-center justify-between">
@@ -3116,7 +3204,7 @@ const syncChatWithServer = async (session: ChatSession) => {
           )}
 
           {creditUsageEntries.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-sm">Credit usage</CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
@@ -3124,28 +3212,21 @@ const syncChatWithServer = async (session: ChatSession) => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm font-medium">
                   Total: {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {creditUsageEntries.map(([key, value]) => (
-                    <Badge key={key} variant="outline">
-                      {formatCreditLabel(key)}: {value}
-                    </Badge>
-                  ))}
-                </div>
               </CardContent>
             </Card>
           )}
 
           {workflowSteps.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-sm">Workflow Steps</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {workflowSteps.map((step, idx) => (
-                  <div key={idx} className="rounded border p-2">
+                  <div key={idx} className="rounded border bg-muted/30 p-2">
                     <div className="font-medium text-sm">{step.title}</div>
                     <div className="text-xs text-muted-foreground">{step.tool}</div>
                   </div>
@@ -3155,7 +3236,7 @@ const syncChatWithServer = async (session: ChatSession) => {
           )}
 
           {agentMessages.length > 0 && (
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <MessageSquare className="h-4 w-4" />
@@ -3166,11 +3247,10 @@ const syncChatWithServer = async (session: ChatSession) => {
                 {agentMessages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`rounded-lg p-3 text-sm ${
-                      msg.role === "user"
+                    className={`rounded-lg p-3 text-sm ${msg.role === "user"
                         ? "bg-primary/10 ml-8"
                         : "bg-muted mr-8"
-                    }`}
+                      }`}
                   >
                     <div className="font-medium text-xs text-muted-foreground mb-1">
                       {msg.role === "user" ? "You" : "Assistant"}

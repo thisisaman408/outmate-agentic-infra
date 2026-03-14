@@ -1,38 +1,19 @@
 "use client"
 
-import { Card } from "@/components/ui/card"
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 import {
     ExternalLink,
     Building2,
     Search,
-    ChevronLeft,
-    ChevronRight,
-    Columns3,
-    Download,
     Loader2,
     Zap,
     Lock,
+    Sparkles,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
-import {
-    DropdownMenu,
-    DropdownMenuCheckboxItem,
-    DropdownMenuContent,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
     Tooltip,
@@ -40,6 +21,12 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { DataTable } from "@/components/leads/data-table/data-table"
+import { PaginationControls } from "@/components/leads/data-table/pagination-controls"
+import { TableToolbar } from "@/components/leads/data-table/table-toolbar"
+import { BulkActionBar } from "@/components/leads/data-table/bulk-action-bar"
+import { useTableState, type ColumnDef } from "@/hooks/use-table-state"
+import { useCopilotPanelStore } from "@/hooks/use-copilot-panel"
 
 const CONTACTOUT_EMAIL_COST = 1
 const CONTACTOUT_PHONE_COST = 1
@@ -54,14 +41,11 @@ const formatCreditsLabel = (value?: number, fallback = "~1 credit") => {
 // Complete company data interface matching all backend columns
 export interface CompanyData {
     id: string
-    // Basic Info
     name: string
     domain: string
     website?: string
     description?: string
     logo_url?: string
-
-    // Firmographic
     industry?: string
     sub_industry?: string
     linkedin_industry_category?: string
@@ -77,8 +61,6 @@ export interface CompanyData {
     market_cap?: number
     fiscal_year_end?: string
     number_of_locations?: number
-
-    // Location
     headquarters_country?: string
     headquarters_state?: string
     headquarters_city?: string
@@ -88,17 +70,11 @@ export interface CompanyData {
     location_display?: string
     locations?: string[]
     locations_distribution_count?: number
-
-    // Revealable Contact Info
     phone?: string
     email?: string
     personal_email?: string
     work_email?: string
-
-    // Tech
     technologies?: string[]
-
-    // Funding
     funding_stage?: string
     funding_total?: number
     last_funding_date?: string
@@ -106,15 +82,11 @@ export interface CompanyData {
     investors_count?: number
     investors?: string | string[]
     last_raised_amount?: number
-
-    // Social
     linkedin_url?: string
     twitter_url?: string
     facebook_url?: string
     instagram_url?: string
     follower_count?: number
-
-    // Metrics & Performance
     employee_growth_6m?: number
     employee_growth_12m?: number
     employee_growth_6m_percent?: number
@@ -128,8 +100,6 @@ export interface CompanyData {
     data_quality_score?: number
     alexa_rank?: number
     is_tech_heavy?: boolean
-
-    // Metadata & Classification
     provider_source?: string
     external_id?: string
     enriched?: boolean
@@ -145,62 +115,6 @@ export interface CompanyData {
     raw_data?: Record<string, any>
 }
 
-// Column configuration
-interface ColumnConfig {
-    key: keyof CompanyData | string
-    label: string
-    visible: boolean
-    width?: string
-    render?: (value: any, row: CompanyData) => React.ReactNode
-    category: 'basic' | 'firmographic' | 'location' | 'funding' | 'metrics' | 'metadata' | 'social'
-}
-
-// Define all available columns
-const DEFAULT_COLUMNS: ColumnConfig[] = [
-    // Basic Info - Always visible by default
-    { key: 'name', label: 'Company', visible: true, width: '200px', category: 'basic' },
-    { key: 'domain', label: 'Domain', visible: true, width: '150px', category: 'basic' },
-    { key: 'industry', label: 'Industry', visible: true, width: '180px', category: 'basic' },
-
-    // Firmographic
-    { key: 'employee_count_exact', label: 'Employees', visible: true, width: '100px', category: 'firmographic' },
-    { key: 'employee_count_range', label: 'Emp. Range', visible: false, width: '100px', category: 'firmographic' },
-    { key: 'revenue_exact', label: 'Revenue', visible: true, width: '120px', category: 'firmographic' },
-    { key: 'revenue_range', label: 'Rev. Range', visible: false, width: '100px', category: 'firmographic' },
-    { key: 'company_type', label: 'Type', visible: true, width: '100px', category: 'firmographic' },
-    { key: 'founded_year', label: 'Founded', visible: false, width: '80px', category: 'firmographic' },
-    { key: 'linkedin_industry_category', label: 'LinkedIn Industry', visible: false, width: '150px', category: 'firmographic' },
-
-    // Location
-    { key: 'headquarters_country', label: 'Country', visible: true, width: '120px', category: 'location' },
-    { key: 'headquarters_state', label: 'State', visible: true, width: '120px', category: 'location' },
-    { key: 'headquarters_city', label: 'City', visible: true, width: '120px', category: 'location' },
-    { key: 'headquarters_address', label: 'Address', visible: true, width: '200px', category: 'location' },
-    { key: 'zip_code', label: 'Zip', visible: true, width: '80px', category: 'location' },
-    { key: 'locations', label: 'Locations', visible: false, width: '150px', category: 'location' },
-    { key: 'locations_distribution_count', label: '#Locations', visible: true, width: '100px', category: 'location' },
-    { key: 'phone', label: 'Phone', visible: true, width: '220px', category: 'location' },
-    { key: 'email', label: 'Email', visible: true, width: '240px', category: 'location' },
-    { key: 'linkedin_url', label: 'LinkedIn', visible: true, width: '100px', category: 'social' },
-
-    // Funding
-    { key: 'funding_stage', label: 'Funding Stage', visible: true, width: '120px', category: 'funding' },
-    { key: 'funding_total', label: 'Total Funding', visible: true, width: '120px', category: 'funding' },
-    { key: 'last_funding_date', label: 'Last Funding', visible: true, width: '110px', category: 'funding' },
-    { key: 'investors', label: 'Investors', visible: true, width: '250px', category: 'funding' },
-    { key: 'investors_count', label: 'Investors Count', visible: false, width: '100px', category: 'funding' },
-
-    // Metrics & Performance
-    { key: 'technologies', label: 'Technologies', visible: true, width: '200px', category: 'metrics' },
-    { key: 'decision_makers_count', label: 'Decision Makers', visible: true, width: '120px', category: 'metrics' },
-    { key: 'is_tech_heavy', label: 'Tech Heavy', visible: true, width: '100px', category: 'metrics' },
-    { key: 'data_quality_score', label: 'Quality Score', visible: false, width: '100px', category: 'metrics' },
-
-    // Metadata & Classification
-    { key: 'id', label: 'Business ID', visible: true, width: '150px', category: 'metadata' },
-    { key: 'enriched', label: 'Enriched', visible: false, width: '80px', category: 'metadata' },
-]
-
 type ContactCacheEntry = {
     emails?: string[]
     phones?: string[]
@@ -211,11 +125,14 @@ type ContactCacheEntry = {
 }
 
 interface CompaniesResultsTableProps {
+    tableId?: string
     companies: CompanyData[]
     isLoading: boolean
     hasSearched: boolean
     onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void
     enrichCache?: Record<string, { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean }>
+    enrichingRows?: Record<string, boolean>
+    onWaterfallResult?: (companyId: string, field: 'email' | 'phone', result: Record<string, any>) => void
     waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
 }
 
@@ -248,465 +165,146 @@ function formatPercent(value: number | undefined): string {
     return `${sign}${value}%`
 }
 
-// Sub-component for rendering cells to isolate logic from main component
-const RenderCell = ({
-    column,
+// Contact cell renderer (extracted from old RenderCell)
+function ContactCell({
     company,
+    field,
     enrichData,
     onEnrichReveal,
     contactCache,
     onContactReveal,
-    waterfallAttempts
+    waterfallAttempts,
 }: {
-    column: ColumnConfig,
-    company: CompanyData,
-    enrichData?: { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean },
-    onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void,
-    contactCache: Record<string, ContactCacheEntry>,
+    company: CompanyData
+    field: 'email' | 'phone'
+    enrichData?: { email?: string; phone?: string; contact_name?: string; contact_title?: string; loading?: boolean }
+    onEnrichReveal?: (companyId: string, field: 'email' | 'phone') => void
+    contactCache: Record<string, ContactCacheEntry>
     onContactReveal?: (company: CompanyData, field: 'email' | 'phone') => Promise<void>
     waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
-}) => {
-        const value = (company as any)[column.key]
-        const companyConfidence = typeof company.data_quality_score === 'number'
-            ? Math.max(0, Math.min(100, Math.round(company.data_quality_score)))
-            : undefined
+}) {
+    const isPhoneCol = field === 'phone'
+    const isEmailCol = field === 'email'
+    const value = isPhoneCol ? company.phone : company.email
+    const revealKey = `${company.id}-${field}`
+    const cacheEntry = contactCache[revealKey] || {}
+    const contactList = isPhoneCol ? cacheEntry.phones : cacheEntry.emails
+    const contactValue = contactList && contactList.length > 0 ? contactList[0] : null
+    const isLoadingContact = isPhoneCol ? cacheEntry.loadingPhone : cacheEntry.loadingEmail
+    const companyId = company.domain || company.id
+    const fallbackValue = value ? (Array.isArray(value) ? value.join(', ') : value) : null
+    const waterfallField = isPhoneCol ? enrichData?.phone : isEmailCol ? enrichData?.email : undefined
+    const waterfallValue = waterfallField
+        ? typeof waterfallField === 'object'
+            ? ((waterfallField as any).email || (waterfallField as any).phone || (waterfallField as any).value || '')
+            : String(waterfallField)
+        : undefined
+    const waterfallCredits = typeof waterfallField === 'object' ? (waterfallField as any).credits_consumed : undefined
+    const contactAttempted = isEmailCol ? cacheEntry.attemptedEmail : cacheEntry.attemptedPhone
+    const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact
+    const attemptRecord = waterfallAttempts?.[companyId] || {}
+    const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
+    const attemptMessage = isEmailCol ? "Email not available via ContactOut" : "Phone not available via ContactOut"
+    const iconColorClass = waterfallValue
+        ? "text-emerald-500 hover:text-emerald-600"
+        : attemptedWaterfall
+            ? "text-orange-500 hover:text-orange-600"
+            : "text-blue-500 hover:text-blue-600"
 
-    // Revealable Contact Info (Phone/Email)
-    if (column.key.toString().toLowerCase().includes('phone') ||
-        column.key.toString().toLowerCase().includes('email')) {
-        const isPhoneCol = column.key.toString().toLowerCase().includes('phone')
-        const isEmailCol = column.key.toString().toLowerCase().includes('email')
-        const field: 'email' | 'phone' = isPhoneCol ? 'phone' : 'email'
-        const revealKey = `${company.id}-${field}`
-        const cacheEntry = contactCache[revealKey] || {}
-        const contactList = isPhoneCol ? cacheEntry.phones : cacheEntry.emails
-        const contactValue = contactList && contactList.length > 0 ? contactList[0] : null
-        const isLoadingContact = isPhoneCol ? cacheEntry.loadingPhone : cacheEntry.loadingEmail
-        const companyId = company.domain || company.id
-        const fallbackValue = value ? (Array.isArray(value) ? value.join(', ') : value) : null
-        const waterfallField = isPhoneCol ? enrichData?.phone : isEmailCol ? enrichData?.email : undefined
-        const waterfallValue = waterfallField
-            ? typeof waterfallField === 'object'
-                ? (waterfallField.email || waterfallField.phone || waterfallField.value || '')
-                : String(waterfallField)
-            : undefined
-        const waterfallCredits = typeof waterfallField === 'object' ? waterfallField.credits_consumed : undefined
-        const contactAttempted = isEmailCol ? cacheEntry.attemptedEmail : cacheEntry.attemptedPhone
-        const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact
-        const attemptRecord = waterfallAttempts?.[companyId] || {}
-        const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
-        const attemptMessage = isEmailCol ? "Email not available via ContactOut" : "Phone not available via ContactOut"
-        const iconColorClass = waterfallValue
-            ? "text-emerald-500 hover:text-emerald-600"
-            : attemptedWaterfall
-                ? "text-orange-500 hover:text-orange-600"
-                : "text-blue-500 hover:text-blue-600"
-
-        return (
-            <div className="flex items-center gap-2">
-                {/* Existing company data */}
-                {fallbackValue && !waterfallValue && !contactValue && (
+    return (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {fallbackValue && !waterfallValue && !contactValue && (
+                <div className="flex items-center gap-2">
+                    <span className="text-xs">{fallbackValue}</span>
+                    <div className="text-xs text-green-600 font-medium">✓ Company</div>
+                </div>
+            )}
+            {contactValue && !waterfallValue && (
+                <div className="flex items-center gap-2">
+                    <span className="text-xs break-all">{contactValue}</span>
+                    <div className="text-xs text-green-600 font-medium">✓ ContactOut</div>
+                </div>
+            )}
+            {typeof waterfallValue !== 'undefined' && (
+                <div className="flex items-center gap-2">
+                    <span className={`text-xs ${!waterfallValue ? 'text-muted-foreground italic' : ''}`}>
+                        {waterfallValue || 'Not available'}
+                    </span>
+                    <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                </div>
+            )}
+            {isLoadingContact && (
+                <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="text-xs text-muted-foreground">Revealing...</span>
+                </div>
+            )}
+            {showRevealControls && (
+                contactAttempted ? (
                     <div className="flex items-center gap-2">
-                        <span className="text-xs">
-                            {fallbackValue}
-                        </span>
-                        <div className="text-xs text-green-600 font-medium">✓ Company</div>
-                    </div>
-                )}
-
-                {/* ContactOut result */}
-                {contactValue && !waterfallValue && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs break-all">
-                            {contactValue}
-                        </span>
-                        <div className="text-xs text-green-600 font-medium">✓ ContactOut</div>
-                    </div>
-                )}
-
-                {/* Enriched data */}
-                {typeof waterfallValue !== 'undefined' && (
-                    <div className="flex items-center gap-2">
-                        <span className={`text-xs ${!waterfallValue ? 'text-muted-foreground italic' : ''}`}>
-                            {waterfallValue || 'Not available'}
-                        </span>
-                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
-                    </div>
-                )}
-
-                {/* ContactOut loading */}
-                {isLoadingContact && (
-                    <div className="flex items-center gap-2">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        <span className="text-xs text-muted-foreground">Revealing...</span>
-                    </div>
-                )}
-
-                {/* Reveal controls */}
-                {showRevealControls && (
-                    contactAttempted ? (
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">{attemptMessage}</span>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-[11px]"
-                                onClick={async (e) => {
-                                    e.stopPropagation()
-                                    await onContactReveal?.(company, field)
-                                }}
-                                disabled={!company.linkedin_url && !company.domain}
-                            >
-                                <Lock className="h-3 w-3 mr-1" />
-                                Reveal again
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    onEnrichReveal?.(companyId, field)
-                                }}
-                                title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
-                            >
-                                <Zap className="h-3 w-3" />
-                            </Button>
-                        </div>
-                    ) : (
-                        <>
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                className="h-7 text-[11px]"
-                                onClick={async (e) => {
-                                    e.stopPropagation()
-                                    await onContactReveal?.(company, field)
-                                }}
-                                disabled={!company.linkedin_url && !company.domain}
-                            >
-                                <Lock className="h-3 w-3 mr-1" />
-                                Tap to Reveal · {field === "email" ? formatCreditsLabel(CONTACTOUT_EMAIL_COST) : formatCreditsLabel(CONTACTOUT_PHONE_COST)}
-                            </Button>
-                            {/* Waterfall enrichment icon */}
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    console.log('[Zap] clicked', { companyId, field, hasHandler: !!onEnrichReveal })
-                                    onEnrichReveal?.(companyId, field)
-                                }}
-                                title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
-                            >
+                        <span className="text-xs text-muted-foreground">{attemptMessage}</span>
+                        <Button variant="ghost" size="sm" className="h-7 text-[11px]"
+                            onClick={async (e) => { e.stopPropagation(); await onContactReveal?.(company, field) }}
+                            disabled={!company.linkedin_url && !company.domain}
+                        >
+                            <Lock className="h-3 w-3 mr-1" /> Reveal again
+                        </Button>
+                        <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
+                            onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                            title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
+                        >
                             <Zap className="h-3 w-3" />
                         </Button>
-                        </>
-                    )
-                )}
-
-                {/* Offer re-enrich option when contact data already present */}
-                {contactValue && !waterfallValue && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            onEnrichReveal?.(companyId, field)
-                        }}
-                        title="Enrich with waterfall (BetterContact)"
-                    >
-                        <Zap className="h-3 w-3" />
-                    </Button>
-                )}
-
-                {/* Enrichment loading state */}
-                {enrichData?.loading && (
-                    <div className="flex items-center gap-2">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        <span className="text-xs text-muted-foreground">Enriching...</span>
                     </div>
-                )}
-            </div>
-        )
-    }
-
-    // Special renderers
-    switch (column.key) {
-        case 'name':
-            return (
-                <div className="flex items-center gap-3">
-                    {company.logo_url ? (
-                        <div className="h-8 w-8 rounded border bg-white flex-shrink-0 overflow-hidden relative">
-                            <img
-                                src={company.logo_url}
-                                alt=""
-                                className="object-contain w-full h-full"
-                                onError={(e) => {
-                                    (e.target as any).style.display = 'none'
-                                }}
-                            />
-                        </div>
-                    ) : (
-                        <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0">
-                            <span className="font-semibold text-base text-foreground">
-                                {(company.name || company.domain || "C").charAt(0).toUpperCase()}
-                            </span>
-                        </div>
-                    )}
-                    <div className="flex flex-col">
-                        <span className="font-medium truncate max-w-[150px]">{company.name}</span>
-                        <span className="text-[10px] text-muted-foreground truncate max-w-[150px]">{company.domain}</span>
-                        {typeof companyConfidence === 'number' && (
-                            <span className="text-[10px] text-muted-foreground">
-                                Confidence Score: {companyConfidence}%
-                            </span>
-                        )}
-                    </div>
-                </div>
-            )
-
-        case 'domain':
-            return company.domain ? (
-                <a
-                    href={`https://${company.domain}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-500 hover:underline flex items-center gap-1 text-xs"
+                ) : (
+                    <>
+                        <Button variant="secondary" size="sm" className="h-7 text-[11px]"
+                            onClick={async (e) => { e.stopPropagation(); await onContactReveal?.(company, field) }}
+                            disabled={!company.linkedin_url && !company.domain}
+                        >
+                            <Lock className="h-3 w-3 mr-1" />
+                            Tap to Reveal · {field === "email" ? formatCreditsLabel(CONTACTOUT_EMAIL_COST) : formatCreditsLabel(CONTACTOUT_PHONE_COST)}
+                        </Button>
+                        <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
+                            onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                            title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
+                        >
+                            <Zap className="h-3 w-3" />
+                        </Button>
+                    </>
+                )
+            )}
+            {contactValue && !waterfallValue && (
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
+                    onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                    title="Enrich with waterfall (BetterContact)"
                 >
-                    {company.domain}
-                    <ExternalLink className="h-3 w-3" />
-                </a>
-            ) : 'N/A'
-
-        case 'headquarters_address': {
-            const addr = value || company.location_display || ""
-            if (addr) return addr
-            const parts = [company.street, company.headquarters_city, company.headquarters_state, company.zip_code].filter(Boolean)
-            return parts.length > 0 ? parts.join(', ') : 'N/A'
-        }
-
-        case 'industry':
-            return value ? (
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <div className="flex justify-start items-start">
-                                <span className="text-xs truncate max-w-[150px] text-left block cursor-help hover:text-primary">
-                                    {value}
-                                </span>
-                            </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            <p className="text-sm">{value}</p>
-                        </TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-            ) : 'N/A'
-
-        case 'revenue_exact':
-            if (typeof value === 'number' && value !== 0) return <>{formatCurrency(value)}</>
-            if (typeof value === 'string' && value.trim() && value !== 'N/A') return <>{value}</>
-            return 'N/A'
-
-        case 'funding_total':
-        case 'market_cap':
-        case 'last_raised_amount':
-            return <>{formatCurrency(value)}</>
-
-        case 'alexa_rank':
-        case 'number_of_locations':
-        case 'employee_count_exact':
-            return <>{formatNumber(value)}</>
-
-        case 'technologies':
-            if (!value || !Array.isArray(value) || value.length === 0) return <>N/A</>
-            return (
-                <div className="flex flex-wrap gap-1 max-w-[200px] justify-start items-start">
-                    {value.slice(0, 3).map((tech: string, idx: number) => (
-                        <Badge key={idx} variant="secondary" className="text-xs px-1.5 py-0 text-left">
-                            {tech}
-                        </Badge>
-                    ))}
-                    {value.length > 3 && (
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger>
-                                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                                        +{value.length - 3}
-                                    </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>{value.slice(3).join(', ')}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    )}
+                    <Zap className="h-3 w-3" />
+                </Button>
+            )}
+            {enrichData?.loading && (
+                <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="text-xs text-muted-foreground">Enriching...</span>
                 </div>
-            )
-
-        case 'investors':
-        case 'locations':
-            if (!value || !Array.isArray(value) || value.length === 0) {
-                return typeof value === 'string' && value ? value : 'N/A'
-            }
-            return (
-                <div className="flex flex-wrap gap-1 max-w-[200px] justify-start items-start">
-                    {value.slice(0, 2).map((item: string, idx: number) => (
-                        <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 truncate max-w-[100px] text-left block">
-                            {item}
-                        </Badge>
-                    ))}
-                    {value.length > 2 && (
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger>
-                                    <Badge variant="outline" className="text-xs px-1.5 py-0">
-                                        +{value.length - 2}
-                                    </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>{value.slice(2).join(', ')}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    )}
-                </div>
-            )
-        case 'linkedin_url':
-            return value ? (
-                <a
-                    href={value.startsWith('http') ? value : `https://${value}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium"
-                >
-                    LinkedIn
-                    <ExternalLink className="h-3 w-3" />
-                </a>
-            ) : <>N/A</>
-
-        case 'twitter_url':
-        case 'facebook_url':
-            return value ? (
-                <a
-                    href={value.startsWith('http') ? value : `https://${value}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-500 hover:underline"
-                >
-                    <ExternalLink className="h-4 w-4" />
-                </a>
-            ) : <>N/A</>
-
-        case 'employee_growth_6m':
-        case 'employee_growth_12m':
-        case 'employee_growth_6m_percent':
-        case 'employee_growth_12m_percent':
-            if (value === undefined || value === null) return <>N/A</>
-            const growthClass = value >= 0 ? 'text-green-600' : 'text-red-600'
-            return <span className={growthClass}>{formatPercent(value)}</span>
-
-        case 'enriched':
-            return value ? (
-                <Badge variant="default" className="bg-green-500">Yes</Badge>
-            ) : (
-                <Badge variant="secondary">No</Badge>
-            )
-
-        case 'data_quality_score':
-            if (value === undefined || value === null) return <>N/A</>
-            const scoreClass = value >= 80 ? 'text-green-600' : value >= 50 ? 'text-yellow-600' : 'text-red-600'
-            return <span className={scoreClass}>{value}/100</span>
-
-        case 'created_at':
-        case 'updated_at':
-        case 'last_enriched_at':
-        case 'last_funding_date':
-            return <>{formatDate(value)}</>
-
-        case 'description':
-            return value ? (
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger>
-                            <span className="truncate max-w-[250px] block">{value}</span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-[400px]">
-                            <p className="text-sm">{value}</p>
-                        </TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-            ) : <>N/A</>
-
-        case 'decision_makers_count':
-        case 'locations_distribution_count':
-            if (value === undefined || value === null || value === 0) return <>N/A</>
-            return <span className="font-medium">{formatNumber(value)}</span>
-
-        case 'is_tech_heavy':
-            if (value === undefined || value === null) return <>N/A</>
-            return value ? (
-                <Badge variant="default" className="bg-blue-500">Yes</Badge>
-            ) : (
-                <Badge variant="secondary">No</Badge>
-            )
-
-        case 'id':
-            return value ? (
-                <span className="font-mono text-xs truncate max-w-[140px] block">{value}</span>
-            ) : <>N/A</>
-
-        default:
-            if (value === undefined || value === null || value === '') return <>N/A</>
-            if (typeof value === 'object' && !Array.isArray(value)) {
-                return <>{JSON.stringify(value)}</>
-            }
-            if (Array.isArray(value)) {
-                return <>{value.join(', ')}</>
-            }
-            return <>{String(value)}</>
-    }
+            )}
+        </div>
+    )
 }
 
 export function CompaniesResultsTable({
+    tableId = "companies",
     companies = [],
     isLoading,
     hasSearched,
     onEnrichReveal,
     enrichCache = {},
+    enrichingRows = {},
+    onWaterfallResult,
     waterfallAttempts = {},
 }: CompaniesResultsTableProps) {
     const router = useRouter()
-    const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS)
-    const [currentPage, setCurrentPage] = useState(1)
-    const itemsPerPage = 25
-
-    console.log('Complex CompaniesResultsTable called with:', { companies: companies.length, isLoading, hasSearched, enrichCache })
-
-    const visibleColumns = useMemo(() => columns.filter(col => col.visible), [columns])
-
-    const paginatedCompanies = useMemo(() => {
-        const start = (currentPage - 1) * itemsPerPage
-        return companies.slice(start, start + itemsPerPage)
-    }, [companies, currentPage])
-
-    const totalPages = Math.ceil(companies.length / itemsPerPage)
-
-    const toggleColumn = (key: string) => {
-        setColumns(prev => prev.map(col =>
-            col.key === key ? { ...col, visible: !col.visible } : col
-        ))
-    }
-
-    const toggleCategoryColumns = (category: ColumnConfig['category'], visible: boolean) => {
-        setColumns(prev => prev.map(col =>
-            col.category === category ? { ...col, visible } : col
-        ))
-    }
-
+    const { openPanel } = useCopilotPanelStore()
     const [contactCache, setContactCache] = useState<Record<string, ContactCacheEntry>>({})
 
     const sanitizeEmails = (values: any[]): string[] =>
@@ -738,17 +336,10 @@ export function CompaniesResultsTable({
     const handleContactReveal = async (company: CompanyData, field: 'email' | 'phone') => {
         const linkedinUrl = company.linkedin_url
         const isCompanyPage = !linkedinUrl || linkedinUrl.includes('/company/') || linkedinUrl.includes('/school/')
-
-        // For company pages, we need a domain to use the decision-makers API
-        if (isCompanyPage && !company.domain) {
-            console.warn('No domain available to reveal company contact')
-            return
-        }
-        // For personal profiles, we need a LinkedIn URL
+        if (isCompanyPage && !company.domain) return
         if (!isCompanyPage && !linkedinUrl) return
 
         const revealKey = `${company.id}-${field}`
-
         setContactCache(prev => ({
             ...prev,
             [revealKey]: {
@@ -767,24 +358,16 @@ export function CompaniesResultsTable({
 
             let response: Response
             if (isCompanyPage) {
-                // Use decision-makers API for company pages
                 response = await fetch('/api/contactout/reveal-company-contact', {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({
-                        domain: company.domain,
-                        include_phone: field === 'phone',
-                    }),
+                    body: JSON.stringify({ domain: company.domain, include_phone: field === 'phone' }),
                 })
             } else {
-                // Use personal profile reveal for individual LinkedIn URLs
                 response = await fetch('/api/contactout/reveal-contact', {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({
-                        linkedin_url: linkedinUrl,
-                        include_phone: field === 'phone',
-                    }),
+                    body: JSON.stringify({ linkedin_url: linkedinUrl, include_phone: field === 'phone' }),
                 })
             }
 
@@ -805,6 +388,8 @@ export function CompaniesResultsTable({
                     phones: field === 'phone' ? sanitized : prev[revealKey]?.phones,
                     loadingEmail: false,
                     loadingPhone: false,
+                    attemptedEmail: field === 'email' ? true : prev[revealKey]?.attemptedEmail,
+                    attemptedPhone: field === 'phone' ? true : prev[revealKey]?.attemptedPhone,
                 },
             }))
         } catch {
@@ -814,27 +399,265 @@ export function CompaniesResultsTable({
                     ...prev[revealKey],
                     loadingEmail: field === 'email' ? false : prev[revealKey]?.loadingEmail,
                     loadingPhone: field === 'phone' ? false : prev[revealKey]?.loadingPhone,
+                    attemptedEmail: field === 'email' ? true : prev[revealKey]?.attemptedEmail,
+                    attemptedPhone: field === 'phone' ? true : prev[revealKey]?.attemptedPhone,
                 },
             }))
         }
     }
+
+    const openCompanyCopilot = (company: CompanyData) => {
+        const hqParts = [
+            company.headquarters_city,
+            company.headquarters_state,
+            company.headquarters_country,
+        ].filter(Boolean)
+        openPanel({
+            entity_type: "company",
+            copilot_id: company.id || company.domain || company.name,
+            id: company.id || company.domain,
+            name: company.name,
+            company: company.name,
+            domain: company.domain,
+            industry: company.industry || company.linkedin_industry_category,
+            employee_count_exact: company.employee_count_exact,
+            employee_count_range: company.employee_count_range,
+            revenue_range: company.revenue_range,
+            revenue_exact: company.revenue_exact,
+            funding_stage: company.funding_stage,
+            funding_total: company.funding_total,
+            technologies: company.technologies || [],
+            headquarters: company.location_display || company.headquarters_address || hqParts.join(", "),
+            linkedin_url: company.linkedin_url,
+            email: company.email,
+            phone: company.phone,
+        })
+    }
+
+    // Build column definitions with renderers
+    const columns: ColumnDef<CompanyData>[] = useMemo(() => [
+        {
+            key: 'name', label: 'Company', defaultVisible: true, width: '200px', category: 'basic', sortable: true,
+            render: (_v, company) => {
+                const companyConfidence = typeof company.data_quality_score === 'number'
+                    ? Math.max(0, Math.min(100, Math.round(company.data_quality_score))) : undefined
+                return (
+                    <div className="flex items-center gap-3">
+                        {company.logo_url ? (
+                            <div className="h-8 w-8 rounded border bg-white flex-shrink-0 overflow-hidden relative">
+                                <img src={company.logo_url} alt="" className="object-contain w-full h-full"
+                                    onError={(e) => { (e.target as any).style.display = 'none' }} />
+                            </div>
+                        ) : (
+                            <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0">
+                                <span className="font-semibold text-base text-foreground">
+                                    {(company.name || company.domain || "C").charAt(0).toUpperCase()}
+                                </span>
+                            </div>
+                        )}
+                        <div className="flex flex-col">
+                            <span className="font-medium truncate max-w-[150px]">{company.name}</span>
+                            <span className="text-[10px] text-muted-foreground truncate max-w-[150px]">{company.domain}</span>
+                            {typeof companyConfidence === 'number' && (
+                                <span className="text-[10px] text-muted-foreground">Confidence Score: {companyConfidence}%</span>
+                            )}
+                        </div>
+                    </div>
+                )
+            },
+        },
+        {
+            key: 'domain', label: 'Domain', defaultVisible: true, width: '150px', category: 'basic', sortable: true,
+            render: (_v, company) => company.domain ? (
+                <a href={`https://${company.domain}`} target="_blank" rel="noopener noreferrer"
+                    className="text-blue-500 hover:underline flex items-center gap-1 text-xs">
+                    {company.domain} <ExternalLink className="h-3 w-3" />
+                </a>
+            ) : <>N/A</>,
+        },
+        {
+            key: 'industry', label: 'Industry', defaultVisible: true, width: '180px', category: 'basic', sortable: true,
+            render: (value) => value ? (
+                <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                    <div className="flex justify-start items-start">
+                        <span className="text-xs truncate max-w-[150px] text-left block cursor-help hover:text-primary">{value}</span>
+                    </div>
+                </TooltipTrigger><TooltipContent><p className="text-sm">{value}</p></TooltipContent></Tooltip></TooltipProvider>
+            ) : <>N/A</>,
+        },
+        { key: 'employee_count_exact', label: 'Employees', defaultVisible: false, width: '100px', category: 'firmographic', sortable: true, render: (v) => <>{formatNumber(v)}</> },
+        { key: 'employee_count_range', label: 'Emp. Range', defaultVisible: true, width: '100px', category: 'firmographic', sortable: true },
+        {
+            key: 'revenue_exact', label: 'Revenue', defaultVisible: true, width: '120px', category: 'firmographic', sortable: true,
+            render: (value) => {
+                if (typeof value === 'number' && value !== 0) return <>{formatCurrency(value)}</>
+                if (typeof value === 'string' && value.trim() && value !== 'N/A') return <>{value}</>
+                return <>N/A</>
+            },
+        },
+        { key: 'revenue_range', label: 'Rev. Range', defaultVisible: false, width: '100px', category: 'firmographic', sortable: true },
+        { key: 'company_type', label: 'Type', defaultVisible: false, width: '100px', category: 'firmographic', sortable: true },
+        { key: 'founded_year', label: 'Founded', defaultVisible: false, width: '80px', category: 'firmographic', sortable: true },
+        { key: 'linkedin_industry_category', label: 'LinkedIn Industry', defaultVisible: false, width: '150px', category: 'firmographic', sortable: true },
+        { key: 'headquarters_country', label: 'Country', defaultVisible: false, width: '120px', category: 'location', sortable: true },
+        { key: 'headquarters_state', label: 'State', defaultVisible: false, width: '120px', category: 'location', sortable: true },
+        { key: 'headquarters_city', label: 'City', defaultVisible: false, width: '120px', category: 'location', sortable: true },
+        {
+            key: 'headquarters_address', label: 'Address', defaultVisible: true, width: '200px', category: 'location', sortable: false,
+            render: (value, company) => {
+                const addr = value || company.location_display || ""
+                if (addr) return <>{addr}</>
+                const parts = [company.street, company.headquarters_city, company.headquarters_state, company.zip_code].filter(Boolean)
+                return parts.length > 0 ? <>{parts.join(', ')}</> : <>N/A</>
+            },
+        },
+        { key: 'zip_code', label: 'Zip', defaultVisible: false, width: '80px', category: 'location', sortable: true },
+        {
+            key: 'locations', label: 'Locations', defaultVisible: false, width: '150px', category: 'location', sortable: false,
+            render: (value) => {
+                if (!value || !Array.isArray(value) || value.length === 0) return typeof value === 'string' && value ? <>{value}</> : <>N/A</>
+                return (
+                    <div className="flex flex-wrap gap-1 max-w-[200px] justify-start items-start">
+                        {value.slice(0, 2).map((item: string, idx: number) => (
+                            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 truncate max-w-[100px] text-left block">{item}</Badge>
+                        ))}
+                        {value.length > 2 && (
+                            <TooltipProvider><Tooltip><TooltipTrigger><Badge variant="outline" className="text-xs px-1.5 py-0">+{value.length - 2}</Badge></TooltipTrigger>
+                            <TooltipContent><p>{value.slice(2).join(', ')}</p></TooltipContent></Tooltip></TooltipProvider>
+                        )}
+                    </div>
+                )
+            },
+        },
+        { key: 'locations_distribution_count', label: '#Locations', defaultVisible: false, width: '100px', category: 'location', sortable: true, render: (v) => (v === undefined || v === null || v === 0) ? <>N/A</> : <span className="font-medium">{formatNumber(v)}</span> },
+        {
+            key: 'email', label: 'Email', defaultVisible: true, width: '240px', category: 'location', sortable: false,
+            render: (_v, company) => (
+                <ContactCell company={company} field="email" enrichData={enrichCache[company.domain || company.id]}
+                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts} />
+            ),
+        },
+        {
+            key: 'phone', label: 'Phone', defaultVisible: true, width: '220px', category: 'location', sortable: false,
+            render: (_v, company) => (
+                <ContactCell company={company} field="phone" enrichData={enrichCache[company.domain || company.id]}
+                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts} />
+            ),
+        },
+        {
+            key: 'linkedin_url', label: 'LinkedIn', defaultVisible: true, width: '100px', category: 'social', sortable: false,
+            render: (value) => value ? (
+                <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
+                    LinkedIn <ExternalLink className="h-3 w-3" />
+                </a>
+            ) : <>N/A</>,
+        },
+        { key: 'funding_stage', label: 'Funding Stage', defaultVisible: false, width: '120px', category: 'funding', sortable: true },
+        { key: 'funding_total', label: 'Total Funding', defaultVisible: false, width: '120px', category: 'funding', sortable: true, render: (v) => <>{formatCurrency(v)}</> },
+        { key: 'last_funding_date', label: 'Last Funding', defaultVisible: false, width: '110px', category: 'funding', sortable: true, render: (v) => <>{formatDate(v)}</> },
+        {
+            key: 'investors', label: 'Investors', defaultVisible: false, width: '250px', category: 'funding', sortable: false,
+            render: (value) => {
+                if (!value || !Array.isArray(value) || value.length === 0) return typeof value === 'string' && value ? <>{value}</> : <>N/A</>
+                return (
+                    <div className="flex flex-wrap gap-1 max-w-[200px] justify-start items-start">
+                        {value.slice(0, 2).map((item: string, idx: number) => (
+                            <Badge key={idx} variant="outline" className="text-xs px-1.5 py-0 truncate max-w-[100px] text-left block">{item}</Badge>
+                        ))}
+                        {value.length > 2 && (
+                            <TooltipProvider><Tooltip><TooltipTrigger><Badge variant="outline" className="text-xs px-1.5 py-0">+{value.length - 2}</Badge></TooltipTrigger>
+                            <TooltipContent><p>{value.slice(2).join(', ')}</p></TooltipContent></Tooltip></TooltipProvider>
+                        )}
+                    </div>
+                )
+            },
+        },
+        { key: 'investors_count', label: 'Investors Count', defaultVisible: false, width: '100px', category: 'funding', sortable: true },
+        {
+            key: 'technologies', label: 'Technologies', defaultVisible: false, width: '200px', category: 'metrics', sortable: false,
+            render: (value) => {
+                if (!value || !Array.isArray(value) || value.length === 0) return <>N/A</>
+                return (
+                    <div className="flex flex-wrap gap-1 max-w-[200px] justify-start items-start">
+                        {value.slice(0, 3).map((tech: string, idx: number) => (
+                            <Badge key={idx} variant="secondary" className="text-xs px-1.5 py-0 text-left">{tech}</Badge>
+                        ))}
+                        {value.length > 3 && (
+                            <TooltipProvider><Tooltip><TooltipTrigger><Badge variant="secondary" className="text-xs px-1.5 py-0">+{value.length - 3}</Badge></TooltipTrigger>
+                            <TooltipContent><p>{value.slice(3).join(', ')}</p></TooltipContent></Tooltip></TooltipProvider>
+                        )}
+                    </div>
+                )
+            },
+        },
+        { key: 'decision_makers_count', label: 'Decision Makers', defaultVisible: false, width: '120px', category: 'metrics', sortable: true, render: (v) => (v === undefined || v === null || v === 0) ? <>N/A</> : <span className="font-medium">{formatNumber(v)}</span> },
+        {
+            key: 'is_tech_heavy', label: 'Tech Heavy', defaultVisible: false, width: '100px', category: 'metrics', sortable: true,
+            render: (value) => {
+                if (value === undefined || value === null) return <>N/A</>
+                return value ? <Badge variant="default" className="bg-blue-500">Yes</Badge> : <Badge variant="secondary">No</Badge>
+            },
+        },
+        { key: 'data_quality_score', label: 'Quality Score', defaultVisible: false, width: '100px', category: 'metrics', sortable: true, render: (v) => {
+            if (v === undefined || v === null) return <>N/A</>
+            const scoreClass = v >= 80 ? 'text-green-600' : v >= 50 ? 'text-yellow-600' : 'text-red-600'
+            return <span className={scoreClass}>{v}/100</span>
+        }},
+        { key: 'id', label: 'Business ID', defaultVisible: false, width: '150px', category: 'metadata', sortable: false, render: (v) => v ? <span className="font-mono text-xs truncate max-w-[140px] block">{v}</span> : <>N/A</> },
+        {
+            key: 'enriched', label: 'Enriched', defaultVisible: false, width: '80px', category: 'metadata', sortable: true,
+            render: (value) => value ? <Badge variant="default" className="bg-green-500">Yes</Badge> : <Badge variant="secondary">No</Badge>,
+        },
+    ], [enrichCache, onEnrichReveal, contactCache, waterfallAttempts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    const getRowId = useCallback((row: CompanyData, _idx: number) => row.id || row.domain || String(_idx), [])
+
+    const table = useTableState({
+        tableId,
+        data: companies,
+        columns,
+        defaultPageSize: 25,
+        getRowId,
+    })
+
+    // Export handler
+    const handleExport = useCallback((rows: CompanyData[]) => {
+        if (rows.length === 0) return
+        const headers = table.visibleColumns.map(c => c.label).join(',')
+        const csvRows = rows.map(company =>
+            table.visibleColumns.map(col => {
+                let val = (company as any)[col.key]
+                if (val === null || val === undefined) val = ''
+                if (typeof val === 'object') val = JSON.stringify(val)
+                val = String(val).replace(/"/g, '""')
+                return `"${val}"`
+            }).join(',')
+        )
+        const csvContent = [headers, ...csvRows].join('\n')
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.setAttribute('href', url)
+        link.setAttribute('download', `companies_export_${new Date().toISOString().split('T')[0]}.csv`)
+        link.style.visibility = 'hidden'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+    }, [table.visibleColumns])
 
     // Loading state
     if (isLoading) {
         return (
             <Card className="p-6">
                 <div className="space-y-4">
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
+                    {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
                 </div>
             </Card>
         )
     }
 
-    // Empty state - no search performed yet
+    // Empty state - no search yet
     if (!hasSearched) {
         return (
             <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
@@ -851,7 +674,7 @@ export function CompaniesResultsTable({
         )
     }
 
-    // Empty state - search performed but no results
+    // Empty state - no results
     if (companies.length === 0) {
         return (
             <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
@@ -860,199 +683,74 @@ export function CompaniesResultsTable({
                         <Building2 className="h-8 w-8 text-muted-foreground" />
                     </div>
                     <h3 className="text-xl font-semibold">No companies found</h3>
-                    <p className="text-muted-foreground">
-                        Try adjusting your filters to find more results.
-                    </p>
+                    <p className="text-muted-foreground">Try adjusting your filters to find more results.</p>
                 </div>
             </Card>
         )
     }
 
-    // Results table with dynamic columns
     return (
         <Card className="p-0 border-border/60 shadow-sm overflow-hidden flex flex-col">
-            {/* Header with controls */}
-            <div className="p-4 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-                <h3 className="font-semibold text-sm text-foreground/80">
-                    {companies.length} companies found
-                </h3>
-                <div className="flex items-center gap-2">
-                    {/* Column visibility dropdown */}
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" className="h-8">
-                                <Columns3 className="h-4 w-4 mr-2" />
-                                Columns ({visibleColumns.length})
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-[280px] max-h-[500px] overflow-y-auto">
-                            <div className="flex items-center justify-between p-2 sticky top-0 bg-popover z-10 border-b">
-                                <span className="font-semibold text-sm">Toggle Columns</span>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs px-2 text-destructive hover:text-destructive"
-                                    onClick={() => setColumns(cols => cols.map(c => ({ ...c, visible: false })))}
-                                >
-                                    Clear All
-                                </Button>
-                            </div>
+            <TableToolbar
+                tableId="companies"
+                columns={columns}
+                visibility={table.visibility}
+                onToggleColumn={table.toggleColumn}
+                onSetVisibility={table.setAllColumnsVisibility}
+                totalRows={table.totalRows}
+                onExport={() => handleExport(companies)}
+            />
 
-                            {(['basic', 'firmographic', 'location', 'funding', 'metrics', 'metadata'] as const).map((category) => {
-                                const categoryColumns = columns.filter(c => c.category === category)
-                                const allVisible = categoryColumns.every(c => c.visible)
-                                const label = category.charAt(0).toUpperCase() + category.slice(1)
-
-                                return (
-                                    <div key={category} className="py-1">
-                                        <div className="flex items-center justify-between px-2 py-1.5 bg-muted/30">
-                                            <span className="text-xs font-semibold text-muted-foreground">{label}</span>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-5 text-[10px] px-2 h-auto py-0.5"
-                                                onClick={() => toggleCategoryColumns(category, !allVisible)}
-                                            >
-                                                {allVisible ? 'Deselect All' : 'Select All'}
-                                            </Button>
-                                        </div>
-                                        {categoryColumns.map(col => (
-                                            <DropdownMenuCheckboxItem
-                                                key={col.key}
-                                                checked={col.visible}
-                                                onCheckedChange={() => toggleColumn(col.key)}
-                                                className="pl-8"
-                                            >
-                                                {col.label}
-                                            </DropdownMenuCheckboxItem>
-                                        ))}
-                                        <DropdownMenuSeparator />
-                                    </div>
-                                )
-                            })}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    {/* Export button */}
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        onClick={() => {
-                            if (companies.length === 0) return
-
-                            // Prepare CSV data
-                            const headers = visibleColumns.map(c => c.label).join(',')
-                            const rows = companies.map(company => visibleColumns.map(col => {
-                                let val = (company as any)[col.key]
-
-                                // Clean value for CSV
-                                if (val === null || val === undefined) val = ''
-                                if (typeof val === 'object') val = JSON.stringify(val)
-                                val = String(val).replace(/"/g, '""') // Escape quotes
-
-                                return `"${val}"`
-                            }).join(','))
-
-                            const csvContent = [headers, ...rows].join('\n')
-                            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-                            const url = URL.createObjectURL(blob)
-                            const link = document.createElement('a')
-                            link.setAttribute('href', url)
-                            link.setAttribute('download', `companies_export_${new Date().toISOString().split('T')[0]}.csv`)
-                            link.style.visibility = 'hidden'
-                            document.body.appendChild(link)
-                            link.click()
-                            document.body.removeChild(link)
-                        }}
-                    >
-                        <Download className="h-4 w-4 mr-2" />
-                        Export CSV
-                    </Button>
-                </div>
-            </div>
-
-            {/* Scrollable table */}
-            <ScrollArea className="flex-1 max-h-[600px]">
-                <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10">
-                        <TableRow>
-                            {visibleColumns.map(col => (
-                                <TableHead
-                                    key={col.key}
-                                    style={{ minWidth: col.width }}
-                                    className="bg-muted/50"
-                                >
-                                    {col.label}
-                                </TableHead>
-                            ))}
-                            <TableHead className="text-right bg-muted/50 sticky right-0">Profile</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {paginatedCompanies.map((company) => (
-                            <TableRow key={company.id} className="hover:bg-muted/50">
-                                {visibleColumns.map(col => (
-                                    <TableCell key={`${company.id}-${col.key}`}>
-                                        <RenderCell
-                                            column={col}
-                                            company={company}
-                                            enrichData={enrichCache[company.domain || company.id]}
-                                            onEnrichReveal={onEnrichReveal}
-                                            contactCache={contactCache}
-                                            onContactReveal={handleContactReveal}
-                                            waterfallAttempts={waterfallAttempts}
-                                        />
-                                    </TableCell>
-                                ))}
-                                <TableCell className="text-right sticky right-0 bg-background">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50"
-                                        onClick={() => {
-                                            router.push(`/leads/companies/${company.domain}`)
-                                        }}
-                                    >
-                                        <Building2 className="h-4 w-4 mr-2" />
-                                        Profile
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-                <ScrollBar orientation="horizontal" />
-            </ScrollArea>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-                <div className="p-4 border-t border-border/40 flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">
-                        Showing {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, companies.length)} of {companies.length}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
-                        >
-                            <ChevronLeft className="h-4 w-4" />
+            <DataTable
+                data={table.paginatedData}
+                columns={columns}
+                visibleColumns={table.visibleColumns}
+                sort={table.sort}
+                onSort={table.handleSort}
+                selectedRows={table.selectedRows}
+                onToggleRow={table.toggleRow}
+                onToggleAll={table.toggleAll}
+                isAllSelected={table.isAllSelected}
+                isSomeSelected={table.isSomeSelected}
+                getRowId={getRowId}
+                pageOffset={(table.page - 1) * table.pageSize}
+                renderActions={(company) => (
+                    <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-500 hover:text-violet-600"
+                            onClick={() => openCompanyCopilot(company)} title="Open AI Copilot">
+                            <Sparkles className="h-4 w-4" /><span className="sr-only">AI Copilot</span>
                         </Button>
-                        <span className="text-sm">
-                            Page {currentPage} of {totalPages}
-                        </span>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                            disabled={currentPage === totalPages}
-                        >
-                            <ChevronRight className="h-4 w-4" />
+                        <Button variant="outline" size="sm" className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50"
+                            onClick={() => router.push(`/leads/companies/${company.domain}`)}>
+                            <Building2 className="h-4 w-4 mr-2" /> Profile
                         </Button>
                     </div>
-                </div>
+                )}
+            />
+
+            {table.totalPages > 1 && (
+                <PaginationControls
+                    page={table.page}
+                    totalPages={table.totalPages}
+                    pageSize={table.pageSize}
+                    totalRows={table.totalRows}
+                    onPageChange={table.setPage}
+                    onPageSizeChange={table.setPageSize}
+                />
+            )}
+
+            {table.selectedRows.size > 0 && (
+                <BulkActionBar
+                    selectedCount={table.selectedRows.size}
+                    onClearSelection={table.clearSelection}
+                    onExportSelected={() => handleExport(table.selectedData)}
+                    onEnrichAll={onEnrichReveal ? () => {
+                        table.selectedData.forEach(c => {
+                            const key = c.domain || c.id
+                            onEnrichReveal(key, 'email')
+                        })
+                    } : undefined}
+                />
             )}
         </Card>
     )

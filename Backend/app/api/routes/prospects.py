@@ -11,10 +11,12 @@ It provides a clean REST API interface with proper:
 - Health checks
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 import logging
 import asyncio
+from sqlalchemy.orm import Session
+from app.db.deps import get_db
 
 from app.schemas.prospect_filters import (
     ProspectSearchRequest,
@@ -29,6 +31,7 @@ from app.core.config import settings
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+MAX_PROSPECT_RESULTS = 3
 
 # Create API router with configuration
 router = APIRouter(
@@ -117,7 +120,7 @@ async def test_keyword_validation(request: ProspectSearchRequest):
     """,
     response_description="Successful search with prospect profiles"
 )
-async def search_prospects(request: ProspectSearchRequest):
+async def search_prospects(request: ProspectSearchRequest, db: Session = Depends(get_db)):
     """
     Search for prospects with comprehensive error handling
     
@@ -181,6 +184,101 @@ async def search_prospects(request: ProspectSearchRequest):
             }
         )
         
+        
+        # Enforce a hard cap to protect credits and match UI expectations
+        requested_limit = request.limit or MAX_PROSPECT_RESULTS
+        effective_limit = min(requested_limit, MAX_PROSPECT_RESULTS)
+
+        # Local database fallback for demo testing
+        if settings.CRUSTDATA_API_KEY == "placeholder_for_dev" or not settings.CRUSTDATA_API_KEY:
+            logger.info("Using local database demo prospects fallback due to missing CrustData API key")
+            from app.db.models.prospect import Prospect
+            from app.db.models.company import Company
+            
+            prospects = db.query(Prospect).limit(effective_limit).all()
+            profiles = []
+            
+            for p in prospects:
+                company_name = "Demo Company"
+                company_domain = "demo.com"
+                if p.company_id:
+                    c = db.query(Company).filter(Company.id == p.company_id).first()
+                    if c:
+                        company_name = c.name
+                        company_domain = c.domain
+                
+                # Use the real database UUID so Copilot can look them up
+                profiles.append({
+                    "id": str(p.id),
+                    "name": p.full_name or f"{p.first_name} {p.last_name}",
+                    "first_name": p.first_name or "",
+                    "last_name": p.last_name or "",
+                    "region": p.city or "Unknown",
+                    "region_address_components": [],
+                    "headline": p.job_title or "Demo Prospect",
+                    "summary": "This is a seeded demo prospect used for Copilot testing.",
+                    "skills": ["Leadership", "Sales", "Strategy"],
+                    "languages": ["English"],
+                    "linkedin_profile_url": p.linkedin_url or f"https://linkedin.com/in/{p.first_name}-{p.last_name}".lower(),
+                    "flagship_profile_url": "",
+                    "emails": [p.email] if p.email else [],
+                    "profile_picture_url": "",
+                    "profile_picture_permalink": "",
+                    "twitter_handle": "",
+                    "num_of_connections": 500,
+                    "education_background": [],
+                    "honors": [],
+                    "certifications": [],
+                    "current_employers": [{
+                        "name": company_name,
+                        "linkedin_id": "",
+                        "company_id": 1,
+                        "company_linkedin_id": "",
+                        "company_website_domain": company_domain,
+                        "position_id": 1,
+                        "title": p.job_title or "Employee",
+                        "description": "",
+                        "location": p.city or "Unknown",
+                        "start_date": "2020-01-01",
+                        "employer_is_default": True,
+                        "seniority_level": p.seniority_level or "",
+                        "function_category": p.department or "",
+                        "years_at_company": "4 years",
+                        "years_at_company_raw": 4,
+                        "company_headquarters_country": p.country or "USA",
+                        "company_hq_location": p.city or "Unknown",
+                        "company_hq_location_address_components": [],
+                        "company_headcount_range": "201-500",
+                        "company_industries": ["Software & Technology"],
+                        "company_linkedin_industry": "",
+                        "company_type": "private",
+                        "company_headcount_latest": 300,
+                        "company_website": f"https://{company_domain}",
+                        "company_linkedin_profile_url": "",
+                        "business_email_verified": True
+                    }],
+                    "past_employers": [],
+                    "last_updated": "2024-01-01",
+                    "recently_changed_jobs": False,
+                    "years_of_experience": "10 years",
+                    "years_of_experience_raw": 10,
+                    "all_employers": [],
+                    "updated_at": "2024-01-01",
+                    "location_details": {
+                        "city": p.city or "",
+                        "state": "",
+                        "country": p.country or "",
+                        "continent": ""
+                    },
+                    "data_quality_score": 100
+                })
+                
+            return ProspectSearchResponse(
+                profiles=profiles,
+                total_count=len(profiles),
+                next_cursor=None
+            )
+            
         # Initialize service with API key from settings
         service = ProspectSearchService(api_key=settings.CRUSTDATA_API_KEY)
         
@@ -203,11 +301,11 @@ async def search_prospects(request: ProspectSearchRequest):
             company=request.company,
             # Employees filter
             employees=request.employees,
-            limit=request.limit,
+            limit=effective_limit,
             cursor=request.cursor
         )
 
-        profiles = result.get("profiles", [])
+        profiles = (result.get("profiles", []) or [])[:effective_limit]
         
         # Add ContactOut enrichment for top profiles to meet "Crustdata + ContactOut" constraint
         # Enrich only top 3 results per request to balance richness vs latency

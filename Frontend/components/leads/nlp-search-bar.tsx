@@ -41,9 +41,17 @@ export function NlpSearchBar({ intent, onFiltersExtracted, placeholder }: NlpSea
     setRedirect(null)
 
     try {
+      const token = localStorage.getItem("outmate_token")
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+
       const res = await fetch(`${API}/api/v1/chat/parse-query`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ query: trimmed }),
       })
 
