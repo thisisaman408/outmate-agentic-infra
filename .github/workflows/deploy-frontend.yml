@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: Frontend
-        run: npm install --ignore-platform
+        run: npm install --force
 
       - name: Build
         working-directory: Frontend
