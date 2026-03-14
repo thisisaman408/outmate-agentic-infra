@@ -1,49 +1,71 @@
-name: Deploy Frontend to Azure Static Web Apps
+name: Deploy Frontend to Azure Container Apps
 
 on:
   push:
-    branches: [ main ]
+    branches: [outmate]
     paths:
       - 'Frontend/**'
       - '.github/workflows/deploy-frontend.yml'
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+env:
+  REGISTRY: outmateregistry.azurecr.io
+  IMAGE: outmate-frontend
+  RESOURCE_GROUP: outmate-prod
+  CONTAINER_APP: outmate-frontend
 
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+          node-version: '20'
 
       - name: Install dependencies
         working-directory: Frontend
-        run: pnpm install --frozen-lockfile
+        run: npm install
 
-      - name: Build Next.js
+      - name: Build
         working-directory: Frontend
-        run: pnpm build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://dev.outmate.ai
 
-      - name: Validate build output
+      - name: Login to ACR
+        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+      - name: Build and push image
         run: |
-          if [ ! -d "Frontend/.next" ] && [ ! -d "Frontend/out" ]; then
-            echo "Build failed: no .next or out directory"; exit 1
-          fi
+          cd Frontend
+          docker build --platform linux/amd64 -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
 
-      - name: Deploy to Static Web Apps
-        uses: azure/static-web-apps-deploy@v1
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          action: "upload"
-          app_location: "Frontend"
-          output_location: "out"
-          skip_app_build: true
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.CONTAINER_APP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Health check
+        run: |
+          sleep 15
+          for i in {1..20}; do
+            if curl -sSf https://app.outmate.ai > /dev/null; then
+              echo "Health OK"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check failed"
+          exit 1
