@@ -11,7 +11,7 @@ env:
   REGISTRY: outmateregistry.azurecr.io
   IMAGE: outmate-frontend
   RESOURCE_GROUP: outmate-prod
-  CONTAINER_APP: outmate-frontend
+  CONTAINER_APP: outmate-web
 
 jobs:
   deploy:
