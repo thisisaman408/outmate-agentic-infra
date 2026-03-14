@@ -81,7 +81,7 @@ class ExploriumService:
             # Explorium business filters generally align better with LinkedIn category strings.
             # Map single user terms to multiple relevant LinkedIn categories to broaden search.
             alias = {
-                "software": ["software development", "technology, information and internet", "computer software"],
+                "software": ["software development", "technology, information and internet"],
                 "saas": ["software development", "technology, information and internet"],
                 "technology": ["technology, information and internet", "information technology"],
                 "tech": ["technology, information and internet"],
@@ -99,7 +99,7 @@ class ExploriumService:
                 normalized.extend(mapped_vals)
 
             # If we have a specific software signal, drop generic technology bucket.
-            has_software = any(x in {"software development", "computer software"} for x in normalized)
+            has_software = any(x in {"software development"} for x in normalized)
             if has_software:
                 normalized = [x for x in normalized if x not in {"technology, information and internet"}]
             
