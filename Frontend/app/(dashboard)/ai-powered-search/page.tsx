@@ -1795,10 +1795,11 @@ export default function DatabaseFinderPage() {
 
     // Detect if the CSV contains company data (rows of companies) vs filter criteria
     const firstRow = records[0]
-    const companyDataKeys = ["name", "company_name", "domain", "website", "company"]
-    const hasCompanyData = companyDataKeys.some((k) =>
-      Object.keys(firstRow).some((col) => col.toLowerCase().trim() === k)
-    )
+    const companyDataPatterns = ["name", "company_name", "company name", "company", "domain", "website", "url", "company domain", "company_domain"]
+    const csvColumns = Object.keys(firstRow).map((col) => col.toLowerCase().trim().replace(/[_\s]+/g, " "))
+    const hasCompanyData = companyDataPatterns.some((pattern) =>
+      csvColumns.some((col) => col === pattern || col === pattern.replace(/ /g, "_"))
+    ) || records.length > 1
 
     if (hasCompanyData && records.length > 0) {
       // CSV contains company data — directly populate the results table
@@ -1809,18 +1810,31 @@ export default function DatabaseFinderPage() {
       setHasSearched(true)
 
       // Normalize CSV column names to match expected company fields
+      const columnMap: Record<string, string> = {
+        "company": "name", "company_name": "name", "company name": "name",
+        "website": "domain", "company domain": "domain", "company_domain": "domain", "url": "domain",
+        "company website": "domain", "company_website": "domain",
+        "industry": "industry", "sector": "industry",
+        "employees": "employee_count_range", "employee count": "employee_count_range",
+        "employee_count": "employee_count_range", "company size": "employee_count_range",
+        "company_size": "employee_count_range", "headcount": "employee_count_range",
+        "location": "location_display", "headquarters": "location_display", "hq": "location_display",
+        "city": "headquarters_city", "country": "headquarters_country", "state": "headquarters_state",
+        "funding": "funding_stage", "funding stage": "funding_stage", "funding_stage": "funding_stage",
+        "revenue": "revenue_range", "linkedin": "linkedin_url", "linkedin url": "linkedin_url",
+        "linkedin_url": "linkedin_url", "description": "description",
+        "phone": "phone", "email": "email",
+      }
       const normalizedRecords = records.map((row) => {
         const normalized: Record<string, any> = {}
         Object.entries(row).forEach(([key, value]) => {
           const k = key.toLowerCase().trim()
-          // Map common CSV column names to our internal field names
-          if (k === "company" || k === "company_name") normalized["name"] = value
-          else if (k === "website") normalized["domain"] = value?.replace(/^https?:\/\//, "").replace(/\/$/, "")
-          else normalized[k] = value
+          const mappedKey = columnMap[k] || columnMap[k.replace(/[_\s]+/g, " ")] || k.replace(/\s+/g, "_")
+          normalized[mappedKey] = value
         })
-        // Ensure domain from website if not set
-        if (!normalized["domain"] && normalized["website"]) {
-          normalized["domain"] = normalized["website"].replace(/^https?:\/\//, "").replace(/\/$/, "")
+        // Clean domain value (strip protocol/trailing slash)
+        if (normalized["domain"]) {
+          normalized["domain"] = String(normalized["domain"]).replace(/^https?:\/\//, "").replace(/\/.*$/, "")
         }
         // Generate a logo URL from domain
         if (normalized["domain"] && !normalized["logo_url"]) {
