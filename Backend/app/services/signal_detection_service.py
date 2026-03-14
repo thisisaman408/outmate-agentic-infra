@@ -337,7 +337,7 @@ class SignalDetectionService:
     
     def _generate_person_personalization_tips(self, signals: List[Dict[str, Any]], job_title: str = "") -> str:
         """Generate outreach tips based on detected person signals"""
-        signal_types = [s.get("type", "") for s in signals]
+        signal_types = [s.get("type", "") for s in signals if isinstance(s, dict)]
         
         tips = []
         
@@ -479,6 +479,8 @@ class SignalDetectionService:
             intent_info = data.get("intent", {})
             intent_topics = intent_info.get("intent_topics", [])
             for topic in intent_topics[:5]:  # Top 5 topics
+                if not isinstance(topic, dict):
+                    continue
                 topic_name = topic.get("topic", "")
                 category = topic.get("category", "")
                 score = topic.get("composite_score", 0)
@@ -595,11 +597,15 @@ class SignalDetectionService:
                     })
                     # Check post content for specific signals
                     for post in posts[:5]:
+                        if not isinstance(post, dict):
+                            continue
                         text = (post.get("text", "") or post.get("content", "") or "").lower()
                         if any(w in text for w in ["hiring", "join our team", "open role", "job opening"]):
                             company_signals.append({"type": "hiring_signal", "description": "Posting about job openings on LinkedIn", "urgency": "high", "confidence": 80})
                             break
                     for post in posts[:5]:
+                        if not isinstance(post, dict):
+                            continue
                         text = (post.get("text", "") or post.get("content", "") or "").lower()
                         if any(w in text for w in ["launch", "announcing", "new product", "released", "excited to share"]):
                             company_signals.append({"type": "product_launch", "description": "Recently announced product/feature launch", "urgency": "high", "confidence": 75})
@@ -892,7 +898,7 @@ class SignalDetectionService:
 
     def _generate_personalization_tips(self, signals: List[Dict[str, Any]]) -> str:
         """Generate outreach tips based on detected signals"""
-        signal_types = [s.get("type", "") for s in signals]
+        signal_types = [s.get("type", "") for s in signals if isinstance(s, dict)]
         
         tips = []
         
