@@ -214,8 +214,10 @@ class ExploriumService:
             "website": "domain",
             "domain": "domain",
             "employee_count": "company_size",  # Map frontend employee_count to company_size
-            "industry": "google_category",
+            "industry": "linkedin_category",
             "keywords": "website_keywords",
+            "company_tech_stack_tech": "company_tech_stack_tech",
+            "company_name": "company_name",
         }
 
         # Enforce single category filter (Explorium requirement)

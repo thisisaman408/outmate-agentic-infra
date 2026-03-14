@@ -368,11 +368,12 @@ class LeadCopilotService:
         """Extract ICP attributes from prospect and search for similar companies."""
         from app.services.explorium_service import ExploriumService
 
-        # Build filters using keys that _map_filters understands
+        # Build filters using Explorium-native filter keys
         filters: Dict[str, Any] = {}
         if company.get("industry"):
-            filters["industry"] = company["industry"]
-        # Use company_size (mapped by _map_filters to Explorium's company_size)
+            # Use linkedin_category which _map_filters normalizes properly
+            filters["linkedin_category"] = company["industry"]
+        # Use company_size with Explorium bucket format
         emp = company.get("employee_count") or company.get("employee_count_range")
         if emp:
             if isinstance(emp, str):
@@ -382,18 +383,34 @@ class LeadCopilotService:
         if company.get("technologies"):
             techs = company["technologies"]
             if isinstance(techs, list) and techs:
-                filters["keywords"] = techs[:3]
+                # Use Explorium's tech stack filter for precise matching
+                filters["company_tech_stack_tech"] = techs[:5]
+
+        print(f">>> [FindSimilar] filters={filters}", flush=True)
 
         try:
             explorium = ExploriumService()
             result = await explorium.search_companies(filters, limit=5)
+            companies = result.get("companies", [])
+            print(f">>> [FindSimilar] got {len(companies)} companies", flush=True)
+
+            # If no results with all filters, retry with just industry + size
+            if not companies and filters.get("company_tech_stack_tech"):
+                fallback_filters = {k: v for k, v in filters.items() if k != "company_tech_stack_tech"}
+                if fallback_filters:
+                    print(f">>> [FindSimilar] retrying without tech filter: {fallback_filters}", flush=True)
+                    result = await explorium.search_companies(fallback_filters, limit=5)
+                    companies = result.get("companies", [])
+                    print(f">>> [FindSimilar] fallback got {len(companies)} companies", flush=True)
+
             return {
-                "similar_companies": result.get("companies", []),
+                "similar_companies": companies,
                 "filters_used": filters,
-                "total_found": result.get("total", 0),
+                "total_found": len(companies),
             }
         except Exception as e:
             logger.warning("Find similar failed: %s", e)
+            print(f">>> [FindSimilar] error: {e}", flush=True)
             return {
                 "similar_companies": [],
                 "filters_used": filters,
