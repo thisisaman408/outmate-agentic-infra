@@ -668,7 +668,7 @@ function FindSimilarResult({ result }: { result: Record<string, any> }) {
       {result.similar_companies?.map((c: any, i: number) => (
         <div key={i} className="p-2 rounded border text-xs w-full overflow-hidden">
           <p className="font-medium break-words whitespace-pre-wrap">{c.name || c.company_name}</p>
-          <p className="text-muted-foreground break-words whitespace-pre-wrap">{c.industry} • {c.employee_count || "?"} employees</p>
+          <p className="text-muted-foreground break-words whitespace-pre-wrap">{c.industry} • {c.employee_count_range || c.employee_count_exact || c.employee_count || "N/A"} employees</p>
         </div>
       ))}
       {result.error && <p className="text-xs text-destructive break-words whitespace-pre-wrap">{result.error}</p>}

@@ -390,7 +390,7 @@ class LeadCopilotService:
 
         try:
             explorium = ExploriumService()
-            result = await explorium.search_companies(filters, limit=5)
+            result = await explorium.search_companies(filters, limit=3)
             companies = result.get("companies", [])
             print(f">>> [FindSimilar] got {len(companies)} companies", flush=True)
 
