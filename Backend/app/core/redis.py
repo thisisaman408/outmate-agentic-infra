@@ -51,7 +51,6 @@ class RedisManager:
                     socket_connect_timeout=5,
                     socket_timeout=5,
                     decode_responses=True,
-                    ssl=True,  # Required for Upstash rediss://
                 )
                 logger.info("Redis async client created with retry strategy")
             except Exception as e:
