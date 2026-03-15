@@ -64,7 +64,7 @@ class BetterContactService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 # Step 1: Submit enrichment request
                 res = await client.post(
                     f"{BETTERCONTACT_BASE}/async",
@@ -82,21 +82,23 @@ class BetterContactService:
                     logger.error(f"BetterContact: no request_id in response: {submit_data}")
                     return {"success": False, "error": "No request_id returned"}
 
-                logger.info(f"BetterContact enrichment submitted: {request_id}")
+                print(f">>> [BetterContact] enrich_prospect submitted: {request_id} (contact: {first_name} {last_name}, company: {company_name}, domain: {company_domain}, linkedin: {linkedin_url}, is_fallback: {_is_fallback})", flush=True)
 
-                # Step 2: Poll for results (max 60s, every 3s)
-                for attempt in range(20):
-                    await asyncio.sleep(3)
+                # Step 2: Poll for results (max 90s, every 5s)
+                for attempt in range(18):
+                    await asyncio.sleep(5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/async/{request_id}",
                         headers=self._headers(),
                     )
 
                     if poll_res.status_code != 200:
+                        print(f">>> [BetterContact] enrich_prospect poll {attempt+1}: HTTP {poll_res.status_code}", flush=True)
                         continue
 
                     poll_data = poll_res.json()
                     status = poll_data.get("status", "")
+                    print(f">>> [BetterContact] enrich_prospect poll {attempt+1}: status={status}", flush=True)
 
                     if status == "terminated":
                         data_list = poll_data.get("data", [])
@@ -104,9 +106,7 @@ class BetterContactService:
                             enriched = data_list[0]
                             email = enriched.get("contact_email_address") or ""
                             phone = enriched.get("contact_phone_number") or enriched.get("contact_mobile_phone") or ""
-                            if not email and not phone and not _is_fallback:
-                                logger.info("BetterContact async returned empty contact, skipping recursive fallback",
-                                            extra={"name": f"{first_name} {last_name}", "company": company_name})
+                            print(f">>> [BetterContact] enrich_prospect result: email={bool(email)}, phone={bool(phone)}, status={enriched.get('contact_email_address_status')}", flush=True)
                             if not email and not phone:
                                 credits_consumed = poll_data.get("credits_consumed", 0)
                                 credits_left = poll_data.get("credits_left", 0)
@@ -128,7 +128,7 @@ class BetterContactService:
                         return {"success": False, "error": f"Enrichment failed: {status}"}
 
                 # Timeout
-                return {"success": False, "error": "Enrichment timed out after 60s"}
+                return {"success": False, "error": "Enrichment timed out after 90s"}
 
         except httpx.TimeoutException:
             logger.error("BetterContact request timed out")
@@ -165,7 +165,7 @@ class BetterContactService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 # Step 1: Submit lead finder request
                 res = await client.post(
                     f"{BETTERCONTACT_BASE}/lead_finder/async",
@@ -184,9 +184,9 @@ class BetterContactService:
 
                 logger.info(f"BetterContact lead_finder submitted: {request_id}")
 
-                # Step 2: Poll for results
-                for attempt in range(10):
-                    await asyncio.sleep(3)
+                # Step 2: Poll for results (max 90s, every 5s)
+                for attempt in range(18):
+                    await asyncio.sleep(5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/lead_finder/async/{request_id}",
                         headers=self._headers(),
@@ -259,8 +259,8 @@ class BetterContactService:
                         logger.error(f"BetterContact lead_finder failed: {status}")
                         return {"success": False, "error": f"Lead finder failed: {status}"}
 
-                logger.warning(f"BetterContact lead_finder timed out after 30s for request {request_id}")
-                return {"success": False, "error": "Lead finder timed out after 30s"}
+                logger.warning(f"BetterContact lead_finder timed out after 90s for request {request_id}")
+                return {"success": False, "error": "Lead finder timed out after 90s"}
 
         except httpx.TimeoutException:
             logger.error("BetterContact lead_finder timed out")
