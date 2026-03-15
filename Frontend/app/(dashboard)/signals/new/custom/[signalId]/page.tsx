@@ -1658,13 +1658,16 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
         setIsLoading(true)
         try {
             const type = signalId.replace(/-/g, '_');
-            await signalsApi.createSignal({
+            const created = await signalsApi.createSignal({
                 name: `Signal: ${config.title}`,
                 type: type as any,
                 category,
                 configuration: formData,
                 status: 'active'
             })
+            if (!created || !created._id) {
+                throw new Error("Signal creation did not return an id.")
+            }
             toast.success("Signal created and run successfully!")
             const returnPages: Record<string, string> = {
                 events: '/signals/events',
@@ -1676,7 +1679,12 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
             router.push(returnPages[category] || '/signals')
         } catch (error) {
             console.error(error)
-            toast.error("Failed to create signal")
+            const errorMessage =
+                (error as any)?.response?.data?.detail ||
+                (error as any)?.response?.data?.error?.message ||
+                (error as any)?.message ||
+                "Failed to create signal"
+            toast.error(errorMessage)
         } finally {
             setIsLoading(false)
         }

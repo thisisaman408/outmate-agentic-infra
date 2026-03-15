@@ -73,7 +73,7 @@ export const signalsApi = {
     },
 
     createSignal: async (signal: Partial<Signal>): Promise<Signal> => {
-        const response = await axios.post(API_URL, signal, { headers: getAuthHeaders() });
+        const response = await axios.post(API_URL, signal, { headers: getAuthHeaders(), timeout: 20000 });
         return response.data;
     },
 
