@@ -105,47 +105,178 @@ function ProspectsPageContent() {
   }
 
     const handleProspectImport = async (records: Record<string, string>[]) => {
-    if (!records.length) {
-      toast({
-        title: "Empty file",
-        description: "CSV must include at least one row with filter columns.",
-        variant: "destructive"
-      })
-      return
-    }
+        if (!records.length) {
+            toast({
+                title: "Empty file",
+                description: "CSV must include at least one row with filter columns.",
+                variant: "destructive"
+            })
+            return
+        }
 
-    const filters = normalizeCsvRecord(records[0])
-    setCurrentFilters(filters as ProspectSearchFilters)
-    setProfiles([])
-    setError(null)
-    setHasSearched(false)
-    setIsSearching(true)
-    setIsImporting(true)
+        // Normalize first row of CSV/Excel into key/value(s)
+        const raw = normalizeCsvRecord(records[0])
 
-    try {
-      const response = await searchProspects({ ...filters, limit: INITIAL_LIMIT })
-      const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
-      setProfiles(limitedProfiles)
-      setTotalCount(response.total_count)
-      setNextCursor(response.next_cursor)
-      setHasSearched(true)
-      toast({
-        title: "Import complete",
-        description: `Imported ${limitedProfiles.length} prospects from CSV filters.`
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to import CSV filters."
-      setError(message)
-      toast({
-        title: "Import failed",
-        description: message,
-        variant: "destructive"
-      })
-    } finally {
-      setIsSearching(false)
-      setIsImporting(false)
+        // Map common header aliases to ProspectSearchFilters keys
+        const aliasMap: Record<string, keyof ProspectSearchFilters> = {
+            // Titles
+            "current_title": "current_title",
+            "title": "current_title",
+            "job_title": "current_title",
+            "current job title": "current_title",
+            "past_title": "past_title",
+            "previous_title": "past_title",
+
+            // Location
+            "location": "location",
+            "locations": "location",
+            "region": "location",
+            "city": "location",
+            "state": "location",
+            "country": "location",
+
+            // Industry / Department / Seniority
+            "industry": "industry",
+            "industries": "industry",
+            "function": "functions",
+            "functions": "functions",
+            "department": "functions",
+            "dept": "functions",
+            "seniority": "seniority_level",
+            "seniority_level": "seniority_level",
+
+            // Person name
+            "name": "name",
+            "full_name": "name",
+            "first_name": "first_name",
+            "firstname": "first_name",
+            "first name": "first_name",
+            "given_name": "first_name",
+            "last_name": "last_name",
+            "lastname": "last_name",
+            "last name": "last_name",
+            "surname": "last_name",
+
+            // Languages
+            "languages": "profile_languages",
+            "language": "profile_languages",
+            "profile_languages": "profile_languages",
+
+            // Company & size
+            "company": "company",
+            "company_name": "company",
+            "employer": "company",
+            "employees": "employees",
+            "company_size": "employees",
+            "headcount": "employees",
+            "company size": "employees",
+
+            // Keyword
+            "keyword": "keyword",
+            "keywords": "keyword",
+            "query": "keyword",
+            "search": "keyword",
+        }
+
+        const ensureArray = (val: any): string[] => {
+            if (val == null) return []
+            if (Array.isArray(val)) return val.filter(Boolean)
+            const str = String(val).trim()
+            return str ? [str] : []
+        }
+
+        const arrayKeys: (keyof ProspectSearchFilters)[] = [
+            "current_title",
+            "past_title",
+            "location",
+            "industry",
+            "functions",
+            "seniority_level",
+            "profile_languages",
+            "employees",
+        ]
+
+        // Build filters object with correct shapes
+        const mapped: ProspectSearchFilters = {}
+        Object.entries(raw).forEach(([k, v]) => {
+            const key = aliasMap[k.toLowerCase?.() || k]
+            if (!key) return
+            if (arrayKeys.includes(key)) {
+                const arr = ensureArray(v)
+                if (arr.length) {
+                    // @ts-ignore
+                    mapped[key] = arr
+                }
+            } else if (key === "keyword") {
+                // keyword must be a string
+                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                if (str) mapped.keyword = str
+            } else if (key === "name") {
+                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                if (str) mapped.name = str
+            } else if (key === "first_name") {
+                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                if (str) mapped.first_name = str
+            } else if (key === "last_name") {
+                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                if (str) mapped.last_name = str
+            } else if (key === "company") {
+                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                if (str) mapped.company = str
+            }
+        })
+
+        if (Object.keys(mapped).length === 0) {
+            toast({
+                title: "No recognized headers",
+                description: "CSV does not contain recognized filter columns. Supported: title/current_title, past_title, location, industry, function/department, seniority, first_name, last_name, languages, company, employees, keyword.",
+                variant: "destructive",
+            })
+            return
+        }
+
+        // Default operator for seniority unless later toggled via UI
+        if (mapped.seniority_level && !mapped.seniority_level_operator) {
+            mapped.seniority_level_operator = 'in'
+        }
+
+        // Enforce credit-protection limit for first fetch
+        const searchFilters: ProspectSearchFilters = {
+            ...mapped,
+            limit: INITIAL_LIMIT,
+        }
+
+        setCurrentFilters(searchFilters)
+        setProfiles([])
+        setError(null)
+        setHasSearched(false)
+        setIsSearching(true)
+        setIsImporting(true)
+
+        try {
+            const response = await searchProspects(searchFilters)
+            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
+            setProfiles(limitedProfiles)
+            setTotalCount(response.total_count)
+            setNextCursor(response.next_cursor)
+            setHasSearched(true)
+            toast({
+                title: "Import complete",
+                description: `Imported ${limitedProfiles.length} prospects using CSV filters.`,
+            })
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to import CSV filters."
+            setError(message)
+            toast({
+                title: "Import failed",
+                description: message,
+                variant: "destructive",
+            })
+        } finally {
+            setIsSearching(false)
+            setIsImporting(false)
+        }
     }
-  }
 
     // Restore search from history if historyId is in URL params
     useEffect(() => {
