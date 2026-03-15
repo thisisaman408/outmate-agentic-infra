@@ -694,6 +694,7 @@ function ProspectsPageContent() {
                             onEnrichReveal={onEnrichReveal}
                             onWaterfallResult={handleWaterfallResult}
                             enrichCache={enrichedData}
+                            tableId="prospects_v2"
                         />
                     ) : hasSearched ? (
                         <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">

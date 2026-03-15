@@ -1,12 +1,15 @@
 from typing import Any, Dict, Optional
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from app.services.explorium_service import ExploriumService
 from app.services.contactout_service import ContactOutService
 from app.services.crustdata_service import CrustdataService
 from app.services.nlp_service import NLPService
 from app.services.advanced_nlp_service import AdvancedNLPService
 from app.services.crustdata.prospect_search_service import ProspectSearchService
+from app.db.deps import get_db
+from app.db.repositories.company_repository import CompanyRepository
+from sqlalchemy.orm import Session
 
 router = APIRouter(tags=["explorium"])
 _advanced_nlp_service: AdvancedNLPService | None = None
@@ -98,7 +101,7 @@ async def autocomplete(field: str, query: str, limit: int | None = None):
     return {"field": field, "query": query, "suggestions": suggestions}
 
 @router.post("/company/search")
-async def search_company(payload: Dict[str, Any]):
+async def search_company(payload: Dict[str, Any], db: Session = Depends(get_db)):
     try:
         filters = payload.get("filters") or {}
         options = payload.get("options") or {}
@@ -354,6 +357,55 @@ async def search_company(payload: Dict[str, Any]):
             for k, v in list(companies[i].items()):
                 if isinstance(v, set):
                     companies[i][k] = list(v)
+
+        # Persist top results into DB for future enrichment/restore
+        try:
+            for company in companies[:size]:
+                domain = (company.get("domain") or "").strip().lower()
+                if not domain:
+                    continue
+                CompanyRepository.create_or_update(
+                    db=db,
+                    domain=domain,
+                    raw_data=company,
+                    provider_source=company.get("provider_source") or "explorium",
+                    name=company.get("name"),
+                    website=company.get("website"),
+                    description=company.get("description"),
+                    industry=company.get("industry"),
+                    sub_industry=company.get("sub_industry"),
+                    employee_count_range=company.get("employee_count_range"),
+                    employee_count_exact=company.get("employee_count_exact"),
+                    revenue_range=company.get("revenue_range"),
+                    revenue_exact=company.get("revenue_exact"),
+                    headquarters_country=company.get("headquarters_country"),
+                    headquarters_state=company.get("headquarters_state"),
+                    headquarters_city=company.get("headquarters_city"),
+                    headquarters_address=company.get("headquarters_address"),
+                    founded_year=company.get("founded_year"),
+                    company_type=company.get("company_type"),
+                    stock_symbol=company.get("stock_symbol"),
+                    phone=company.get("phone"),
+                    technologies=company.get("technologies"),
+                    categories=company.get("categories") or company.get("specialties"),
+                    funding_stage=company.get("funding_stage"),
+                    funding_total=company.get("funding_total"),
+                    last_funding_date=company.get("last_funding_date"),
+                    employee_growth_6m=company.get("employee_growth_6m"),
+                    employee_growth_12m=company.get("employee_growth_12m"),
+                    employee_growth_6m_percent=company.get("employee_growth_6m_percent"),
+                    employee_growth_12m_percent=company.get("employee_growth_12m_percent"),
+                    linkedin_url=company.get("linkedin_url"),
+                    twitter_url=company.get("twitter_url"),
+                    facebook_url=company.get("facebook_url"),
+                    follower_count=company.get("follower_count"),
+                    external_id=company.get("id"),
+                    enriched=bool(company.get("enriched")),
+                    data_quality_score=company.get("quality_score") or company.get("data_quality_score"),
+                    last_enriched_at=company.get("last_enriched_at"),
+                )
+        except Exception:
+            pass
 
         return {
             "success": True,

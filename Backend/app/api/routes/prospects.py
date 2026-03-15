@@ -29,9 +29,87 @@ from app.services.crustdata.base_crustdata_client import CrustDataAPIError
 from app.services.contactout_service import ContactOutService
 from app.core.config import settings
 from pydantic import BaseModel, Field
+from datetime import datetime
+from app.db.repositories.prospect_repository import ProspectRepository
+from app.db.repositories.company_repository import CompanyRepository
 
 logger = logging.getLogger(__name__)
 MAX_PROSPECT_RESULTS = 3
+
+
+def _persist_prospects(db: Session, profiles: list[dict]) -> None:
+    for profile in profiles or []:
+        try:
+            external_id = str(profile.get("id") or profile.get("person_id") or "").strip()
+            linkedin_url = (profile.get("linkedin_profile_url") or profile.get("flagship_profile_url") or "").strip()
+            emails = profile.get("emails") or []
+            email = emails[0] if isinstance(emails, list) and emails else profile.get("email")
+            phone = profile.get("phone") or (profile.get("phones")[0] if isinstance(profile.get("phones"), list) and profile.get("phones") else None)
+
+            full_name = profile.get("name") or ""
+            first_name = profile.get("first_name") or (full_name.split(" ")[0] if full_name else "")
+            last_name = profile.get("last_name") or (" ".join(full_name.split(" ")[1:]) if full_name else "")
+
+            current_employer = (profile.get("current_employers") or [{}])[0] or {}
+            job_title = current_employer.get("title") or profile.get("headline") or profile.get("job_title")
+            seniority = current_employer.get("seniority_level") or profile.get("seniority")
+            department = current_employer.get("function_category") or profile.get("department")
+            job_function = profile.get("job_function")
+
+            location = profile.get("location_details") or {}
+            city = location.get("city") or profile.get("city")
+            state = location.get("state") or profile.get("state")
+            country = location.get("country") or profile.get("country")
+
+            company_domain = current_employer.get("company_website_domain") or current_employer.get("company_domain")
+            company_id = None
+            if company_domain:
+                company_domain = company_domain.strip().lower()
+                existing_company = CompanyRepository.get_by_domain(db, company_domain)
+                if not existing_company:
+                    existing_company = CompanyRepository.create_or_update(
+                        db=db,
+                        domain=company_domain,
+                        raw_data=current_employer,
+                        provider_source="crustdata",
+                        name=current_employer.get("name"),
+                        website=current_employer.get("company_website"),
+                        industry=current_employer.get("company_linkedin_industry"),
+                        employee_count_range=current_employer.get("company_headcount_range"),
+                        headquarters_country=current_employer.get("company_headquarters_country"),
+                        headquarters_address=current_employer.get("company_hq_location"),
+                        linkedin_url=current_employer.get("company_linkedin_profile_url"),
+                    )
+                if existing_company:
+                    company_id = existing_company.id
+
+            ProspectRepository.create_or_update_by_keys(
+                db=db,
+                keys={
+                    "external_id": external_id or None,
+                    "linkedin_url": linkedin_url or None,
+                    "email": email or None,
+                },
+                raw_data=profile,
+                provider_source="crustdata",
+                first_name=first_name,
+                last_name=last_name,
+                full_name=full_name,
+                email=email,
+                phone=phone,
+                job_title=job_title,
+                seniority_level=seniority,
+                department=department,
+                job_function=job_function,
+                country=country,
+                state=state,
+                city=city,
+                linkedin_url=linkedin_url,
+                company_id=company_id,
+                data_quality_score=profile.get("data_quality_score"),
+            )
+        except Exception as exc:
+            logger.warning(f"Prospect DB upsert failed: {exc}")
 
 # Create API router with configuration
 router = APIRouter(
@@ -358,6 +436,12 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
                 "total_available": result.get("total_count", 0)
             }
         )
+
+        # Persist results for later enrichment/restoration
+        try:
+            _persist_prospects(db, profiles)
+        except Exception:
+            pass
         
         # Return successful response
         return ProspectSearchResponse(
