@@ -2,10 +2,13 @@ import axios from 'axios';
 import { authService } from '@/lib/auth'
 
 const BASE_API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const API_URL =
-    typeof window !== "undefined"
-        ? "/api/v1/signals"
-        : `${BASE_API.replace(/\/$/, '')}/api/v1/signals`;
+const API_URL = (() => {
+    if (typeof window !== "undefined") {
+        // Use trailing slash to avoid FastAPI 307 redirects.
+        return "/api/v1/signals/"
+    }
+    return `${BASE_API.replace(/\/$/, '')}/api/v1/signals/`
+})()
 
 const getAuthHeaders = () => {
     const headers: Record<string, string> = {
