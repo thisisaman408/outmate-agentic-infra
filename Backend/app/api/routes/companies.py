@@ -3,8 +3,9 @@ Company search API endpoints
 RESTful, well-documented, with comprehensive error handling
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 import logging
+from sqlalchemy.orm import Session
 
 from app.schemas.company_filters import (
     CompanySearchRequest,
@@ -14,6 +15,8 @@ from app.schemas.company_filters import (
 from app.services.crustdata.company_search_service import CompanySearchService
 from app.services.crustdata.base_crustdata_client import CrustDataAPIError
 from app.core.config import settings
+from app.db.deps import get_db
+from app.db.models.company import Company
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +217,57 @@ async def get_companies_info():
         "version": getattr(settings, "APP_VERSION", "1.0.0"),
         "endpoints": {
             "search": "/api/companies/search (POST)",
+            "db": "/api/companies/db (GET)",
             "health": "/api/companies/health (GET)"
         },
         "documentation": "/docs"
     }
+
+
+@router.get(
+    "/db",
+    status_code=status.HTTP_200_OK,
+    summary="Get companies from local DB",
+    description="Returns companies stored in the database (enrichment cache)."
+)
+async def list_db_companies(
+    limit: int = Query(3, ge=1, le=50, description="Number of companies to return"),
+    db: Session = Depends(get_db),
+):
+    try:
+        companies = (
+            db.query(Company)
+            .order_by(Company.updated_at.desc(), Company.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        payload = []
+        for c in companies:
+            payload.append(
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "domain": c.domain,
+                    "website": c.website,
+                    "industry": c.industry,
+                    "employee_count": c.employee_count_exact or c.employee_count_range,
+                    "revenue": c.revenue_exact or c.revenue_range,
+                    "location": {
+                        "country": c.headquarters_country,
+                        "state": c.headquarters_state,
+                        "city": c.headquarters_city,
+                    },
+                    "technologies": c.technologies or [],
+                    "linkedin_url": c.linkedin_url,
+                    "quality_score": c.data_quality_score or 50,
+                }
+            )
+
+        return {"success": True, "data": {"companies": payload}}
+    except Exception:
+        logger.exception("Failed to load companies from DB")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load companies from database.",
+        )

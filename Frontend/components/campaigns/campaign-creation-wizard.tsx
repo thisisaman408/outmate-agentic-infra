@@ -18,9 +18,6 @@ const MAX_LEADS = 3
 
 const WIZARD_STATE_KEY = "campaign-wizard-state"
 
-const AI_LEADS_PROMPT =
-  "Find B2B SaaS companies in the US and Canada that raised Series A or Series B funding with 50 to 500 employees."
-
 export function CampaignCreationWizard() {
   const router = useRouter()
   const { toast } = useToast()
@@ -140,17 +137,13 @@ export function CampaignCreationWizard() {
     setIsLeadLoading(true)
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const response = await fetch(`${API}/api/explorium/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: AI_LEADS_PROMPT }),
-      })
+      const response = await fetch(`${API}/api/v1/companies/db?limit=${MAX_LEADS}`)
       if (!response.ok) {
         const errText = await response.text().catch(() => response.statusText)
-        throw new Error(errText || "Explorium search failed")
+        throw new Error(errText || "Database lead fetch failed")
       }
       const payload = await response.json()
-      const companies: any[] = payload?.results?.data || []
+      const companies: any[] = payload?.data?.companies || []
       const leads = companies.slice(0, MAX_LEADS).map(transformCompanyToLead)
       setLeadPool(leads)
     } catch (error) {
