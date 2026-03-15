@@ -6,9 +6,13 @@ export function parseCsv(text: string): CsvRecord[] {
     const lines = cleaned.split(/\r?\n/).filter((line) => line.trim().length > 0)
     if (lines.length === 0) return []
 
-    const headers = splitCsvLine(lines[0])
+    // Auto-detect delimiter: tab vs comma
+    const firstLine = lines[0]
+    const delimiter = firstLine.includes('\t') ? '\t' : ','
+
+    const headers = delimiter === '\t' ? firstLine.split('\t') : splitCsvLine(firstLine)
     return lines.slice(1).map((line) => {
-        const values = splitCsvLine(line)
+        const values = delimiter === '\t' ? line.split('\t') : splitCsvLine(line)
         const record: CsvRecord = {}
         headers.forEach((header, index) => {
             if (!header) return

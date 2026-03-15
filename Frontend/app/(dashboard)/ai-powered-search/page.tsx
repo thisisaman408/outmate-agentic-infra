@@ -1808,22 +1808,53 @@ export default function DatabaseFinderPage() {
       setNaturalLanguageQuery("Imported companies from CSV")
       setClarification(`Imported ${records.length} companies from CSV`)
       setHasSearched(true)
+      setIsSearching(false)
+
+      // Update session to skip clarification
+      const now = new Date().toISOString()
+      const baseSession = chats.find((c) => c.id === activeChatId) || createEmptySession()
+      setActiveChatId(baseSession.id)
+      setChats((prev) => {
+        const updated = {
+          ...baseSession,
+          query: "Imported companies from CSV",
+          intent: "business" as const,
+          clarification: `Imported ${records.length} companies from CSV`,
+          clarificationStep: "completed" as const,
+          updatedAt: now,
+        }
+        const exists = prev.some((c) => c.id === updated.id)
+        const merged = exists
+          ? prev.map((c) => (c.id === updated.id ? updated : c))
+          : [updated, ...prev]
+        return merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      })
 
       // Normalize CSV column names to match expected company fields
       const columnMap: Record<string, string> = {
-        "company": "name", "company_name": "name", "company name": "name",
-        "website": "domain", "company domain": "domain", "company_domain": "domain", "url": "domain",
+        "company": "name", "company_name": "name", "company name": "name", "name": "name",
+        "domain": "domain", "website": "domain", "company domain": "domain", "company_domain": "domain", "url": "domain",
         "company website": "domain", "company_website": "domain",
-        "industry": "industry", "sector": "industry",
-        "employees": "employee_count_range", "employee count": "employee_count_range",
-        "employee_count": "employee_count_range", "company size": "employee_count_range",
-        "company_size": "employee_count_range", "headcount": "employee_count_range",
+        "industry": "industry", "sector": "industry", "linkedin industry": "industry",
+        "employees": "employee_count_exact", "employee count": "employee_count_exact",
+        "emp. range": "employee_count_range", "employee range": "employee_count_range",
+        "employee_count": "employee_count_exact", "company size": "employee_count_range",
+        "company_size": "employee_count_range", "headcount": "employee_count_exact",
         "location": "location_display", "headquarters": "location_display", "hq": "location_display",
         "city": "headquarters_city", "country": "headquarters_country", "state": "headquarters_state",
-        "funding": "funding_stage", "funding stage": "funding_stage", "funding_stage": "funding_stage",
-        "revenue": "revenue_range", "linkedin": "linkedin_url", "linkedin url": "linkedin_url",
-        "linkedin_url": "linkedin_url", "description": "description",
-        "phone": "phone", "email": "email",
+        "address": "street", "zip": "zip_code",
+        "funding stage": "funding_stage", "funding_stage": "funding_stage",
+        "total funding": "funding_total", "total_funding": "funding_total",
+        "last funding": "last_funding_date",
+        "revenue": "revenue_exact", "rev. range": "revenue_range", "revenue range": "revenue_range",
+        "linkedin": "linkedin_url", "linkedin url": "linkedin_url", "linkedin_url": "linkedin_url",
+        "description": "description", "phone": "phone", "email": "email",
+        "type": "company_type", "founded": "founded_year",
+        "investors": "investors", "investors count": "investors_count",
+        "technologies": "technologies", "tech heavy": "is_tech_heavy",
+        "quality score": "data_quality_score", "business id": "id",
+        "enriched": "enriched", "decision makers": "decision_makers_count",
+        "locations": "locations", "#locations": "locations_distribution_count",
       }
       const normalizedRecords = records.map((row) => {
         const normalized: Record<string, any> = {}

@@ -16,10 +16,34 @@ export function CsvImportButton({ label = "Import CSV", onRecordsParsed, classNa
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0]
         if (!file) return
-        const text = await file.text()
-        const { parseCsv } = await import("@/lib/utils/csv")
-        const records = parseCsv(text)
-        onRecordsParsed(records)
+
+        const fileName = file.name.toLowerCase()
+
+        if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+            // Excel file — parse with xlsx library
+            const XLSX = (await import("xlsx"))
+            const buffer = await file.arrayBuffer()
+            const workbook = XLSX.read(buffer, { type: "array" })
+            const sheetName = workbook.SheetNames[0]
+            const sheet = workbook.Sheets[sheetName]
+            const records: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+            // Ensure all values are strings
+            const stringRecords = records.map((row) => {
+                const cleaned: Record<string, string> = {}
+                Object.entries(row).forEach(([key, value]) => {
+                    cleaned[key.trim()] = String(value ?? "").trim()
+                })
+                return cleaned
+            }).filter((row) => Object.keys(row).length > 0)
+            onRecordsParsed(stringRecords)
+        } else {
+            // CSV/TSV file
+            const text = await file.text()
+            const { parseCsv } = await import("@/lib/utils/csv")
+            const records = parseCsv(text)
+            onRecordsParsed(records)
+        }
+
         if (inputRef.current) inputRef.current.value = ""
     }
 
@@ -28,7 +52,7 @@ export function CsvImportButton({ label = "Import CSV", onRecordsParsed, classNa
             <input
                 ref={inputRef}
                 type="file"
-                accept="text/csv"
+                accept=".csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 className="hidden"
                 onChange={handleFileChange}
             />
