@@ -108,16 +108,13 @@ function ProspectsPageContent() {
         if (!records.length) {
             toast({
                 title: "Empty file",
-                description: "CSV must include at least one row with filter columns.",
+                description: "CSV/Excel must include at least one row with filter columns.",
                 variant: "destructive"
             })
             return
         }
 
-        // Normalize first row of CSV/Excel into key/value(s)
-        const raw = normalizeCsvRecord(records[0])
-
-        // Map common header aliases to ProspectSearchFilters keys
+        // Alias mapping for header names → API filter keys
         const aliasMap: Record<string, keyof ProspectSearchFilters> = {
             // Titles
             "current_title": "current_title",
@@ -126,7 +123,6 @@ function ProspectsPageContent() {
             "current job title": "current_title",
             "past_title": "past_title",
             "previous_title": "past_title",
-
             // Location
             "location": "location",
             "locations": "location",
@@ -134,7 +130,6 @@ function ProspectsPageContent() {
             "city": "location",
             "state": "location",
             "country": "location",
-
             // Industry / Department / Seniority
             "industry": "industry",
             "industries": "industry",
@@ -144,7 +139,6 @@ function ProspectsPageContent() {
             "dept": "functions",
             "seniority": "seniority_level",
             "seniority_level": "seniority_level",
-
             // Person name
             "name": "name",
             "full_name": "name",
@@ -156,12 +150,10 @@ function ProspectsPageContent() {
             "lastname": "last_name",
             "last name": "last_name",
             "surname": "last_name",
-
             // Languages
             "languages": "profile_languages",
             "language": "profile_languages",
             "profile_languages": "profile_languages",
-
             // Company & size
             "company": "company",
             "company_name": "company",
@@ -170,7 +162,6 @@ function ProspectsPageContent() {
             "company_size": "employees",
             "headcount": "employees",
             "company size": "employees",
-
             // Keyword
             "keyword": "keyword",
             "keywords": "keyword",
@@ -196,73 +187,109 @@ function ProspectsPageContent() {
             "employees",
         ]
 
-        // Build filters object with correct shapes
-        const mapped: ProspectSearchFilters = {}
-        Object.entries(raw).forEach(([k, v]) => {
-            const key = aliasMap[k.toLowerCase?.() || k]
-            if (!key) return
-            if (arrayKeys.includes(key)) {
-                const arr = ensureArray(v)
-                if (arr.length) {
-                    // @ts-ignore
-                    mapped[key] = arr
+        const mapRecordToFilters = (record: Record<string, string | string[]>): ProspectSearchFilters => {
+            const mapped: ProspectSearchFilters = {}
+            Object.entries(record).forEach(([k, v]) => {
+                const key = aliasMap[k.toLowerCase?.() || k]
+                if (!key) return
+                if (arrayKeys.includes(key)) {
+                    const arr = ensureArray(v)
+                    if (arr.length) {
+                        // @ts-ignore
+                        mapped[key] = arr
+                    }
+                } else if (key === "keyword") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.keyword = str
+                } else if (key === "name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.name = str
+                } else if (key === "first_name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.first_name = str
+                } else if (key === "last_name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.last_name = str
+                } else if (key === "company") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.company = str
                 }
-            } else if (key === "keyword") {
-                // keyword must be a string
-                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                if (str) mapped.keyword = str
-            } else if (key === "name") {
-                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                if (str) mapped.name = str
-            } else if (key === "first_name") {
-                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                if (str) mapped.first_name = str
-            } else if (key === "last_name") {
-                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                if (str) mapped.last_name = str
-            } else if (key === "company") {
-                const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                if (str) mapped.company = str
+            })
+            if (mapped.seniority_level && !mapped.seniority_level_operator) {
+                mapped.seniority_level_operator = 'in'
             }
-        })
+            return mapped
+        }
 
-        if (Object.keys(mapped).length === 0) {
+        // Build filters per-row
+        const perRowFilters: ProspectSearchFilters[] = []
+        for (const row of records) {
+            const raw = normalizeCsvRecord(row)
+            const mapped = mapRecordToFilters(raw)
+            if (Object.keys(mapped).length > 0) perRowFilters.push(mapped)
+        }
+
+        if (perRowFilters.length === 0) {
             toast({
                 title: "No recognized headers",
-                description: "CSV does not contain recognized filter columns. Supported: title/current_title, past_title, location, industry, function/department, seniority, first_name, last_name, languages, company, employees, keyword.",
+                description: "CSV/Excel does not contain recognized filter columns. Supported: title/current_title, past_title, location, industry, function/department, seniority, first_name, last_name, languages, company, employees, keyword.",
                 variant: "destructive",
             })
             return
         }
 
-        // Default operator for seniority unless later toggled via UI
-        if (mapped.seniority_level && !mapped.seniority_level_operator) {
-            mapped.seniority_level_operator = 'in'
-        }
+        // If multiple rows, fetch one result per row to match row count and protect credits
+        const perRowLimit = perRowFilters.length > 1 ? 1 : INITIAL_LIMIT
 
-        // Enforce credit-protection limit for first fetch
-        const searchFilters: ProspectSearchFilters = {
-            ...mapped,
-            limit: INITIAL_LIMIT,
-        }
-
-        setCurrentFilters(searchFilters)
+        setCurrentFilters({})
         setProfiles([])
+        setEnrichedData({})
         setError(null)
         setHasSearched(false)
         setIsSearching(true)
         setIsImporting(true)
 
         try {
-            const response = await searchProspects(searchFilters)
-            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
-            setProfiles(limitedProfiles)
-            setTotalCount(response.total_count)
-            setNextCursor(response.next_cursor)
+            const aggregated: ProspectProfile[] = []
+            const seen = new Set<string>()
+            let processed = 0
+            let success = 0
+
+            for (const f of perRowFilters) {
+                // Stop if we hit global max
+                if (aggregated.length >= MAX_RESULTS_LIMIT) break
+
+                try {
+                    const res = await searchProspects({ ...f, limit: perRowLimit })
+                    const rows = res.profiles.slice(0, perRowLimit)
+                    let added = 0
+                    for (const p of rows) {
+                        const key = String((p as any).person_id || p.linkedin_profile_url || p.flagship_profile_url || `${p.name}-${(p as any).current_employers?.[0]?.name || ''}`)
+                        if (!seen.has(key) && aggregated.length < MAX_RESULTS_LIMIT) {
+                            aggregated.push(p)
+                            seen.add(key)
+                            added++
+                        }
+                    }
+                    if (added > 0) success++
+                } catch (e) {
+                    // continue other rows
+                } finally {
+                    processed++
+                }
+            }
+
+            setProfiles(aggregated)
+            setTotalCount(aggregated.length)
+            setNextCursor(null)
             setHasSearched(true)
+
+            // Persist to local storage for detail page access
+            try { localStorage.setItem("prospect_search_results", JSON.stringify(aggregated)) } catch {}
+
             toast({
                 title: "Import complete",
-                description: `Imported ${limitedProfiles.length} prospects using CSV filters.`,
+                description: `Processed ${processed} row(s); found ${aggregated.length} unique prospect(s).`,
             })
         } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to import CSV filters."
