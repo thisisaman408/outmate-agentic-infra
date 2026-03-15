@@ -23,6 +23,12 @@ GROQ_MODELS_DETAILED = [
     # These are stable models that are very unlikely to be removed
     create_model_metadata(provider="Groq", name="llama-3.1-8b-instant", icon="Groq", tool_calling=True),
     create_model_metadata(provider="Groq", name="llama-3.3-70b-versatile", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="openai/gpt-oss-120b", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="openai/gpt-oss-20b", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="qwen/qwen3-32b", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="meta-llama/llama-4-scout-17b-16e-instruct", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="meta-llama/llama-4-maverick-17b-128e-instruct", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="compound-beta", icon="Groq", tool_calling=True),
     # ===== DEPRECATED MODELS =====
     # Keep these for backwards compatibility - users may have flows using them
     # These will appear in the list but show as deprecated in the UI

@@ -107,7 +107,7 @@
             "legacy": false,
             "lf_version": "1.5.0.post1",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -252,7 +252,7 @@
             "legacy": false,
             "lf_version": "1.5.0.post1",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -531,12 +531,12 @@
             "last_updated": "2025-08-26T16:19:16.681Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "8b5ca1f38f6e",
+              "code_hash": "0504dabccdec",
               "dependencies": {
                 "dependencies": [
                   {
                     "name": "chromadb",
-                    "version": "1.5.4"
+                    "version": "1.5.5"
                   },
                   {
                     "name": "cryptography",
@@ -560,23 +560,23 @@
                   },
                   {
                     "name": "langchain_openai",
-                    "version": "0.3.23"
+                    "version": "0.3.33"
                   },
                   {
                     "name": "langchain_huggingface",
-                    "version": "0.3.1"
+                    "version": null
                   },
                   {
                     "name": "langchain_cohere",
-                    "version": "0.4.6"
+                    "version": null
                   },
                   {
                     "name": "langchain_google_genai",
-                    "version": "2.0.6"
+                    "version": "2.1.10"
                   },
                   {
                     "name": "langchain_ollama",
-                    "version": "0.3.10"
+                    "version": null
                   },
                   {
                     "name": "langchain_ibm",
@@ -775,5 +775,8 @@
   "is_component": false,
   "last_tested_version": "1.5.0.post2",
   "name": "Knowledge Base",
-  "tags": []
+  "tags": [
+    "data-enrichment",
+    "research-analysis"
+  ]
 }

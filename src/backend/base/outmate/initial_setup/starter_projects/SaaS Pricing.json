@@ -398,7 +398,7 @@
             "legacy": false,
             "lf_version": "1.4.2",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -712,7 +712,7 @@
             "legacy": false,
             "lf_version": "1.4.2",
             "metadata": {
-              "code_hash": "acbe2603b034",
+              "code_hash": "17c73e15b92b",
               "dependencies": {
                 "dependencies": [
                   {
@@ -887,7 +887,7 @@
             "last_updated": "2025-12-11T21:41:48.407Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "108da32d83f1",
+              "code_hash": "518cdb45e3cf",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1443,6 +1443,7 @@
   "name": "SaaS Pricing",
   "tags": [
     "agents",
-    "assistants"
+    "lead-scoring",
+    "research-analysis"
   ]
 }

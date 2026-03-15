@@ -173,6 +173,32 @@ MODEL_PROVIDER_METADATA: dict[str, Any] = {
             "model_param": "model",
         },
     },
+    "Groq": {
+        "icon": "Groq",
+        "max_tokens_field_name": "max_tokens",
+        "variables": [
+            {
+                "variable_name": "Groq API Key",
+                "variable_key": "GROQ_API_KEY",
+                "required": True,
+                "is_secret": True,
+                "is_list": False,
+                "options": [],
+                "langchain_param": "api_key",
+                "component_metadata": {
+                    "mapping_field": "api_key",
+                    "required": False,
+                    "advanced": True,
+                    "info": "Falls back to GROQ_API_KEY environment variable",
+                },
+            }
+        ],
+        "api_docs_url": "https://console.groq.com/docs",
+        "mapping": {
+            "model_class": "ChatGroq",
+            "model_param": "model",
+        },
+    },
     "IBM WatsonX": {
         "icon": "WatsonxAI",
         "max_tokens_field_name": "max_tokens",

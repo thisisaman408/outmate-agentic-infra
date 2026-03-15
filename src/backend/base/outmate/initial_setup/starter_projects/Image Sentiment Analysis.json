@@ -176,7 +176,7 @@
             "legacy": false,
             "lf_version": "1.7.0",
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -447,7 +447,7 @@
             "legacy": false,
             "lf_version": "1.7.0",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1094,7 +1094,7 @@
             "legacy": false,
             "lf_version": "1.7.0",
             "metadata": {
-              "code_hash": "058ca1f51e9f",
+              "code_hash": "e5acc5eef41b",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2071,6 +2071,7 @@
   "last_tested_version": "1.7.0",
   "name": "Image Sentiment Analysis",
   "tags": [
-    "classification"
+    "lead-scoring",
+    "research-analysis"
   ]
 }

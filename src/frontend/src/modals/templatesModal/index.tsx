@@ -53,27 +53,41 @@ export default function TemplatesModal({
       ],
     },
     {
-      title: "Use Cases",
+      title: "GTM Signals",
       items: [
-        { title: "Assistants", icon: "BotMessageSquare", id: "assistants" },
-        { title: "Classification", icon: "Tags", id: "classification" },
-        { title: "Coding", icon: "TerminalIcon", id: "coding" },
+        {
+          title: "Full Pipeline",
+          icon: "Rocket",
+          id: "full-pipeline",
+        },
+        {
+          title: "Prospect Research",
+          icon: "Search",
+          id: "prospect-research",
+        },
+        { title: "Lead Scoring", icon: "BarChart3", id: "lead-scoring" },
+        { title: "Email Outreach", icon: "Mail", id: "email-outreach" },
+        {
+          title: "Data Enrichment",
+          icon: "DatabaseZap",
+          id: "data-enrichment",
+        },
+      ],
+    },
+    {
+      title: "GTM Workflows",
+      items: [
+        { title: "Agents", icon: "Bot", id: "agents" },
         {
           title: "Content Generation",
           icon: "Newspaper",
           id: "content-generation",
         },
-        { title: "Q&A", icon: "Database", id: "q-a" },
-        // { title: "Summarization", icon: "Bot", id: "summarization" },
-        // { title: "Web Scraping", icon: "CodeXml", id: "web-scraping" },
-      ],
-    },
-    {
-      title: "Methodology",
-      items: [
-        { title: "Prompting", icon: "MessagesSquare", id: "chatbots" },
-        { title: "RAG", icon: "Database", id: "rag" },
-        { title: "Agents", icon: "Bot", id: "agents" },
+        {
+          title: "Research & Analysis",
+          icon: "FileSearch",
+          id: "research-analysis",
+        },
       ],
     },
   ];

@@ -1,0 +1,41 @@
+<svg width="400" height="600" viewBox="0 0 400 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="400" y2="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1a1a3e"/>
+      <stop offset="30%" stop-color="#2d1b69"/>
+      <stop offset="60%" stop-color="#1b3a4b"/>
+      <stop offset="100%" stop-color="#0f2b1e"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="80" cy="150" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="320" cy="350" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow3" cx="200" cy="250" r="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#bg)"/>
+  <rect width="400" height="600" fill="url(#glow1)"/>
+  <rect width="400" height="600" fill="url(#glow2)"/>
+  <rect width="400" height="600" fill="url(#glow3)"/>
+  <!-- Pipeline flow lines -->
+  <path d="M60 180 Q200 160 340 200 Q200 240 60 280 Q200 320 340 360 Q200 400 60 440" stroke="rgba(255,255,255,0.06)" stroke-width="1" fill="none"/>
+  <path d="M80 160 Q220 140 360 180 Q220 220 80 260 Q220 300 360 340 Q220 380 80 420" stroke="rgba(255,255,255,0.04)" stroke-width="1" fill="none"/>
+  <!-- Stage nodes -->
+  <circle cx="120" cy="200" r="4" fill="rgba(99,102,241,0.6)"/>
+  <circle cx="200" cy="300" r="4" fill="rgba(168,85,247,0.6)"/>
+  <circle cx="280" cy="400" r="4" fill="rgba(34,197,94,0.6)"/>
+  <!-- Connecting dots -->
+  <circle cx="160" cy="240" r="2" fill="rgba(255,255,255,0.15)"/>
+  <circle cx="240" cy="340" r="2" fill="rgba(255,255,255,0.15)"/>
+  <!-- Subtle grid -->
+  <line x1="0" y1="200" x2="400" y2="200" stroke="rgba(255,255,255,0.02)" stroke-width="1"/>
+  <line x1="0" y1="300" x2="400" y2="300" stroke="rgba(255,255,255,0.02)" stroke-width="1"/>
+  <line x1="0" y1="400" x2="400" y2="400" stroke="rgba(255,255,255,0.02)" stroke-width="1"/>
+  <line x1="200" y1="0" x2="200" y2="600" stroke="rgba(255,255,255,0.02)" stroke-width="1"/>
+</svg>

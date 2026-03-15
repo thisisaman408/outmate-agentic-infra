@@ -621,7 +621,7 @@
             "legacy": false,
             "lf_version": "1.4.2",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1286,7 +1286,7 @@
   "last_tested_version": "1.4.3",
   "name": "SEO Keyword Generator",
   "tags": [
-    "chatbots",
-    "assistants"
+    "content-generation",
+    "research-analysis"
   ]
 }

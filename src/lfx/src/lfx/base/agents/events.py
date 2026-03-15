@@ -426,5 +426,10 @@ async def process_agent_events(
         # Final DB update with the complete message (skip_db_update=False by default)
         agent_message = await send_message_callback(message=agent_message)
     except Exception as e:
+        import logging as _logging
+        import traceback as _tb
+        _logging.getLogger("outmate.agent_events").error(
+            "Exception in process_agent_events: %s: %s\n%s", type(e).__name__, e, _tb.format_exc()
+        )
         raise ExceptionWithMessageError(agent_message, str(e)) from e
     return await Message.create(**agent_message.model_dump())

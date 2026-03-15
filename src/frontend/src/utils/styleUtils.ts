@@ -110,6 +110,7 @@ export const nodeColors: { [char: string]: string } = {
   Notion: "#000000",
   AssemblyAI: "#213ED7",
   assemblyai: "#213ED7",
+  gtm_agents: "#E85D04",
   helpers: "#31A3CC",
   prototypes: "#E6277A",
   astra_assistants: "#272541",
@@ -162,6 +163,7 @@ export const nodeColorsName: { [char: string]: string } = {
   Notion: "slate",
   AssemblyAI: "blue",
   assemblyai: "blue",
+  gtm_agents: "orange",
   helpers: "cyan",
   prototypes: "rose",
   astra_assistants: "indigo",
@@ -297,6 +299,7 @@ export const SIDEBAR_CATEGORIES = [
     icon: "ArrowRightLeft",
   },
   { display_name: "Utilities", name: "utilities", icon: "Wand2" },
+  { display_name: "GTM Agents", name: "gtm_agents", icon: "Rocket" },
 ];
 
 export const SIDEBAR_BUNDLES = [
@@ -344,6 +347,7 @@ export const categoryIcons: Record<string, string> = {
   vectorstores: "Layers",
   embeddings: "Binary",
   agents: "Bot",
+  gtm_agents: "Rocket",
   astra_assistants: "Sparkles",
   chains: "Link",
   documentloaders: "Paperclip",
@@ -372,6 +376,7 @@ export const nodeIconToDisplayIconMap: Record<string, string> = {
   vectorstores: "Layers",
   embeddings: "Binary",
   agents: "Bot",
+  gtm_agents: "Rocket",
   astra_assistants: "Sparkles",
   chains: "Link",
   documentloaders: "Paperclip",

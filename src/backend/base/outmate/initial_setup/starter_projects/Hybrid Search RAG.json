@@ -199,7 +199,7 @@
             "legacy": false,
             "lf_version": "1.6.0",
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -472,7 +472,7 @@
             "legacy": false,
             "lf_version": "1.6.0",
             "metadata": {
-              "code_hash": "3cda25c3f7b5",
+              "code_hash": "b6faff157c9b",
               "dependencies": {
                 "dependencies": [
                   {
@@ -661,7 +661,7 @@
             "legacy": false,
             "lf_version": "1.6.0",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -938,7 +938,7 @@
             "legacy": false,
             "lf_version": "1.6.0",
             "metadata": {
-              "code_hash": "3cda25c3f7b5",
+              "code_hash": "b6faff157c9b",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1153,7 +1153,7 @@
             "legacy": false,
             "lf_version": "1.6.0",
             "metadata": {
-              "code_hash": "058ca1f51e9f",
+              "code_hash": "e5acc5eef41b",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2779,10 +2779,7 @@
   "last_tested_version": "1.7.1",
   "name": "Hybrid Search RAG",
   "tags": [
-    "openai",
-    "astradb",
-    "rag",
-    "q-a",
-    "hybrid"
+    "data-enrichment",
+    "research-analysis"
   ]
 }

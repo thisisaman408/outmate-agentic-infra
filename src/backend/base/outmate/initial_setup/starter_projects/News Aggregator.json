@@ -206,12 +206,12 @@
             "legacy": false,
             "lf_version": "1.4.3",
             "metadata": {
-              "code_hash": "37de3210aed9",
+              "code_hash": "6504bb3f530e",
               "dependencies": {
                 "dependencies": [
                   {
                     "name": "httpx",
-                    "version": "0.28.1"
+                    "version": "0.27.2"
                   },
                   {
                     "name": "lfx",
@@ -573,7 +573,7 @@
             "legacy": false,
             "lf_version": "1.4.3",
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -876,7 +876,7 @@
             "legacy": false,
             "lf_version": "1.4.3",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1166,7 +1166,7 @@
             "last_updated": "2025-12-11T21:41:48.407Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "108da32d83f1",
+              "code_hash": "518cdb45e3cf",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1742,7 +1742,7 @@
             "last_updated": "2025-09-30T16:16:26.172Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "6d0e4842271e",
+              "code_hash": "e009d2a1026c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1767,11 +1767,11 @@
                   },
                   {
                     "name": "boto3",
-                    "version": "1.40.61"
+                    "version": "1.35.0"
                   },
                   {
                     "name": "googleapiclient",
-                    "version": "2.154.0"
+                    "version": "2.181.0"
                   }
                 ],
                 "total_dependencies": 7
@@ -2173,7 +2173,8 @@
   "last_tested_version": "1.6.0",
   "name": "News Aggregator",
   "tags": [
-    "web-scraping",
+    "prospect-research",
+    "research-analysis",
     "agents"
   ]
 }

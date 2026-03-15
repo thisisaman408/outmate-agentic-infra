@@ -281,7 +281,7 @@
             "icon": "MessagesSquare",
             "legacy": false,
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -555,7 +555,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -699,7 +699,7 @@
             "icon": "MessagesSquare",
             "legacy": false,
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -978,7 +978,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1115,7 +1115,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1252,7 +1252,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1389,7 +1389,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1526,7 +1526,7 @@
             "legacy": false,
             "lf_version": "1.0.19.post2",
             "metadata": {
-              "code_hash": "518f16485886",
+              "code_hash": "ee5992634171",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2370,7 +2370,7 @@
   "last_tested_version": "1.4.3",
   "name": "Twitter Thread Generator",
   "tags": [
-    "chatbots",
-    "content-generation"
+    "content-generation",
+    "email-outreach"
   ]
 }

@@ -274,13 +274,13 @@ class LCAgentComponent(Component):
                 on_token_callback,
             )
         except ExceptionWithMessageError as e:
+            logger.error(f"ExceptionWithMessageError: {e}")
             # Only delete message from database if it has an ID (was stored)
             if hasattr(e, "agent_message"):
                 msg_id = e.agent_message.get_id()
                 if msg_id:
                     await delete_message(id_=msg_id)
             await self._send_message_event(e.agent_message, category="remove_message")
-            logger.error(f"ExceptionWithMessageError: {e}")
             raise
         except Exception as e:
             # Log or handle any other exceptions
@@ -325,7 +325,7 @@ class LCToolsAgentComponent(LCAgentComponent):
         agent = self.create_agent_runnable()
         return AgentExecutor.from_agent_and_tools(
             agent=RunnableAgent(runnable=agent, input_keys_arg=["input"], return_keys_arg=["output"]),
-            tools=self.tools,
+            tools=self.tools or [],
             **self.get_agent_kwargs(flatten=True),
         )
 

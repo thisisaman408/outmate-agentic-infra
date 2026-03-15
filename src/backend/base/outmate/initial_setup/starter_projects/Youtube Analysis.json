@@ -268,7 +268,7 @@
                   },
                   {
                     "name": "googleapiclient",
-                    "version": "2.154.0"
+                    "version": "2.181.0"
                   },
                   {
                     "name": "lfx",
@@ -494,7 +494,7 @@
             "last_updated": "2025-12-22T21:08:01.050Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "108da32d83f1",
+              "code_hash": "518cdb45e3cf",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1440,7 +1440,7 @@
             "legacy": false,
             "lf_version": "1.4.3",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -1727,11 +1727,11 @@
                 "dependencies": [
                   {
                     "name": "pandas",
-                    "version": "2.2.3"
+                    "version": null
                   },
                   {
                     "name": "youtube_transcript_api",
-                    "version": "1.2.4"
+                    "version": null
                   },
                   {
                     "name": "lfx",
@@ -2192,7 +2192,7 @@
             "legacy": false,
             "lf_version": "1.4.3",
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2469,7 +2469,7 @@
             "last_updated": "2025-12-22T21:08:20.144Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "8b1ec3b03475",
+              "code_hash": "a00a7bba9a32",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2482,7 +2482,7 @@
                   },
                   {
                     "name": "langchain_core",
-                    "version": "0.3.83"
+                    "version": null
                   }
                 ],
                 "total_dependencies": 3
@@ -2907,7 +2907,8 @@
   "last_tested_version": "1.7.0",
   "name": "YouTube Analysis",
   "tags": [
+    "research-analysis",
     "agents",
-    "assistants"
+    "content-generation"
   ]
 }

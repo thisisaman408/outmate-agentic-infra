@@ -17,6 +17,7 @@ from lfx.base.models.google_generative_ai_constants import (
     GOOGLE_GENERATIVE_AI_EMBEDDING_MODELS_DETAILED,
     GOOGLE_GENERATIVE_AI_MODELS_DETAILED,
 )
+from lfx.base.models.groq_constants import GROQ_MODELS_DETAILED
 from lfx.base.models.model_metadata import MODEL_PROVIDER_METADATA, get_provider_param_mapping
 from lfx.base.models.model_utils import _to_str, replace_with_live_models
 from lfx.base.models.ollama_constants import OLLAMA_EMBEDDING_MODELS_DETAILED, OLLAMA_MODELS_DETAILED
@@ -39,6 +40,7 @@ _MODEL_CLASS_IMPORTS: dict[str, tuple[str, str, str | None]] = {
     ),
     "ChatOllama": ("langchain_ollama", "ChatOllama", None),
     "ChatWatsonx": ("langchain_ibm", "ChatWatsonx", None),
+    "ChatGroq": ("langchain_groq", "ChatGroq", None),
 }
 
 _EMBEDDING_CLASS_IMPORTS: dict[str, tuple[str, str, str | None]] = {
@@ -168,6 +170,7 @@ def get_models_detailed():
         OPENAI_EMBEDDING_MODELS_DETAILED,
         GOOGLE_GENERATIVE_AI_MODELS_DETAILED,
         GOOGLE_GENERATIVE_AI_EMBEDDING_MODELS_DETAILED,
+        GROQ_MODELS_DETAILED,
         OLLAMA_MODELS_DETAILED,
         OLLAMA_EMBEDDING_MODELS_DETAILED,
         WATSONX_MODELS_DETAILED,

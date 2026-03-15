@@ -135,7 +135,7 @@
             "legacy": false,
             "lf_version": "1.3.2",
             "metadata": {
-              "code_hash": "7a26c54d89ed",
+              "code_hash": "4bb2acde140c",
               "dependencies": {
                 "dependencies": [
                   {
@@ -413,7 +413,7 @@
             "legacy": false,
             "lf_version": "1.3.2",
             "metadata": {
-              "code_hash": "8c87e536cca4",
+              "code_hash": "a59aab980c40",
               "dependencies": {
                 "dependencies": [
                   {
@@ -708,7 +708,7 @@
                 "dependencies": [
                   {
                     "name": "httpx",
-                    "version": "0.28.1"
+                    "version": "0.27.2"
                   },
                   {
                     "name": "lfx",
@@ -1117,12 +1117,12 @@
             "legacy": false,
             "lf_version": "1.3.2",
             "metadata": {
-              "code_hash": "37de3210aed9",
+              "code_hash": "6504bb3f530e",
               "dependencies": {
                 "dependencies": [
                   {
                     "name": "httpx",
-                    "version": "0.28.1"
+                    "version": "0.27.2"
                   },
                   {
                     "name": "lfx",
@@ -1601,7 +1601,7 @@
             "last_updated": "2025-12-11T21:41:48.407Z",
             "legacy": false,
             "metadata": {
-              "code_hash": "108da32d83f1",
+              "code_hash": "518cdb45e3cf",
               "dependencies": {
                 "dependencies": [
                   {
@@ -2156,7 +2156,7 @@
   "last_tested_version": "1.4.3",
   "name": "Price Deal Finder",
   "tags": [
-    "web-scraping",
+    "research-analysis",
     "agents"
   ]
 }
