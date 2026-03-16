@@ -14,6 +14,7 @@ import uuid
 from app.db.session import SessionLocal
 from app.services.search_service import SearchService
 from app.services.bettercontact_service import BetterContactService
+from app.services.contactout_service import ContactOutService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class AiAgentsService:
             logger.warning("TAVILY_API_KEY not found in environment. Tavily-based search will fail.")
         self.explorium = ExploriumService()
         self.better_contact = BetterContactService()
+        self.contact_out = ContactOutService()
         self.seed_domain_lookup = {
             "stripe": "stripe.com",
             "airbnb": "airbnb.com",
@@ -1379,7 +1381,13 @@ class AiAgentsService:
             "customScore": 0-100,
             "intentSignal": "High | Medium | Low",
             "confidence": 0-100,
-            "reasoning": "string"
+            "reasoning": "string",
+            "contact": {{
+              "name": "Full Name",
+              "title": "Job Title",
+              "email": "guessed.email@domain.com",
+              "linkedin": "https://linkedin.com/in/..."
+            }}
           }}
         }}
         """
@@ -1429,9 +1437,10 @@ class AiAgentsService:
                     prospect_svc = ProspectSearchService(api_key=app_settings.CRUSTDATA_API_KEY)
                     prospect_res = await prospect_svc.search(
                         company=name,
+                        domain=target.get("domain") or "",
                         seniority_levels=["Director", "VP", "CXO", "Founder", "Owner", "Partner"],
                         seniority_operator="in",
-                        limit=3,
+                        limit=5,
                     )
                     profiles = prospect_res.get("profiles", [])
                     
@@ -1447,15 +1456,37 @@ class AiAgentsService:
                                 logger.info(f"Parallel enrichment for {p_name}")
                                 first = p.get("first_name") or (p_name.split()[0] if p_name else "")
                                 last = p.get("last_name") or (p_name.split()[-1] if p_name and " " in p_name else "")
-                                enriched = await self.better_contact.enrich_prospect(
+                                
+                                # Task A: BetterContact
+                                bc_task = self.better_contact.enrich_prospect(
                                     first_name=first,
                                     last_name=last,
                                     company_name=name,
                                     company_domain=target.get("domain") or "",
                                     linkedin_url=p_linkedin
                                 )
-                                if enriched.get("success") and enriched.get("email"):
-                                    p_email = enriched["email"]
+                                
+                                # Task B: ContactOut Reveal (if LinkedIn available)
+                                co_task = None
+                                if p_linkedin and "/in/" in p_linkedin:
+                                    co_task = self.contact_out.reveal_contact_info(p_linkedin)
+                                
+                                # Wait for both with a competitive timeout
+                                results = await asyncio.gather(bc_task, co_task) if co_task else [await bc_task]
+                                
+                                # 1. Check BetterContact result
+                                bc_res = results[0]
+                                if bc_res.get("success") and bc_res.get("email"):
+                                    p_email = bc_res["email"]
+                                
+                                # 2. Fallback to ContactOut if still missing
+                                if not p_email and len(results) > 1:
+                                    co_res = results[1]
+                                    emails = co_res.get("sanitized_emails") or []
+                                    if emails:
+                                        p_email = emails[0]
+                                        logger.info(f"ContactOut found email for {p_name}: {p_email}")
+                                        
                             except Exception as e:
                                 logger.warning(f"Enrichment task failed for {p_name}: {e}")
                         

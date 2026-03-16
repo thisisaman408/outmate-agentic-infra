@@ -94,6 +94,7 @@ class ProspectSearchService:
 
         # NEW: Company filter
         company: Optional[str] = None,
+        domain: Optional[str] = None,
         
         # NEW: Employees filter
         employees: Optional[List[str]] = None,
@@ -173,6 +174,7 @@ class ProspectSearchService:
             profile_languages=profile_languages,
             # NEW: Company filter
             company=company,
+            domain=domain,
             # NEW: Employees filter
             employees=employees
         )
