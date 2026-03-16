@@ -19,14 +19,15 @@
 
     function track() {
         // Collect basic data
-        const data = new FormData();
-        data.append('url', window.location.href);
-        data.append('referrer', document.referrer || '');
+        const params = new URLSearchParams();
+        params.append('url', window.location.href);
+        params.append('referrer', document.referrer || '');
+        params.append('pixel_key', PIXEL_KEY);
         
         // Include identity if previously set via outmate.identify()
         const savedEmail = localStorage.getItem('outmate_visitor_email');
         if (savedEmail) {
-            data.append('email', savedEmail);
+            params.append('email', savedEmail);
         }
 
         // Use fetch with keepalive to ensure tracking completes on page unload if needed
@@ -35,11 +36,16 @@
             key: PIXEL_KEY,
             email: savedEmail || 'anonymous'
         });
+
         fetch(TRACK_URL, {
             method: 'POST',
-            body: data,
+            body: params,
             mode: 'cors',
-            keepalive: true
+            keepalive: true,
+            headers: {
+                // Explicitly set content-type for URLSearchParams compatibility
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
         }).then(res => {
             console.log('Outmate Pixel: Track response status:', res.status);
             return res.json();

@@ -239,43 +239,64 @@ async def get_pixel():
 
 
 @public_router.post("/track")
-async def track_visitor(
-    request: Request,
-    url: str = Form(...),
-    referrer: Optional[str] = Form(None),
-    pixel_key: Optional[str] = Form(None),
-    email: Optional[str] = Form(None),
-    user_agent: Optional[str] = Header(None),
-    x_forwarded_for: Optional[str] = Header(None),
-    x_pixel_key: Optional[str] = Header(None, alias="X-Pixel-Key"),
-):
+async def track_visitor(request: Request):
+    """
+    Robust tracking endpoint that accepts both Form and JSON data
+    delivered via 다양한 (various) cross-origin methods.
+    """
     try:
-        # Support both new form-based key and legacy header-based key
-        active_pixel_key = pixel_key or x_pixel_key
-        if not active_pixel_key:
-            raise HTTPException(status_code=400, detail="Missing pixel key (form or header)")
+        # 1. Extract Headers
+        user_agent = request.headers.get("user-agent", "Unknown")
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        x_pixel_key = request.headers.get("x-pixel-key") # Case-insensitive check
         
-        # 1. Validate Pixel Key (DB call with timeout)
+        # 2. Extract Body (Try Form first, then JSON)
+        data = {}
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type:
+            try:
+                data = await request.json()
+            except Exception:
+                pass
+        else:
+            try:
+                form = await request.form()
+                data = dict(form)
+            except Exception:
+                pass
+
+        # 3. Consolidate Fields
+        url = data.get("url")
+        referrer = data.get("referrer")
+        pixel_key = data.get("pixel_key") or x_pixel_key
+        email = data.get("email")
+
+        if not url:
+            # We need a URL to track. If truly missing, we return 400 not 422.
+            return JSONResponse(status_code=400, content={"error": "Missing url"})
+        if not pixel_key:
+            return JSONResponse(status_code=400, content={"error": "Missing pixel key"})
+        
+        # 4. Validate Pixel Key
         def _validate_key():
             db = SessionLocal()
             try:
-                return db.query(SiteConfig).filter(SiteConfig.pixel_key == active_pixel_key).first()
+                return db.query(SiteConfig).filter(SiteConfig.pixel_key == pixel_key).first()
             finally:
                 db.close()
         
         site_config = await _run_db(_validate_key)
         if not site_config:
-            raise HTTPException(status_code=401, detail="Invalid pixel key")
+            return JSONResponse(status_code=401, content={"error": "Invalid pixel key"})
 
-        # 2. Get IP and User-Agent
-        forwarded = x_forwarded_for or request.headers.get("x-forwarded-for")
-        ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
-        ua = user_agent or request.headers.get("user-agent", "Unknown")
+        # 5. Geolocation / IP
+        ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (request.client.host if request.client else "127.0.0.1")
         
-        # 3. Calculate Intent Score
+        # 6. Intent Score
         intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]) else 0.5
         
-        # 4. Redis Deduplication (1 hour) — skipped if email is present to ensure identity updates
+        # 7. Redis Deduplication (Skip if identified)
         if not email:
             try:
                 dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
@@ -290,14 +311,14 @@ async def track_visitor(
             except Exception as e:
                 logger.warning(f"Redis deduplication failed: {e}")
 
-        # 5. Process Visitor (Async via Celery)
+        # 8. Process Visitor (Async via Celery)
         from app.tasks.visitors import process_visitor_task, _process_visitor_data
-
+        
         payload = {
             "ip": ip,
             "url": url,
             "referrer": referrer,
-            "user_agent": ua,
+            "user_agent": user_agent,
             "intent_score": intent_score,
             "email": email,
         }
