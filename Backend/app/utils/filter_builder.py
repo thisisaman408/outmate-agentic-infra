@@ -68,6 +68,7 @@ class ProspectFilterBuilder:
         # NEW: Profile Language filter
         profile_languages: Optional[List[str]] = None,
         company: Optional[str] = None,
+        domain: Optional[str] = None,
         employees: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
@@ -150,6 +151,12 @@ class ProspectFilterBuilder:
             company_filter = self._build_company_filter(company.strip())
             conditions.append(company_filter)
             logger.debug(f"Added company filter: '{company.strip()}'")
+            
+        # Build domain filter
+        if domain and domain.strip():
+            domain_filter = self._build_domain_filter(domain.strip())
+            conditions.append(domain_filter)
+            logger.debug(f"Added domain filter: '{domain.strip()}'")
             
         # Build employees filter
         if employees and len(employees) > 0:
@@ -578,6 +585,18 @@ class ProspectFilterBuilder:
             "column": "current_employers.company_headcount_range",
             "type": "in",
             "value": unique_values
+        }
+
+    def _build_domain_filter(self, domain: str) -> Dict[str, Any]:
+        """
+        Build domain filter using current_employers.website column.
+        """
+        if not domain:
+            return {}
+        return {
+            "column": "current_employers.website",
+            "type": "(.)",
+            "value": domain
         }
 
     # Future filter methods can be added here following the same pattern:
