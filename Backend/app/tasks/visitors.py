@@ -152,11 +152,7 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
                     headquarters_city=(res.get("geo") or {}).get("city") if isinstance(res.get("geo"), dict) else None,
                     headquarters_country=(res.get("geo") or {}).get("country") if isinstance(res.get("geo"), dict) else None,
                 )
-    except Exception as e:
-        logger.warning(f"Company match/create failed: {e}")
-
-    # Prioritize 'prospect' only for personal emails (gmail, etc.)
-    # If it's a work email, treat it as a 'company' visit as per user preference
+    # MANDATORY: If we have a personal email, this is a PROSPECT visit.
     if email and is_personal_email(email):
         res["category"] = "prospect"
         res["matched_entity"] = "prospect"
@@ -165,7 +161,17 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
             "email": matched_prospect.email if matched_prospect else email,
             "full_name": matched_prospect.full_name if matched_prospect else res.get("full_name"),
         }
-    elif domain or (email and not is_personal_email(email)):
+        # Even if it's a prospect, we can still link them to the company identified by IP
+        if matched_company:
+            res["matched_company"] = {
+                "id": str(matched_company.id) if getattr(matched_company, "id", None) else None,
+                "domain": getattr(matched_company, "domain", None) or domain,
+                "name": getattr(matched_company, "name", None) or company_name or domain,
+            }
+        return res
+
+    # Otherwise, if we have a domain or work email, it's a COMPANY visit
+    if domain or (email and not is_personal_email(email)):
         res["category"] = "company"
         res["matched_entity"] = "company"
         res["matched_company"] = {
@@ -174,7 +180,6 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
             "name": getattr(matched_company, "name", None) or company_name or domain,
         }
         if matched_prospect:
-            # Still record that we know WHICH person from that company visited
             res["matched_prospect"] = {
                 "id": str(matched_prospect.id),
                 "email": matched_prospect.email,
