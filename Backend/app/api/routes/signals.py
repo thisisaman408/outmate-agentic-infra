@@ -192,11 +192,13 @@ class CreateSignalRequest(BaseModel):
     category: Optional[str] = None
 
 
+@router.get("")
 @router.get("/")
 async def list_signals():
     return sorted(SIGNAL_STORE, key=lambda s: s.get("created_at", ""), reverse=True)
 
 
+@router.post("")
 @router.post("/")
 async def create_signal(request: CreateSignalRequest):
     new_signal = {

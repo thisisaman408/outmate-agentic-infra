@@ -63,22 +63,6 @@ const parsePerplexityPayload = (details?: string) => {
   return null
 }
 
-const extractPerplexityReason = (details?: string, preExtractedReason?: string) => {
-  if (preExtractedReason && preExtractedReason.trim()) return preExtractedReason.trim()
-  const payload = parsePerplexityPayload(details)
-  if (payload && typeof payload.reason === "string" && payload.reason.trim()) {
-    return payload.reason.trim()
-  }
-  if (!details) return null
-  const cleaned = cleanPerplexityJson(details)
-  if (cleaned && cleaned.length < details.trim().length) {
-    if (cleaned.startsWith("[") || cleaned.startsWith("{")) return null
-    return cleaned.trim()
-  }
-  if (details.trim().startsWith("[") || details.trim().startsWith("{")) return null
-  return details.trim()
-}
-
 function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const [messages, setMessages] = useState<string[]>([])
   const allMessages = [
@@ -145,7 +129,6 @@ export function AgenticSearchPanel() {
     ? results.find((result, idx) => getCardKey(result, idx) === activeRecordId)
     : null
   const activePerplexityPayload = activeRecord ? parsePerplexityPayload(activeRecord.perplexityDetails) : null
-  const activePerplexityReason = activeRecord ? extractPerplexityReason(activeRecord.perplexityDetails, activeRecord.perplexityReason) : null
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -340,7 +323,6 @@ export function AgenticSearchPanel() {
                 const locationLabel = (result.location || perplexityPayload?.location)?.trim() || "Location not specified"
                 const reasonText = result.reason?.trim() || "No reasoning provided yet."
                 const industryLabel = result.industry || "Industry Unknown"
-                const perplexityReason = extractPerplexityReason(result.perplexityDetails, result.perplexityReason)
                 const initialLetter = (companyName.charAt(0) || "?").toUpperCase()
                 const engagedHref = rawEmail.includes("@") ? `mailto:${rawEmail}` : undefined
 
@@ -393,12 +375,6 @@ export function AgenticSearchPanel() {
                                 <span className="font-black text-[10px] uppercase tracking-widest mr-2 opacity-50">Agent Reasoning:</span>
                                 {reasonText}
                               </p>
-                            {perplexityReason && (
-                              <p className="mt-3 text-xs text-blue-100 leading-relaxed line-clamp-3">
-                                <span className="font-bold uppercase tracking-[0.3em] text-white/70 mr-2">Perplexity:</span>
-                                {perplexityReason}
-                              </p>
-                            )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-8 py-2 border-y border-white/5">
@@ -463,9 +439,6 @@ export function AgenticSearchPanel() {
               </div>
               <h3 className="text-xl font-bold">{activeRecord.companyName || "Unnamed company"}</h3>
               <p className="text-sm text-muted-foreground line-clamp-3">{activeRecord.reason}</p>
-              {activePerplexityReason && (
-                <p className="text-sm text-blue-100 line-clamp-3">{activePerplexityReason}</p>
-              )}
             </motion.div>
           )}
           {!isSearching && results.length === 0 && (

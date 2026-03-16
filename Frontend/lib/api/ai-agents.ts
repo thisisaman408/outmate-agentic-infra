@@ -69,12 +69,20 @@ export interface PredictiveScore {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+function getHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 export const aiAgentsApi = {
   // Agentic Search Agent
   searchProspects: async (query: string): Promise<AgenticSearchResult[]> => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ query }),
     });
     if (!response.ok) throw new Error('Failed to search prospects');
@@ -85,7 +93,7 @@ export const aiAgentsApi = {
   findLookalikeCompanies: async (seedCompanyIds: string[]): Promise<LookalikeResult[]> => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/lookalike`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ seedCompanyIds }),
     });
     if (!response.ok) throw new Error('Failed to find lookalikes');
@@ -96,7 +104,7 @@ export const aiAgentsApi = {
   researchCompany: async (companyName: string, depth: "quick" | "standard" | "deep"): Promise<ResearchResult> => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/research`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ companyName, depth }),
     });
     if (!response.ok) throw new Error('Failed to research company');
@@ -107,7 +115,7 @@ export const aiAgentsApi = {
   scoreLeads: async (company: { name: string; domain?: string; industry?: string; country?: string }): Promise<PredictiveScore[]> => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/predictive`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ company }),
     });
     if (!response.ok) {
@@ -125,7 +133,7 @@ export const aiAgentsApi = {
   addPipelineCompany: async (payload: { companyId: string; companyName: string; contactName?: string; similarityScore?: number }) => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/pipeline`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify(payload),
     })
     if (!response.ok) throw new Error('Failed to add company to pipeline')

@@ -105,47 +105,292 @@ function ProspectsPageContent() {
   }
 
     const handleProspectImport = async (records: Record<string, string>[]) => {
-    if (!records.length) {
-      toast({
-        title: "Empty file",
-        description: "CSV must include at least one row with filter columns.",
-        variant: "destructive"
-      })
-      return
-    }
+        if (!records.length) {
+            toast({
+                title: "Empty file",
+                description: "CSV/Excel must include at least one row with filter columns.",
+                variant: "destructive"
+            })
+            return
+        }
 
-    const filters = normalizeCsvRecord(records[0])
-    setCurrentFilters(filters as ProspectSearchFilters)
-    setProfiles([])
-    setError(null)
-    setHasSearched(false)
-    setIsSearching(true)
-    setIsImporting(true)
+        // --- Detect if file contains actual prospect data (not filters) ---
+        const headers = Object.keys(records[0]).map(h => h.toLowerCase().trim())
+        const prospectDataHeaders = ["email", "emails", "linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url", "headline", "summary", "skills", "twitter", "twitter_handle", "phone", "connections", "num_of_connections"]
+        const nameHeaders = ["name", "full_name", "full name", "first_name", "first name", "firstname", "last_name", "last name", "lastname"]
+        const hasProspectData = headers.some(h => prospectDataHeaders.includes(h))
+        const hasNames = headers.some(h => nameHeaders.includes(h))
 
-    try {
-      const response = await searchProspects({ ...filters, limit: INITIAL_LIMIT })
-      const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
-      setProfiles(limitedProfiles)
-      setTotalCount(response.total_count)
-      setNextCursor(response.next_cursor)
-      setHasSearched(true)
-      toast({
-        title: "Import complete",
-        description: `Imported ${limitedProfiles.length} prospects from CSV filters.`
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to import CSV filters."
-      setError(message)
-      toast({
-        title: "Import failed",
-        description: message,
-        variant: "destructive"
-      })
-    } finally {
-      setIsSearching(false)
-      setIsImporting(false)
+        if (hasProspectData && hasNames && records.length > 1) {
+            // Direct population: treat imported rows as prospect data
+            const colMap: Record<string, string> = {}
+            for (const h of Object.keys(records[0])) {
+                const low = h.toLowerCase().trim()
+                if (["name", "full_name", "full name"].includes(low)) colMap[h] = "name"
+                else if (["first_name", "first name", "firstname"].includes(low)) colMap[h] = "first_name"
+                else if (["last_name", "last name", "lastname", "surname"].includes(low)) colMap[h] = "last_name"
+                else if (["email", "emails"].includes(low)) colMap[h] = "emails"
+                else if (["linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url"].includes(low)) colMap[h] = "linkedin_profile_url"
+                else if (["headline", "title", "job_title", "job title"].includes(low)) colMap[h] = "headline"
+                else if (["company", "company_name", "employer", "current_company"].includes(low)) colMap[h] = "company"
+                else if (["location", "region", "city"].includes(low)) colMap[h] = "region"
+                else if (["industry"].includes(low)) colMap[h] = "industry"
+                else if (["skills"].includes(low)) colMap[h] = "skills"
+                else if (["twitter", "twitter_handle"].includes(low)) colMap[h] = "twitter_handle"
+                else if (["phone"].includes(low)) colMap[h] = "phone"
+                else if (["summary", "bio", "about"].includes(low)) colMap[h] = "summary"
+                else if (["connections", "num_of_connections"].includes(low)) colMap[h] = "num_of_connections"
+            }
+
+            const imported: ProspectProfile[] = records.map((row, idx) => {
+                const mapped: any = {}
+                Object.entries(row).forEach(([k, v]) => {
+                    const field = colMap[k]
+                    if (field && v) mapped[field] = String(v).trim()
+                })
+                const firstName = mapped.first_name || ""
+                const lastName = mapped.last_name || ""
+                const fullName = mapped.name || [firstName, lastName].filter(Boolean).join(" ") || "Unknown"
+                const emails = mapped.emails ? (mapped.emails.includes(",") ? mapped.emails.split(",").map((e: string) => e.trim()) : [mapped.emails]) : []
+
+                return {
+                    person_id: idx + 1,
+                    name: fullName,
+                    first_name: firstName || fullName.split(" ")[0] || "",
+                    last_name: lastName || fullName.split(" ").slice(1).join(" ") || "",
+                    region: mapped.region || "",
+                    region_address_components: [],
+                    headline: mapped.headline || "",
+                    summary: mapped.summary || "",
+                    skills: mapped.skills ? mapped.skills.split(",").map((s: string) => s.trim()) : [],
+                    languages: [],
+                    linkedin_profile_url: mapped.linkedin_profile_url || "",
+                    flagship_profile_url: mapped.linkedin_profile_url || "",
+                    emails,
+                    profile_picture_url: "",
+                    profile_picture_permalink: "",
+                    twitter_handle: mapped.twitter_handle || "",
+                    num_of_connections: mapped.num_of_connections ? parseInt(mapped.num_of_connections) : 0,
+                    education_background: [],
+                    honors: [],
+                    certifications: [],
+                    current_employers: mapped.company ? [{ name: mapped.company, title: mapped.headline || "", start_date: "", end_date: "", industry: mapped.industry || "" }] : [],
+                    past_employers: [],
+                    last_updated: new Date().toISOString(),
+                    recently_changed_jobs: false,
+                    years_of_experience: "",
+                    years_of_experience_raw: 0,
+                    all_employers: [],
+                    updated_at: new Date().toISOString(),
+                    location_details: { city: "", state: "", country: "" },
+                } as ProspectProfile
+            }).filter(p => p.name !== "Unknown")
+
+            setProfiles(imported)
+            setTotalCount(imported.length)
+            setNextCursor(null)
+            setHasSearched(true)
+            setCurrentFilters({})
+            try { localStorage.setItem("prospect_search_results", JSON.stringify(imported)) } catch {}
+
+            toast({
+                title: "Import complete",
+                description: `Imported ${imported.length} prospect(s) directly from file.`,
+            })
+            return
+        }
+
+        // --- Otherwise, treat as filter data and search ---
+        // Alias mapping for header names → API filter keys
+        const aliasMap: Record<string, keyof ProspectSearchFilters> = {
+            // Titles
+            "current_title": "current_title",
+            "title": "current_title",
+            "job_title": "current_title",
+            "current job title": "current_title",
+            "past_title": "past_title",
+            "previous_title": "past_title",
+            // Location
+            "location": "location",
+            "locations": "location",
+            "region": "location",
+            "city": "location",
+            "state": "location",
+            "country": "location",
+            // Industry / Department / Seniority
+            "industry": "industry",
+            "industries": "industry",
+            "function": "functions",
+            "functions": "functions",
+            "department": "functions",
+            "dept": "functions",
+            "seniority": "seniority_level",
+            "seniority_level": "seniority_level",
+            // Person name
+            "name": "name",
+            "full_name": "name",
+            "first_name": "first_name",
+            "firstname": "first_name",
+            "first name": "first_name",
+            "given_name": "first_name",
+            "last_name": "last_name",
+            "lastname": "last_name",
+            "last name": "last_name",
+            "surname": "last_name",
+            // Languages
+            "languages": "profile_languages",
+            "language": "profile_languages",
+            "profile_languages": "profile_languages",
+            // Company & size
+            "company": "company",
+            "company_name": "company",
+            "employer": "company",
+            "employees": "employees",
+            "company_size": "employees",
+            "headcount": "employees",
+            "company size": "employees",
+            // Keyword
+            "keyword": "keyword",
+            "keywords": "keyword",
+            "query": "keyword",
+            "search": "keyword",
+        }
+
+        const ensureArray = (val: any): string[] => {
+            if (val == null) return []
+            if (Array.isArray(val)) return val.filter(Boolean)
+            const str = String(val).trim()
+            return str ? [str] : []
+        }
+
+        const arrayKeys: (keyof ProspectSearchFilters)[] = [
+            "current_title",
+            "past_title",
+            "location",
+            "industry",
+            "functions",
+            "seniority_level",
+            "profile_languages",
+            "employees",
+        ]
+
+        const mapRecordToFilters = (record: Record<string, string | string[]>): ProspectSearchFilters => {
+            const mapped: ProspectSearchFilters = {}
+            Object.entries(record).forEach(([k, v]) => {
+                const key = aliasMap[k.toLowerCase?.() || k]
+                if (!key) return
+                if (arrayKeys.includes(key)) {
+                    const arr = ensureArray(v)
+                    if (arr.length) {
+                        // @ts-ignore
+                        mapped[key] = arr
+                    }
+                } else if (key === "keyword") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.keyword = str
+                } else if (key === "name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.name = str
+                } else if (key === "first_name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.first_name = str
+                } else if (key === "last_name") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.last_name = str
+                } else if (key === "company") {
+                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
+                    if (str) mapped.company = str
+                }
+            })
+            if (mapped.seniority_level && !mapped.seniority_level_operator) {
+                mapped.seniority_level_operator = 'in'
+            }
+            return mapped
+        }
+
+        // Build filters per-row
+        const perRowFilters: ProspectSearchFilters[] = []
+        for (const row of records) {
+            const raw = normalizeCsvRecord(row)
+            const mapped = mapRecordToFilters(raw)
+            if (Object.keys(mapped).length > 0) perRowFilters.push(mapped)
+        }
+
+        if (perRowFilters.length === 0) {
+            toast({
+                title: "No recognized headers",
+                description: "CSV/Excel does not contain recognized filter columns. Supported: title/current_title, past_title, location, industry, function/department, seniority, first_name, last_name, languages, company, employees, keyword.",
+                variant: "destructive",
+            })
+            return
+        }
+
+        // If multiple rows, fetch one result per row to match row count and protect credits
+        const perRowLimit = perRowFilters.length > 1 ? 1 : INITIAL_LIMIT
+
+        setCurrentFilters({})
+        setProfiles([])
+        setEnrichedData({})
+        setError(null)
+        setHasSearched(false)
+        setIsSearching(true)
+        setIsImporting(true)
+
+        try {
+            const aggregated: ProspectProfile[] = []
+            const seen = new Set<string>()
+            let processed = 0
+            let success = 0
+
+            for (const f of perRowFilters) {
+                // Stop if we hit global max
+                if (aggregated.length >= MAX_RESULTS_LIMIT) break
+
+                try {
+                    const res = await searchProspects({ ...f, limit: perRowLimit })
+                    const rows = res.profiles.slice(0, perRowLimit)
+                    let added = 0
+                    for (const p of rows) {
+                        const key = String((p as any).person_id || p.linkedin_profile_url || p.flagship_profile_url || `${p.name}-${(p as any).current_employers?.[0]?.name || ''}`)
+                        if (!seen.has(key) && aggregated.length < MAX_RESULTS_LIMIT) {
+                            aggregated.push(p)
+                            seen.add(key)
+                            added++
+                        }
+                    }
+                    if (added > 0) success++
+                } catch (e) {
+                    // continue other rows
+                } finally {
+                    processed++
+                }
+            }
+
+            setProfiles(aggregated)
+            setTotalCount(aggregated.length)
+            setNextCursor(null)
+            setHasSearched(true)
+
+            // Persist to local storage for detail page access
+            try { localStorage.setItem("prospect_search_results", JSON.stringify(aggregated)) } catch {}
+
+            toast({
+                title: "Import complete",
+                description: `Processed ${processed} row(s); found ${aggregated.length} unique prospect(s).`,
+            })
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to import CSV filters."
+            setError(message)
+            toast({
+                title: "Import failed",
+                description: message,
+                variant: "destructive",
+            })
+        } finally {
+            setIsSearching(false)
+            setIsImporting(false)
+        }
     }
-  }
 
     // Restore search from history if historyId is in URL params
     useEffect(() => {
@@ -536,6 +781,7 @@ function ProspectsPageContent() {
                             onEnrichReveal={onEnrichReveal}
                             onWaterfallResult={handleWaterfallResult}
                             enrichCache={enrichedData}
+                            tableId="prospects_v2"
                         />
                     ) : hasSearched ? (
                         <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">

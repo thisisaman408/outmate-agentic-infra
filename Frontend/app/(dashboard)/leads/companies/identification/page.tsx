@@ -82,7 +82,8 @@ export default function CompanyIdentificationPage() {
         return
       }
 
-      const response = await fetch('http://localhost:8000/api/v1/crustdata/identify', {
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${API}/api/v1/crustdata/identify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -134,7 +135,7 @@ export default function CompanyIdentificationPage() {
       <div className="flex items-center gap-3">
         <Building2 className="h-8 w-8 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Company Identification API</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Company Identification</h1>
           <p className="text-muted-foreground">Identify companies using various identifiers</p>
         </div>
       </div>

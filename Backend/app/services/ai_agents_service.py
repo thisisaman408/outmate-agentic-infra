@@ -13,6 +13,7 @@ import asyncio
 import uuid
 from app.db.session import SessionLocal
 from app.services.search_service import SearchService
+from app.services.bettercontact_service import BetterContactService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class AiAgentsService:
         if not self.tavily_api_key:
             logger.warning("TAVILY_API_KEY not found in environment. Tavily-based search will fail.")
         self.explorium = ExploriumService()
+        self.better_contact = BetterContactService()
         self.seed_domain_lookup = {
             "stripe": "stripe.com",
             "airbnb": "airbnb.com",
@@ -1418,41 +1420,138 @@ class AiAgentsService:
                     if not fallback_signals:
                         fallback_signals.append({"name": "Behavioral opportunity signal", "impact": "positive"})
                 company_domain = format_domain(target.get("domain"))
-                email_slug = slugify(target.get("name"))
-                profile_slug = slugify(target.get("name"))
-                contact_info = summary.get("contact") or {}
-                profile_link = (
-                    summary.get("profileLink")
-                    or summary.get("profileUrl")
-                    or contact_info.get("profileUrl")
-                    or contact_info.get("linkedin")
-                )
-                email_address = (
-                    summary.get("email")
-                    or summary.get("contactEmail")
-                    or contact_info.get("email")
-                    or contact_info.get("workEmail")
-                    or contact_info.get("personalEmail")
-                )
 
-                payload = {
-                    "id": str(uuid.uuid4()),
-                    "companyId": target.get("domain"),
-                    "companyName": target.get("name"),
-                    "contactName": target.get("name"),
-                    "title": "Predicted Champion",
-                    "email": email_address,
-                    "profileLink": profile_link,
-                    "score": summary.get("customScore") or 0,
-                    "conversionLikelihood": summary.get("confidence") or 0,
-                    "confidence": min(max((summary.get("confidence") or 0) / 100, 0), 1),
-                    "prediction": summary.get("intentSignal") or "Medium",
-                    "factors": fallback_signals,
-                    "guidance": summary.get("reasoning") or parsed.get("reasoning") or "",
-                    "recommendation": "Execute outreach with predictive confidence."
-                }
-                logger.info("Received predictive score payload from OpenRouter")
-                return [payload]
+                # --- Real contact lookup via CrustData prospect search ---
+                real_contacts = []
+                try:
+                    from app.services.crustdata.prospect_search_service import ProspectSearchService
+                    from app.core.config import settings as app_settings
+                    prospect_svc = ProspectSearchService(api_key=app_settings.CRUSTDATA_API_KEY)
+                    prospect_res = await prospect_svc.search(
+                        company=name,
+                        seniority_levels=["Director", "VP", "CXO", "Founder", "Owner", "Partner"],
+                        seniority_operator="in",
+                        limit=3,
+                    )
+                    profiles = prospect_res.get("profiles", [])
+                    
+                    async def enrich_single_prospect(p):
+                        p_name = p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                        p_title = p.get("headline") or ""
+                        p_linkedin = p.get("linkedin_profile_url") or p.get("flagship_profile_url") or ""
+                        p_emails = p.get("emails") or []
+                        p_email = p_emails[0] if p_emails else ""
+
+                        if not p_email and (p_name or p_linkedin):
+                            try:
+                                logger.info(f"Parallel enrichment for {p_name}")
+                                first = p.get("first_name") or (p_name.split()[0] if p_name else "")
+                                last = p.get("last_name") or (p_name.split()[-1] if p_name and " " in p_name else "")
+                                enriched = await self.better_contact.enrich_prospect(
+                                    first_name=first,
+                                    last_name=last,
+                                    company_name=name,
+                                    company_domain=target.get("domain") or "",
+                                    linkedin_url=p_linkedin
+                                )
+                                if enriched.get("success") and enriched.get("email"):
+                                    p_email = enriched["email"]
+                            except Exception as e:
+                                logger.warning(f"Enrichment task failed for {p_name}: {e}")
+                        
+                        return {
+                            "name": p_name,
+                            "title": p_title,
+                            "email": p_email,
+                            "linkedin": p_linkedin,
+                        }
+
+                    # Execute all enrichments in parallel
+                    real_contacts = await asyncio.gather(*(enrich_single_prospect(p) for p in profiles))
+                    logger.info(f"Parallel processing finished for {len(real_contacts)} contacts")
+                except Exception as e:
+                    logger.warning(f"Prospect lookup/enrichment failed for {name}: {e}")
+
+                # --- Fallback: If no emails found across all contacts, try BetterContact Lead Finder ---
+                has_emails = any(c.get("email") for c in real_contacts) if real_contacts else False
+                if not has_emails:
+                    try:
+                        logger.info(f"No emails found via search for {name}, trying BetterContact Lead Finder fallback")
+                        enriched_company = await self.better_contact.enrich_company(
+                            company_name=name,
+                            company_domain=target.get("domain") or ""
+                        )
+                        if enriched_company.get("success") and enriched_company.get("email"):
+                            real_contacts.append({
+                                "name": enriched_company.get("contact_name") or "Decision Maker",
+                                "title": enriched_company.get("contact_title") or "Key Stakeholder",
+                                "email": enriched_company.get("email"),
+                                "linkedin": enriched_company.get("linkedin_url") or "",
+                            })
+                            logger.info(f"Lead Finder fallback successful: {enriched_company.get('email')}")
+                    except Exception as cf_err:
+                        logger.warning(f"BetterContact lead finder fallback failed for {name}: {cf_err}")
+
+                # Build result payloads — one per real contact, or a single fallback
+                base_score = summary.get("customScore") or 0
+                base_confidence = min(max((summary.get("confidence") or 0) / 100, 0), 1)
+                base_prediction = summary.get("intentSignal") or "Medium"
+                base_guidance = summary.get("reasoning") or parsed.get("reasoning") or ""
+
+                results = []
+                if real_contacts:
+                    for i, contact in enumerate(real_contacts):
+                        results.append({
+                            "id": str(uuid.uuid4()),
+                            "companyId": target.get("domain") or name,
+                            "companyName": name,
+                            "contactName": contact["name"] or name,
+                            "title": contact["title"] or "Decision Maker",
+                            "email": contact["email"] or "",
+                            "profileLink": contact["linkedin"] or "",
+                            "score": max(base_score - (i * 5), 10),
+                            "conversionLikelihood": summary.get("confidence") or 0,
+                            "confidence": base_confidence,
+                            "prediction": base_prediction,
+                            "factors": fallback_signals,
+                            "guidance": base_guidance,
+                            "recommendation": "Execute outreach with predictive confidence."
+                        })
+                else:
+                    # Fallback: no real contacts found
+                    contact_info = summary.get("contact") or {}
+                    profile_link = (
+                        summary.get("profileLink")
+                        or summary.get("profileUrl")
+                        or contact_info.get("profileUrl")
+                        or contact_info.get("linkedin")
+                    )
+                    email_address = (
+                        summary.get("email")
+                        or summary.get("contactEmail")
+                        or contact_info.get("email")
+                        or contact_info.get("workEmail")
+                        or contact_info.get("personalEmail")
+                    )
+                    results.append({
+                        "id": str(uuid.uuid4()),
+                        "companyId": target.get("domain") or name,
+                        "companyName": name,
+                        "contactName": name,
+                        "title": "Predicted Champion",
+                        "email": email_address or "",
+                        "profileLink": profile_link or "",
+                        "score": base_score,
+                        "conversionLikelihood": summary.get("confidence") or 0,
+                        "confidence": base_confidence,
+                        "prediction": base_prediction,
+                        "factors": fallback_signals,
+                        "guidance": base_guidance,
+                        "recommendation": "Execute outreach with predictive confidence."
+                    })
+
+                logger.info(f"Returning {len(results)} predictive score(s) for {name}")
+                return results
         except HTTPException:
             raise
         except Exception as e:

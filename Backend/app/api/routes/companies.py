@@ -3,8 +3,9 @@ Company search API endpoints
 RESTful, well-documented, with comprehensive error handling
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 import logging
+from sqlalchemy.orm import Session
 
 from app.schemas.company_filters import (
     CompanySearchRequest,
@@ -14,6 +15,9 @@ from app.schemas.company_filters import (
 from app.services.crustdata.company_search_service import CompanySearchService
 from app.services.crustdata.base_crustdata_client import CrustDataAPIError
 from app.core.config import settings
+from app.db.deps import get_db
+from app.db.models.company import Company
+from app.db.repositories.company_repository import CompanyRepository
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ router = APIRouter(
     """,
     response_description="Successful search with company profiles"
 )
-async def search_companies(request: CompanySearchRequest):
+async def search_companies(request: CompanySearchRequest, db: Session = Depends(get_db)):
     """
     Search for companies with comprehensive error handling
     """
@@ -122,7 +126,27 @@ async def search_companies(request: CompanySearchRequest):
                 "total_available": result.get("total_count", 0)
             }
         )
-        
+
+        # Persist results to DB
+        try:
+            for company in result.get("companies", []):
+                domain = (company.get("company_domain") or company.get("domain") or "").strip().lower()
+                if not domain:
+                    continue
+                CompanyRepository.create_or_update(
+                    db=db,
+                    domain=domain,
+                    raw_data=company,
+                    provider_source="crustdata",
+                    name=company.get("company_name") or company.get("name"),
+                    website=company.get("company_website") or company.get("website"),
+                    industry=company.get("company_linkedin_industry") or company.get("industry"),
+                    employee_count_range=company.get("headcount_range") or company.get("employee_count_range"),
+                    linkedin_url=company.get("company_linkedin_profile_url") or company.get("linkedin_url"),
+                )
+        except Exception:
+            logger.exception("Failed to persist company search results to DB")
+
         # Return response
         return CompanySearchResponse(
             companies=result.get("companies", []),
@@ -214,7 +238,57 @@ async def get_companies_info():
         "version": getattr(settings, "APP_VERSION", "1.0.0"),
         "endpoints": {
             "search": "/api/companies/search (POST)",
+            "db": "/api/companies/db (GET)",
             "health": "/api/companies/health (GET)"
         },
         "documentation": "/docs"
     }
+
+
+@router.get(
+    "/db",
+    status_code=status.HTTP_200_OK,
+    summary="Get companies from local DB",
+    description="Returns companies stored in the database (enrichment cache)."
+)
+async def list_db_companies(
+    limit: int = Query(3, ge=1, le=50, description="Number of companies to return"),
+    db: Session = Depends(get_db),
+):
+    try:
+        companies = (
+            db.query(Company)
+            .order_by(Company.updated_at.desc(), Company.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        payload = []
+        for c in companies:
+            payload.append(
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "domain": c.domain,
+                    "website": c.website,
+                    "industry": c.industry,
+                    "employee_count": c.employee_count_exact or c.employee_count_range,
+                    "revenue": c.revenue_exact or c.revenue_range,
+                    "location": {
+                        "country": c.headquarters_country,
+                        "state": c.headquarters_state,
+                        "city": c.headquarters_city,
+                    },
+                    "technologies": c.technologies or [],
+                    "linkedin_url": c.linkedin_url,
+                    "quality_score": c.data_quality_score or 50,
+                }
+            )
+
+        return {"success": True, "data": {"companies": payload}}
+    except Exception:
+        logger.exception("Failed to load companies from DB")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load companies from database.",
+        )

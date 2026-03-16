@@ -14,6 +14,7 @@ from app.services.filter_mapping_service import FilterMappingService
 from app.services.explorium_service import ExploriumService
 from app.db.models.user import User
 from app.db.models.credit import CreditTransaction
+from app.db.repositories.company_repository import CompanyRepository
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,8 @@ class SearchService:
         if companies_returned > 0 and user_id:
             self._deduct_credits(user_id, companies_returned)
             print(f">>> Deducted {companies_returned} credits", flush=True)
+        if companies_returned > 0:
+            self._persist_companies(companies_list)
 
         return {
             "success": True,
@@ -600,6 +603,7 @@ class SearchService:
                     return {"companies": [], "sources_used": ["explorium"]}
 
             
+            self._persist_companies(companies[:limit])
             return {
                 "companies": companies,
                 "sources_used": ["explorium", "contactout"],
@@ -861,3 +865,53 @@ class SearchService:
         except Exception as exc:
             logger.error(f"Crustdata fallback failed: {exc}")
             return []
+
+    def _persist_companies(self, companies: List[Dict[str, Any]]) -> None:
+        """Upsert companies into the DB for reuse in enrichment/restore flows."""
+        for company in companies or []:
+            domain = (company.get("domain") or "").strip().lower()
+            if not domain:
+                continue
+            try:
+                CompanyRepository.create_or_update(
+                    db=self.db,
+                    domain=domain,
+                    raw_data=company,
+                    provider_source=company.get("provider_source") or "explorium",
+                    name=company.get("name"),
+                    website=company.get("website"),
+                    description=company.get("description"),
+                    industry=company.get("industry"),
+                    sub_industry=company.get("sub_industry"),
+                    employee_count_range=company.get("employee_count_range"),
+                    employee_count_exact=company.get("employee_count_exact"),
+                    revenue_range=company.get("revenue_range"),
+                    revenue_exact=company.get("revenue_exact"),
+                    headquarters_country=company.get("headquarters_country"),
+                    headquarters_state=company.get("headquarters_state"),
+                    headquarters_city=company.get("headquarters_city"),
+                    headquarters_address=company.get("headquarters_address"),
+                    founded_year=company.get("founded_year"),
+                    company_type=company.get("company_type"),
+                    stock_symbol=company.get("stock_symbol"),
+                    phone=company.get("phone"),
+                    technologies=company.get("technologies"),
+                    categories=company.get("categories") or company.get("specialties"),
+                    funding_stage=company.get("funding_stage"),
+                    funding_total=company.get("funding_total"),
+                    last_funding_date=company.get("last_funding_date"),
+                    employee_growth_6m=company.get("employee_growth_6m"),
+                    employee_growth_12m=company.get("employee_growth_12m"),
+                    employee_growth_6m_percent=company.get("employee_growth_6m_percent"),
+                    employee_growth_12m_percent=company.get("employee_growth_12m_percent"),
+                    linkedin_url=company.get("linkedin_url"),
+                    twitter_url=company.get("twitter_url"),
+                    facebook_url=company.get("facebook_url"),
+                    follower_count=company.get("follower_count"),
+                    external_id=company.get("id") or company.get("explorium_id"),
+                    enriched=bool(company.get("enriched")),
+                    data_quality_score=company.get("quality_score") or company.get("data_quality_score"),
+                    last_enriched_at=company.get("last_enriched_at"),
+                )
+            except Exception as exc:
+                logger.warning(f"Company DB upsert failed for {domain}: {exc}")
