@@ -76,7 +76,8 @@ export function PredictivePanel() {
   const [country, setCountry] = useState("US")
 
   const handleScoreLeads = async () => {
-    console.log("[PredictivePanel] handleScoreLeads called, companyName:", companyName)
+    const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+    console.log("[PredictivePanel] handleScoreLeads called, companyName:", companyName, "hasToken:", !!token, "tokenPreview:", token ? token.substring(0, 20) + "..." : "null")
     if (!companyName.trim()) {
       toast({
         title: "Company Required",
