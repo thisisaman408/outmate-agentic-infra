@@ -18,33 +18,27 @@
     }
 
     function track() {
-        // Collect basic data
-        const params = new URLSearchParams();
-        params.append('url', window.location.href);
-        params.append('referrer', document.referrer || '');
-        params.append('pixel_key', PIXEL_KEY);
-        
-        // Include identity if previously set via outmate.identify()
+        // Collect identity if previously set via outmate.identify()
         const savedEmail = localStorage.getItem('outmate_visitor_email');
-        if (savedEmail) {
-            params.append('email', savedEmail);
-        }
+        
+        const payload = {
+            url: window.location.href,
+            referrer: document.referrer || '',
+            pixel_key: PIXEL_KEY,
+            email: savedEmail || null
+        };
 
-        // Use fetch with keepalive to ensure tracking completes on page unload if needed
-        console.log('Outmate Pixel: Tracking visit...', { 
-            url: window.location.href, 
-            key: PIXEL_KEY,
-            email: savedEmail || 'anonymous'
-        });
+        console.log('Outmate Pixel: Tracking visit...', payload);
 
+        // Standard fetch with JSON body. 
+        // We use application/json specifically because it's the most robust format for modern APIs.
         fetch(TRACK_URL, {
             method: 'POST',
-            body: params,
+            body: JSON.stringify(payload),
             mode: 'cors',
             keepalive: true,
             headers: {
-                // Explicitly set content-type for URLSearchParams compatibility
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/json'
             }
         }).then(res => {
             console.log('Outmate Pixel: Track response status:', res.status);

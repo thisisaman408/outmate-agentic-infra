@@ -242,43 +242,56 @@ async def get_pixel():
 async def track_visitor(request: Request):
     """
     Robust tracking endpoint that accepts both Form and JSON data
-    delivered via 다양한 (various) cross-origin methods.
+    delivered via various cross-origin methods.
     """
     try:
         # 1. Extract Headers
         user_agent = request.headers.get("user-agent", "Unknown")
         x_forwarded_for = request.headers.get("x-forwarded-for")
-        x_pixel_key = request.headers.get("x-pixel-key") # Case-insensitive check
+        x_pixel_key = request.headers.get("x-pixel-key")
         
-        # 2. Extract Body (Try Form first, then JSON)
+        # 2. Extract Body (Ultra-Robust Combined Extraction)
         data = {}
-        content_type = request.headers.get("content-type", "")
         
-        if "application/json" in content_type:
-            try:
-                data = await request.json()
-            except Exception:
-                pass
-        else:
-            try:
-                form = await request.form()
-                data = dict(form)
-            except Exception:
-                pass
+        # Priority 1: Query Parameters (easy to parse, impossible to fail)
+        data.update(dict(request.query_params))
+        
+        # Priority 2: JSON Body
+        try:
+            json_data = await request.json()
+            if isinstance(json_data, dict):
+                data.update(json_data)
+        except Exception:
+            pass
+            
+        # Priority 3: Form Data (if not already handled by JSON)
+        try:
+            form_data = await request.form()
+            if form_data:
+                data.update(dict(form_data))
+        except Exception:
+            pass
 
-        # 3. Consolidate Fields
-        url = data.get("url")
-        referrer = data.get("referrer")
-        pixel_key = data.get("pixel_key") or x_pixel_key
+        # 3. Consolidate Fields and Aliases
+        url = data.get("url") or data.get("page_url") or data.get("URL")
+        pixel_key = data.get("pixel_key") or x_pixel_key or data.get("pixelKey") or data.get("key")
         email = data.get("email")
+        referrer = data.get("referrer") or data.get("ref") or data.get("Ref")
 
         if not url:
-            # We need a URL to track. If truly missing, we return 400 not 422.
-            return JSONResponse(status_code=400, content={"error": "Missing url"})
+            # If still missing, we return a detailed debug error
+            return JSONResponse(
+                status_code=400, 
+                content={
+                    "error": "Missing url", 
+                    "received_keys": list(data.keys()),
+                    "content_type": request.headers.get("content-type")
+                }
+            )
         if not pixel_key:
             return JSONResponse(status_code=400, content={"error": "Missing pixel key"})
         
-        # 4. Validate Pixel Key
+        # 5. Validate Pixel Key
         def _validate_key():
             db = SessionLocal()
             try:
