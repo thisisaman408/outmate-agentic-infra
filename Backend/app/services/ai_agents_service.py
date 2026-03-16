@@ -1418,41 +1418,93 @@ class AiAgentsService:
                     if not fallback_signals:
                         fallback_signals.append({"name": "Behavioral opportunity signal", "impact": "positive"})
                 company_domain = format_domain(target.get("domain"))
-                email_slug = slugify(target.get("name"))
-                profile_slug = slugify(target.get("name"))
-                contact_info = summary.get("contact") or {}
-                profile_link = (
-                    summary.get("profileLink")
-                    or summary.get("profileUrl")
-                    or contact_info.get("profileUrl")
-                    or contact_info.get("linkedin")
-                )
-                email_address = (
-                    summary.get("email")
-                    or summary.get("contactEmail")
-                    or contact_info.get("email")
-                    or contact_info.get("workEmail")
-                    or contact_info.get("personalEmail")
-                )
 
-                payload = {
-                    "id": str(uuid.uuid4()),
-                    "companyId": target.get("domain"),
-                    "companyName": target.get("name"),
-                    "contactName": target.get("name"),
-                    "title": "Predicted Champion",
-                    "email": email_address,
-                    "profileLink": profile_link,
-                    "score": summary.get("customScore") or 0,
-                    "conversionLikelihood": summary.get("confidence") or 0,
-                    "confidence": min(max((summary.get("confidence") or 0) / 100, 0), 1),
-                    "prediction": summary.get("intentSignal") or "Medium",
-                    "factors": fallback_signals,
-                    "guidance": summary.get("reasoning") or parsed.get("reasoning") or "",
-                    "recommendation": "Execute outreach with predictive confidence."
-                }
-                logger.info("Received predictive score payload from OpenRouter")
-                return [payload]
+                # --- Real contact lookup via CrustData prospect search ---
+                real_contacts = []
+                try:
+                    from app.services.crustdata.prospect_search_service import ProspectSearchService
+                    from app.core.config import settings as app_settings
+                    prospect_svc = ProspectSearchService(api_key=app_settings.CRUSTDATA_API_KEY)
+                    prospect_res = await prospect_svc.search(
+                        company=name,
+                        seniority_levels=["Director", "VP", "CXO", "Founder", "Owner", "Partner"],
+                        seniority_operator="in",
+                        limit=3,
+                    )
+                    profiles = prospect_res.get("profiles", [])
+                    for p in profiles:
+                        emails = p.get("emails") or []
+                        linkedin = p.get("linkedin_profile_url") or p.get("flagship_profile_url") or ""
+                        real_contacts.append({
+                            "name": p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+                            "title": p.get("headline") or "",
+                            "email": emails[0] if emails else "",
+                            "linkedin": linkedin,
+                        })
+                    logger.info(f"Found {len(real_contacts)} real contacts for {name}")
+                except Exception as e:
+                    logger.warning(f"Prospect lookup failed for {name}: {e}")
+
+                # Build result payloads — one per real contact, or a single fallback
+                base_score = summary.get("customScore") or 0
+                base_confidence = min(max((summary.get("confidence") or 0) / 100, 0), 1)
+                base_prediction = summary.get("intentSignal") or "Medium"
+                base_guidance = summary.get("reasoning") or parsed.get("reasoning") or ""
+
+                results = []
+                if real_contacts:
+                    for i, contact in enumerate(real_contacts):
+                        results.append({
+                            "id": str(uuid.uuid4()),
+                            "companyId": target.get("domain") or name,
+                            "companyName": name,
+                            "contactName": contact["name"] or name,
+                            "title": contact["title"] or "Decision Maker",
+                            "email": contact["email"] or "",
+                            "profileLink": contact["linkedin"] or "",
+                            "score": max(base_score - (i * 5), 10),
+                            "conversionLikelihood": summary.get("confidence") or 0,
+                            "confidence": base_confidence,
+                            "prediction": base_prediction,
+                            "factors": fallback_signals,
+                            "guidance": base_guidance,
+                            "recommendation": "Execute outreach with predictive confidence."
+                        })
+                else:
+                    # Fallback: no real contacts found
+                    contact_info = summary.get("contact") or {}
+                    profile_link = (
+                        summary.get("profileLink")
+                        or summary.get("profileUrl")
+                        or contact_info.get("profileUrl")
+                        or contact_info.get("linkedin")
+                    )
+                    email_address = (
+                        summary.get("email")
+                        or summary.get("contactEmail")
+                        or contact_info.get("email")
+                        or contact_info.get("workEmail")
+                        or contact_info.get("personalEmail")
+                    )
+                    results.append({
+                        "id": str(uuid.uuid4()),
+                        "companyId": target.get("domain") or name,
+                        "companyName": name,
+                        "contactName": name,
+                        "title": "Predicted Champion",
+                        "email": email_address or "",
+                        "profileLink": profile_link or "",
+                        "score": base_score,
+                        "conversionLikelihood": summary.get("confidence") or 0,
+                        "confidence": base_confidence,
+                        "prediction": base_prediction,
+                        "factors": fallback_signals,
+                        "guidance": base_guidance,
+                        "recommendation": "Execute outreach with predictive confidence."
+                    })
+
+                logger.info(f"Returning {len(results)} predictive score(s) for {name}")
+                return results
         except HTTPException:
             raise
         except Exception as e:
