@@ -142,39 +142,60 @@ class VisitorEnricher:
                     logger.info(f"[Enrichment] Enrich.so returned no data for {ip}")
 
             # ──────────────────────────────────────────────
-            # 3. Explorium (Company firmographics via domain)
+            # 3. Explorium (Company firmographics)
+            #    Primary: lookup by domain
+            #    Fallback: lookup by company name (when IPinfo returns org but no domain)
             # ──────────────────────────────────────────────
-            if resolution["domain"]:
-                logger.info(f"[Enrichment] Step 3: Explorium lookup for domain={resolution['domain']}")
+            async def _explorium_lookup_and_apply(filters: dict, label: str) -> bool:
+                """Run Explorium search, validate result, update resolution. Returns True on success."""
                 try:
-                    explorium_data = await self.explorium.search_companies({"domain": resolution["domain"]}, limit=1)
-                    if explorium_data.get("companies"):
-                        company = explorium_data["companies"][0]
-                        # Validate domain match to avoid wrong results (e.g. a service
-                        # domain like dns.google matching an unrelated company)
-                        company_domain = (company.get("domain") or "").strip().lower().lstrip("www.")
-                        queried_domain = resolution["domain"].strip().lower()
+                    explorium_data = await self.explorium.search_companies(filters, limit=1)
+                    if not explorium_data.get("companies"):
+                        return False
+                    company = explorium_data["companies"][0]
+                    company_domain = (company.get("domain") or "").strip().lower().lstrip("www.")
+                    queried_domain = (filters.get("domain") or "").strip().lower()
+                    # Domain validation only when we queried by domain
+                    if queried_domain:
                         domain_ok = (
-                            not company_domain  # no domain returned — accept anyway
+                            not company_domain
                             or company_domain == queried_domain
                             or queried_domain.endswith(f".{company_domain}")
                             or company_domain.endswith(f".{queried_domain}")
                         )
-                        if domain_ok:
-                            resolution["explorium"] = company
-                            resolution["confidence"] = max(resolution["confidence"], 0.9)
-                            resolution["company"] = company.get("name") or resolution["company"]
-                            # Promote company-level contact fields if not already set
-                            if not resolution["linkedin_url"]:
-                                resolution["linkedin_url"] = company.get("linkedin_url")
-                            logger.info(f"[Enrichment] Explorium found: {company.get('name')} ({company_domain})")
-                        else:
+                        if not domain_ok:
                             logger.warning(
-                                f"[Enrichment] Explorium domain mismatch: queried={queried_domain}, "
-                                f"got={company_domain} ({company.get('name')}) — skipping"
+                                f"[Enrichment] Explorium domain mismatch ({label}): "
+                                f"queried={queried_domain}, got={company_domain} ({company.get('name')}) — skipping"
                             )
+                            return False
+                    resolution["explorium"] = company
+                    resolution["confidence"] = max(resolution["confidence"], 0.9)
+                    resolution["company"] = company.get("name") or resolution["company"]
+                    # Backfill domain from Explorium if we didn't have one
+                    if not resolution["domain"] and company_domain:
+                        resolution["domain"] = company_domain
+                    if not resolution["linkedin_url"]:
+                        resolution["linkedin_url"] = company.get("linkedin_url")
+                    logger.info(f"[Enrichment] Explorium found ({label}): {company.get('name')} ({company_domain})")
+                    return True
                 except Exception as e:
-                    logger.error(f"[Enrichment] Explorium enrichment failed for {resolution['domain']}: {e}")
+                    logger.error(f"[Enrichment] Explorium lookup failed ({label}): {e}")
+                    return False
+
+            explorium_matched = False
+            if resolution["domain"]:
+                logger.info(f"[Enrichment] Step 3: Explorium domain lookup for {resolution['domain']}")
+                explorium_matched = await _explorium_lookup_and_apply(
+                    {"domain": resolution["domain"]}, f"domain={resolution['domain']}"
+                )
+
+            # Fallback: try by company name from IPinfo org field
+            if not explorium_matched and resolution["company"]:
+                logger.info(f"[Enrichment] Step 3b: Explorium name fallback for '{resolution['company']}'")
+                await _explorium_lookup_and_apply(
+                    {"name": resolution["company"]}, f"name={resolution['company']}"
+                )
 
         except Exception as e:
             logger.error(f"[Enrichment] Visitor enrichment failed for IP {ip}: {e}")

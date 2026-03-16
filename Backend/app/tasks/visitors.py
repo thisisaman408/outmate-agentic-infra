@@ -188,8 +188,8 @@ async def _publish_visit_event(org_id: str, visit: Visit) -> None:
             },
         }
         msg = json.dumps(payload, default=str)
+        # Publish only to the org-scoped channel (no global "visitors:all" to prevent cross-tenant leakage)
         await redis_client.publish(f"visitors:{org_id}", msg)
-        await redis_client.publish("visitors:all", msg)
     except Exception:
         # Realtime is best-effort; don't fail background processing.
         return

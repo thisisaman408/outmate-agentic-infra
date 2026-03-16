@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Plus_Jakarta_Sans, Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import Script from "next/script"
 import "./globals.css"
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -40,6 +41,12 @@ export const metadata: Metadata = {
   },
 }
 
+// Visitor tracking pixel — auto-installed when NEXT_PUBLIC_PIXEL_KEY is set.
+// In production (app.outmate.ai): set NEXT_PUBLIC_PIXEL_KEY to your pixel key
+// and NEXT_PUBLIC_API_URL to https://dev.outmate.ai in Azure App Service settings.
+const PIXEL_KEY = process.env.NEXT_PUBLIC_PIXEL_KEY
+const PIXEL_SRC = `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/v1/visitors/pixel.js`
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -47,6 +54,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        {/* Visitor tracking pixel — only rendered when NEXT_PUBLIC_PIXEL_KEY is set */}
+        {PIXEL_KEY && (
+          <Script
+            src={PIXEL_SRC}
+            data-pixel-key={PIXEL_KEY}
+            strategy="afterInteractive"
+          />
+        )}
+      </head>
       <body className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}>
         <AuthProvider>{children}</AuthProvider>
         <Analytics />
