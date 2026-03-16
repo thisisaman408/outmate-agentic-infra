@@ -228,10 +228,12 @@ async def get_pixel():
     """Serves the tracking pixel JavaScript."""
     import os
     from fastapi.responses import FileResponse
-    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../Frontend/public/pixel.js"))
+    # Use path relative to this file's directory: app/api/routes -> ../../static/pixel.js
+    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/pixel.js"))
     
     if not os.path.exists(pixel_path):
-        return {"error": "pixel.js not found"}
+        logger.error(f"pixel.js not found at {pixel_path}")
+        return JSONResponse(status_code=404, content={"error": "pixel.js not found"})
         
     return FileResponse(pixel_path, media_type="application/javascript")
 
