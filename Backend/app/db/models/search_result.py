@@ -12,7 +12,8 @@ class SearchResult(Base):
     __tablename__ = "search_results"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    search_query_id = Column(UUID(as_uuid=True), ForeignKey("search_queries.id", ondelete="CASCADE"), nullable=False, index=True)
+    # search_queries is a SERIAL (integer) vector-store table; store id without FK
+    search_query_id = Column(Integer, nullable=True, index=True)
     result_type = Column(String(50), nullable=False)  # 'company' or 'prospect'
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), index=True)
     prospect_id = Column(UUID(as_uuid=True), ForeignKey("prospects.id", ondelete="CASCADE"), index=True)

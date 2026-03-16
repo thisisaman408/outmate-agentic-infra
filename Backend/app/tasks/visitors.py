@@ -52,7 +52,18 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
             user_agent=data.get("user_agent"),
             intent_score=intent_score,
             resolution=resolution,
-            matched=bool(resolution.get("matched_entity")) or resolution.get("confidence", 0) > 0.4
+            # A visit is "matched" (Identified) when we have real data:
+            # - a DB-matched entity (prospect or company record), OR
+            # - high confidence (≥0.7) from Enrich.so/Explorium, OR
+            # - IPinfo returned a real org/domain (confidence ≥0.4) — ASN orgs
+            #   are real companies even without person-level enrichment
+            matched=(
+                bool(resolution.get("matched_entity"))
+                or (
+                    resolution.get("confidence", 0) >= 0.4
+                    and bool(resolution.get("company") or resolution.get("domain"))
+                )
+            )
         )
         db.add(new_visit)
         db.commit()
