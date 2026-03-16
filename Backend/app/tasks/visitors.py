@@ -177,10 +177,16 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     if domain or (email and not is_personal_email(email)):
         res["category"] = "company"
         res["matched_entity"] = "company"
+        
+        # Ensure top-level fields are populated for the UI from our matched entities
+        if matched_company:
+            res["company"] = getattr(matched_company, "name", None) or res.get("company") or domain
+            res["domain"] = getattr(matched_company, "domain", None) or res.get("domain") or domain
+        
         res["matched_company"] = {
             "id": str(matched_company.id) if getattr(matched_company, "id", None) else None,
-            "domain": getattr(matched_company, "domain", None) or domain,
-            "name": getattr(matched_company, "name", None) or company_name or domain,
+            "domain": res.get("domain") or domain,
+            "name": res.get("company") or company_name or domain,
         }
         if matched_prospect:
             res["matched_prospect"] = {

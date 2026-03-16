@@ -5,7 +5,26 @@ from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.services.explorium_service import ExploriumService
 
+from app.services.explorium_service import ExploriumService
+
 logger = logging.getLogger(__name__)
+
+# Common ISP and Cloud Provider keywords to filter out of company identification
+ISP_CLOUD_KEYWORDS = {
+    "airtel", "bharti", "reliance", "jio", "vodafone", "telecom", "mobile", "broadband",
+    "comcast", "verizon", "at&t", "spectrum", "charter", "infiniti", "google fiber",
+    "isp", "internet service", "hosting", "cloud", "server", "data center", "vps",
+    "proxad", "wanadoo", "orange", "telefonica", "t-mobile", "sprint", "nexmo", 
+    "twilio", "ovh", "digitalocean", "linode", "amazon", "google inc", "microsoft corp",
+    "akamai", "cloudflare", "fastly", "level 3", "cogent", "tata communications",
+    "network foundation", "isp foundation", "hathway", "act fibernet", "bsnl", "mtnl"
+}
+
+def is_isp_or_cloud(org_name: str) -> bool:
+    if not org_name:
+        return False
+    name_lower = org_name.lower()
+    return any(keyword in name_lower for keyword in ISP_CLOUD_KEYWORDS)
 
 class VisitorEnricher:
     def __init__(self):
@@ -81,6 +100,13 @@ class VisitorEnricher:
                     city = getattr(details, 'city', None) or None
                     region = getattr(details, 'region', None) or None
                     country = getattr(details, 'country', None) or None
+
+                    # ISP and Cloud Provider Filtering:
+                    # If the organization matches our ISP/Cloud list, do NOT use it as the company name.
+                    if is_isp_or_cloud(org):
+                        logger.info(f"[Enrichment] Filtered out ISP/Cloud organization: {org}")
+                        org = None
+                        domain = None
 
                     logger.info(f"[Enrichment] IPinfo success: org={org}, domain={domain}, city={city}, country={country}")
 
