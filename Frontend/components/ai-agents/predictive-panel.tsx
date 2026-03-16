@@ -367,6 +367,18 @@ export function PredictivePanel() {
                         <Button className="w-full h-12 bg-orange-600 hover:bg-orange-500 font-bold rounded-xl shadow-lg shadow-orange-500/10 transition-all">
                           Engage Prospect
                         </Button>
+                        {result.email && (
+                          <div className="text-center">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Direct Contact</p>
+                            <a 
+                              href={`mailto:${result.email}`} 
+                              className="text-xs font-medium text-orange-200/70 hover:text-orange-400 transition-colors truncate block"
+                              title={result.email}
+                            >
+                              {result.email}
+                            </a>
+                          </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

@@ -1,3 +1,5 @@
+import { authService } from "@/lib/auth"
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export type GTMAgentId =
@@ -14,9 +16,13 @@ export interface GTMAgentRunResponse {
 }
 
 async function postJson(path: string, body: unknown) {
+  const authHeaders = authService.getAuthHeaders()
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json",
+      ...authHeaders
+    },
     body: JSON.stringify(body),
   })
   if (!res.ok) {
