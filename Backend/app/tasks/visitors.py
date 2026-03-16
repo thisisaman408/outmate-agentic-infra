@@ -152,6 +152,9 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
                     headquarters_city=(res.get("geo") or {}).get("city") if isinstance(res.get("geo"), dict) else None,
                     headquarters_country=(res.get("geo") or {}).get("country") if isinstance(res.get("geo"), dict) else None,
                 )
+    except Exception as e:
+        logger.warning(f"Company match/create failed: {e}")
+
     # MANDATORY: If we have a personal email, this is a PROSPECT visit.
     if email and is_personal_email(email):
         res["category"] = "prospect"
