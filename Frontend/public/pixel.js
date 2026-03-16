@@ -1,12 +1,21 @@
 (function () {
     // Visitor Tracking Pixel for Outmate.ai
-    const PIXEL_KEY = document.currentScript.getAttribute('data-pixel-key');
+    const scriptTag = document.currentScript;
+    const PIXEL_KEY = scriptTag ? scriptTag.getAttribute('data-pixel-key') : null;
     if (!PIXEL_KEY) {
         console.warn('Outmate Pixel: Missing data-pixel-key');
         return;
     }
 
-    const TRACK_URL = 'http://127.0.0.1:8000/api/visitors/track'; // Update for production
+    // Auto-detect backend URL from the script's own src so the pixel works
+    // in any environment without hardcoding a host.
+    let TRACK_URL = 'http://127.0.0.1:8000/api/v1/visitors/track';
+    if (scriptTag && scriptTag.src) {
+        try {
+            const u = new URL(scriptTag.src);
+            TRACK_URL = u.protocol + '//' + u.host + '/api/v1/visitors/track';
+        } catch (e) { /* fallback to default */ }
+    }
 
     function track() {
         // Collect basic data

@@ -71,6 +71,10 @@ app = FastAPI(
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None if settings.is_production else "/redoc",
     openapi_url=None if settings.is_production else "/openapi.json",
+    # Disable automatic trailing-slash redirects (307). Next.js proxy strips
+    # trailing slashes before forwarding, causing FastAPI to redirect, which
+    # drops the Authorization header → 401 on all authenticated GET endpoints.
+    redirect_slashes=False,
 )
 
 # Security Headers Middleware
@@ -97,8 +101,41 @@ app.add_middleware(
     allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Pixel-Key"],
 )
+
+# Pixel CORS Middleware — must be added AFTER CORSMiddleware so it runs first
+# (Starlette middleware stack is LIFO). The tracking pixel is embedded on
+# third-party websites, so /track and /pixel.js must accept any origin.
+_PIXEL_PATHS = {"/api/v1/visitors/track", "/api/v1/visitors/pixel.js"}
+
+class PixelCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.url.path not in _PIXEL_PATHS:
+            return await call_next(request)
+
+        origin = request.headers.get("origin", "*")
+
+        # Handle preflight — short-circuit before any route logic runs
+        if request.method == "OPTIONS":
+            from starlette.responses import Response as StarletteResponse
+            return StarletteResponse(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "X-Pixel-Key, Content-Type",
+                    "Access-Control-Max-Age": "86400",
+                    "Vary": "Origin",
+                },
+            )
+
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        return response
+
+app.add_middleware(PixelCORSMiddleware)
 
 # Add custom exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -185,6 +222,9 @@ async def health_check():
         return JSONResponse(status_code=status_code, content=response)
     return response
 
+# Public pixel endpoints — no JWT required (pixel is embedded on client sites)
+app.include_router(visitors.public_router)
+# Protected dashboard endpoints — JWT required
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
 
@@ -220,6 +260,14 @@ async def startup_event():
         logger.info("✓ Database tables ensured")
     except Exception as e:
         logger.error(f"✗ Database init failed (app will start without DB): {e}")
+
+    # Seed the default visitor pixel key (idempotent — safe to run every startup)
+    try:
+        from app.api.routes.visitors import _ensure_default_site_config
+        _ensure_default_site_config()
+        logger.info("✓ Default visitor SiteConfig ensured")
+    except Exception as e:
+        logger.warning(f"⚠ Could not seed visitor SiteConfig: {e}")
 
     try:
         connected = RedisManager.connect()

@@ -1,20 +1,54 @@
-from fastapi import APIRouter, Header, Form, HTTPException, Request
+from fastapi import APIRouter, Header, Form, HTTPException, Request, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import OperationalError
 from urllib.parse import urlparse
 import logging
 import asyncio
+import httpx
+import jwt as pyjwt
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import Counter, defaultdict
+
+import uuid as _uuid
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.core.redis import RedisManager
 from app.db.models.visitor import SiteConfig, Visit
 
+# ── Default test SiteConfig ──────────────────────────────────────────────────
+# This pixel key is what the dashboard's "Setup Tracking Pixel" dialog shows.
+# It is seeded automatically at module load so the tracker works out-of-the-box.
+_DEFAULT_PIXEL_KEY = "outmate_test_key_123"
+_DEFAULT_ORG_ID = _uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+def _ensure_default_site_config() -> None:
+    """Idempotently create the default SiteConfig row if it doesn't exist."""
+    db = SessionLocal()
+    try:
+        exists = db.query(SiteConfig).filter(SiteConfig.pixel_key == _DEFAULT_PIXEL_KEY).first()
+        if not exists:
+            db.add(SiteConfig(org_id=_DEFAULT_ORG_ID, pixel_key=_DEFAULT_PIXEL_KEY, domain="localhost"))
+            db.commit()
+            logger.info("Seeded default SiteConfig (pixel_key=%s)", _DEFAULT_PIXEL_KEY)
+        else:
+            logger.debug("Default SiteConfig already present (org_id=%s)", exists.org_id)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Could not seed default SiteConfig: %s", exc)
+    finally:
+        db.close()
+
+# public_router: no JWT required — used by the tracking pixel and pixel.js file
+# (registered in main.py WITHOUT auth_dependencies)
+public_router = APIRouter(prefix="/api/v1/visitors", tags=["visitors"])
+
+# router: JWT required — used by the dashboard UI
+# (registered in main.py WITH auth_dependencies)
 router = APIRouter(prefix="/api/v1/visitors", tags=["visitors"])
+
 logger = logging.getLogger(__name__)
 
 # Thread pool for running synchronous DB operations with timeouts
@@ -38,6 +72,7 @@ async def _run_db(func, timeout=DB_TIMEOUT):
 def _visit_to_dict(v: Visit) -> dict:
     res = v.resolution or {}
     person = res.get("person") or {}
+    exp = res.get("explorium") or {}  # Explorium company firmographic data
     return {
         "id": str(v.id),
         "ip": str(v.ip),
@@ -51,19 +86,82 @@ def _visit_to_dict(v: Visit) -> dict:
         "matched_entity": res.get("matched_entity"),
         "matched_company": res.get("matched_company"),
         "matched_prospect": res.get("matched_prospect"),
-        "company": res.get("company"),
-        "domain": res.get("domain"),
+        # Company identity
+        "company": res.get("company") or exp.get("name"),
+        "domain": res.get("domain") or exp.get("domain"),
+        "website": exp.get("website") or res.get("website"),
         "geo": res.get("geo"),
         "confidence": res.get("confidence", 0),
+        # Person contact (from Enrich.so)
         "email": res.get("email") or person.get("email"),
-        "phone": res.get("phone") or person.get("phone"),
+        "phone": res.get("phone") or person.get("phone") or exp.get("phone"),
         "full_name": res.get("full_name") or person.get("full_name") or person.get("name"),
         "linkedin_url": res.get("linkedin_url") or person.get("linkedin_url") or person.get("linkedin"),
         "job_title": res.get("job_title") or person.get("title") or person.get("job_title"),
+        # Company firmographics (from Explorium)
+        "company_linkedin_url": exp.get("linkedin_url"),
+        "industry": exp.get("industry") or exp.get("linkedin_industry_category"),
+        "employee_count_range": exp.get("employee_count_range"),
+        "employee_count_exact": exp.get("employee_count_exact"),
+        "revenue_range": exp.get("revenue_range"),
+        "funding_stage": exp.get("funding_stage"),
+        "funding_total": exp.get("funding_total"),
+        "technologies": exp.get("technologies") or [],
+        "headquarters_city": exp.get("headquarters_city"),
+        "headquarters_country": exp.get("headquarters_country"),
+        "description": exp.get("description"),
     }
 
 
-@router.get("/pixel.js")
+@public_router.post("/test-hit")
+async def send_test_hit(request: Request):
+    """
+    Fire a synthetic visitor event using the default pixel key.
+    Used by the dashboard's 'Send Test Hit' button to verify the pipeline works
+    without requiring an external website or curl command.
+    """
+    try:
+        def _get_config():
+            db = SessionLocal()
+            try:
+                return db.query(SiteConfig).filter(SiteConfig.pixel_key == _DEFAULT_PIXEL_KEY).first()
+            finally:
+                db.close()
+
+        site_config = await _run_db(_get_config)
+        if not site_config:
+            # Try to seed it now
+            _ensure_default_site_config()
+            site_config = await _run_db(_get_config)
+        if not site_config:
+            raise HTTPException(status_code=503, detail="Site config unavailable — database may be down")
+
+        # Use Cloudflare's public IP for test hits.
+        # 1.1.1.1 → IPinfo: Cloudflare Inc., San Francisco, US, domain=cloudflare.com
+        # Explorium correctly maps cloudflare.com → Cloudflare Inc. with full firmographics.
+        # (8.8.8.8 → dns.google → Explorium returned wrong company data)
+        ip = "1.1.1.1"
+        logger.info("test-hit: using corporate test IP %s", ip)
+
+        from app.tasks.visitors import _process_visitor_data
+        payload = {
+            "ip": ip,
+            "url": "http://localhost:3000/pricing",
+            "referrer": "https://google.com",
+            "user_agent": request.headers.get("user-agent", "Outmate-Test"),
+            "intent_score": 1.0,
+        }
+        asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
+
+        return {"status": "queued", "ip": ip, "message": f"Test visit queued for IP {ip} — refresh in a few seconds"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("test-hit error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@public_router.get("/pixel.js")
 async def get_pixel():
     """Serves the tracking pixel JavaScript."""
     import os
@@ -76,7 +174,7 @@ async def get_pixel():
     return FileResponse(pixel_path, media_type="application/javascript")
 
 
-@router.post("/track")
+@public_router.post("/track")
 async def track_visitor(
     request: Request,
     url: str = Form(...),
@@ -157,7 +255,8 @@ async def track_visitor(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-@router.get("/")
+@router.get("")   # matches /api/v1/visitors  (Next.js proxy strips trailing slash)
+@router.get("/")  # matches /api/v1/visitors/ (direct calls)
 async def list_visitors(limit: int = 100):
     """Get recent visits. Returns 503 if database is unavailable."""
     try:
@@ -217,51 +316,69 @@ async def get_visitor_stats():
 async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, top_n: int = 10):
     """
     Visitor analytics for charts on the Visitors page.
+    - hours ≤ 48  → hourly timeseries buckets
+    - hours > 48  → daily timeseries buckets (supports up to 31 days / 744 hours)
     Returns 503 if database is unavailable.
     """
-    hours = max(1, min(int(hours), 168))  # 1h..7d
+    hours = max(1, min(int(hours), 744))   # 1h..31d
     live_window_minutes = max(1, min(int(live_window_minutes), 60))
     top_n = max(3, min(int(top_n), 50))
-    since = datetime.utcnow() - timedelta(hours=hours)
-    live_since = datetime.utcnow() - timedelta(minutes=live_window_minutes)
+    use_daily = hours > 48                 # daily buckets for 7d / 30d views
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    live_since = now - timedelta(minutes=live_window_minutes)
 
     try:
         def _query():
             db = SessionLocal()
             try:
                 rows = (
-                    db.query(Visit.created_at, Visit.ip, Visit.url, Visit.referrer, Visit.intent_score, Visit.matched, Visit.resolution)
+                    db.query(
+                        Visit.created_at, Visit.ip, Visit.url, Visit.referrer,
+                        Visit.intent_score, Visit.matched, Visit.resolution, Visit.user_agent,
+                    )
                     .filter(Visit.created_at >= since)
                     .order_by(Visit.created_at.desc())
-                    .limit(20000)
+                    .limit(50000)
                     .all()
                 )
 
-                # Live online: unique IPs in the recent window
                 live_ips = set()
-
-                # Timeseries buckets (hourly)
                 buckets = defaultdict(lambda: {"total": 0, "matched": 0, "company": 0, "prospect": 0, "unknown": 0})
-
-                # Top pages / referrers
                 page_counts = Counter()
                 ref_counts = Counter()
-
-                # Intent buckets
                 intent_buckets = Counter({"0-49": 0, "50-69": 0, "70-84": 0, "85-100": 0})
+                geo_country = Counter()
+                geo_city = Counter()
+                industry_counts = Counter()
+                tech_counts = Counter()
+                total = matched_count = company_count = prospect_count = 0
 
-                for created_at, ip, url, ref, intent, matched, res in rows:
+                for created_at, ip, url, ref, intent, matched, res, ua in rows:
                     if not created_at:
                         continue
-                    hour_key = created_at.replace(minute=0, second=0, microsecond=0).isoformat()
-                    cat = ((res or {}).get("category") or "unknown").lower()
+
+                    # Bucket key: daily (YYYY-MM-DD) or hourly (YYYY-MM-DDTHH:00:00)
+                    if use_daily:
+                        bucket_key = created_at.strftime("%Y-%m-%d")
+                    else:
+                        bucket_key = created_at.replace(minute=0, second=0, microsecond=0).isoformat()
+
+                    res = res or {}
+                    cat = (res.get("category") or "unknown").lower()
                     if cat not in ("company", "prospect", "unknown"):
                         cat = "unknown"
 
-                    buckets[hour_key]["total"] += 1
+                    buckets[bucket_key]["total"] += 1
+                    total += 1
                     if matched:
-                        buckets[hour_key]["matched"] += 1
-                    buckets[hour_key][cat] += 1
+                        buckets[bucket_key]["matched"] += 1
+                        matched_count += 1
+                    buckets[bucket_key][cat] += 1
+                    if cat == "company":
+                        company_count += 1
+                    elif cat == "prospect":
+                        prospect_count += 1
 
                     if created_at >= live_since and ip:
                         live_ips.add(str(ip))
@@ -292,9 +409,28 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
                     else:
                         intent_buckets["85-100"] += 1
 
+                    # Geo breakdown
+                    geo = res.get("geo") or {}
+                    country = geo.get("country") or (res.get("explorium") or {}).get("headquarters_country")
+                    city = geo.get("city") or (res.get("explorium") or {}).get("headquarters_city")
+                    if country:
+                        geo_country[country] += 1
+                    if city and country:
+                        geo_city[f"{city}, {country}"] += 1
+
+                    # Industry breakdown (from Explorium)
+                    exp = res.get("explorium") or {}
+                    industry = exp.get("industry") or exp.get("linkedin_industry_category")
+                    if industry:
+                        industry_counts[industry] += 1
+
+                    # Technology breakdown
+                    for tech in (exp.get("technologies") or [])[:5]:
+                        tech_counts[tech] += 1
+
                 timeseries = [
                     {
-                        "hour": k,
+                        "bucket": k,
                         "total": v["total"],
                         "matched": v["matched"],
                         "company": v["company"],
@@ -305,12 +441,23 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
                 ]
 
                 return {
-                    "window": {"hours": hours, "since": since.isoformat()},
+                    "window": {"hours": hours, "since": since.isoformat(), "use_daily": use_daily},
                     "live": {"window_minutes": live_window_minutes, "unique_ips": len(live_ips)},
+                    "summary": {
+                        "total": total,
+                        "matched": matched_count,
+                        "companies": company_count,
+                        "prospects": prospect_count,
+                        "match_rate": round(matched_count / total * 100, 1) if total else 0,
+                    },
                     "timeseries": timeseries,
                     "top_pages": [{"page": p, "count": c} for p, c in page_counts.most_common(top_n)],
                     "top_referrers": [{"referrer": r, "count": c} for r, c in ref_counts.most_common(top_n)],
                     "intent_distribution": [{"bucket": b, "count": c} for b, c in intent_buckets.items()],
+                    "geo_countries": [{"country": c, "count": n} for c, n in geo_country.most_common(top_n)],
+                    "geo_cities": [{"city": c, "count": n} for c, n in geo_city.most_common(top_n)],
+                    "industry_breakdown": [{"industry": i, "count": n} for i, n in industry_counts.most_common(top_n)],
+                    "top_technologies": [{"tech": t, "count": n} for t, n in tech_counts.most_common(top_n)],
                 }
             finally:
                 db.close()
@@ -320,13 +467,24 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
         return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
 
 
-@router.get("/stream")
-async def stream_visitors(org_id: str = "all"):
+@public_router.get("/stream")
+async def stream_visitors(request: Request, org_id: str = "all", token: Optional[str] = Query(None)):
     """
     Server-Sent Events stream for realtime visitor updates.
-    Requires Redis (pubsub); if the client is not connected we respond with 503
-    and a helpful JSON message that the front end can display.
+    Accepts JWT via ?token= query param (EventSource cannot send headers).
+    Requires Redis (pubsub); if unavailable responds with 503.
     """
+    # Validate JWT — accept via query param (EventSource) or Authorization header
+    raw_token = token or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not raw_token:
+        return JSONResponse(status_code=401, content={"error": "Authentication required"})
+    try:
+        pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+    except pyjwt.ExpiredSignatureError:
+        return JSONResponse(status_code=401, content={"error": "Token expired"})
+    except pyjwt.PyJWTError:
+        return JSONResponse(status_code=401, content={"error": "Invalid token"})
+
     try:
         redis_client = RedisManager.get_client()
         # test ping to verify the connection is still alive
@@ -365,4 +523,12 @@ async def stream_visitors(org_id: str = "all"):
             except Exception:
                 pass
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disables nginx/Azure front-door buffering
+            "Connection": "keep-alive",
+        },
+    )

@@ -27,12 +27,17 @@ import {
     Clock,
     CheckCircle2,
     Code2,
-    ArrowRight,
     ExternalLink,
     AlertTriangle,
     Mail,
     Phone,
-    Linkedin
+    Linkedin,
+    FlaskConical,
+    RefreshCw,
+    TrendingUp,
+    Building2,
+    MapPin,
+    Layers,
 } from "lucide-react"
 import {
     Dialog,
@@ -42,9 +47,35 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    ResponsiveContainer,
+    Legend,
+} from "recharts"
 import { toast } from "sonner"
 
+const PERIODS = [
+    { label: "Today", hours: 24 },
+    { label: "7 Days", hours: 168 },
+    { label: "30 Days", hours: 720 },
+] as const
+type PeriodHours = (typeof PERIODS)[number]["hours"]
+
+// All API calls use relative URLs so they route through the Next.js proxy
+// (next.config.mjs rewrites /api/* → backend). This avoids CORS entirely.
+// API_BASE is kept only for the pixel snippet shown in the setup dialog.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+const API = "/api/v1/visitors"
+
+function getAuthHeaders(): Record<string, string> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
+    return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 interface Visit {
     id: string
@@ -55,23 +86,38 @@ interface Visit {
     matched: boolean
     created_at: string
     resolution: any
-    // Flattened enrichment fields
+    category: string | null
+    // Company identity
     company: string | null
     domain: string | null
+    website: string | null
     geo: { city: string; region: string; country: string } | null
     confidence: number
+    // Person contact (Enrich.so)
     email: string | null
     phone: string | null
     full_name: string | null
     linkedin_url: string | null
     job_title: string | null
+    // Company firmographics (Explorium)
+    company_linkedin_url: string | null
+    industry: string | null
+    employee_count_range: string | null
+    employee_count_exact: number | null
+    revenue_range: string | null
+    funding_stage: string | null
+    technologies: string[]
+    headquarters_city: string | null
+    headquarters_country: string | null
+    description: string | null
 }
 
 interface VisitorAnalytics {
-    window: { hours: number; since: string }
+    window: { hours: number; since: string; use_daily: boolean }
     live: { window_minutes: number; unique_ips: number }
+    summary: { total: number; matched: number; companies: number; prospects: number; match_rate: number }
     timeseries: Array<{
-        hour: string
+        bucket: string
         total: number
         matched: number
         company: number
@@ -81,6 +127,10 @@ interface VisitorAnalytics {
     top_pages: Array<{ page: string; count: number }>
     top_referrers: Array<{ referrer: string; count: number }>
     intent_distribution: Array<{ bucket: string; count: number }>
+    geo_countries: Array<{ country: string; count: number }>
+    geo_cities: Array<{ city: string; count: number }>
+    industry_breakdown: Array<{ industry: string; count: number }>
+    top_technologies: Array<{ tech: string; count: number }>
 }
 
 export default function VisitorsPage() {
@@ -91,15 +141,37 @@ export default function VisitorsPage() {
     const [error, setError] = useState<string | null>(null)
     const [analytics, setAnalytics] = useState<VisitorAnalytics | null>(null)
     const [analyticsLoading, setAnalyticsLoading] = useState(false)
+    const [period, setPeriod] = useState<PeriodHours>(24)
     const [segment, setSegment] = useState<"all" | "company" | "prospect">("all")
+    const [testLoading, setTestLoading] = useState(false)
     const pixelKey = "outmate_test_key_123"
+
+    const sendTestHit = async () => {
+        setTestLoading(true)
+        try {
+            const res = await fetch(`${API}/test-hit`, { method: "POST" })
+            const data = await res.json()
+            if (res.ok) {
+                toast.success(`Test visit queued from IP ${data.ip} — refreshing in 3s…`)
+                setTimeout(fetchData, 3000)
+                setTimeout(fetchAnalytics, 3000)
+            } else {
+                toast.error(data.detail || data.error || "Test hit failed")
+            }
+        } catch {
+            toast.error("Cannot reach backend")
+        } finally {
+            setTestLoading(false)
+        }
+    }
 
     const fetchData = async () => {
         setError(null)
         try {
+            const headers = getAuthHeaders()
             const [visitsRes, statsRes] = await Promise.all([
-                fetch(`${API_BASE}/api/v1/visitors/`),
-                fetch(`${API_BASE}/api/v1/visitors/stats`)
+                fetch(`${API}`, { headers }),
+                fetch(`${API}/stats`, { headers })
             ])
 
             if (visitsRes.ok) {
@@ -131,10 +203,10 @@ export default function VisitorsPage() {
         }
     }
 
-    const fetchAnalytics = async () => {
+    const fetchAnalytics = async (h: PeriodHours = period) => {
         setAnalyticsLoading(true)
         try {
-            const res = await fetch(`${API_BASE}/api/v1/visitors/analytics?hours=24&top_n=8`)
+            const res = await fetch(`${API}/analytics?hours=${h}&top_n=10`, { headers: getAuthHeaders() })
             if (!res.ok) {
                 const errData = await res.json().catch(() => null)
                 if (res.status === 503) setError(errData?.error || "Database temporarily unavailable")
@@ -149,6 +221,11 @@ export default function VisitorsPage() {
         }
     }
 
+    const handlePeriodChange = (h: PeriodHours) => {
+        setPeriod(h)
+        fetchAnalytics(h)
+    }
+
     const copyPixel = () => {
         const snippet = `<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`
         navigator.clipboard.writeText(snippet)
@@ -161,10 +238,18 @@ export default function VisitorsPage() {
         fetchAnalytics()
 
         const interval = setInterval(fetchData, 30000)
-        const analyticsInterval = setInterval(fetchAnalytics, 60000)
+        const analyticsInterval = setInterval(() => fetchAnalytics(period), 60000)
 
-        // Realtime stream (best-effort; will silently fail if Redis/SSE unavailable)
-        const es = new EventSource(`${API_BASE}/api/v1/visitors/stream`)
+        // SSE must connect DIRECTLY to the backend (not through the Next.js proxy).
+        // Next.js rewrites buffer responses, which breaks streaming. In production
+        // (Azure Static Web Apps → api.outmate.ai) the browser hits the backend directly;
+        // CORS is handled by the backend's CORSMiddleware for the frontend origin.
+        const streamToken = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
+        const streamBase = API_BASE  // e.g. http://127.0.0.1:8000 (dev) or https://api.outmate.ai (prod)
+        const streamUrl = streamToken
+            ? `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(streamToken)}`
+            : `${streamBase}/api/v1/visitors/stream`
+        const es = new EventSource(streamUrl)
         es.onmessage = (evt) => {
             try {
                 const msg = JSON.parse(evt.data)
@@ -207,6 +292,20 @@ export default function VisitorsPage() {
                     <p className="text-muted-foreground">Identify anonymous B2B visitors in real-time</p>
                 </div>
 
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={sendTestHit}
+                        disabled={testLoading}
+                    >
+                        {testLoading
+                            ? <RefreshCw className="h-4 w-4 animate-spin" />
+                            : <FlaskConical className="h-4 w-4" />
+                        }
+                        {testLoading ? "Sending…" : "Send Test Hit"}
+                    </Button>
+
                 <Dialog>
                     <DialogTrigger asChild>
                         <Button className="gap-2">
@@ -244,7 +343,8 @@ export default function VisitorsPage() {
                         </div>
                     </DialogContent>
                 </Dialog>
-            </div>
+                </div>{/* end flex items-center gap-2 */}
+            </div>{/* end flex items-center justify-between */}
 
             {/* Error Banner */}
             {error && (
@@ -310,73 +410,272 @@ export default function VisitorsPage() {
                 </Card>
             </div>
 
-            {/* Analytics */}
-            <div className="grid gap-4 md:grid-cols-2">
-                <Card className="md:col-span-2">
-                    <CardHeader>
-                        <CardTitle>Traffic (last 24h)</CardTitle>
-                        <CardDescription>Realtime updates stream in when available.</CardDescription>
+            {/* ── Analytics Dashboard ───────────────────────────────── */}
+            <div className="space-y-4">
+
+                {/* Period selector + summary stats */}
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5 text-primary" />
+                        Traffic Analytics
+                    </h2>
+                    <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                        {PERIODS.map((p) => (
+                            <Button
+                                key={p.hours}
+                                size="sm"
+                                variant={period === p.hours ? "default" : "ghost"}
+                                className="h-7 px-3 text-xs"
+                                onClick={() => handlePeriodChange(p.hours)}
+                            >
+                                {p.label}
+                            </Button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Period summary cards */}
+                <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
+                    {[
+                        { label: "Total Visits", value: analytics?.summary?.total ?? stats.total_visits, icon: <Users className="h-4 w-4" /> },
+                        { label: "Identified", value: analytics?.summary?.matched ?? stats.matched_visits, icon: <CheckCircle2 className="h-4 w-4" /> },
+                        { label: "Companies", value: analytics?.summary?.companies ?? "—", icon: <Building2 className="h-4 w-4" /> },
+                        { label: "Prospects", value: analytics?.summary?.prospects ?? "—", icon: <Target className="h-4 w-4" /> },
+                        { label: "Match Rate", value: analytics?.summary ? `${analytics.summary.match_rate}%` : `${(stats.match_rate ?? 0).toFixed(1)}%`, icon: <Zap className="h-4 w-4" /> },
+                    ].map((s) => (
+                        <Card key={s.label} className="py-3">
+                            <CardContent className="px-4 py-0">
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs text-muted-foreground">{s.label}</span>
+                                    <span className="text-muted-foreground">{s.icon}</span>
+                                </div>
+                                <div className="text-xl font-bold">{analyticsLoading ? "…" : s.value}</div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+
+                {/* Traffic chart */}
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base">
+                            {period === 24 ? "Hourly Traffic (Today)" : period === 168 ? "Daily Traffic (Last 7 Days)" : "Daily Traffic (Last 30 Days)"}
+                        </CardTitle>
+                        <CardDescription>Total visits vs. identified companies/prospects</CardDescription>
                     </CardHeader>
                     <CardContent>
                         {analyticsLoading ? (
-                            <div className="h-[260px] w-full animate-pulse bg-muted/40 rounded-lg" />
+                            <div className="h-[280px] w-full animate-pulse bg-muted/40 rounded-lg" />
                         ) : !analytics?.timeseries?.length ? (
-                            <div className="text-sm text-muted-foreground py-8">No analytics yet.</div>
-                        ) : (
-                            <div className="h-[260px]">
-                                {/* lightweight inline chart using existing CSS; no new component dependency */}
-                                <div className="grid grid-cols-12 gap-2 h-full items-end">
-                                    {analytics.timeseries.slice(-12).map((p) => (
-                                        <div key={p.hour} className="flex flex-col justify-end gap-1">
-                                            <div
-                                                className="bg-primary/80 rounded-sm"
-                                                style={{ height: `${Math.min(100, p.total * 6)}%` }}
-                                                title={`${p.total} visits`}
-                                            />
-                                            <div className="bg-green-600/70 rounded-sm" style={{ height: `${Math.min(100, p.matched * 6)}%` }} title={`${p.matched} identified`} />
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="mt-3 text-xs text-muted-foreground">
-                                    Primary bars = total visits, green overlay = identified.
-                                </div>
+                            <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">
+                                No traffic data for this period.
                             </div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height={280}>
+                                <BarChart
+                                    data={analytics.timeseries.map((t) => ({
+                                        ...t,
+                                        label: analytics.window.use_daily
+                                            ? t.bucket.slice(5)   // MM-DD
+                                            : new Date(t.bucket).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                                    }))}
+                                    margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                    <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                                    <Tooltip
+                                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                        labelStyle={{ fontWeight: 600 }}
+                                    />
+                                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                                    <Bar dataKey="total" name="Total" fill="#818cf8" radius={[3, 3, 0, 0]} />
+                                    <Bar dataKey="company" name="Companies" fill="#34d399" radius={[3, 3, 0, 0]} stackId="identified" />
+                                    <Bar dataKey="prospect" name="Prospects" fill="#fb923c" radius={[3, 3, 0, 0]} stackId="identified" />
+                                </BarChart>
+                            </ResponsiveContainer>
                         )}
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Top Pages</CardTitle>
-                        <CardDescription>Most visited paths (window)</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                        {(analytics?.top_pages || []).map((p) => (
-                            <div key={p.page} className="flex items-center justify-between gap-3 text-sm">
-                                <span className="truncate" title={p.page}>{p.page}</span>
-                                <Badge variant="secondary">{p.count}</Badge>
-                            </div>
-                        ))}
-                        {!analytics?.top_pages?.length && <div className="text-sm text-muted-foreground">—</div>}
-                    </CardContent>
-                </Card>
+                {/* Top pages + Top referrers */}
+                <div className="grid gap-4 md:grid-cols-2">
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                                Top Pages
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            {analyticsLoading
+                                ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-5 animate-pulse bg-muted/40 rounded" />)
+                                : (analytics?.top_pages || []).map((p) => {
+                                    const max = analytics!.top_pages[0]?.count || 1
+                                    return (
+                                        <div key={p.page} className="space-y-0.5">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="truncate font-mono text-xs" title={p.page}>{p.page}</span>
+                                                <Badge variant="secondary" className="ml-2 shrink-0">{p.count}</Badge>
+                                            </div>
+                                            <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                                <div className="h-full bg-primary/60 rounded-full" style={{ width: `${(p.count / max) * 100}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            {!analyticsLoading && !analytics?.top_pages?.length && <p className="text-sm text-muted-foreground">—</p>}
+                        </CardContent>
+                    </Card>
 
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <Globe className="h-4 w-4 text-muted-foreground" />
+                                Top Referrers
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            {analyticsLoading
+                                ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-5 animate-pulse bg-muted/40 rounded" />)
+                                : (analytics?.top_referrers || []).map((r) => {
+                                    const max = analytics!.top_referrers[0]?.count || 1
+                                    return (
+                                        <div key={r.referrer} className="space-y-0.5">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="truncate text-xs" title={r.referrer}>{r.referrer}</span>
+                                                <Badge variant="secondary" className="ml-2 shrink-0">{r.count}</Badge>
+                                            </div>
+                                            <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                                <div className="h-full bg-info/60 rounded-full" style={{ width: `${(r.count / max) * 100}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            {!analyticsLoading && !analytics?.top_referrers?.length && <p className="text-sm text-muted-foreground">—</p>}
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Geo + Industry + Technologies */}
+                <div className="grid gap-4 md:grid-cols-3">
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <MapPin className="h-4 w-4 text-muted-foreground" />
+                                Top Countries
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            {analyticsLoading
+                                ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-5 animate-pulse bg-muted/40 rounded" />)
+                                : (analytics?.geo_countries || []).map((g) => {
+                                    const max = analytics!.geo_countries[0]?.count || 1
+                                    return (
+                                        <div key={g.country} className="space-y-0.5">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-xs">{g.country}</span>
+                                                <Badge variant="outline" className="ml-2 shrink-0 text-[10px]">{g.count}</Badge>
+                                            </div>
+                                            <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                                <div className="h-full bg-success/60 rounded-full" style={{ width: `${(g.count / max) * 100}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            {!analyticsLoading && !analytics?.geo_countries?.length && <p className="text-sm text-muted-foreground">No geo data yet</p>}
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <Building2 className="h-4 w-4 text-muted-foreground" />
+                                Industries
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                            {analyticsLoading
+                                ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-5 animate-pulse bg-muted/40 rounded" />)
+                                : (analytics?.industry_breakdown || []).map((ind) => {
+                                    const max = analytics!.industry_breakdown[0]?.count || 1
+                                    return (
+                                        <div key={ind.industry} className="space-y-0.5">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="truncate text-xs" title={ind.industry}>{ind.industry}</span>
+                                                <Badge variant="outline" className="ml-2 shrink-0 text-[10px]">{ind.count}</Badge>
+                                            </div>
+                                            <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                                <div className="h-full bg-warning/60 rounded-full" style={{ width: `${(ind.count / max) * 100}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            {!analyticsLoading && !analytics?.industry_breakdown?.length && <p className="text-sm text-muted-foreground">No industry data yet</p>}
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <Layers className="h-4 w-4 text-muted-foreground" />
+                                Technologies
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {analyticsLoading
+                                ? <div className="flex flex-wrap gap-2">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-6 w-16 animate-pulse bg-muted/40 rounded-full" />)}</div>
+                                : (analytics?.top_technologies || []).length > 0
+                                    ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {(analytics?.top_technologies || []).map((t) => (
+                                                <Badge key={t.tech} variant="secondary" className="text-xs gap-1">
+                                                    {t.tech}
+                                                    <span className="text-muted-foreground font-normal">{t.count}</span>
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )
+                                    : <p className="text-sm text-muted-foreground">No technology data yet</p>
+                            }
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Intent distribution */}
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Top Referrers</CardTitle>
-                        <CardDescription>Where visitors came from</CardDescription>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-muted-foreground" />
+                            Intent Score Distribution
+                        </CardTitle>
+                        <CardDescription>How engaged are your visitors</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-2">
-                        {(analytics?.top_referrers || []).map((r) => (
-                            <div key={r.referrer} className="flex items-center justify-between gap-3 text-sm">
-                                <span className="truncate" title={r.referrer}>{r.referrer}</span>
-                                <Badge variant="secondary">{r.count}</Badge>
-                            </div>
-                        ))}
-                        {!analytics?.top_referrers?.length && <div className="text-sm text-muted-foreground">—</div>}
+                    <CardContent>
+                        {analyticsLoading ? (
+                            <div className="h-[180px] animate-pulse bg-muted/40 rounded-lg" />
+                        ) : (analytics?.intent_distribution?.some((d) => d.count > 0)) ? (
+                            <ResponsiveContainer width="100%" height={180}>
+                                <BarChart
+                                    data={analytics!.intent_distribution}
+                                    margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                    <XAxis dataKey="bucket" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                                    <Tooltip
+                                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                    />
+                                    <Bar dataKey="count" name="Visitors" fill="#818cf8" radius={[3, 3, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-[180px] flex items-center justify-center text-sm text-muted-foreground">No intent data yet.</div>
+                        )}
                     </CardContent>
                 </Card>
             </div>
+            {/* ── end Analytics Dashboard ─────────────────────────────── */}
 
             {/* Main Table */}
             <Card>
@@ -433,16 +732,14 @@ export default function VisitorsPage() {
                                         return cat === segment
                                     })
                                     .map((visit) => {
+                                    // Geo: prefer IPinfo result, fall back to Explorium HQ
                                     const geo =
                                         visit.geo ||
                                         visit.resolution?.geo ||
-                                        (visit.resolution?.explorium
-                                            ? {
-                                                  city: visit.resolution.explorium?.headquarters_city,
-                                                  region: visit.resolution.explorium?.headquarters_state,
-                                                  country: visit.resolution.explorium?.headquarters_country,
-                                              }
+                                        ((visit.headquarters_city || visit.headquarters_country)
+                                            ? { city: visit.headquarters_city, region: null, country: visit.headquarters_country }
                                             : null)
+
                                     const company = visit.company || visit.resolution?.company
                                     const person = visit.resolution?.person || {}
                                     const email =
@@ -460,7 +757,16 @@ export default function VisitorsPage() {
                                     const fullName = visit.full_name || person.full_name || person.name
                                     const linkedinUrl = visit.linkedin_url || person.linkedin_url || person.linkedin
                                     const jobTitle = visit.job_title || person.title || person.job_title
-                                    const category = (visit as any).category || visit.resolution?.category
+                                    const category = visit.category || visit.resolution?.category
+
+                                    // Company enrichment
+                                    const companyLinkedin = visit.company_linkedin_url || visit.resolution?.explorium?.linkedin_url
+                                    const website = visit.website || visit.resolution?.explorium?.website || (visit.domain ? `https://${visit.domain}` : null)
+                                    const industry = visit.industry || visit.resolution?.explorium?.industry
+                                    const employeeRange = visit.employee_count_range || visit.resolution?.explorium?.employee_count_range
+                                    const revenueRange = visit.revenue_range || visit.resolution?.explorium?.revenue_range
+                                    const technologies: string[] = visit.technologies || visit.resolution?.explorium?.technologies || []
+                                    const fundingStage = visit.funding_stage || visit.resolution?.explorium?.funding_stage
 
                                     // Safe URL parsing
                                     let pagePath = visit.url
@@ -478,6 +784,33 @@ export default function VisitorsPage() {
                                                     </span>
                                                     {jobTitle && (
                                                         <span className="text-xs text-muted-foreground">{jobTitle}</span>
+                                                    )}
+                                                    {/* Industry + employee count */}
+                                                    {(industry || employeeRange) && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {[industry, employeeRange && `${employeeRange} employees`].filter(Boolean).join(" · ")}
+                                                        </span>
+                                                    )}
+                                                    {/* Revenue + funding */}
+                                                    {(revenueRange || fundingStage) && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {[revenueRange, fundingStage].filter(Boolean).join(" · ")}
+                                                        </span>
+                                                    )}
+                                                    {/* Technologies (first 3) */}
+                                                    {technologies.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                                            {technologies.slice(0, 3).map((t) => (
+                                                                <Badge key={t} variant="outline" className="text-[9px] h-3.5 px-1 py-0">
+                                                                    {t}
+                                                                </Badge>
+                                                            ))}
+                                                            {technologies.length > 3 && (
+                                                                <span className="text-[9px] text-muted-foreground self-center">
+                                                                    +{technologies.length - 3}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     )}
                                                     {category && category !== "unknown" && (
                                                         <span className="text-xs">
@@ -508,21 +841,36 @@ export default function VisitorsPage() {
                                                     {linkedinUrl ? (
                                                         <a href={linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
                                                             <Linkedin className="h-3 w-3" />
-                                                            LinkedIn
+                                                            Profile
                                                         </a>
                                                     ) : null}
-                                                    {!email && !phone && !linkedinUrl && (
+                                                    {/* Company-level links */}
+                                                    {companyLinkedin ? (
+                                                        <a href={companyLinkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                                                            <Linkedin className="h-3 w-3" />
+                                                            Company page
+                                                        </a>
+                                                    ) : null}
+                                                    {website ? (
+                                                        <a href={website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-muted-foreground hover:underline">
+                                                            <Globe className="h-3 w-3" />
+                                                            {visit.domain || website}
+                                                        </a>
+                                                    ) : null}
+                                                    {!email && !phone && !linkedinUrl && !companyLinkedin && !website && (
                                                         <span className="text-xs text-muted-foreground italic">—</span>
                                                     )}
                                                 </div>
                                             </TableCell>
                                             <TableCell>
-                                                {geo ? (
+                                                {geo?.city || (geo as any)?.country ? (
                                                     <span className="flex items-center gap-1 text-sm">
                                                         <Globe className="h-3 w-3" />
-                                                        {geo.city}, {geo.country}
+                                                        {[geo.city, (geo as any).country].filter(Boolean).join(", ")}
                                                     </span>
-                                                ) : "Unknown"}
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">Unknown</span>
+                                                )}
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-1 max-w-[200px]">

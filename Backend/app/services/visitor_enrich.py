@@ -44,20 +44,45 @@ class VisitorEnricher:
                     from functools import partial
                     loop = asyncio.get_event_loop()
                     details = await loop.run_in_executor(None, partial(self.ipinfo_client.getDetails, ip))
-                    
-                    org = getattr(details, 'org', None)
+
+                    # org is "AS12345 Company Name" — strip the ASN prefix
+                    raw_org = getattr(details, 'org', None) or ""
+                    if raw_org.startswith("AS") and " " in raw_org:
+                        org = raw_org.split(" ", 1)[1].strip()
+                    else:
+                        org = raw_org or None
+
+                    # IPinfo paid plans expose a `company` dict with name + domain
+                    company_attr = getattr(details, 'company', None)
+                    if isinstance(company_attr, dict):
+                        org = company_attr.get("name") or org
+                        domain = company_attr.get("domain") or None
+                    else:
+                        domain = None
+
+                    # hostname is usable only when it looks like a real domain (≤3 labels)
+                    # e.g. "office.acme.com" is good; "123-45-67.broadband.isp.com" is not
                     hostname = getattr(details, 'hostname', None)
-                    logger.info(f"[Enrichment] IPinfo success: org={org}, hostname={hostname}")
-                    
+                    if not domain and hostname:
+                        parts = hostname.strip(".").split(".")
+                        # Keep if it has 2-3 labels and no IP octets (digits only segments)
+                        has_ip_octets = any(p.isdigit() for p in parts)
+                        if not has_ip_octets and 2 <= len(parts) <= 3:
+                            domain = ".".join(parts[-2:])
+
+                    city = getattr(details, 'city', None) or None
+                    region = getattr(details, 'region', None) or None
+                    country = getattr(details, 'country', None) or None
+
+                    logger.info(f"[Enrichment] IPinfo success: org={org}, domain={domain}, city={city}, country={country}")
+
+                    # Only update confidence if we got usable data
+                    got_data = bool(org or domain or city or country)
                     resolution.update({
                         "company": org,
-                        "domain": hostname,
-                        "geo": {
-                            "city": getattr(details, 'city', None),
-                            "region": getattr(details, 'region', None),
-                            "country": getattr(details, 'country', None),
-                        },
-                        "confidence": 0.5
+                        "domain": domain,
+                        "geo": {"city": city, "region": region, "country": country},
+                        "confidence": 0.5 if got_data else 0.1,
                     })
                 except Exception as e:
                     logger.error(f"[Enrichment] IPinfo lookup failed: {e}")
@@ -125,10 +150,29 @@ class VisitorEnricher:
                     explorium_data = await self.explorium.search_companies({"domain": resolution["domain"]}, limit=1)
                     if explorium_data.get("companies"):
                         company = explorium_data["companies"][0]
-                        resolution["explorium"] = company
-                        resolution["confidence"] = max(resolution["confidence"], 0.9)
-                        resolution["company"] = company.get("name") or resolution["company"]
-                        logger.info(f"[Enrichment] Explorium found: {company.get('name')}")
+                        # Validate domain match to avoid wrong results (e.g. a service
+                        # domain like dns.google matching an unrelated company)
+                        company_domain = (company.get("domain") or "").strip().lower().lstrip("www.")
+                        queried_domain = resolution["domain"].strip().lower()
+                        domain_ok = (
+                            not company_domain  # no domain returned — accept anyway
+                            or company_domain == queried_domain
+                            or queried_domain.endswith(f".{company_domain}")
+                            or company_domain.endswith(f".{queried_domain}")
+                        )
+                        if domain_ok:
+                            resolution["explorium"] = company
+                            resolution["confidence"] = max(resolution["confidence"], 0.9)
+                            resolution["company"] = company.get("name") or resolution["company"]
+                            # Promote company-level contact fields if not already set
+                            if not resolution["linkedin_url"]:
+                                resolution["linkedin_url"] = company.get("linkedin_url")
+                            logger.info(f"[Enrichment] Explorium found: {company.get('name')} ({company_domain})")
+                        else:
+                            logger.warning(
+                                f"[Enrichment] Explorium domain mismatch: queried={queried_domain}, "
+                                f"got={company_domain} ({company.get('name')}) — skipping"
+                            )
                 except Exception as e:
                     logger.error(f"[Enrichment] Explorium enrichment failed for {resolution['domain']}: {e}")
 
