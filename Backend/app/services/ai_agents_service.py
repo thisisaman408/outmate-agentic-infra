@@ -13,6 +13,7 @@ import asyncio
 import uuid
 from app.db.session import SessionLocal
 from app.services.search_service import SearchService
+from app.services.bettercontact_service import BetterContactService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class AiAgentsService:
         if not self.tavily_api_key:
             logger.warning("TAVILY_API_KEY not found in environment. Tavily-based search will fail.")
         self.explorium = ExploriumService()
+        self.better_contact = BetterContactService()
         self.seed_domain_lookup = {
             "stripe": "stripe.com",
             "airbnb": "airbnb.com",
@@ -1433,17 +1435,60 @@ class AiAgentsService:
                     )
                     profiles = prospect_res.get("profiles", [])
                     for p in profiles:
-                        emails = p.get("emails") or []
-                        linkedin = p.get("linkedin_profile_url") or p.get("flagship_profile_url") or ""
+                        # Extract basic info
+                        p_name = p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                        p_title = p.get("headline") or ""
+                        p_linkedin = p.get("linkedin_profile_url") or p.get("flagship_profile_url") or ""
+                        p_emails = p.get("emails") or []
+                        p_email = p_emails[0] if p_emails else ""
+
+                        # If email is missing, trigger waterfall enrichment
+                        if not p_email and (p_name or p_linkedin):
+                            try:
+                                logger.info(f"Enriching contact {p_name} via BetterContact")
+                                first = p.get("first_name") or (p_name.split()[0] if p_name else "")
+                                last = p.get("last_name") or (p_name.split()[-1] if p_name and " " in p_name else "")
+                                enriched = await self.better_contact.enrich_prospect(
+                                    first_name=first,
+                                    last_name=last,
+                                    company_name=name,
+                                    company_domain=target.get("domain") or "",
+                                    linkedin_url=p_linkedin
+                                )
+                                if enriched.get("success") and enriched.get("email"):
+                                    p_email = enriched["email"]
+                                    logger.info(f"Successfully enriched email for {p_name}: {p_email}")
+                            except Exception as ent_err:
+                                logger.warning(f"BetterContact enrichment failed for {p_name}: {ent_err}")
+
                         real_contacts.append({
-                            "name": p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
-                            "title": p.get("headline") or "",
-                            "email": emails[0] if emails else "",
-                            "linkedin": linkedin,
+                            "name": p_name,
+                            "title": p_title,
+                            "email": p_email,
+                            "linkedin": p_linkedin,
                         })
-                    logger.info(f"Found {len(real_contacts)} real contacts for {name}")
+                    logger.info(f"Found and enriched {len(real_contacts)} real contacts for {name}")
                 except Exception as e:
-                    logger.warning(f"Prospect lookup failed for {name}: {e}")
+                    logger.warning(f"Prospect lookup/enrichment failed for {name}: {e}")
+
+                # --- Fallback: If no real contacts found, try BetterContact Company Lead Finder ---
+                if not real_contacts:
+                    try:
+                        logger.info(f"No contacts found for {name}, trying BetterContact Lead Finder")
+                        enriched_company = await self.better_contact.enrich_company(
+                            company_name=name,
+                            company_domain=target.get("domain") or ""
+                        )
+                        if enriched_company.get("success") and enriched_company.get("email"):
+                            real_contacts.append({
+                                "name": enriched_company.get("contact_name") or "Decision Maker",
+                                "title": enriched_company.get("contact_title") or "Key Stakeholder",
+                                "email": enriched_company.get("email"),
+                                "linkedin": enriched_company.get("linkedin_url") or "",
+                            })
+                            logger.info(f"Lead Finder found contact: {enriched_company.get('email')}")
+                    except Exception as cf_err:
+                        logger.warning(f"BetterContact lead finder failed for {name}: {cf_err}")
 
                 # Build result payloads — one per real contact, or a single fallback
                 base_score = summary.get("customScore") or 0
