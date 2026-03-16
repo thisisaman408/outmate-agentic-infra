@@ -34,6 +34,7 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_API_URL: https://dev.outmate.ai
+          NEXT_PUBLIC_PIXEL_KEY: pk_8673a1dd795f70ba14f96478d7409ac2
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           REDIS_URL: redis://localhost:6379
 
