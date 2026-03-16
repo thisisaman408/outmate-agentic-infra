@@ -10,8 +10,8 @@ RESOURCE_GROUP="outmate-prod"
 LOCATION="eastus"
 ACR_NAME="outmateregistry"
 CONTAINER_APP_ENV="outmate-env"
-BACKEND_APP_NAME="outmate-api"
-FRONTEND_APP_NAME="outmate-web"
+CONTAINER_APP_NAME="outmate-api"
+STATIC_WEB_APP_NAME="outmate-web"
 IMAGE_NAME="outmate-api"
 
 echo "🚀 Setting up Azure resources for Outmate.ai..."
@@ -39,13 +39,13 @@ az containerapp env create \
 echo "🏗️ Building and pushing Docker image..."
 ./build_and_push.sh
 
-# Deploy Backend Container App
-echo "🚀 Deploying Backend Container App: $BACKEND_APP_NAME"
+# Deploy Container App
+echo "🚀 Deploying Container App: $CONTAINER_APP_NAME"
 az containerapp create \
-  --name $BACKEND_APP_NAME \
+  --name $CONTAINER_APP_NAME \
   --resource-group $RESOURCE_GROUP \
   --environment $CONTAINER_APP_ENV \
-  --image $ACR_NAME.azurecr.io/outmate-api:latest \
+  --image $ACR_NAME.azurecr.io/$IMAGE_NAME:latest \
   --target-port 8000 \
   --ingress external \
   --cpu 0.5 \
@@ -64,31 +64,22 @@ az containerapp create \
     crustdata-api-key="CRUSTDATA_API_KEY_PLACEHOLDER" \
     explorium-api-key="EXPLORIUM_API_KEY_PLACEHOLDER" \
     contactout-api-key="CONTACTOUT_API_KEY_PLACEHOLDER" \
-    bettercontact-api-key="BETTERCONTACT_API_KEY_PLACEHOLDER" \
     openrouter-api-key="OPENROUTER_API_KEY_PLACEHOLDER" \
     serper-api-key="SERPER_API_KEY_PLACEHOLDER" \
     tavily-api-key="TAVILY_API_KEY_PLACEHOLDER" \
     ipinfo-token="IPINFO_TOKEN_PLACEHOLDER"
 
-# Deploy Frontend Container App
-echo "🚀 Deploying Frontend Container App: $FRONTEND_APP_NAME"
-az containerapp create \
-  --name $FRONTEND_APP_NAME \
+# Create Static Web App for Frontend
+echo "🌐 Creating Static Web App: $STATIC_WEB_APP_NAME"
+az staticwebapp create \
+  --name $STATIC_WEB_APP_NAME \
   --resource-group $RESOURCE_GROUP \
-  --environment $CONTAINER_APP_ENV \
-  --image $ACR_NAME.azurecr.io/outmate-web:latest \
-  --target-port 3000 \
-  --ingress external \
-  --cpu 0.5 \
-  --memory 1.0Gi \
-  --min-replicas 1 \
-  --max-replicas 2 \
-  --env-vars \
-    NEXT_PUBLIC_API_URL="https://dev.outmate.ai" \
-    NEXT_PUBLIC_PIXEL_KEY="pk_PLACEHOLDER"
-
-# Note: Frontend and Backend are both deployed as Container Apps.
-# Static Web Apps were found to be incompatible with the current architecture.
+  --location $LOCATION \
+  --source https://github.com/YOUR_USERNAME/outmate \
+  --branch outmate \
+  --app-location "Frontend" \
+  --output-location ".next" \
+  --login-with-github
 
 echo "✅ Azure setup complete!"
 echo ""

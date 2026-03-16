@@ -45,8 +45,20 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const pixelKey = process.env.NEXT_PUBLIC_PIXEL_KEY
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        {pixelKey && (
+          <script
+            src={`${apiUrl}/api/v1/visitors/pixel.js`}
+            data-pixel-key={pixelKey}
+            async
+          />
+        )}
+      </head>
       <body className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}>
         <AuthProvider>{children}</AuthProvider>
         <Analytics />

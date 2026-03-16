@@ -6,8 +6,8 @@ Outmate.ai uses the following domain structure:
 
 - **Landing site**: https://outmate.ai (existing, do not modify)
 - **SaaS app**: https://app.outmate.ai
-- **Backend API**: https://dev.outmate.ai (managed via Container Apps)
-- **Local Dev**: http://localhost:8000
+- **Backend API**: https://api.outmate.ai
+- **Development**: https://dev.outmate.ai
 
 ## DNS Configuration (Hostinger)
 
@@ -23,21 +23,28 @@ Add the following CNAME records:
 ```
 Type: CNAME
 Name: app
-Target: [Azure Container App FQDN for Frontend]
+Target: [Azure Static Web App URL]
+TTL: 3600
+
+Type: CNAME
+Name: api
+Target: [Azure Container App FQDN]
 TTL: 3600
 
 Type: CNAME
 Name: dev
-Target: [Azure Container App FQDN for Backend]
+Target: [Development Static Web App URL]
 TTL: 3600
 ```
 
-**Frontend FQDN** (for app.outmate.ai):
+### Step 3: Get Azure URLs
+
+**Static Web App URL** (for app.outmate.ai):
 ```bash
-az containerapp show --name outmate-web --resource-group outmate-prod --query properties.configuration.ingress.fqdn -o tsv
+az staticwebapp show --name outmate-web --resource-group outmate-prod --query defaultHostname -o tsv
 ```
 
-**Backend FQDN** (for dev.outmate.ai):
+**Container App FQDN** (for api.outmate.ai):
 ```bash
 az containerapp show --name outmate-api --resource-group outmate-prod --query properties.configuration.ingress.fqdn -o tsv
 ```
@@ -52,20 +59,20 @@ nslookup api.outmate.ai
 
 ## Azure Custom Domain Setup
 
-### Frontend (app.outmate.ai)
+### Static Web App (app.outmate.ai)
 ```bash
-az containerapp hostname set \
+az staticwebapp hostname set \
   --name outmate-web \
   --resource-group outmate-prod \
-  --hostname app.outmate.ai
+  --domain app.outmate.ai
 ```
 
-### Backend (dev.outmate.ai)
+### Container App (api.outmate.ai)
 ```bash
 az containerapp hostname set \
   --name outmate-api \
   --resource-group outmate-prod \
-  --hostname dev.outmate.ai
+  --hostname api.outmate.ai
 ```
 
 ## SSL Certificates

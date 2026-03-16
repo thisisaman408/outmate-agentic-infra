@@ -1,19 +1,33 @@
-**Updated:** March 16, 2026
-**Target:** Azure Production Deployment (Container Apps)
+# Outmate.ai Deployment Status Report
+
+**Generated:** March 9, 2026
+**Target:** Azure Lean Production Deployment
 **Branch:** outmate
 
 ## Repository Readiness ✅
 
 ### Backend
 - **Framework:** FastAPI (Python 3.11)
-- **Container App:** `outmate-api`
-- **Status:** ✅ Ready & Deployed
+- **Container:** Multi-stage Dockerfile with non-root user
+- **Serving:** Gunicorn + Uvicorn workers (4 workers, 1000 req/worker, 60s timeout)
+- **Health Checks:** `/health`, `/health/db` endpoints implemented
+- **Port:** 8000
+- **Build Process:** `pip install -r requirements.txt` → `gunicorn ...`
+- **Status:** ✅ Ready
 
 ### Frontend
-- **Framework:** Next.js App Router
-- **Container App:** `outmate-web`
-- **Pixel Tracking:** `NEXT_PUBLIC_PIXEL_KEY` integrated and auto-installed
-- **Status:** ✅ Ready & Deployed
+- **Framework:** Next.js App Router (v16)
+- **Container:** Multi-stage Dockerfile (Node 18-alpine, pnpm)
+- **Build Process:** `pnpm install --frozen-lockfile` → `pnpm build`
+- **Output:** `.next` directory (SSR/hybrid rendering)
+- **Environment:** `NEXT_PUBLIC_API_URL=https://api.outmate.ai`
+- **Status:** ✅ Ready
+
+### Docker Images
+- **Backend:** `outmate-api:latest`
+- **Frontend:** `outmate-web:latest`
+- **Registry:** Azure Container Registry (`outmateregistry.azurecr.io`)
+- **Status:** ✅ Ready
 
 ## CI/CD Status ✅
 
@@ -25,7 +39,8 @@
 
 - **Frontend Workflow:** `deploy-frontend.yml`
   - Trigger: Push to `outmate` branch, `Frontend/**` changes
-  - Steps: Install deps → Build Next.js Docker image → Push to ACR → Deploy to Container Apps (`outmate-web`)
+  - Steps: Install deps → Build Next.js → Deploy to Static Web Apps
+  - Output location: `.next` (fixed for SSR)
   - Status: ✅ Updated and ready
 
 ### Required Secrets (GitHub)
@@ -34,6 +49,7 @@ AZURE_SUBSCRIPTION_ID
 AZURE_CLIENT_ID
 AZURE_TENANT_ID
 AZURE_CONTAINER_REGISTRY_PASSWORD
+AZURE_STATIC_WEB_APPS_API_TOKEN
 ```
 
 ## Environment Variables ✅
@@ -58,18 +74,12 @@ Created: `deployment/env.production.example`
 **Status:** ✅ Template created
 
 ### Frontend Environment Variables
-- `NEXT_PUBLIC_API_URL=https://dev.outmate.ai`
-- `BACKEND_URL=https://dev.outmate.ai` (server-side)
+- `NEXT_PUBLIC_API_URL=https://api.outmate.ai`
+- `BACKEND_URL=https://api.outmate.ai` (server-side)
 
 **Status:** ✅ Configured in code
 
 ## Azure Resources to Create
-
-### Recent Achievements (March 16, 2026) ✅
-- **Predictive Agent Fixed**: Integrated BetterContact + ContactOut Reveal for parallel email enrichment.
-- **CORS Hardened**: Validated origins `app.outmate.ai` and `dev.outmate.ai` in backend settings.
-- **Visitor Tracking**: Pixel script auto-injected into root layout via environment variables.
-- **Infrastructure Identified**: Confirmed Container App `outmate-web` in resource group `outmate-prod`.
 
 ### Required Azure CLI Commands
 
@@ -98,15 +108,18 @@ az containerapp create \
   --min-replicas 1 --max-replicas 10 \
   --scale-rule-name http-scale --scale-rule-http-concurrency 10 \
   --env-vars ENVIRONMENT=production LOG_LEVEL=WARNING \
-  --secrets database-url="YOUR_DB_URL" ...
+  --secrets database-url="YOUR_DB_URL" redis-url="YOUR_REDIS_URL" jwt-secret="YOUR_JWT_SECRET" ...
 
-# 6. Update Container App Environment Variables
-az containerapp update \
+# 6. Create Static Web App
+az staticwebapp create \
   --name outmate-web \
   --resource-group outmate-prod \
-  --set-env-vars \
-    NEXT_PUBLIC_PIXEL_KEY="pk_8673a1dd795f70ba14f96478d7409ac2" \
-    NEXT_PUBLIC_API_URL="https://dev.outmate.ai"
+  --location eastus \
+  --source https://github.com/YOUR_USERNAME/outmate \
+  --branch outmate \
+  --app-location "Frontend" \
+  --output-location ".next" \
+  --login-with-github
 ```
 
 ## DNS Configuration Instructions
@@ -117,22 +130,27 @@ Add these CNAME records in Hostinger DNS Zone for `outmate.ai`:
 ```
 Type: CNAME
 Name: app
-Target: (Container App FQDN for outmate-web)
+Target: [Static Web App URL from Azure]
+TTL: 3600
+
+Type: CNAME
+Name: api
+Target: [Container App FQDN from Azure]
 TTL: 3600
 
 Type: CNAME
 Name: dev
-Target: (Container App FQDN for outmate-api)
+Target: [Development Static Web App URL]
 TTL: 3600
 ```
 
 ### Azure Custom Domain Setup
 ```bash
-# For Frontend
-az containerapp hostname set --name outmate-web --resource-group outmate-prod --hostname app.outmate.ai
+# For Static Web App
+az staticwebapp hostname set --name outmate-web --resource-group outmate-prod --domain app.outmate.ai
 
-# For Backend
-az containerapp hostname set --name outmate-api --resource-group outmate-prod --hostname dev.outmate.ai
+# For Container App
+az containerapp hostname set --name outmate-api --resource-group outmate-prod --hostname api.outmate.ai
 ```
 
 ## Manual Steps Required
@@ -162,7 +180,7 @@ Set the following in GitHub repository settings:
 - Confirm all endpoints accessible
 
 ### 5. Post-Deployment Testing
-- Test health endpoints: `https://dev.outmate.ai/health`
+- Test health endpoints: `https://api.outmate.ai/health`
 - Verify frontend loads: `https://app.outmate.ai`
 - Test API integration
 - Monitor application logs in Azure
