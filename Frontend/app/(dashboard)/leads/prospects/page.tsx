@@ -114,6 +114,93 @@ function ProspectsPageContent() {
             return
         }
 
+        // --- Detect if file contains actual prospect data (not filters) ---
+        const headers = Object.keys(records[0]).map(h => h.toLowerCase().trim())
+        const prospectDataHeaders = ["email", "emails", "linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url", "headline", "summary", "skills", "twitter", "twitter_handle", "phone", "connections", "num_of_connections"]
+        const nameHeaders = ["name", "full_name", "full name", "first_name", "first name", "firstname", "last_name", "last name", "lastname"]
+        const hasProspectData = headers.some(h => prospectDataHeaders.includes(h))
+        const hasNames = headers.some(h => nameHeaders.includes(h))
+
+        if (hasProspectData && hasNames && records.length > 1) {
+            // Direct population: treat imported rows as prospect data
+            const colMap: Record<string, string> = {}
+            for (const h of Object.keys(records[0])) {
+                const low = h.toLowerCase().trim()
+                if (["name", "full_name", "full name"].includes(low)) colMap[h] = "name"
+                else if (["first_name", "first name", "firstname"].includes(low)) colMap[h] = "first_name"
+                else if (["last_name", "last name", "lastname", "surname"].includes(low)) colMap[h] = "last_name"
+                else if (["email", "emails"].includes(low)) colMap[h] = "emails"
+                else if (["linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url"].includes(low)) colMap[h] = "linkedin_profile_url"
+                else if (["headline", "title", "job_title", "job title"].includes(low)) colMap[h] = "headline"
+                else if (["company", "company_name", "employer", "current_company"].includes(low)) colMap[h] = "company"
+                else if (["location", "region", "city"].includes(low)) colMap[h] = "region"
+                else if (["industry"].includes(low)) colMap[h] = "industry"
+                else if (["skills"].includes(low)) colMap[h] = "skills"
+                else if (["twitter", "twitter_handle"].includes(low)) colMap[h] = "twitter_handle"
+                else if (["phone"].includes(low)) colMap[h] = "phone"
+                else if (["summary", "bio", "about"].includes(low)) colMap[h] = "summary"
+                else if (["connections", "num_of_connections"].includes(low)) colMap[h] = "num_of_connections"
+            }
+
+            const imported: ProspectProfile[] = records.map((row, idx) => {
+                const mapped: any = {}
+                Object.entries(row).forEach(([k, v]) => {
+                    const field = colMap[k]
+                    if (field && v) mapped[field] = String(v).trim()
+                })
+                const firstName = mapped.first_name || ""
+                const lastName = mapped.last_name || ""
+                const fullName = mapped.name || [firstName, lastName].filter(Boolean).join(" ") || "Unknown"
+                const emails = mapped.emails ? (mapped.emails.includes(",") ? mapped.emails.split(",").map((e: string) => e.trim()) : [mapped.emails]) : []
+
+                return {
+                    person_id: idx + 1,
+                    name: fullName,
+                    first_name: firstName || fullName.split(" ")[0] || "",
+                    last_name: lastName || fullName.split(" ").slice(1).join(" ") || "",
+                    region: mapped.region || "",
+                    region_address_components: [],
+                    headline: mapped.headline || "",
+                    summary: mapped.summary || "",
+                    skills: mapped.skills ? mapped.skills.split(",").map((s: string) => s.trim()) : [],
+                    languages: [],
+                    linkedin_profile_url: mapped.linkedin_profile_url || "",
+                    flagship_profile_url: mapped.linkedin_profile_url || "",
+                    emails,
+                    profile_picture_url: "",
+                    profile_picture_permalink: "",
+                    twitter_handle: mapped.twitter_handle || "",
+                    num_of_connections: mapped.num_of_connections ? parseInt(mapped.num_of_connections) : 0,
+                    education_background: [],
+                    honors: [],
+                    certifications: [],
+                    current_employers: mapped.company ? [{ name: mapped.company, title: mapped.headline || "", start_date: "", end_date: "", industry: mapped.industry || "" }] : [],
+                    past_employers: [],
+                    last_updated: new Date().toISOString(),
+                    recently_changed_jobs: false,
+                    years_of_experience: "",
+                    years_of_experience_raw: 0,
+                    all_employers: [],
+                    updated_at: new Date().toISOString(),
+                    location_details: { city: "", state: "", country: "" },
+                } as ProspectProfile
+            }).filter(p => p.name !== "Unknown")
+
+            setProfiles(imported)
+            setTotalCount(imported.length)
+            setNextCursor(null)
+            setHasSearched(true)
+            setCurrentFilters({})
+            try { localStorage.setItem("prospect_search_results", JSON.stringify(imported)) } catch {}
+
+            toast({
+                title: "Import complete",
+                description: `Imported ${imported.length} prospect(s) directly from file.`,
+            })
+            return
+        }
+
+        // --- Otherwise, treat as filter data and search ---
         // Alias mapping for header names → API filter keys
         const aliasMap: Record<string, keyof ProspectSearchFilters> = {
             // Titles

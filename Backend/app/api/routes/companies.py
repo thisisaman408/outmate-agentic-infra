@@ -17,6 +17,7 @@ from app.services.crustdata.base_crustdata_client import CrustDataAPIError
 from app.core.config import settings
 from app.db.deps import get_db
 from app.db.models.company import Company
+from app.db.repositories.company_repository import CompanyRepository
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ router = APIRouter(
     """,
     response_description="Successful search with company profiles"
 )
-async def search_companies(request: CompanySearchRequest):
+async def search_companies(request: CompanySearchRequest, db: Session = Depends(get_db)):
     """
     Search for companies with comprehensive error handling
     """
@@ -125,7 +126,27 @@ async def search_companies(request: CompanySearchRequest):
                 "total_available": result.get("total_count", 0)
             }
         )
-        
+
+        # Persist results to DB
+        try:
+            for company in result.get("companies", []):
+                domain = (company.get("company_domain") or company.get("domain") or "").strip().lower()
+                if not domain:
+                    continue
+                CompanyRepository.create_or_update(
+                    db=db,
+                    domain=domain,
+                    raw_data=company,
+                    provider_source="crustdata",
+                    name=company.get("company_name") or company.get("name"),
+                    website=company.get("company_website") or company.get("website"),
+                    industry=company.get("company_linkedin_industry") or company.get("industry"),
+                    employee_count_range=company.get("headcount_range") or company.get("employee_count_range"),
+                    linkedin_url=company.get("company_linkedin_profile_url") or company.get("linkedin_url"),
+                )
+        except Exception:
+            logger.exception("Failed to persist company search results to DB")
+
         # Return response
         return CompanySearchResponse(
             companies=result.get("companies", []),
