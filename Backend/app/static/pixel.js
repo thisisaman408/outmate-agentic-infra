@@ -22,7 +22,6 @@
         const data = new FormData();
         data.append('url', window.location.href);
         data.append('referrer', document.referrer || '');
-        data.append('pixel_key', PIXEL_KEY);
         
         // Include identity if previously set via outmate.identify()
         const savedEmail = localStorage.getItem('outmate_visitor_email');
