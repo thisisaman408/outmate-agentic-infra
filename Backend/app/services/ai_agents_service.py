@@ -1434,18 +1434,17 @@ class AiAgentsService:
                         limit=3,
                     )
                     profiles = prospect_res.get("profiles", [])
-                    for p in profiles:
-                        # Extract basic info
+                    
+                    async def enrich_single_prospect(p):
                         p_name = p.get("name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
                         p_title = p.get("headline") or ""
                         p_linkedin = p.get("linkedin_profile_url") or p.get("flagship_profile_url") or ""
                         p_emails = p.get("emails") or []
                         p_email = p_emails[0] if p_emails else ""
 
-                        # If email is missing, trigger waterfall enrichment
                         if not p_email and (p_name or p_linkedin):
                             try:
-                                logger.info(f"Enriching contact {p_name} via BetterContact")
+                                logger.info(f"Parallel enrichment for {p_name}")
                                 first = p.get("first_name") or (p_name.split()[0] if p_name else "")
                                 last = p.get("last_name") or (p_name.split()[-1] if p_name and " " in p_name else "")
                                 enriched = await self.better_contact.enrich_prospect(
@@ -1457,24 +1456,27 @@ class AiAgentsService:
                                 )
                                 if enriched.get("success") and enriched.get("email"):
                                     p_email = enriched["email"]
-                                    logger.info(f"Successfully enriched email for {p_name}: {p_email}")
-                            except Exception as ent_err:
-                                logger.warning(f"BetterContact enrichment failed for {p_name}: {ent_err}")
-
-                        real_contacts.append({
+                            except Exception as e:
+                                logger.warning(f"Enrichment task failed for {p_name}: {e}")
+                        
+                        return {
                             "name": p_name,
                             "title": p_title,
                             "email": p_email,
                             "linkedin": p_linkedin,
-                        })
-                    logger.info(f"Found and enriched {len(real_contacts)} real contacts for {name}")
+                        }
+
+                    # Execute all enrichments in parallel
+                    real_contacts = await asyncio.gather(*(enrich_single_prospect(p) for p in profiles))
+                    logger.info(f"Parallel processing finished for {len(real_contacts)} contacts")
                 except Exception as e:
                     logger.warning(f"Prospect lookup/enrichment failed for {name}: {e}")
 
-                # --- Fallback: If no real contacts found, try BetterContact Company Lead Finder ---
-                if not real_contacts:
+                # --- Fallback: If no emails found across all contacts, try BetterContact Lead Finder ---
+                has_emails = any(c.get("email") for c in real_contacts) if real_contacts else False
+                if not has_emails:
                     try:
-                        logger.info(f"No contacts found for {name}, trying BetterContact Lead Finder")
+                        logger.info(f"No emails found via search for {name}, trying BetterContact Lead Finder fallback")
                         enriched_company = await self.better_contact.enrich_company(
                             company_name=name,
                             company_domain=target.get("domain") or ""
@@ -1486,9 +1488,9 @@ class AiAgentsService:
                                 "email": enriched_company.get("email"),
                                 "linkedin": enriched_company.get("linkedin_url") or "",
                             })
-                            logger.info(f"Lead Finder found contact: {enriched_company.get('email')}")
+                            logger.info(f"Lead Finder fallback successful: {enriched_company.get('email')}")
                     except Exception as cf_err:
-                        logger.warning(f"BetterContact lead finder failed for {name}: {cf_err}")
+                        logger.warning(f"BetterContact lead finder fallback failed for {name}: {cf_err}")
 
                 # Build result payloads — one per real contact, or a single fallback
                 base_score = summary.get("customScore") or 0

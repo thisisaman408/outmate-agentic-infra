@@ -156,6 +156,9 @@ class Settings(BaseSettings):
             "http://localhost:3001",
             "http://127.0.0.1:3001",
             "https://outmate-signal-craft.lovable.app",
+            "https://app.outmate.ai",
+            "https://dev-app.outmate.ai",
+            "https://dev.outmate.ai",
         ],
         description="Frontend origins allowed for CORS"
     )

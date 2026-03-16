@@ -84,9 +84,9 @@ class BetterContactService:
 
                 print(f">>> [BetterContact] enrich_prospect submitted: {request_id} (contact: {first_name} {last_name}, company: {company_name}, domain: {company_domain}, linkedin: {linkedin_url}, is_fallback: {_is_fallback})", flush=True)
 
-                # Step 2: Poll for results (max 90s, every 5s)
-                for attempt in range(18):
-                    await asyncio.sleep(5)
+                # Step 2: Poll for results (shorter window for Agents to prevent Gateway Timeouts)
+                for attempt in range(10):
+                    await asyncio.sleep(2.5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/async/{request_id}",
                         headers=self._headers(),
@@ -184,9 +184,9 @@ class BetterContactService:
 
                 logger.info(f"BetterContact lead_finder submitted: {request_id}")
 
-                # Step 2: Poll for results (max 90s, every 5s)
-                for attempt in range(18):
-                    await asyncio.sleep(5)
+                # Step 2: Poll for results (shorter window for Agents)
+                for attempt in range(10):
+                    await asyncio.sleep(2.5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/lead_finder/async/{request_id}",
                         headers=self._headers(),
