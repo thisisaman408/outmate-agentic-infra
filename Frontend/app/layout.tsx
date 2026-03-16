@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Plus_Jakarta_Sans, Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import Script from "next/script"
 import "./globals.css"
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -51,11 +52,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        {/* Visitor tracking pixel — only rendered when NEXT_PUBLIC_PIXEL_KEY is set */}
         {pixelKey && (
-          <script
+          <Script
             src={`${apiUrl}/api/v1/visitors/pixel.js`}
             data-pixel-key={pixelKey}
-            async
+            strategy="afterInteractive"
           />
         )}
       </head>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, Form, HTTPException, Request, Query
+from fastapi import APIRouter, Header, Form, HTTPException, Request, Query, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import OperationalError
 from urllib.parse import urlparse
@@ -6,6 +6,7 @@ import logging
 import asyncio
 import httpx
 import jwt as pyjwt
+import secrets
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,8 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.core.redis import RedisManager
 from app.db.models.visitor import SiteConfig, Visit
+from app.db.models.user import User
+from app.api.deps.auth import get_current_user
 
 # ── Default test SiteConfig ──────────────────────────────────────────────────
 # This pixel key is what the dashboard's "Setup Tracking Pixel" dialog shows.
@@ -40,6 +43,23 @@ def _ensure_default_site_config() -> None:
         logger.warning("Could not seed default SiteConfig: %s", exc)
     finally:
         db.close()
+
+def _get_or_create_site_config(db, user_id: _uuid.UUID) -> SiteConfig:
+    """
+    Return the SiteConfig for a user's org, creating one if it doesn't exist.
+    Uses user.id as org_id (1:1 user→org model).
+    Pixel key format: pk_<16 random hex chars> — unique, URL-safe.
+    """
+    cfg = db.query(SiteConfig).filter(SiteConfig.org_id == user_id).first()
+    if not cfg:
+        pixel_key = "pk_" + secrets.token_hex(16)
+        cfg = SiteConfig(org_id=user_id, pixel_key=pixel_key, domain="")
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+        logger.info("Created SiteConfig for user %s (pixel_key=%s)", user_id, pixel_key)
+    return cfg
+
 
 # public_router: no JWT required — used by the tracking pixel and pixel.js file
 # (registered in main.py WITHOUT auth_dependencies)
@@ -113,35 +133,78 @@ def _visit_to_dict(v: Visit) -> dict:
     }
 
 
-@public_router.post("/test-hit")
-async def send_test_hit(request: Request):
+@router.get("/site-config")
+async def get_site_config(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user's SiteConfig (pixel_key, domain, webhooks). Auto-creates if missing."""
+    def _get():
+        db = SessionLocal()
+        try:
+            cfg = _get_or_create_site_config(db, current_user.id)
+            return {
+                "org_id": str(cfg.org_id),
+                "pixel_key": cfg.pixel_key,
+                "domain": cfg.domain or "",
+                "webhook_urls": cfg.webhook_urls or [],
+                "icp_filters": cfg.icp_filters or {},
+                "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
+            }
+        finally:
+            db.close()
+
+    try:
+        return await _run_db(_get)
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+
+
+@router.post("/site-config")
+async def update_site_config(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Update domain, webhook_urls, or icp_filters for the user's SiteConfig."""
+    body = await request.json()
+    def _update():
+        db = SessionLocal()
+        try:
+            cfg = _get_or_create_site_config(db, current_user.id)
+            if "domain" in body:
+                cfg.domain = str(body["domain"])[:255]
+            if "webhook_urls" in body and isinstance(body["webhook_urls"], list):
+                cfg.webhook_urls = body["webhook_urls"][:10]
+            if "icp_filters" in body and isinstance(body["icp_filters"], dict):
+                cfg.icp_filters = body["icp_filters"]
+            db.commit()
+            return {"status": "updated", "pixel_key": cfg.pixel_key, "domain": cfg.domain}
+        finally:
+            db.close()
+
+    try:
+        return await _run_db(_update)
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+
+
+@router.post("/test-hit")
+async def send_test_hit(request: Request, current_user: User = Depends(get_current_user)):
     """
-    Fire a synthetic visitor event using the default pixel key.
-    Used by the dashboard's 'Send Test Hit' button to verify the pipeline works
-    without requiring an external website or curl command.
+    Fire a synthetic visitor event scoped to the authenticated user's org.
+    Uses 1.1.1.1 (Cloudflare) as the test IP — well-known corporate IP with
+    full IPinfo + Explorium data (Cloudflare Inc., San Francisco, US).
     """
     try:
         def _get_config():
             db = SessionLocal()
             try:
-                return db.query(SiteConfig).filter(SiteConfig.pixel_key == _DEFAULT_PIXEL_KEY).first()
+                return _get_or_create_site_config(db, current_user.id)
             finally:
                 db.close()
 
         site_config = await _run_db(_get_config)
-        if not site_config:
-            # Try to seed it now
-            _ensure_default_site_config()
-            site_config = await _run_db(_get_config)
-        if not site_config:
-            raise HTTPException(status_code=503, detail="Site config unavailable — database may be down")
 
-        # Use Cloudflare's public IP for test hits.
         # 1.1.1.1 → IPinfo: Cloudflare Inc., San Francisco, US, domain=cloudflare.com
-        # Explorium correctly maps cloudflare.com → Cloudflare Inc. with full firmographics.
-        # (8.8.8.8 → dns.google → Explorium returned wrong company data)
         ip = "1.1.1.1"
-        logger.info("test-hit: using corporate test IP %s", ip)
+        logger.info("test-hit: user=%s org=%s using IP %s", current_user.id, site_config.org_id, ip)
 
         from app.tasks.visitors import _process_visitor_data
         payload = {
@@ -152,7 +215,6 @@ async def send_test_hit(request: Request):
             "intent_score": 1.0,
         }
         asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
-
         return {"status": "queued", "ip": ip, "message": f"Test visit queued for IP {ip} — refresh in a few seconds"}
     except HTTPException:
         raise
@@ -257,19 +319,26 @@ async def track_visitor(
 
 @router.get("")   # matches /api/v1/visitors  (Next.js proxy strips trailing slash)
 @router.get("/")  # matches /api/v1/visitors/ (direct calls)
-async def list_visitors(limit: int = 100):
-    """Get recent visits. Returns 503 if database is unavailable."""
+async def list_visitors(limit: int = 100, current_user: User = Depends(get_current_user)):
+    """Get recent visits scoped to the authenticated user's org."""
+    org_id = current_user.id
     try:
         def _query():
             db = SessionLocal()
             try:
-                visits = db.query(Visit).order_by(Visit.created_at.desc()).limit(limit).all()
+                visits = (
+                    db.query(Visit)
+                    .filter(Visit.org_id == org_id)
+                    .order_by(Visit.created_at.desc())
+                    .limit(limit)
+                    .all()
+                )
                 return [_visit_to_dict(v) for v in visits]
             finally:
                 db.close()
-        
+
         return await _run_db(_query)
-    
+
     except (OperationalError, asyncio.TimeoutError):
         return JSONResponse(status_code=503, content={
             "error": "Database temporarily unavailable. Please check your Supabase connection."
@@ -279,16 +348,22 @@ async def list_visitors(limit: int = 100):
 
 
 @router.get("/stats")
-async def get_visitor_stats():
-    """Get visitor stats. Returns zeros with 503 if database is unavailable."""
+async def get_visitor_stats(current_user: User = Depends(get_current_user)):
+    """Get visitor stats scoped to the authenticated user's org."""
+    org_id = current_user.id
     try:
         def _query():
             db = SessionLocal()
             try:
-                total = db.query(Visit).count()
-                matched = db.query(Visit).filter(Visit.matched == True).count()
-                # category breakdown (best-effort; JSONB may be null)
-                recent = db.query(Visit.resolution).order_by(Visit.created_at.desc()).limit(2000).all()
+                total = db.query(Visit).filter(Visit.org_id == org_id).count()
+                matched = db.query(Visit).filter(Visit.org_id == org_id, Visit.matched == True).count()
+                recent = (
+                    db.query(Visit.resolution)
+                    .filter(Visit.org_id == org_id)
+                    .order_by(Visit.created_at.desc())
+                    .limit(2000)
+                    .all()
+                )
                 cats = Counter([(r[0] or {}).get("category") or "unknown" for r in recent])
                 return {
                     "total_visits": total,
@@ -298,9 +373,9 @@ async def get_visitor_stats():
                 }
             finally:
                 db.close()
-        
+
         return await _run_db(_query)
-    
+
     except (OperationalError, asyncio.TimeoutError):
         return JSONResponse(status_code=503, content={
             "error": "Database temporarily unavailable",
@@ -313,7 +388,12 @@ async def get_visitor_stats():
 
 
 @router.get("/analytics")
-async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, top_n: int = 10):
+async def get_visitor_analytics(
+    hours: int = 24,
+    live_window_minutes: int = 5,
+    top_n: int = 10,
+    current_user: User = Depends(get_current_user),
+):
     """
     Visitor analytics for charts on the Visitors page.
     - hours ≤ 48  → hourly timeseries buckets
@@ -324,6 +404,7 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
     live_window_minutes = max(1, min(int(live_window_minutes), 60))
     top_n = max(3, min(int(top_n), 50))
     use_daily = hours > 48                 # daily buckets for 7d / 30d views
+    org_id = current_user.id
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=hours)
     live_since = now - timedelta(minutes=live_window_minutes)
@@ -337,7 +418,7 @@ async def get_visitor_analytics(hours: int = 24, live_window_minutes: int = 5, t
                         Visit.created_at, Visit.ip, Visit.url, Visit.referrer,
                         Visit.intent_score, Visit.matched, Visit.resolution, Visit.user_agent,
                     )
-                    .filter(Visit.created_at >= since)
+                    .filter(Visit.org_id == org_id, Visit.created_at >= since)
                     .order_by(Visit.created_at.desc())
                     .limit(50000)
                     .all()
@@ -479,15 +560,19 @@ async def stream_visitors(request: Request, org_id: str = "all", token: Optional
     if not raw_token:
         return JSONResponse(status_code=401, content={"error": "Authentication required"})
     try:
-        pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+        payload_data = pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+        user_id_from_token = payload_data.get("sub")
     except pyjwt.ExpiredSignatureError:
         return JSONResponse(status_code=401, content={"error": "Token expired"})
     except pyjwt.PyJWTError:
         return JSONResponse(status_code=401, content={"error": "Invalid token"})
 
+    # Scope channel to authenticated user's org — prevents cross-tenant SSE leakage
+    # (org_id query param is kept for backwards compat but overridden by token sub)
+    scoped_org_id = user_id_from_token or org_id
+
     try:
         redis_client = RedisManager.get_client()
-        # test ping to verify the connection is still alive
         await redis_client.ping()
     except Exception as exc:
         logger.error(f"Redis unavailable for stream: {exc}")
@@ -495,7 +580,7 @@ async def stream_visitors(request: Request, org_id: str = "all", token: Optional
             "error": "Realtime stream unavailable - Redis connection failed."
         })
 
-    channel = "visitors:all" if org_id == "all" else f"visitors:{org_id}"
+    channel = f"visitors:{scoped_org_id}"
     pubsub = redis_client.pubsub()
 
     async def event_generator():

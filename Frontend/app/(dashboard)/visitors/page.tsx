@@ -144,7 +144,19 @@ export default function VisitorsPage() {
     const [period, setPeriod] = useState<PeriodHours>(24)
     const [segment, setSegment] = useState<"all" | "company" | "prospect">("all")
     const [testLoading, setTestLoading] = useState(false)
-    const pixelKey = "outmate_test_key_123"
+    const [siteConfig, setSiteConfig] = useState<{ pixel_key: string; domain: string; org_id: string } | null>(null)
+    const [siteConfigLoading, setSiteConfigLoading] = useState(true)
+    const pixelKey = siteConfig?.pixel_key ?? "loading..."
+
+    const fetchSiteConfig = async () => {
+        setSiteConfigLoading(true)
+        try {
+            const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
+            if (res.ok) setSiteConfig(await res.json())
+        } catch { /* non-fatal */ } finally {
+            setSiteConfigLoading(false)
+        }
+    }
 
     const sendTestHit = async () => {
         setTestLoading(true)
@@ -236,6 +248,7 @@ export default function VisitorsPage() {
         setMounted(true)
         fetchData()
         fetchAnalytics()
+        fetchSiteConfig()
 
         const interval = setInterval(fetchData, 30000)
         const analyticsInterval = setInterval(() => fetchAnalytics(period), 60000)
@@ -313,33 +326,111 @@ export default function VisitorsPage() {
                             Setup Tracking Pixel
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
-                            <DialogTitle>Install Outmate Pixel</DialogTitle>
+                            <DialogTitle>Install the Visitor Tracking Pixel</DialogTitle>
                             <DialogDescription>
-                                Copy and paste this snippet into the <code>&lt;head&gt;</code> of your website to start identifying visitors.
+                                Embed this pixel on any website to identify anonymous B2B visitors in real-time.
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="bg-muted p-4 rounded-lg relative font-mono text-sm group">
-                            <pre className="whitespace-pre-wrap break-all">
-                                {`<script src="${API_BASE}/api/v1/visitors/pixel.js" \n  data-pixel-key="${pixelKey}">\n</script>`}
-                            </pre>
-                            <Button
-                                size="icon"
-                                variant="ghost"
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                                onClick={copyPixel}
-                            >
-                                <Copy className="h-4 w-4" />
+
+                        {/* Pixel key banner */}
+                        <div className="flex items-center justify-between bg-muted/60 border rounded-lg px-4 py-3">
+                            <div>
+                                <p className="text-xs text-muted-foreground mb-0.5">Your Pixel Key</p>
+                                <code className="text-sm font-mono font-bold text-primary">
+                                    {siteConfigLoading ? "Loading…" : pixelKey}
+                                </code>
+                            </div>
+                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => {
+                                navigator.clipboard.writeText(pixelKey)
+                                toast.success("Pixel key copied!")
+                            }}>
+                                <Copy className="h-3.5 w-3.5" /> Copy Key
                             </Button>
                         </div>
-                        <div className="text-sm text-muted-foreground space-y-2">
-                            <p className="font-medium text-foreground">Next Steps:</p>
-                            <ul className="list-disc pl-5 space-y-1">
-                                <li>Embed the script on all pages you want to track.</li>
-                                <li>Verify your domain in settings.</li>
-                                <li>Visitor data will start appearing in this dashboard within seconds.</li>
-                            </ul>
+
+                        {/* Installation tabs */}
+                        <div className="space-y-4 text-sm">
+                            {/* HTML snippet */}
+                            <div>
+                                <p className="font-semibold mb-1.5 flex items-center gap-2">
+                                    <Code2 className="h-4 w-4 text-primary" /> HTML / Any website
+                                </p>
+                                <p className="text-muted-foreground text-xs mb-2">Paste inside <code>&lt;head&gt;</code> or before <code>&lt;/body&gt;</code> on every page you want to track.</p>
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs relative group">
+                                    <pre className="whitespace-pre-wrap break-all">{`<script\n  src="${API_BASE}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey}"\n  async\n></script>`}</pre>
+                                    <Button size="icon" variant="ghost" className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100" onClick={copyPixel}><Copy className="h-3 w-3" /></Button>
+                                </div>
+                            </div>
+
+                            {/* Next.js */}
+                            <div>
+                                <p className="font-semibold mb-1.5 flex items-center gap-2">
+                                    <ExternalLink className="h-4 w-4 text-primary" /> Next.js (App Router)
+                                </p>
+                                <p className="text-muted-foreground text-xs mb-2">Add to <code>app/layout.tsx</code> inside the <code>&lt;head&gt;</code> tag.</p>
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs relative group">
+                                    <pre className="whitespace-pre-wrap break-all">{`// app/layout.tsx\n<head>\n  <script\n    src="${API_BASE}/api/v1/visitors/pixel.js"\n    data-pixel-key="${pixelKey}"\n    async\n  />\n</head>`}</pre>
+                                    <Button size="icon" variant="ghost" className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100" onClick={() => { navigator.clipboard.writeText(`<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async />`); toast.success("Copied!") }}><Copy className="h-3 w-3" /></Button>
+                                </div>
+                            </div>
+
+                            {/* React */}
+                            <div>
+                                <p className="font-semibold mb-1.5 flex items-center gap-2">
+                                    <Code2 className="h-4 w-4 text-primary" /> React (index.html / Vite)
+                                </p>
+                                <p className="text-muted-foreground text-xs mb-2">Add to <code>public/index.html</code> or your root HTML template.</p>
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs">
+                                    <pre className="whitespace-pre-wrap break-all">{`<!-- public/index.html -->\n<script\n  src="${API_BASE}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey}"\n  async\n></script>`}</pre>
+                                </div>
+                            </div>
+
+                            {/* WordPress */}
+                            <div>
+                                <p className="font-semibold mb-1.5 flex items-center gap-2">
+                                    <Globe className="h-4 w-4 text-primary" /> WordPress
+                                </p>
+                                <p className="text-muted-foreground text-xs mb-2">Go to <strong>Appearance → Theme Editor → header.php</strong> and paste before <code>&lt;/head&gt;</code>. Or use a plugin like <em>Insert Headers and Footers</em>.</p>
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs">
+                                    <pre className="whitespace-pre-wrap break-all">{`<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>`}</pre>
+                                </div>
+                            </div>
+
+                            {/* Shopify */}
+                            <div>
+                                <p className="font-semibold mb-1.5 flex items-center gap-2">
+                                    <Globe className="h-4 w-4 text-primary" /> Shopify
+                                </p>
+                                <p className="text-muted-foreground text-xs mb-2">Go to <strong>Online Store → Themes → Edit code → theme.liquid</strong>. Paste before <code>&lt;/head&gt;</code>.</p>
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs">
+                                    <pre className="whitespace-pre-wrap break-all">{`<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>`}</pre>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Verification steps */}
+                        <div className="border rounded-lg p-4 space-y-2 bg-muted/30">
+                            <p className="font-semibold text-sm">Verify Installation</p>
+                            <ol className="list-decimal pl-5 space-y-1 text-xs text-muted-foreground">
+                                <li>Embed the snippet on your site and open any page in a browser.</li>
+                                <li>Come back to this dashboard and click <strong>Send Test Hit</strong> — you should see a new entry appear within ~5 seconds.</li>
+                                <li>For your live site, open DevTools → Network and search for <code>track</code> — you should see a POST request with status 200.</li>
+                                <li>Enriched company/contact data populates within 5–10 seconds after the visit is recorded.</li>
+                            </ol>
+                        </div>
+
+                        {/* How it works */}
+                        <div className="border rounded-lg p-4 space-y-2 bg-muted/30">
+                            <p className="font-semibold text-sm">How it works</p>
+                            <ol className="list-decimal pl-5 space-y-1 text-xs text-muted-foreground">
+                                <li>Pixel fires a lightweight POST to the backend with the visitor's IP, page URL, and referrer.</li>
+                                <li>IP is enriched via IPinfo (geo + org), Enrich.so (IP-to-person), and Explorium (company firmographics).</li>
+                                <li>Visitor is categorised as <strong>Company</strong> or <strong>Prospect</strong> and saved to your database.</li>
+                                <li>Dashboard updates in real-time via SSE — no page refresh needed.</li>
+                                <li>All data is scoped to your account only — other users cannot see your visitors.</li>
+                            </ol>
                         </div>
                     </DialogContent>
                 </Dialog>
