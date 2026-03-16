@@ -76,6 +76,7 @@ export function PredictivePanel() {
   const [country, setCountry] = useState("US")
 
   const handleScoreLeads = async () => {
+    console.log("[PredictivePanel] handleScoreLeads called, companyName:", companyName)
     if (!companyName.trim()) {
       toast({
         title: "Company Required",
@@ -93,11 +94,20 @@ export function PredictivePanel() {
         industry: industry.trim() || undefined,
         country: country.trim() || "US",
       })
-      setResults(scores)
-      toast({
-        title: "Intelligence Model Run",
-        description: `Agent calculated conversion propensity for ${companyName}.`,
-      })
+      const list = Array.isArray(scores) ? scores : []
+      setResults(list)
+      if (list.length === 0) {
+        toast({
+          title: "No Scores Returned",
+          description: `The model could not generate a score for "${companyName}". Try a well-known company name.`,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Intelligence Model Run",
+          description: `Agent calculated conversion propensity for ${companyName}.`,
+        })
+      }
     } catch (error: any) {
       toast({
         title: "Model Execution Error",
@@ -188,12 +198,13 @@ export function PredictivePanel() {
             </div>
             <div className="flex justify-end">
               <Button
+                type="button"
                 onClick={handleScoreLeads}
                 disabled={isScoring}
                 className={cn(
-                  "h-14 px-12 text-base font-bold rounded-2xl transition-all duration-300",
+                  "h-14 px-12 text-base font-bold rounded-2xl transition-all duration-300 cursor-pointer text-white",
                   isScoring
-                    ? "bg-muted"
+                    ? "bg-muted text-muted-foreground"
                     : "bg-orange-600 hover:bg-orange-500 shadow-2xl shadow-orange-500/20"
                 )}
               >
