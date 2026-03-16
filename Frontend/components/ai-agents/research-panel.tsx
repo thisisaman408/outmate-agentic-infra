@@ -72,6 +72,44 @@ export function ResearchPanel() {
   const [depth, setDepth] = useState<"quick" | "standard" | "deep">("standard")
   const [isResearching, setIsResearching] = useState(false)
   const [result, setResult] = useState<ResearchResult | null>(null)
+  const derived = result
+    ? {
+        companyInitial: result.companyName?.[0] || "?",
+        recentNews:
+          result.recentNews && result.recentNews.length > 0
+            ? result.recentNews
+            : [
+                "No recent news available yet.",
+                "Check back after the next intel refresh.",
+                "Signals will appear once tracked sources update.",
+              ],
+        opportunities:
+          result.opportunities && result.opportunities.length > 0
+            ? result.opportunities
+            : [
+                "Opportunity signals pending for this entity.",
+                "Monitor hiring, funding, and product updates for momentum.",
+              ],
+        risks:
+          result.risks && result.risks.length > 0
+            ? result.risks
+            : [
+                "Risk signals not yet detected.",
+                "Set up alerts for competitive moves and budget shifts.",
+              ],
+        keyInsights:
+          result.keyInsights && result.keyInsights.length > 0
+            ? result.keyInsights
+            : [
+                "Core insight feed is still populating.",
+                "Run another scan after adding more sources.",
+              ],
+        competitors:
+          result.competitors && result.competitors.length > 0
+            ? result.competitors
+            : ["Competitor set not established yet."],
+      }
+    : null
 
   const handleResearch = async () => {
     if (!companyName.trim()) {
@@ -191,202 +229,178 @@ export function ResearchPanel() {
             animate={{ opacity: 1, y: 0 }}
             className="grid gap-6"
           >
-            {(() => {
-              const companyInitial = result.companyName?.[0] || "?"
-              const recentNews = result.recentNews && result.recentNews.length > 0
-                ? result.recentNews
-                : [
-                    "No recent news available yet.",
-                    "Check back after the next intel refresh.",
-                    "Signals will appear once tracked sources update.",
-                  ]
-              const opportunities = result.opportunities && result.opportunities.length > 0
-                ? result.opportunities
-                : [
-                    "Opportunity signals pending for this entity.",
-                    "Monitor hiring, funding, and product updates for momentum.",
-                  ]
-              const risks = result.risks && result.risks.length > 0
-                ? result.risks
-                : [
-                    "Risk signals not yet detected.",
-                    "Set up alerts for competitive moves and budget shifts.",
-                  ]
-              const keyInsights = result.keyInsights && result.keyInsights.length > 0
-                ? result.keyInsights
-                : [
-                    "Core insight feed is still populating.",
-                    "Run another scan after adding more sources.",
-                  ]
-              const competitors = result.competitors && result.competitors.length > 0
-                ? result.competitors
-                : ["Competitor set not established yet."]
+            {derived && (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Research Complete</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 border-white/10 hover:border-emerald-500/30"
+                    onClick={() => {
+                      const mp = result.marketPosition
+                      const marketPos =
+                        typeof mp === "string"
+                          ? mp
+                          : mp
+                            ? `${mp.positioning || ""} · ${mp.industry || ""} · ${mp.geographicPresence || ""}`
+                            : ""
+                      const headers = ["Company Name", "Summary", "Market Position", "Key Insights", "Opportunities", "Risks", "Competitors", "Recent News"]
+                      const rows = [[
+                        result.companyName || "", result.summary || "", marketPos,
+                        (result.keyInsights || []).join(" | "), (result.opportunities || []).join(" | "),
+                        (result.risks || []).join(" | "), (result.competitors || []).join(" | "),
+                        (result.recentNews || []).join(" | ")
+                      ]]
+                      exportToCSV(`research_export_${new Date().toISOString().split("T")[0]}.csv`, headers, rows)
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </Button>
+                </div>
 
-              return (
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Research Complete</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 border-white/10 hover:border-emerald-500/30"
-                onClick={() => {
-                  const mp = result.marketPosition
-                  const marketPos = typeof mp === "string" ? mp : mp ? `${mp.positioning || ""} · ${mp.industry || ""} · ${mp.geographicPresence || ""}` : ""
-                  const headers = ["Company Name", "Summary", "Market Position", "Key Insights", "Opportunities", "Risks", "Competitors", "Recent News"]
-                  const rows = [[
-                    result.companyName || "", result.summary || "", marketPos,
-                    (result.keyInsights || []).join(" | "), (result.opportunities || []).join(" | "),
-                    (result.risks || []).join(" | "), (result.competitors || []).join(" | "),
-                    (result.recentNews || []).join(" | ")
-                  ]]
-                  exportToCSV(`research_export_${new Date().toISOString().split('T')[0]}.csv`, headers, rows)
-                }}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </Button>
-            </div>
+                {/* Overview Section */}
+                <div className="grid gap-6 md:grid-cols-3">
+                  <Card className="md:col-span-2 glass-effect border-emerald-500/10">
+                    <CardHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-xl">
+                          {derived.companyInitial}
+                        </div>
+                        <div>
+                          <CardTitle className="text-2xl">{result.companyName}</CardTitle>
+                          <CardDescription className="flex items-center gap-2 mt-1">
+                            <Globe className="h-3 w-3" />
+                            Intelligence Summary
+                          </CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <div>
+                        <h4 className="text-xs uppercase font-bold tracking-tighter text-muted-foreground mb-2 flex items-center gap-2">
+                          Mission Profile
+                        </h4>
+                        <p className="text-muted-foreground leading-relaxed">{result.summary}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-xs uppercase font-bold tracking-tighter text-muted-foreground mb-2 flex items-center gap-2">
+                          Strategic Positioning
+                        </h4>
+                        <p className="text-muted-foreground leading-relaxed italic border-l-2 border-emerald-500/30 pl-4">
+                          {typeof result.marketPosition === "string"
+                            ? result.marketPosition
+                            : result.marketPosition
+                              ? `${result.marketPosition.positioning || "Positioning unknown"} · ${result.marketPosition.industry || "Industry unknown"} · ${result.marketPosition.geographicPresence || "Regions unspecified"}`
+                              : "Positioning data unavailable."}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-            {/* Overview Section */}
-            <div className="grid gap-6 md:grid-cols-3">
-              <Card className="md:col-span-2 glass-effect border-emerald-500/10">
-                <CardHeader>
-                    <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-xl">
-                    {companyInitial}
-                  </div>
-                    <div>
-                      <CardTitle className="text-2xl">{result.companyName}</CardTitle>
-                      <CardDescription className="flex items-center gap-2 mt-1">
-                        <Globe className="h-3 w-3" />
-                        Intelligence Summary
-                      </CardDescription>
+                  <Card className="glass-effect">
+                    <CardHeader>
+                      <CardTitle className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <Newspaper className="h-4 w-4" />
+                        Latest Intel
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-4">
+                        {derived.recentNews.slice(0, 3).map((news, index) => (
+                          <li key={index} className="text-sm leading-snug group border-b border-white/5 pb-3 last:border-0">
+                            <p className="text-muted-foreground group-hover:text-foreground transition-colors">{news}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Insights & Competition */}
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Card className="glass-effect shadow-md">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-primary font-bold">
+                        <TrendingUp className="h-5 w-5" />
+                        Opportunities
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="grid gap-3">
+                        {derived.opportunities.map((opp, index) => (
+                          <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/10 text-sm">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+                            <span className="text-muted-foreground">{opp}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="glass-effect">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-orange-400 font-bold">
+                        <ShieldAlert className="h-5 w-5" />
+                        Risk Assessment
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="grid gap-3">
+                        {derived.risks.map((risk, index) => (
+                          <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-orange-500/5 border border-orange-500/10 text-sm">
+                            <AlertCircle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
+                            <span className="text-muted-foreground">{risk}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Key Findings Multi-columns */}
+                <Card className="glass-effect border-white/5 bg-transparent overflow-hidden">
+                  <div className="grid md:grid-cols-2 gap-0 divide-x divide-white/10">
+                    <div className="p-8">
+                      <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                        Key Insight Findings
+                      </h3>
+                      <div className="space-y-6">
+                        {derived.keyInsights.map((insight, i) => (
+                          <div key={i} className="flex gap-4">
+                            <span className="font-mono text-emerald-500/40 text-sm">0{i + 1}</span>
+                            <p className="text-sm text-muted-foreground leading-relaxed">{insight}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="p-8 bg-black/10">
+                      <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                        <Users className="h-5 w-5 text-primary" />
+                        Competitor Landscape
+                      </h3>
+                      <div className="flex flex-wrap gap-3">
+                        {derived.competitors.map((comp) => (
+                          <Badge key={comp} className="px-4 py-2 bg-muted/40 hover:bg-primary/20 text-muted-foreground border-white/5 transition-colors cursor-default text-sm rounded-lg">
+                            {comp}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="mt-8 p-4 rounded-xl border border-white/5 bg-white/5">
+                        <p className="text-[10px] uppercase font-black text-muted-foreground/40 tracking-widest mb-2 underline overline">AI PROJECTION</p>
+                        <p className="text-xs text-muted-foreground">Entity shows 74% similarity to high-value cohorts. Recommended outreach tier: VIP.</p>
+                      </div>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div>
-                    <h4 className="text-xs uppercase font-bold tracking-tighter text-muted-foreground mb-2 flex items-center gap-2">
-                      Mission Profile
-                    </h4>
-                    <p className="text-muted-foreground leading-relaxed">{result.summary}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-xs uppercase font-bold tracking-tighter text-muted-foreground mb-2 flex items-center gap-2">
-                      Strategic Positioning
-                    </h4>
-                    <p className="text-muted-foreground leading-relaxed italic border-l-2 border-emerald-500/30 pl-4">
-                      {typeof result.marketPosition === "string"
-                        ? result.marketPosition
-                        : result.marketPosition
-                          ? `${result.marketPosition.positioning || "Positioning unknown"} · ${result.marketPosition.industry || "Industry unknown"} · ${result.marketPosition.geographicPresence || "Regions unspecified"}`
-                          : "Positioning data unavailable."}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="glass-effect">
-                <CardHeader>
-                  <CardTitle className="text-sm font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                    <Newspaper className="h-4 w-4" />
-                    Latest Intel
-                  </CardTitle>
-                </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-4">
-                    {recentNews.slice(0, 3).map((news, index) => (
-                      <li key={index} className="text-sm leading-snug group border-b border-white/5 pb-3 last:border-0">
-                        <p className="text-muted-foreground group-hover:text-foreground transition-colors">{news}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Insights & Competition */}
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card className="glass-effect shadow-md">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-primary font-bold">
-                    <TrendingUp className="h-5 w-5" />
-                    Opportunities
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="grid gap-3">
-                    {opportunities.map((opp, index) => (
-                      <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/10 text-sm">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-                        <span className="text-muted-foreground">{opp}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <Card className="glass-effect">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-orange-400 font-bold">
-                    <ShieldAlert className="h-5 w-5" />
-                    Risk Assessment
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="grid gap-3">
-                    {risks.map((risk, index) => (
-                      <li key={index} className="flex items-start gap-3 p-3 rounded-xl bg-orange-500/5 border border-orange-500/10 text-sm">
-                        <AlertCircle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
-                        <span className="text-muted-foreground">{risk}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Key Findings Multi-columns */}
-            <Card className="glass-effect border-white/5 bg-transparent overflow-hidden">
-              <div className="grid md:grid-cols-2 gap-0 divide-x divide-white/10">
-                <div className="p-8">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                    Key Insight Findings
-                  </h3>
-                  <div className="space-y-6">
-                    {keyInsights.map((insight, i) => (
-                      <div key={i} className="flex gap-4">
-                        <span className="font-mono text-emerald-500/40 text-sm">0{i + 1}</span>
-                        <p className="text-sm text-muted-foreground leading-relaxed">{insight}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-8 bg-black/10">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" />
-                    Competitor Landscape
-                  </h3>
-                  <div className="flex flex-wrap gap-3">
-                    {competitors.map((comp) => (
-                      <Badge key={comp} className="px-4 py-2 bg-muted/40 hover:bg-primary/20 text-muted-foreground border-white/5 transition-colors cursor-default text-sm rounded-lg">
-                        {comp}
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="mt-8 p-4 rounded-xl border border-white/5 bg-white/5">
-                    <p className="text-[10px] uppercase font-black text-muted-foreground/40 tracking-widest mb-2 underline overline">AI PROJECTION</p>
-                    <p className="text-xs text-muted-foreground">Entity shows 74% similarity to high-value cohorts. Recommended outreach tier: VIP.</p>
-                  </div>
-                </div>
-              </div>
-            </Card>
-              )
-            })()}
+                </Card>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   )
 }
+
