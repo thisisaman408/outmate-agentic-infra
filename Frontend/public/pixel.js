@@ -22,16 +22,23 @@
         const data = new FormData();
         data.append('url', window.location.href);
         data.append('referrer', document.referrer || '');
+        data.append('pixel_key', PIXEL_KEY);
+        
+        // Include identity if previously set via outmate.identify()
+        const savedEmail = localStorage.getItem('outmate_visitor_email');
+        if (savedEmail) {
+            data.append('email', savedEmail);
+        }
 
         // Use fetch with keepalive to ensure tracking completes on page unload if needed
-        // but since we track on load, fetch is fine.
-        console.log('Outmate Pixel: Tracking visit...', { url: window.location.href, key: PIXEL_KEY });
+        console.log('Outmate Pixel: Tracking visit...', { 
+            url: window.location.href, 
+            key: PIXEL_KEY,
+            email: savedEmail || 'anonymous'
+        });
         fetch(TRACK_URL, {
             method: 'POST',
             body: data,
-            headers: {
-                'X-Pixel-Key': PIXEL_KEY
-            },
             mode: 'cors',
             keepalive: true
         }).then(res => {
@@ -43,6 +50,22 @@
             console.error('Outmate Pixel Error:', err);
         });
     }
+
+    // Expose identify method to the global window object
+    window.outmate = {
+        identify: function(email) {
+            if (email && /^\S+@\S+\.\S+$/.test(email)) {
+                localStorage.setItem('outmate_visitor_email', email);
+                console.log('Outmate Pixel: Identified as', email);
+                // Trigger an immediate re-track with identity
+                track();
+            }
+        },
+        reset: function() {
+            localStorage.removeItem('outmate_visitor_email');
+            console.log('Outmate Pixel: Identity reset');
+        }
+    };
 
     // Debounce or delay tracking to avoid blocking main thread
     if (document.readyState === 'complete') {

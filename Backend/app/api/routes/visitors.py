@@ -243,16 +243,23 @@ async def track_visitor(
     request: Request,
     url: str = Form(...),
     referrer: Optional[str] = Form(None),
+    pixel_key: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
     user_agent: str = Header(...),
     x_forwarded_for: Optional[str] = Header(None),
-    pixel_key: str = Header(..., alias="X-Pixel-Key"),
+    x_pixel_key: Optional[str] = Header(None, alias="X-Pixel-Key"),
 ):
     try:
+        # Support both new form-based key and legacy header-based key
+        active_pixel_key = pixel_key or x_pixel_key
+        if not active_pixel_key:
+            raise HTTPException(status_code=400, detail="Missing pixel key (form or header)")
+        
         # 1. Validate Pixel Key (DB call with timeout)
         def _validate_key():
             db = SessionLocal()
             try:
-                return db.query(SiteConfig).filter(SiteConfig.pixel_key == pixel_key).first()
+                return db.query(SiteConfig).filter(SiteConfig.pixel_key == active_pixel_key).first()
             finally:
                 db.close()
         
@@ -265,24 +272,22 @@ async def track_visitor(
         ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
         
         # 3. Calculate Intent Score
-        intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact"]) else 0.5
+        intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]) else 0.5
         
-        # 4. Redis Deduplication (1 hour)
-        try:
-            dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
-            if dedupe_seconds > 0:
-                redis_client = RedisManager.get_client()
-                # if redis is not available, get_client will attempt to reconnect but
-                # may still raise; catch it and continue to avoid failing the track
-                if redis_client is not None:
-                    domain = urlparse(url).netloc
-                    dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-                    if await redis_client.get(dedupe_key):
-                        return {"status": "deduplicated"}
-                    await redis_client.setex(dedupe_key, dedupe_seconds, "1")
-        except Exception as e:
-            # log the error but don't prevent tracking
-            logger.warning(f"Redis deduplication failed: {e}")
+        # 4. Redis Deduplication (1 hour) — skipped if email is present to ensure identity updates
+        if not email:
+            try:
+                dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
+                if dedupe_seconds > 0:
+                    redis_client = RedisManager.get_client()
+                    if redis_client is not None:
+                        domain = urlparse(url).netloc
+                        dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
+                        if await redis_client.get(dedupe_key):
+                            return {"status": "deduplicated"}
+                        await redis_client.setex(dedupe_key, dedupe_seconds, "1")
+            except Exception as e:
+                logger.warning(f"Redis deduplication failed: {e}")
 
         # 5. Process Visitor (Async via Celery)
         from app.tasks.visitors import process_visitor_task, _process_visitor_data
@@ -293,6 +298,7 @@ async def track_visitor(
             "referrer": referrer,
             "user_agent": user_agent,
             "intent_score": intent_score,
+            "email": email,
         }
 
         queued_via = "celery"

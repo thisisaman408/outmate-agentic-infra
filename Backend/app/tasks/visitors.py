@@ -23,6 +23,15 @@ def process_visitor_task(org_id: str, data: Dict[str, Any]):
     """
     return asyncio.run(_process_visitor_data(org_id, data))
 
+def _normalize_domain(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    d = domain.strip().lower()
+    if d.startswith("www."):
+        d = d[4:]
+    # ipinfo hostname can be a reverse DNS host; keep it but trim trailing dot
+    return d.rstrip(".") or None
+
 async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
     """
     Background task to enrich visitor data and save to DB.
@@ -31,12 +40,13 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
     try:
         ip = data.get("ip")
         url = data.get("url")
+        email = data.get("email")
         intent_score = data.get("intent_score", 0.5)
         
         # 1. Enrich data
-        logger.info(f"Starting enrichment for IP: {ip}")
+        logger.info(f"Starting enrichment for IP: {ip} (email={email})")
         enricher = VisitorEnricher()
-        resolution = await enricher.enrich_ip(ip, url, intent_score)
+        resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
         logger.info(f"Enrichment completed for IP: {ip}. Confidence: {resolution.get('confidence')}")
 
         # 1b. Categorize visitor (company vs prospect) and attach matches
@@ -83,22 +93,21 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
     finally:
         db.close()
 
-def _normalize_domain(domain: str | None) -> str | None:
-    if not domain:
-        return None
-    d = domain.strip().lower()
-    if d.startswith("www."):
-        d = d[4:]
-    # ipinfo hostname can be a reverse DNS host; keep it but trim trailing dot
-    return d.rstrip(".") or None
+PERSONAL_DOMAINS = {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "mail.com"}
+
+def is_personal_email(email: str | None) -> bool:
+    if not email or "@" not in email:
+        return False
+    domain = email.split("@")[-1].lower()
+    return domain in PERSONAL_DOMAINS
 
 def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     """
     Classify a visitor as a 'company' or 'prospect' and attach matched entities (best-effort).
 
-    - **prospect**: we have a person email (or can map to an existing Prospect)
-    - **company**: we have a company/domain (or can map to an existing Company)
-    - **unknown**: neither found
+    - **prospect**: identified individual with a PERSONAL email (gmail, etc.).
+    - **company**: identified organization (by IP or by a WORK email domain).
+    - **unknown**: neither found.
     """
     res = dict(resolution or {})
 
@@ -146,24 +155,30 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Company match/create failed: {e}")
 
-    if matched_prospect:
+    # Prioritize 'prospect' only for personal emails (gmail, etc.)
+    # If it's a work email, treat it as a 'company' visit as per user preference
+    if email and is_personal_email(email):
         res["category"] = "prospect"
         res["matched_entity"] = "prospect"
         res["matched_prospect"] = {
-            "id": str(matched_prospect.id),
-            "email": matched_prospect.email,
-            "full_name": matched_prospect.full_name,
+            "id": str(matched_prospect.id) if matched_prospect else None,
+            "email": matched_prospect.email if matched_prospect else email,
+            "full_name": matched_prospect.full_name if matched_prospect else res.get("full_name"),
         }
-        if matched_prospect.company_id:
-            res["matched_company_id"] = str(matched_prospect.company_id)
-    elif matched_company:
+    elif domain or (email and not is_personal_email(email)):
         res["category"] = "company"
         res["matched_entity"] = "company"
         res["matched_company"] = {
             "id": str(matched_company.id) if getattr(matched_company, "id", None) else None,
-            "domain": getattr(matched_company, "domain", None),
-            "name": getattr(matched_company, "name", None),
+            "domain": getattr(matched_company, "domain", None) or domain,
+            "name": getattr(matched_company, "name", None) or company_name or domain,
         }
+        if matched_prospect:
+            # Still record that we know WHICH person from that company visited
+            res["matched_prospect"] = {
+                "id": str(matched_prospect.id),
+                "email": matched_prospect.email,
+            }
     else:
         res["category"] = "unknown"
         res["matched_entity"] = None

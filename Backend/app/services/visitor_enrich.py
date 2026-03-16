@@ -13,7 +13,7 @@ class VisitorEnricher:
         self.enrich_api_key = getattr(settings, 'ENRICH_API_KEY', None)
         self.explorium = ExploriumService()
 
-    async def enrich_ip(self, ip: str, url: str, intent_score: float) -> Dict[str, Any]:
+    async def enrich_ip(self, ip: str, url: str, intent_score: float, email: Optional[str] = None) -> Dict[str, Any]:
         """
         Enrich visitor IP with company, person, email, phone, and other contact data.
         """
@@ -26,12 +26,20 @@ class VisitorEnricher:
             "person": None,
             "intent_score": intent_score,
             # Contact-level fields (flattened for easy access)
-            "email": None,
+            "email": email,
             "phone": None,
             "full_name": None,
             "linkedin_url": None,
             "job_title": None,
         }
+        if email:
+            resolution["confidence"] = 0.5
+            if "@" in email:
+                domain = email.split("@")[-1].lower()
+                # If it's not a common personal domain, use it as the company domain
+                personal_domains = {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "mail.com"}
+                if domain not in personal_domains:
+                    resolution["domain"] = domain
 
         try:
             # ──────────────────────────────────────────────
