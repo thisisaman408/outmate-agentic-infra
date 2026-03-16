@@ -17,6 +17,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const user = authService.getCurrentUser()
             if (user) {
                 setUser(user)
+                // Link authenticated user to the tracking pixel
+                if (typeof window !== 'undefined' && (window as any).outmate) {
+                    (window as any).outmate.identify(user.email);
+                }
             }
             setIsLoading(false)
         }

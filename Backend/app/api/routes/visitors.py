@@ -245,7 +245,7 @@ async def track_visitor(
     referrer: Optional[str] = Form(None),
     pixel_key: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
-    user_agent: str = Header(...),
+    user_agent: Optional[str] = Header(None),
     x_forwarded_for: Optional[str] = Header(None),
     x_pixel_key: Optional[str] = Header(None, alias="X-Pixel-Key"),
 ):
@@ -267,9 +267,10 @@ async def track_visitor(
         if not site_config:
             raise HTTPException(status_code=401, detail="Invalid pixel key")
 
-        # 2. Get IP
+        # 2. Get IP and User-Agent
         forwarded = x_forwarded_for or request.headers.get("x-forwarded-for")
         ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "127.0.0.1")
+        ua = user_agent or request.headers.get("user-agent", "Unknown")
         
         # 3. Calculate Intent Score
         intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]) else 0.5
@@ -296,7 +297,7 @@ async def track_visitor(
             "ip": ip,
             "url": url,
             "referrer": referrer,
-            "user_agent": user_agent,
+            "user_agent": ua,
             "intent_score": intent_score,
             "email": email,
         }
