@@ -23,7 +23,7 @@ Build a **production-grade website visitor identification system** (RB2B clone) 
 | Queue | Celery + Redis | `tasks.process_visitor` |
 | DB | Postgres (Supabase) | `site_configs`, `visits`, `alerts` |
 | Enrichment | IPinfo (free) + Enrich.so ($29) + Explorium | IP→company→person |
-| Pixel | Custom JS beacon | Vercel CDN (later) |
+| Pixel | Custom JS beacon | CDN (later) |
 | Frontend | Next.js `/dashboard/visitors` | TanStack Table + SSE |
 | Testing | ngrok + Postman | Local pixel testing |
 

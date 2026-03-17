@@ -19,7 +19,7 @@ const FLOATING_CARDS = [
   { icon: "📧", text: "Campaign launched", sub: "150 personalized sequences sent", delay: 2.4 },
 ]
 
-const COMPANY_LOGOS = ["Stripe", "Figma", "Linear", "Notion", "Vercel", "Rippling"]
+const COMPANY_LOGOS = ["Stripe", "Figma", "Linear", "Notion", "Rippling", "Brex"]
 
 function NLPPromptBox() {
   const [value, setValue] = useState("")

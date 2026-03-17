@@ -1,7 +1,6 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Plus_Jakarta_Sans, Inter } from "next/font/google"
-import { Analytics } from "@vercel/analytics/next"
 import Script from "next/script"
 import "./globals.css"
 
@@ -21,7 +20,6 @@ import { AuthProvider } from "@/components/auth/auth-provider"
 export const metadata: Metadata = {
   title: "Outmate.ai - B2B GTM Intelligence Platform",
   description: "AI-powered B2B lead generation, buying signals, and GTM automation",
-  generator: "v0.app",
   icons: {
     icon: [
       {
@@ -63,7 +61,6 @@ export default function RootLayout({
       </head>
       <body className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}>
         <AuthProvider>{children}</AuthProvider>
-        <Analytics />
       </body>
     </html>
   )

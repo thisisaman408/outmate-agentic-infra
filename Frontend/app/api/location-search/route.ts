@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import fs from 'fs/promises'
 
-// Cache the data in memory to avoid reading disk on every request
-// In a serverless environment (like Vercel), this cache might be reset frequently, 
-// but it helps for persistent containers or local dev.
+// Cache the data in memory to avoid reading disk on every request.
+// This helps for persistent containers or local dev.
 let regionsData: Record<string, any> | null = null
 let countriesData: any[] | null = null
 

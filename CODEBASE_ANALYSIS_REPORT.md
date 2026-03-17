@@ -86,7 +86,7 @@
 | Charts | Recharts | 2.15.4 |
 | HTTP Client | Axios | ^1.13.6 |
 | Notifications | Sonner | ^1.7.4 |
-| Analytics | Vercel Analytics | 1.3.1 |
+| Analytics | Custom Visitor Script | 1.0.0 |
 | DB (server) | pg (postgres) + ioredis | Latest |
 
 ---
@@ -702,7 +702,7 @@ User submits credentials
 | **Supabase** | PostgreSQL database | Connection string | `session.py` |
 | **Upstash Redis** | Caching + deduplication | Redis URL (TLS) | `redis.py` |
 | **HuggingFace** | `all-MiniLM-L6-v2` embeddings | Model download | `advanced_nlp_service.py` |
-| **Vercel Analytics** | Frontend analytics | Auto (script) | `app/layout.tsx` |
+| **Frontend Analytics** | Visitor tracking script | Auto (script) | `app/layout.tsx` |
 
 ---
 
@@ -751,7 +751,7 @@ User submits credentials
 - Zustand for lightweight state management (avoids Redux overhead)
 - `use-debounce` hook for search input throttling
 - Framer Motion animations with `AnimatePresence` for smooth transitions
-- Vercel Analytics for production monitoring
+- Custom Visitor Tracking Script for production monitoring
 
 ### API Timeout Configuration
 | Service | Timeout |

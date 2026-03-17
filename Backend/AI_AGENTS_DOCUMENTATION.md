@@ -89,7 +89,7 @@ This document outlines the architecture, pipeline, input/output structures, and 
 **Goal**: Perform deep strategic analysis of a specific company using live web data.
 
 ### 🔹 Input
-- **JSON Body**: `{ "companyName": "Vercel", "depth": "quick" | "standard" | "deep" }`
+- **JSON Body**: `{ "companyName": "Stripe", "depth": "quick" | "standard" | "deep" }`
 
 ### 🔹 Pipeline
 1.  **Live Info Gathering (Tavily)**:
