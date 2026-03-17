@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.services.explorium_service import ExploriumService
 from app.services.bettercontact_service import BetterContactService
+from app.services.contactout_service import ContactOutService
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,14 @@ ISP_CLOUD_KEYWORDS = {
     "proxad", "wanadoo", "orange", "telefonica", "t-mobile", "sprint", "nexmo", 
     "twilio", "ovh", "digitalocean", "linode", "amazon", "google inc", "microsoft corp",
     "akamai", "cloudflare", "fastly", "level 3", "cogent", "tata communications",
-    "network foundation", "isp foundation", "hathway", "act fibernet", "bsnl", "mtnl"
+    "network foundation", "isp foundation", "hathway", "act fibernet", "bsnl", "mtnl",
+    "centurylink", "cox", "optimum", "suddenlink", "frontier", "windstream",
+    "hughesnet", "viasat", "starlink", "earthlink", "netzero", "juno",
+    "hetzner", "leaseweb", "choopa", "vultr", "scaleway", "upcloud",
+    "azure", "aws", "gcp", "alibaba", "oracle cloud", "ibm cloud",
+    "rackspace", "softlayer", "bluehost", "hostgator", "dreamhost", "siteground",
+    "godaddy", "namecheap", "wix", "squarespace", "fastweb", "sky broadband",
+    "bt group", "talktalk", "virgin media", "telstra", "optus", "tpg", "shaw", "rogers", "telus"
 }
 
 def is_isp_or_cloud(org_name: str) -> bool:
@@ -32,6 +40,14 @@ class VisitorEnricher:
         self.enrich_api_key = getattr(settings, 'ENRICH_API_KEY', None)
         self.explorium = ExploriumService()
         self.bettercontact = BetterContactService()
+        self.contactout = ContactOutService()
+        
+        # Debug API statuses
+        logger.info(f"[VisitorEnricher] Configured: IPINFO={bool(self.ipinfo_client)}, "
+                    f"ENRICH_SO={bool(self.enrich_api_key)}, "
+                    f"EXPLORIUM={bool(self.explorium.api_key)}, "
+                    f"BETTERCONTACT={bool(self.bettercontact.api_key)}, "
+                    f"CONTACTOUT={bool(self.contactout.api_key)}")
 
     async def enrich_ip(self, ip: str, url: str, intent_score: float, email: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -104,8 +120,8 @@ class VisitorEnricher:
 
                     # ISP and Cloud Provider Filtering:
                     # If the organization matches our ISP/Cloud list, do NOT use it as the company name.
-                    if is_isp_or_cloud(org):
-                        logger.info(f"[Enrichment] Filtered out ISP/Cloud organization: {org}")
+                    if is_isp_or_cloud(org) or is_isp_or_cloud(domain):
+                        logger.info(f"[Enrichment] Filtered out ISP/Cloud organization: {org} (domain={domain})")
                         org = None
                         domain = None
 
@@ -113,12 +129,18 @@ class VisitorEnricher:
 
                     # Only update confidence if we got usable data
                     got_data = bool(org or domain or city or country)
-                    resolution.update({
-                        "company": org,
-                        "domain": domain,
-                        "geo": {"city": city, "region": region, "country": country},
-                        "confidence": 0.5 if got_data else 0.1,
-                    })
+                    
+                    # Update resolution, but PROTECT EXISTING DATA from email logic
+                    if org:
+                        resolution["company"] = org
+                    if domain and not resolution.get("domain"):
+                        resolution["domain"] = domain
+                    
+                    if city or country:
+                        resolution["geo"] = {"city": city, "region": region, "country": country}
+                    
+                    if got_data:
+                        resolution["confidence"] = max(resolution["confidence"], 0.4)
                 except Exception as e:
                     logger.error(f"[Enrichment] IPinfo lookup failed: {e}")
 
@@ -137,15 +159,17 @@ class VisitorEnricher:
                     company_domain = company_data.get("company_domain") or ""
 
                     # Only use if NOT an ISP/cloud provider
-                    if company_name and not is_isp_or_cloud(company_name):
+                    if company_name and not is_isp_or_cloud(company_name) and not is_isp_or_cloud(company_domain):
                         resolution["company"] = company_name
-                        resolution["domain"] = company_domain or resolution["domain"]
+                        if company_domain and not resolution.get("domain"):
+                            resolution["domain"] = company_domain
+                        
                         resolution["confidence"] = max(resolution["confidence"], 0.7)
                         # Store extra company info
                         resolution["enrich_company"] = company_data
                         logger.info(f"[Enrichment] Enrich.so IP found company: {company_name} ({company_domain})")
                     else:
-                        logger.info(f"[Enrichment] Enrich.so IP returned ISP/cloud: {company_name} — skipped")
+                        logger.info(f"[Enrichment] Enrich.so IP returned ISP/cloud or empty: {company_name} — skipped")
                 else:
                     logger.info(f"[Enrichment] Enrich.so IP returned no company data for {ip}")
 
@@ -201,11 +225,20 @@ class VisitorEnricher:
             if resolution.get("email") and needs_more_data and self.bettercontact.api_key:
                 logger.info(f"[Enrichment] Step 2c: BetterContact fallback for {resolution['email']} "
                             f"(missing: name={not resolution.get('full_name')}, phone={not resolution.get('phone')}, linkedin={not resolution.get('linkedin_url')})")
-                # Use name hints from email if available (helps BetterContact narrow down)
-                first_name, last_name = self._parse_name_from_email(resolution["email"])
+                
+                # Use name hints from resolution if available (found by previous steps)
+                full_name = resolution.get("full_name") or ""
+                first_name, last_name = ("", "")
+                if " " in full_name:
+                    parts = full_name.split(" ", 1)
+                    first_name, last_name = parts[0], parts[1]
+                else:
+                    first_name = full_name
+
                 bc_result = await self.bettercontact.enrich_prospect(
-                    first_name=first_name or "",
-                    last_name=last_name or "",
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=resolution["email"],
                     company_name=resolution.get("company") or "",
                     company_domain=resolution.get("domain") or "",
                     linkedin_url=resolution.get("linkedin_url") or "",
@@ -226,6 +259,25 @@ class VisitorEnricher:
                                 f"phone={bool(resolution.get('phone'))}, linkedin={bool(resolution.get('linkedin_url'))}")
                 else:
                     logger.info(f"[Enrichment] BetterContact returned no data: {bc_result.get('error')}")
+
+            # ──────────────────────────────────────────────
+            # 2d. ContactOut fallback (get decision makers by domain)
+            # ──────────────────────────────────────────────
+            if resolution.get("domain") and not resolution.get("full_name") and self.contactout.api_key:
+                logger.info(f"[Enrichment] Step 2d: ContactOut fallback for domain {resolution['domain']}")
+                try:
+                    co_data = await self.contactout.get_decision_makers(domain=resolution["domain"], reveal_info=False)
+                    profiles = co_data.get("profiles", {})
+                    if profiles:
+                        # Take first DM
+                        dm = next(iter(profiles.values()))
+                        normalized = ContactOutService.normalize_decision_maker(dm)
+                        resolution["full_name"] = normalized.get("full_name") or resolution.get("full_name")
+                        resolution["job_title"] = normalized.get("title") or resolution.get("job_title")
+                        resolution["linkedin_url"] = normalized.get("linkedin_url") or resolution.get("linkedin_url")
+                        logger.info(f"[Enrichment] ContactOut found DM: {resolution['full_name']}")
+                except Exception as e:
+                    logger.warning(f"[Enrichment] ContactOut fallback failed: {e}")
 
             # ──────────────────────────────────────────────
             # 3. Explorium (Company firmographics)
@@ -290,54 +342,10 @@ class VisitorEnricher:
                      f"email={resolution.get('email')}, confidence={resolution['confidence']}")
         return resolution
 
-    @staticmethod
-    def _parse_name_from_email(email: str) -> tuple:
-        """
-        Extract (first_name, last_name) from an email prefix.
-        e.g. john.doe@gmail.com → ("John", "Doe")
-             muditmohitkumarsingh@gmail.com → ("Mudit", "Mohitkumarsingh")
-             jdoe@company.com → ("", "")  — too ambiguous
-             info@company.com → ("", "")
-        """
-        GENERIC_PREFIXES = {"info", "admin", "support", "hello", "contact", "sales",
-                            "noreply", "no-reply", "team", "help", "office", "mail",
-                            "billing", "accounts", "webmaster", "postmaster", "abuse"}
-        try:
-            prefix = email.split("@")[0]
-            prefix_lower = prefix.lower()
-            if prefix_lower in GENERIC_PREFIXES:
-                return ("", "")
 
-            # Step 1: Split on . _ - and filter out pure numbers
-            parts = re.split(r'[._\-]+', prefix_lower)
-            parts = [p for p in parts if p and not p.isdigit()]
-            if not parts:
-                return ("", "")
 
-            if len(parts) >= 2:
-                return (parts[0].capitalize(), parts[-1].capitalize())
 
-            # Step 2: Single chunk — try camelCase split using the original casing
-            #   e.g. "MuditSingh" → ["Mudit", "Singh"]
-            #   also "muditmohitkumarsingh" with original "MuditMohitKumarSingh"
-            original_prefix = email.split("@")[0]
-            camel_parts = re.findall(r'[A-Z][a-z]+', original_prefix)
-            if len(camel_parts) >= 2:
-                return (camel_parts[0], " ".join(camel_parts[1:]))
 
-            # Step 3: If single chunk is very long (>12 chars), it's likely concatenated
-            # names but all lowercase — we can't reliably split, return empty
-            if len(parts[0]) > 12:
-                return ("", "")
-
-            # Step 4: Short single part (3-12 chars) — could be a first name only
-            # Only return if reasonably name-like (has vowels)
-            if len(parts[0]) >= 3 and re.search(r'[aeiou]', parts[0]):
-                return (parts[0].capitalize(), "")
-
-            return ("", "")
-        except Exception:
-            return ("", "")
 
     async def _enrich_so_email_lookup(self, email: str) -> Optional[Dict[str, Any]]:
         """Call Enrich.so API for Email to Person lookup (GET /v1/api/person?email=)."""

@@ -10,6 +10,7 @@ import httpx
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ BETTERCONTACT_BASE = "https://app.bettercontact.rocks/api/v2"
 
 class BetterContactService:
     def __init__(self):
-        self.api_key = os.getenv("BETTERCONTACT_API_KEY")
+        self.api_key = getattr(settings, 'BETTERCONTACT_API_KEY', None) or os.getenv("BETTERCONTACT_API_KEY")
         if not self.api_key:
             logger.warning("BETTERCONTACT_API_KEY not set")
 
@@ -30,8 +31,9 @@ class BetterContactService:
 
     async def enrich_prospect(
         self,
-        first_name: str,
-        last_name: str,
+        first_name: str = "",
+        last_name: str = "",
+        email: str = "",
         company_name: str = "",
         company_domain: str = "",
         linkedin_url: str = "",
@@ -45,11 +47,14 @@ class BetterContactService:
         if not self.api_key:
             return {"success": False, "error": "BETTERCONTACT_API_KEY not set"}
 
-        # Build the contact payload (API uses "company" not "company_name")
-        contact = {
-            "first_name": first_name,
-            "last_name": last_name,
-        }
+        # Build the contact payload
+        contact = {}
+        if first_name:
+            contact["first_name"] = first_name
+        if last_name:
+            contact["last_name"] = last_name
+        if email:
+            contact["email"] = email
         if company_name:
             contact["company"] = company_name
         if company_domain:

@@ -74,6 +74,10 @@ class GTMAgentsService:
     Orchestrator for the specialised GTM agents.
     Uses Perplexity Sonar Pro for research-heavy tasks and Claude 3.5 Haiku for logical/creative ones.
     """
+    
+    def __init__(self):
+        # Diagnostic: Print configured status
+        print(f">>> GTMAgentsService: OpenRouter API key configured: {bool(settings.OPENROUTER_API_KEY)}", flush=True)
 
     async def run_crossfire(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Competitive Intelligence Agent — uses Perplexity for real-time data."""

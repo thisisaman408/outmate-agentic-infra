@@ -235,6 +235,10 @@ class Settings(BaseSettings):
         None,
         description="Enrich.so API key (optional)"
     )
+    BETTERCONTACT_API_KEY: Optional[str] = Field(
+        None,
+        description="BetterContact API key (optional)"
+    )
     BRIGHTDATA_API_TOKEN: Optional[str] = Field(
         None,
         description="Brightdata API token (optional)"

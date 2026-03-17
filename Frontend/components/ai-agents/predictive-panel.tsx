@@ -364,9 +364,17 @@ export function PredictivePanel() {
                           <div className="text-4xl font-black text-orange-400 leading-none">{result.score}</div>
                           <div className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">GTM Score</div>
                         </div>
-                        <Button className="w-full h-12 bg-orange-600 hover:bg-orange-500 font-bold rounded-xl shadow-lg shadow-orange-500/10 transition-all">
-                          Engage Prospect
-                        </Button>
+                        {result.email ? (
+                          <a href={`mailto:${result.email}`} className="w-full">
+                            <Button className="w-full h-12 bg-orange-600 hover:bg-orange-500 font-bold rounded-xl shadow-lg shadow-orange-500/10 transition-all text-white">
+                              Engage Prospect
+                            </Button>
+                          </a>
+                        ) : (
+                          <Button className="w-full h-12 bg-orange-600 hover:bg-orange-500 font-bold rounded-xl shadow-lg shadow-orange-500/10 transition-all text-white">
+                            Engage Prospect
+                          </Button>
+                        )}
                         {result.email && (
                           <div className="text-center">
                             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Direct Contact</p>
