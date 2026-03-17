@@ -993,7 +993,9 @@ export default function VisitorsPage() {
                                                         Identified
                                                     </Badge>
                                                 ) : (
-                                                    <span className="text-xs text-muted-foreground italic">Resolving...</span>
+                                                    <Badge variant="outline" className="text-muted-foreground">
+                                                        Anonymous
+                                                    </Badge>
                                                 )}
                                             </TableCell>
                                         </TableRow>
