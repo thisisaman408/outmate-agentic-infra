@@ -710,8 +710,8 @@ export default function VisitorsPage() {
                                                             {d.fullName ? d.fullName.charAt(0).toUpperCase() : <User className="h-3.5 w-3.5" />}
                                                         </div>
                                                         <div>
-                                                            <div className="font-medium text-sm">{d.fullName || "Anonymous"}</div>
-                                                            <div className="text-xs text-muted-foreground">{d.jobTitle || d.email || visit.ip}</div>
+                                                            <div className="font-medium text-sm">{d.fullName || d.email || "Anonymous"}</div>
+                                                            <div className="text-xs text-muted-foreground">{d.fullName ? (d.jobTitle || d.email || visit.ip) : (d.jobTitle || visit.ip)}</div>
                                                         </div>
                                                     </div>
                                                 </TableCell>
@@ -982,7 +982,7 @@ export default function VisitorsPage() {
                                             {(d.company || d.fullName || "?").charAt(0).toUpperCase()}
                                         </div>
                                         <div>
-                                            <SheetTitle className="text-lg">{d.company || d.fullName || "Anonymous Visitor"}</SheetTitle>
+                                            <SheetTitle className="text-lg">{d.company || d.fullName || d.email || "Anonymous Visitor"}</SheetTitle>
                                             <p className="text-sm text-muted-foreground">
                                                 {[d.industry, d.employeeRange && `${d.employeeRange} employees`].filter(Boolean).join(" · ") || selectedVisit.domain || selectedVisit.ip}
                                             </p>

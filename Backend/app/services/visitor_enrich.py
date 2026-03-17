@@ -193,25 +193,28 @@ class VisitorEnricher:
                     logger.info(f"[Enrichment] Enrich.so email lookup returned no data for {resolution['email']}")
 
             # ──────────────────────────────────────────────
-            # 2c. BetterContact fallback (when Enrich.so email returned no person)
-            #     Uses 20+ data sources to find name, LinkedIn, phone from email.
+            # 2c. BetterContact fallback (when Enrich.so email returned no/partial person data)
+            #     Uses 20+ waterfall data sources to find name, LinkedIn, phone.
+            #     Always attempt when we have email — BetterContact can enrich by email alone.
             # ──────────────────────────────────────────────
-            if resolution.get("email") and not resolution.get("full_name") and self.bettercontact.api_key:
-                logger.info(f"[Enrichment] Step 2c: BetterContact fallback for {resolution['email']}")
-                # Try to extract a name guess from email to seed BetterContact
+            needs_more_data = not resolution.get("full_name") or not resolution.get("phone") or not resolution.get("linkedin_url")
+            if resolution.get("email") and needs_more_data and self.bettercontact.api_key:
+                logger.info(f"[Enrichment] Step 2c: BetterContact fallback for {resolution['email']} "
+                            f"(missing: name={not resolution.get('full_name')}, phone={not resolution.get('phone')}, linkedin={not resolution.get('linkedin_url')})")
+                # Use name hints from email if available (helps BetterContact narrow down)
                 first_name, last_name = self._parse_name_from_email(resolution["email"])
                 bc_result = await self.bettercontact.enrich_prospect(
-                    first_name=first_name or "Unknown",
+                    first_name=first_name or "",
                     last_name=last_name or "",
                     company_name=resolution.get("company") or "",
                     company_domain=resolution.get("domain") or "",
+                    linkedin_url=resolution.get("linkedin_url") or "",
                 )
                 if bc_result.get("success"):
                     if bc_result.get("email") and not resolution.get("email"):
                         resolution["email"] = bc_result["email"]
                     if bc_result.get("phone") and not resolution.get("phone"):
                         resolution["phone"] = bc_result["phone"]
-                    # BetterContact contact_name from lead_finder
                     if bc_result.get("contact_name") and not resolution.get("full_name"):
                         resolution["full_name"] = bc_result["contact_name"]
                         resolution["confidence"] = max(resolution["confidence"], 0.6)
@@ -219,22 +222,10 @@ class VisitorEnricher:
                         resolution["linkedin_url"] = bc_result["linkedin_url"]
                     if bc_result.get("contact_title") and not resolution.get("job_title"):
                         resolution["job_title"] = bc_result["contact_title"]
-                    logger.info(f"[Enrichment] BetterContact fallback: name={resolution.get('full_name')}, phone={bool(resolution.get('phone'))}")
+                    logger.info(f"[Enrichment] BetterContact result: name={resolution.get('full_name')}, "
+                                f"phone={bool(resolution.get('phone'))}, linkedin={bool(resolution.get('linkedin_url'))}")
                 else:
-                    logger.info(f"[Enrichment] BetterContact fallback returned no data: {bc_result.get('error')}")
-
-            # ──────────────────────────────────────────────
-            # 2d. Email-based name extraction (last resort)
-            #     Parse email prefix to guess name (e.g. john.doe@gmail.com → John Doe)
-            # ──────────────────────────────────────────────
-            if resolution.get("email") and not resolution.get("full_name"):
-                guessed_first, guessed_last = self._parse_name_from_email(resolution["email"])
-                if guessed_first:
-                    guessed_name = f"{guessed_first} {guessed_last}".strip()
-                    if guessed_name:
-                        resolution["full_name"] = guessed_name
-                        resolution["confidence"] = max(resolution["confidence"], 0.3)
-                        logger.info(f"[Enrichment] Step 2d: Guessed name from email: {guessed_name}")
+                    logger.info(f"[Enrichment] BetterContact returned no data: {bc_result.get('error')}")
 
             # ──────────────────────────────────────────────
             # 3. Explorium (Company firmographics)
@@ -304,26 +295,46 @@ class VisitorEnricher:
         """
         Extract (first_name, last_name) from an email prefix.
         e.g. john.doe@gmail.com → ("John", "Doe")
-             jdoe@company.com → ("Jdoe", "")
+             muditmohitkumarsingh@gmail.com → ("Mudit", "Mohitkumarsingh")
+             jdoe@company.com → ("", "")  — too ambiguous
              info@company.com → ("", "")
         """
         GENERIC_PREFIXES = {"info", "admin", "support", "hello", "contact", "sales",
-                            "noreply", "no-reply", "team", "help", "office", "mail"}
+                            "noreply", "no-reply", "team", "help", "office", "mail",
+                            "billing", "accounts", "webmaster", "postmaster", "abuse"}
         try:
-            prefix = email.split("@")[0].lower()
-            # Skip generic/role-based prefixes
-            if prefix in GENERIC_PREFIXES:
+            prefix = email.split("@")[0]
+            prefix_lower = prefix.lower()
+            if prefix_lower in GENERIC_PREFIXES:
                 return ("", "")
-            # Split on . _ - and filter out pure numbers
-            parts = re.split(r'[._\-]+', prefix)
+
+            # Step 1: Split on . _ - and filter out pure numbers
+            parts = re.split(r'[._\-]+', prefix_lower)
             parts = [p for p in parts if p and not p.isdigit()]
             if not parts:
                 return ("", "")
+
             if len(parts) >= 2:
                 return (parts[0].capitalize(), parts[-1].capitalize())
-            # Single part — only use if it looks like a name (>2 chars, not all consonants)
-            if len(parts[0]) > 2:
+
+            # Step 2: Single chunk — try camelCase split using the original casing
+            #   e.g. "MuditSingh" → ["Mudit", "Singh"]
+            #   also "muditmohitkumarsingh" with original "MuditMohitKumarSingh"
+            original_prefix = email.split("@")[0]
+            camel_parts = re.findall(r'[A-Z][a-z]+', original_prefix)
+            if len(camel_parts) >= 2:
+                return (camel_parts[0], " ".join(camel_parts[1:]))
+
+            # Step 3: If single chunk is very long (>12 chars), it's likely concatenated
+            # names but all lowercase — we can't reliably split, return empty
+            if len(parts[0]) > 12:
+                return ("", "")
+
+            # Step 4: Short single part (3-12 chars) — could be a first name only
+            # Only return if reasonably name-like (has vowels)
+            if len(parts[0]) >= 3 and re.search(r'[aeiou]', parts[0]):
                 return (parts[0].capitalize(), "")
+
             return ("", "")
         except Exception:
             return ("", "")
