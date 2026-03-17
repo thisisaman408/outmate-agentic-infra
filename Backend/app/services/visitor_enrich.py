@@ -1,11 +1,11 @@
 import httpx
 import ipinfo
 import logging
+import re
 from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.services.explorium_service import ExploriumService
-
-from app.services.explorium_service import ExploriumService
+from app.services.bettercontact_service import BetterContactService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class VisitorEnricher:
         self.ipinfo_client = ipinfo.getHandler(settings.IPINFO_TOKEN) if hasattr(settings, 'IPINFO_TOKEN') else None
         self.enrich_api_key = getattr(settings, 'ENRICH_API_KEY', None)
         self.explorium = ExploriumService()
+        self.bettercontact = BetterContactService()
 
     async def enrich_ip(self, ip: str, url: str, intent_score: float, email: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -192,6 +193,50 @@ class VisitorEnricher:
                     logger.info(f"[Enrichment] Enrich.so email lookup returned no data for {resolution['email']}")
 
             # ──────────────────────────────────────────────
+            # 2c. BetterContact fallback (when Enrich.so email returned no person)
+            #     Uses 20+ data sources to find name, LinkedIn, phone from email.
+            # ──────────────────────────────────────────────
+            if resolution.get("email") and not resolution.get("full_name") and self.bettercontact.api_key:
+                logger.info(f"[Enrichment] Step 2c: BetterContact fallback for {resolution['email']}")
+                # Try to extract a name guess from email to seed BetterContact
+                first_name, last_name = self._parse_name_from_email(resolution["email"])
+                bc_result = await self.bettercontact.enrich_prospect(
+                    first_name=first_name or "Unknown",
+                    last_name=last_name or "",
+                    company_name=resolution.get("company") or "",
+                    company_domain=resolution.get("domain") or "",
+                )
+                if bc_result.get("success"):
+                    if bc_result.get("email") and not resolution.get("email"):
+                        resolution["email"] = bc_result["email"]
+                    if bc_result.get("phone") and not resolution.get("phone"):
+                        resolution["phone"] = bc_result["phone"]
+                    # BetterContact contact_name from lead_finder
+                    if bc_result.get("contact_name") and not resolution.get("full_name"):
+                        resolution["full_name"] = bc_result["contact_name"]
+                        resolution["confidence"] = max(resolution["confidence"], 0.6)
+                    if bc_result.get("linkedin_url") and not resolution.get("linkedin_url"):
+                        resolution["linkedin_url"] = bc_result["linkedin_url"]
+                    if bc_result.get("contact_title") and not resolution.get("job_title"):
+                        resolution["job_title"] = bc_result["contact_title"]
+                    logger.info(f"[Enrichment] BetterContact fallback: name={resolution.get('full_name')}, phone={bool(resolution.get('phone'))}")
+                else:
+                    logger.info(f"[Enrichment] BetterContact fallback returned no data: {bc_result.get('error')}")
+
+            # ──────────────────────────────────────────────
+            # 2d. Email-based name extraction (last resort)
+            #     Parse email prefix to guess name (e.g. john.doe@gmail.com → John Doe)
+            # ──────────────────────────────────────────────
+            if resolution.get("email") and not resolution.get("full_name"):
+                guessed_first, guessed_last = self._parse_name_from_email(resolution["email"])
+                if guessed_first:
+                    guessed_name = f"{guessed_first} {guessed_last}".strip()
+                    if guessed_name:
+                        resolution["full_name"] = guessed_name
+                        resolution["confidence"] = max(resolution["confidence"], 0.3)
+                        logger.info(f"[Enrichment] Step 2d: Guessed name from email: {guessed_name}")
+
+            # ──────────────────────────────────────────────
             # 3. Explorium (Company firmographics)
             #    Primary: lookup by domain
             #    Fallback: lookup by company name (when IPinfo returns org but no domain)
@@ -253,6 +298,35 @@ class VisitorEnricher:
         logger.info(f"[Enrichment] Final result for {ip}: company={resolution['company']}, "
                      f"email={resolution.get('email')}, confidence={resolution['confidence']}")
         return resolution
+
+    @staticmethod
+    def _parse_name_from_email(email: str) -> tuple:
+        """
+        Extract (first_name, last_name) from an email prefix.
+        e.g. john.doe@gmail.com → ("John", "Doe")
+             jdoe@company.com → ("Jdoe", "")
+             info@company.com → ("", "")
+        """
+        GENERIC_PREFIXES = {"info", "admin", "support", "hello", "contact", "sales",
+                            "noreply", "no-reply", "team", "help", "office", "mail"}
+        try:
+            prefix = email.split("@")[0].lower()
+            # Skip generic/role-based prefixes
+            if prefix in GENERIC_PREFIXES:
+                return ("", "")
+            # Split on . _ - and filter out pure numbers
+            parts = re.split(r'[._\-]+', prefix)
+            parts = [p for p in parts if p and not p.isdigit()]
+            if not parts:
+                return ("", "")
+            if len(parts) >= 2:
+                return (parts[0].capitalize(), parts[-1].capitalize())
+            # Single part — only use if it looks like a name (>2 chars, not all consonants)
+            if len(parts[0]) > 2:
+                return (parts[0].capitalize(), "")
+            return ("", "")
+        except Exception:
+            return ("", "")
 
     async def _enrich_so_email_lookup(self, email: str) -> Optional[Dict[str, Any]]:
         """Call Enrich.so API for Email to Person lookup (GET /v1/api/person?email=)."""
