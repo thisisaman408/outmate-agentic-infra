@@ -111,21 +111,29 @@ class BetterContactService:
                             enriched = data_list[0]
                             email = enriched.get("contact_email_address") or ""
                             phone = enriched.get("contact_phone_number") or enriched.get("contact_mobile_phone") or ""
-                            print(f">>> [BetterContact] enrich_prospect result: email={bool(email)}, phone={bool(phone)}, status={enriched.get('contact_email_address_status')}", flush=True)
-                            if not email and not phone:
-                                credits_consumed = poll_data.get("credits_consumed", 0)
-                                credits_left = poll_data.get("credits_left", 0)
-                            else:
-                                credits_consumed = poll_data.get("credits_consumed", 0)
-                                credits_left = poll_data.get("credits_left", 0)
+                            first_name = enriched.get("contact_first_name") or ""
+                            last_name = enriched.get("contact_last_name") or ""
+                            full_name = enriched.get("contact_full_name") or f"{first_name} {last_name}".strip()
+                            
+                            print(f">>> [BetterContact] enrich_prospect result: name={full_name}, email={bool(email)}, phone={bool(phone)}, status={enriched.get('contact_email_address_status')}", flush=True)
+                            
+                            credits_consumed = poll_data.get("credits_consumed", 0)
+                            credits_left = poll_data.get("credits_left", 0)
+                            
                             return {
                                 "success": True,
                                 "email": email,
                                 "email_status": enriched.get("contact_email_address_status") or "",
                                 "phone": phone,
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "full_name": full_name,
+                                "job_title": enriched.get("contact_job_title") or "",
+                                "linkedin_url": enriched.get("contact_linkedin_profile_url") or enriched.get("contact_linkedin_url") or "",
                                 "email_provider": enriched.get("email_provider") or "",
                                 "credits_consumed": credits_consumed,
                                 "credits_left": credits_left,
+                                "raw_data": enriched
                             }
                         return {"success": True, "email": "", "phone": "", "not_found": True}
 

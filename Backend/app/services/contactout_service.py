@@ -220,6 +220,42 @@ class ContactOutService:
         except Exception as e:
             raise Exception(f"ContactOut decision makers failed: {str(e)}")
 
+    async def enrich_person_by_email(
+        self,
+        email: str
+    ) -> Dict[str, Any]:
+        """
+        GET /email/enrich
+        Find person details using their email address.
+        """
+        try:
+            params = {"email": email}
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                headers = self._get_headers()
+                response = await client.get(
+                    f"{self.base_url}/email/enrich",
+                    headers=headers,
+                    params=params
+                )
+                
+                if response.status_code == 404:
+                    return {"profile": {}}
+                    
+                try:
+                    response.raise_for_status()
+                    return response.json()
+                except httpx.HTTPStatusError as he:
+                    if he.response is not None and he.response.status_code == 401:
+                        resp = await self._attempt_with_header_variants(
+                            client, 'get', f"{self.base_url}/email/enrich", headers, params=params
+                        )
+                        return resp.json()
+                    else:
+                        raise
+        except Exception as e:
+            logger.warning(f"ContactOut email enrichment failed: {e}")
+            return {"profile": {}}
+
     # ──────────────────────────────────────────────────────────────────────────
     # Contact Info Reveal (when user clicks "Reveal")
     # ──────────────────────────────────────────────────────────────────────────
