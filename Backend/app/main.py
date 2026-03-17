@@ -125,6 +125,7 @@ class PixelCORSMiddleware(BaseHTTPMiddleware):
                     "Access-Control-Allow-Origin": origin,
                     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                     "Access-Control-Allow-Headers": "X-Pixel-Key, Content-Type, Authorization",
+                    "Access-Control-Allow-Credentials": "true",
                     "Access-Control-Max-Age": "86400",
                     "Vary": "Origin",
                 },
@@ -132,6 +133,7 @@ class PixelCORSMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Vary"] = "Origin"
         return response
 
