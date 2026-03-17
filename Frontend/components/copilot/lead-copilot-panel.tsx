@@ -34,8 +34,16 @@ import {
   Check,
   Loader2,
   Coins,
+  Swords,
+  FileCheck,
+  Zap,
+  UserX,
+  TrendingUp,
+  ArrowRightLeft,
+  BarChart3,
+  Calendar,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { CopilotCommandInput } from "./copilot-command-input"
 import {
@@ -77,6 +85,15 @@ const QUICK_ACTIONS: { type: LeadActionType; label: string; icon: typeof Mail; c
   { type: "research", label: "Research", icon: Search, cost: 2 },
   { type: "find_similar", label: "Find Similar", icon: Target, cost: 1 },
   { type: "objection_handler", label: "Objection Handler", icon: Shield, cost: 1 },
+  { type: "crossfire", label: "Crossfire Intelligence", icon: Swords, cost: 2 },
+  { type: "compliance", label: "Compliance Oracle", icon: FileCheck, cost: 1 },
+  { type: "bombora_intent", label: "Bombora Intent", icon: Zap, cost: 2 },
+  { type: "talent_radar", label: "Talent Radar", icon: UserX, cost: 2 },
+  { type: "virality", label: "Virality Engine", icon: TrendingUp, cost: 1 },
+  { type: "regime_shift", label: "Regime Shifter", icon: ArrowRightLeft, cost: 2 },
+  { type: "website_traffic", label: "Website Traffic", icon: BarChart3, cost: 1 },
+  { type: "business_events", label: "Business Events", icon: Calendar, cost: 1 },
+  { type: "linkedin_posts", label: "LinkedIn Post Analysis", icon: Linkedin, cost: 1 },
 ]
 
 // ── Helper to get prospect ID ────────────────────────────────
@@ -162,13 +179,24 @@ function buildContextOverrides(prospect: any) {
 
 // ── Main Component ───────────────────────────────────────────
 
+// Actions that need user input before running
+const ACTIONS_REQUIRING_INPUT: Partial<Record<LeadActionType, { label: string; placeholder: string }>> = {
+  crossfire: {
+    label: "Enter the competitor name to compare against Outmate:",
+    placeholder: "e.g. HubSpot, Salesforce, Apollo.io...",
+  },
+}
+
 export function LeadCopilotPanel() {
   const { isPanelOpen, selectedProspect, messages, closePanel } = useCopilotPanelStore()
   const isCompanyEntity = selectedProspect?.entity_type === "company"
   const prospectId = selectedProspect ? getProspectId(selectedProspect) : null
   const { context, isLoading: contextLoading, fetchContext } = useLeadContext(prospectId)
-  const { isLoading: actionLoading, executeAction } = useLeadAction()
+  const { isLoading: actionLoading, streamingStage, streamingMessage, executeAction } = useLeadAction()
   const { suggestions, isLoading: suggestionsLoading, fetchSuggestions } = useLeadSuggestions(prospectId)
+  const [awaitingInput, setAwaitingInput] = useState<LeadActionType | null>(null)
+  const [inputValue, setInputValue] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // Fetch context + suggestions when panel opens
   useEffect(() => {
@@ -181,6 +209,12 @@ export function LeadCopilotPanel() {
   const handleQuickAction = useCallback(
     (actionType: LeadActionType) => {
       if (!prospectId) return
+      if (ACTIONS_REQUIRING_INPUT[actionType]) {
+        setAwaitingInput(actionType)
+        setInputValue("")
+        setTimeout(() => inputRef.current?.focus(), 50)
+        return
+      }
       executeAction({
         prospect_id: prospectId,
         action_type: actionType,
@@ -189,6 +223,18 @@ export function LeadCopilotPanel() {
     },
     [prospectId, executeAction, selectedProspect]
   )
+
+  const handleInputSubmit = useCallback(() => {
+    if (!prospectId || !awaitingInput || !inputValue.trim()) return
+    executeAction({
+      prospect_id: prospectId,
+      action_type: awaitingInput,
+      prompt: inputValue.trim(),
+      context_overrides: buildContextOverrides(selectedProspect),
+    })
+    setAwaitingInput(null)
+    setInputValue("")
+  }, [prospectId, awaitingInput, inputValue, executeAction, selectedProspect])
 
   const handleCustomCommand = useCallback(
     (prompt: string) => {
@@ -282,11 +328,44 @@ export function LeadCopilotPanel() {
               </div>
             </div>
 
+            {/* Competitor Input Prompt */}
+            {awaitingInput && ACTIONS_REQUIRING_INPUT[awaitingInput] && (
+              <>
+                <Separator />
+                <div className="space-y-2 p-3 rounded-lg border border-primary/30 bg-primary/5">
+                  <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                    <Swords className="h-3.5 w-3.5 text-primary" />
+                    {ACTIONS_REQUIRING_INPUT[awaitingInput]!.label}
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleInputSubmit()
+                        if (e.key === "Escape") { setAwaitingInput(null); setInputValue("") }
+                      }}
+                      placeholder={ACTIONS_REQUIRING_INPUT[awaitingInput]!.placeholder}
+                      className="flex-1 text-sm px-3 py-1.5 rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <Button size="sm" onClick={handleInputSubmit} disabled={!inputValue.trim()}>
+                      Run
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAwaitingInput(null); setInputValue("") }}>
+                      ✕
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Conversation Thread */}
             {messages.length > 0 && (
               <>
                 <Separator />
-                <ConversationThread messages={messages} isLoading={actionLoading} />
+                <ConversationThread messages={messages} isLoading={actionLoading} streamingStage={streamingStage} streamingMessage={streamingMessage} />
               </>
             )}
           </div>
@@ -452,7 +531,13 @@ function SuggestionsSection({
 
 // ── Conversation Thread ──────────────────────────────────────
 
-function ConversationThread({ messages, isLoading }: { messages: CopilotMessage[]; isLoading: boolean }) {
+function ConversationThread({ messages, isLoading, streamingStage, streamingMessage }: { messages: CopilotMessage[]; isLoading: boolean; streamingStage?: string | null; streamingMessage?: string | null }) {
+  const stageDisplay = streamingStage === "enriching"
+    ? { text: streamingMessage || "Researching lead...", icon: Search, color: "text-blue-500" }
+    : streamingStage === "generating"
+    ? { text: streamingMessage || "Generating response...", icon: Sparkles, color: "text-purple-500" }
+    : null
+
   return (
     <div className="space-y-3 w-full max-w-full overflow-hidden">
       <p className="text-sm font-medium text-muted-foreground">Conversation</p>
@@ -475,9 +560,25 @@ function ConversationThread({ messages, isLoading }: { messages: CopilotMessage[
         </div>
       ))}
       {isLoading && (
-        <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Thinking...</span>
+        <div className="bg-muted rounded-lg px-3 py-2 space-y-2">
+          {stageDisplay ? (
+            <div className="flex items-center gap-2">
+              <stageDisplay.icon className={`h-4 w-4 animate-pulse ${stageDisplay.color}`} />
+              <span className="text-sm text-muted-foreground">{stageDisplay.text}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Thinking...</span>
+            </div>
+          )}
+          {streamingStage === "enriching" && (
+            <div className="flex gap-1 ml-6">
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -524,7 +625,115 @@ function ActionResult({ actionType, result }: { actionType?: string; result: Rec
     return <MeetingPrepResult result={result} />
   }
 
+  // --- Intelligence Actions ---
+
+  if (actionType === "bombora_intent") {
+    return <BomboraIntentResult result={result} />
+  }
+
+  if (["website_traffic", "business_events", "linkedin_posts"].includes(actionType || "")) {
+    return <SignalResult result={result} />
+  }
+
+  if (["crossfire", "compliance", "virality", "regime_shift", "talent_radar"].includes(actionType || "")) {
+    return <GTMActionResult result={result} />
+  }
+
   return <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>
+}
+
+// ── New Intelligence Components ──────────────────────────────
+
+function BomboraIntentResult({ result }: { result: Record<string, any> }) {
+  return (
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <div className="flex items-center gap-2">
+        <Zap className="h-3.5 w-3.5 text-yellow-500" />
+        <p className="text-sm font-semibold">Intent Analysis</p>
+        <Badge variant="outline" className="text-[10px] ml-auto">
+          {result.level_of_intent} Level
+        </Badge>
+      </div>
+      <div className="space-y-1.5">
+        {result.intent_topics?.map((topic: any, i: number) => (
+          <div key={topic.name || i} className="p-2 rounded bg-muted/30 border border-border/50">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-xs font-medium truncate pr-2">{topic.name}</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">Score: {topic.score}</span>
+            </div>
+            <div className="h-1 w-full bg-secondary rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all" 
+                style={{ width: `${topic.score}%` }} 
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {result.summary && (
+        <p className="text-xs text-muted-foreground italic pt-1">{result.summary}</p>
+      )}
+      {result.intent_topics?.length === 0 && (
+        <p className="text-xs text-muted-foreground italic text-center py-2">No significant intent topics detected.</p>
+      )}
+    </div>
+  )
+}
+
+function SignalResult({ result }: { result: Record<string, any> }) {
+  const signals = result.signals || []
+  return (
+    <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <p className="text-sm font-semibold flex items-center gap-1.5">
+        <Sparkles className="h-3.5 w-3.5 text-primary" />
+        Detected Signals
+      </p>
+      <div className="space-y-2">
+        {signals.map((signal: any, i: number) => (
+          <div key={i} className="text-xs p-2.5 rounded-md border bg-muted/20 space-y-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-primary capitalize">{signal.type?.replace(/_/g, " ")}</p>
+              <Badge variant={signal.urgency === "high" ? "destructive" : "secondary"} className="text-[9px] shrink-0 uppercase">
+                {signal.urgency}
+              </Badge>
+            </div>
+            <p className="text-muted-foreground break-words">{signal.description}</p>
+            {signal.suggested_action && (
+              <div className="pt-1 border-t border-border/40">
+                <p className="text-[10px] font-medium text-foreground/70 mb-0.5">Suggested Action</p>
+                <p className="break-words text-foreground/80">{signal.suggested_action}</p>
+              </div>
+            )}
+            {signal.detected_at && (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Detected: {new Date(signal.detected_at).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        ))}
+        {signals.length === 0 && (
+          <p className="text-xs text-muted-foreground italic text-center py-2">No signals found in recent audit.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GTMActionResult({ result }: { result: Record<string, any> }) {
+  const content = result.result || result.battle_card || result.response || ""
+  
+  return (
+    <div className="space-y-3 w-full max-w-full overflow-hidden prose prose-sm dark:prose-invert">
+      <div className="text-sm break-words whitespace-pre-wrap leading-relaxed">
+        {content.split('\n').map((line: string, i: number) => {
+          if (line.startsWith('#')) return <h4 key={i} className="text-sm font-bold mt-3 mb-1">{line.replace(/^#+\s*/, '')}</h4>
+          if (line.match(/^\d+\.\s/)) return <p key={i} className="text-sm ml-2 mt-1 font-medium">{line}</p>
+          if (line.trim().startsWith('-') || line.trim().startsWith('•')) return <p key={i} className="text-sm ml-4 mt-0.5">• {line.trim().substring(1).trim()}</p>
+          return <p key={i} className={`${line.trim() ? "mt-1" : "h-2"}`}>{line}</p>
+        })}
+      </div>
+    </div>
+  )
 }
 
 // ── Annotated Email ──────────────────────────────────────────
