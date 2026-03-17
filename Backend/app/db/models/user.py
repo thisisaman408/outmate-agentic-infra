@@ -15,6 +15,10 @@ class User(Base):
     credits_balance = Column(Integer, default=100)  # Give 100 free credits
     subscription_tier = Column(String(50), default='free')  # 'free', 'basic', 'pro', 'enterprise'
     is_active = Column(Boolean, default=True, index=True)
+    # OAuth & verification
+    google_id = Column(String(255), nullable=True, unique=True, index=True)
+    is_email_verified = Column(Boolean, default=False)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True))

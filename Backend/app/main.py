@@ -251,10 +251,20 @@ async def startup_event():
     try:
         inspector = inspect(engine)
         columns = {col["name"] for col in inspector.get_columns("users")}
-        if "hashed_password" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
-            logger.info("Added missing users.hashed_password column")
+
+        # Ensure columns added across releases exist (idempotent ALTER TABLE)
+        migrations = [
+            ("hashed_password",    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"),
+            ("google_id",          "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);"),
+            ("is_email_verified",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT FALSE;"),
+            ("terms_accepted_at",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;"),
+        ]
+        with engine.begin() as conn:
+            for col_name, ddl in migrations:
+                if col_name not in columns:
+                    conn.execute(text(ddl))
+                    logger.info(f"Added missing users.{col_name} column")
+
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
         logger.info("✓ Database tables ensured")

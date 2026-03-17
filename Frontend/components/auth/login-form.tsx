@@ -1,45 +1,40 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { authService } from "@/lib/auth"
 import { useStore } from "@/lib/store"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2 } from "lucide-react"
+import { GoogleButton } from "@/components/auth/google-button"
 
 export function LoginForm() {
   const router = useRouter()
   const { toast } = useToast()
   const setUser = useStore((state) => state.setUser)
+
   const [isLoading, setIsLoading] = useState(false)
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  })
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [formData, setFormData] = useState({ email: "", password: "" })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-
     try {
       const user = await authService.login(formData.email, formData.password)
       setUser(user)
-      toast({
-        title: "Welcome back!",
-        description: "You have successfully signed in.",
-      })
+      toast({ title: "Welcome back!", description: "You've signed in successfully." })
       router.push("/dashboard")
-    } catch (error) {
+    } catch (error: any) {
       toast({
-        title: "Error",
-        description: "Invalid email or password. Please try again.",
+        title: "Sign in failed",
+        description: error?.message || "Invalid email or password.",
         variant: "destructive",
       })
     } finally {
@@ -47,56 +42,133 @@ export function LoginForm() {
     }
   }
 
+  const handleGoogleCredential = async (credential: string) => {
+    console.debug("[Google] credential length:", credential?.length ?? 0)
+    setIsGoogleLoading(true)
+    try {
+      const user = await authService.googleLogin(credential)
+      setUser(user)
+      toast({ title: "Welcome back!", description: "Signed in with Google." })
+      router.push("/dashboard")
+    } catch (error: any) {
+      toast({
+        title: "Google sign-in failed",
+        description: error?.message || "Could not sign in with Google.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGoogleLoading(false)
+    }
+  }
+
+  const isAnyLoading = isLoading || isGoogleLoading
+
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
-        <CardDescription>Enter your credentials to access your account</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+    <div className="w-full max-w-[400px] space-y-6">
+      {/* Header */}
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Welcome back</h1>
+        <p className="text-sm text-muted-foreground">Sign in to your Outmate.ai account</p>
+      </div>
+
+      {/* Google Sign-In */}
+      <div className="space-y-3">
+        {isGoogleLoading ? (
+          <div className="flex items-center justify-center h-11 w-full rounded-md border border-border bg-background text-sm text-muted-foreground gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Signing in with Google…
+          </div>
+        ) : (
+          <GoogleButton onCredential={handleGoogleCredential} text="signin_with" disabled={isAnyLoading} />
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-border" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-background px-3 text-muted-foreground tracking-wider">or continue with email</span>
+        </div>
+      </div>
+
+      {/* Email / Password form */}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="email" className="text-sm font-medium">
+            Work email
+          </Label>
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="email"
               type="email"
-              placeholder="name@company.com"
+              placeholder="you@company.com"
+              className="pl-9"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
-              disabled={isLoading}
+              disabled={isAnyLoading}
+              autoComplete="email"
             />
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
-              <Link href="/auth/forgot-password" className="text-sm text-primary hover:underline">
-                Forgot password?
-              </Link>
-            </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password" className="text-sm font-medium">
+              Password
+            </Label>
+            <Link
+              href="/auth/forgot-password"
+              className="text-xs text-primary hover:underline underline-offset-4"
+            >
+              Forgot password?
+            </Link>
+          </div>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
+              className="pl-9 pr-10"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              disabled={isLoading}
+              disabled={isAnyLoading}
+              autoComplete="current-password"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              tabIndex={-1}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Sign in
-          </Button>
-        </form>
-      </CardContent>
-      <CardFooter>
-        <p className="text-sm text-muted-foreground text-center w-full">
-          {"Don't have an account? "}
-          <Link href="/auth/signup" className="text-primary hover:underline font-medium">
-            Sign up
-          </Link>
-        </p>
-      </CardFooter>
-    </Card>
+        </div>
+
+        <Button type="submit" className="w-full h-11 font-semibold" disabled={isAnyLoading}>
+          {isLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Signing in…
+            </>
+          ) : (
+            "Sign in"
+          )}
+        </Button>
+      </form>
+
+      {/* Footer */}
+      <p className="text-center text-sm text-muted-foreground">
+        Don&apos;t have an account?{" "}
+        <Link href="/auth/signup" className="text-primary font-medium hover:underline underline-offset-4">
+          Start free
+        </Link>
+      </p>
+    </div>
   )
 }
