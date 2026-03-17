@@ -1,8 +1,4 @@
 node_modules
-.next
+.next/cache
 .git
-npm-debug.log
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.vscode
