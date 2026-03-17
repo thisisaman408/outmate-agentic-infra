@@ -1,8 +1,23 @@
+"""
+Visitor Enrichment Pipeline — IP-first, no email shortcuts.
+
+Enrichment layers (in order of execution):
+  0. ip-api.com      — primary geo (accurate city/region, ISP, mobile/proxy flags)
+  1. IPinfo          — secondary geo + company data (paid plan features)
+  2. Enrich.so       — IP → Company lookup
+  3. ContactOut DMs  — company domain → decision maker contacts
+  4. Explorium       — company firmographics by domain
+  5. [Email only]    — Enrich.so + BetterContact + ContactOut person (form-captured email ONLY)
+
+Design principle: the email argument is ONLY from pixel form-capture or manual identify().
+Login emails are NEVER passed into this pipeline.
+"""
+
 import httpx
 import ipinfo
 import logging
-import re
-import os
+import asyncio
+from functools import partial
 from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.services.explorium_service import ExploriumService
@@ -11,23 +26,38 @@ from app.services.contactout_service import ContactOutService
 
 logger = logging.getLogger(__name__)
 
-# Common ISP and Cloud Provider keywords to filter out of company identification
+# ── ISP / Cloud / Residential filter ─────────────────────────────────────────
+# If the IP org resolves to any of these → it's a residential/consumer/cloud IP
+# and cannot be de-anonymised to a company.
 ISP_CLOUD_KEYWORDS = {
-    "airtel", "bharti", "reliance", "jio", "vodafone", "telecom", "mobile", "broadband",
-    "comcast", "verizon", "at&t", "spectrum", "charter", "infiniti", "google fiber",
-    "isp", "internet service", "hosting", "cloud", "server", "data center", "vps",
-    "proxad", "wanadoo", "orange", "telefonica", "t-mobile", "sprint", "nexmo", 
-    "twilio", "ovh", "digitalocean", "linode", "amazon", "google inc", "microsoft corp",
-    "akamai", "cloudflare", "fastly", "level 3", "cogent", "tata communications",
-    "network foundation", "isp foundation", "hathway", "act fibernet", "bsnl", "mtnl",
-    "centurylink", "cox", "optimum", "suddenlink", "frontier", "windstream",
-    "hughesnet", "viasat", "starlink", "earthlink", "netzero", "juno",
-    "hetzner", "leaseweb", "choopa", "vultr", "scaleway", "upcloud",
-    "azure", "aws", "gcp", "alibaba", "oracle cloud", "ibm cloud",
-    "rackspace", "softlayer", "bluehost", "hostgator", "dreamhost", "siteground",
-    "godaddy", "namecheap", "wix", "squarespace", "fastweb", "sky broadband",
-    "bt group", "talktalk", "virgin media", "telstra", "optus", "tpg", "shaw", "rogers", "telus"
+    # India residential ISPs
+    "airtel", "bharti", "reliance jio", "jio", "vodafone", "bsnl", "mtnl",
+    "hathway", "act fibernet", "tikona", "spectranet", "excitel", "gtpl",
+    "asianet", "you broadband", "den networks",
+    # Global consumer ISPs
+    "comcast", "verizon", "at&t", "spectrum", "charter", "cox", "optimum",
+    "suddenlink", "frontier", "windstream", "centurylink", "lumen",
+    "t-mobile", "sprint", "nexmo", "twilio",
+    "proxad", "wanadoo", "orange", "telefonica",
+    "sky broadband", "bt group", "talktalk", "virgin media",
+    "telstra", "optus", "tpg", "shaw", "rogers", "telus",
+    "google fiber", "starlink", "hughesnet", "viasat", "earthlink",
+    # Cloud / hosting providers
+    "amazon", "aws", "google inc", "microsoft corp", "azure",
+    "digitalocean", "linode", "vultr", "hetzner", "leaseweb", "choopa",
+    "scaleway", "upcloud", "ovh", "rackspace", "softlayer",
+    "akamai", "cloudflare", "fastly", "level 3", "cogent",
+    "tata communications", "bluehost", "hostgator", "dreamhost",
+    "siteground", "godaddy", "namecheap", "wix", "squarespace",
+    "alibaba", "oracle cloud", "ibm cloud",
+    # Generic
+    "internet service", "hosting", "cloud", "server", "data center",
+    "vps", "isp", "network foundation", "broadband",
 }
+
+# These AS names typically indicate residential/mobile connections in India
+MOBILE_ASN_PATTERNS = {"jio", "reliance jio", "airtel", "vodafone idea", "vi "}
+
 
 def is_isp_or_cloud(org_name: str) -> bool:
     if not org_name:
@@ -35,260 +65,507 @@ def is_isp_or_cloud(org_name: str) -> bool:
     name_lower = org_name.lower()
     return any(keyword in name_lower for keyword in ISP_CLOUD_KEYWORDS)
 
+
+def _clean_domain(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    d = domain.strip().lower().lstrip("www.")
+    return d.rstrip(".") or None
+
+
+PERSONAL_EMAIL_DOMAINS = {
+    "gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com",
+    "me.com", "aol.com", "mail.com", "protonmail.com", "zoho.com",
+    "yandex.com", "rediffmail.com", "live.com", "msn.com",
+}
+
+
+# ── Main enricher ─────────────────────────────────────────────────────────────
+
 class VisitorEnricher:
     def __init__(self):
-        self.ipinfo_client = ipinfo.getHandler(settings.IPINFO_TOKEN) if hasattr(settings, 'IPINFO_TOKEN') else None
-        self.enrich_api_key = getattr(settings, 'ENRICH_API_KEY', None)
+        self.ipinfo_client = (
+            ipinfo.getHandler(settings.IPINFO_TOKEN)
+            if getattr(settings, "IPINFO_TOKEN", None)
+            else None
+        )
+        self.enrich_api_key = getattr(settings, "ENRICH_API_KEY", None)
         self.explorium = ExploriumService()
         self.bettercontact = BetterContactService()
         self.contactout = ContactOutService()
-        
-        # Debug API statuses
-        logger.info(f"[VisitorEnricher] Configured: IPINFO={bool(self.ipinfo_client)}, "
-                    f"ENRICH_SO={bool(self.enrich_api_key)}, "
-                    f"EXPLORIUM={bool(self.explorium.api_key)}, "
-                    f"BETTERCONTACT={bool(self.bettercontact.api_key)}, "
-                    f"CONTACTOUT={bool(self.contactout.api_key)}")
 
-    async def enrich_ip(self, ip: str, url: str, intent_score: float, email: Optional[str] = None) -> Dict[str, Any]:
+        logger.info(
+            "[VisitorEnricher] APIs: IPINFO=%s, ENRICH_SO=%s, EXPLORIUM=%s, "
+            "BETTERCONTACT=%s, CONTACTOUT=%s",
+            bool(self.ipinfo_client),
+            bool(self.enrich_api_key),
+            bool(self.explorium.api_key),
+            bool(self.bettercontact.api_key),
+            bool(self.contactout.api_key),
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public entry point
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def enrich_ip(
+        self,
+        ip: str,
+        url: str,
+        intent_score: float,
+        email: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Enrich visitor IP with company, person, email, phone, and other contact data.
+        Enrich a visitor from their IP address.
+        `email` must be from pixel form-capture only — never from a login session.
         """
-        resolution = {
+        # Reject private / loopback IPs (local dev / test)
+        is_private = any(ip.startswith(pfx) for pfx in (
+            "127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.",
+            "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+            "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.",
+            "172.31.", "::1", "localhost",
+        ))
+
+        resolution: Dict[str, Any] = {
             "ip": ip,
+            "is_private_ip": is_private,
             "company": None,
             "domain": None,
             "geo": None,
             "confidence": 0.0,
             "person": None,
             "intent_score": intent_score,
-            # Contact-level fields (flattened for easy access)
-            "email": email,
+            # Person contact fields
+            "email": email if email and email not in ("", "null", "undefined") else None,
             "phone": None,
             "full_name": None,
             "linkedin_url": None,
             "job_title": None,
+            # Enrichment source flags (for debugging)
+            "_sources": [],
         }
-        if email:
-            resolution["confidence"] = 0.5
-            if "@" in email:
-                domain = email.split("@")[-1].lower()
-                # If it's not a common personal domain, use it as the company domain
-                personal_domains = {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "mail.com"}
-                if domain not in personal_domains:
-                    resolution["domain"] = domain
+
+        # If a form-captured work email is available, pre-fill domain
+        if resolution["email"] and "@" in resolution["email"]:
+            domain_from_email = resolution["email"].split("@")[-1].lower()
+            if domain_from_email not in PERSONAL_EMAIL_DOMAINS:
+                resolution["domain"] = _clean_domain(domain_from_email)
+                resolution["confidence"] = max(resolution["confidence"], 0.5)
+
+        if is_private:
+            logger.info("[Enrichment] Private IP %s — skipping external lookups", ip)
+            resolution["geo"] = {"city": "localhost", "region": None, "country": None}
+            return resolution
 
         try:
-            # ──────────────────────────────────────────────
-            # 1. IPinfo lookup (Geo + Basic Company/ISP)
-            # ──────────────────────────────────────────────
-            if self.ipinfo_client:
-                logger.info(f"[Enrichment] Step 1: IPinfo lookup for {ip}")
-                try:
-                    import asyncio
-                    from functools import partial
-                    loop = asyncio.get_event_loop()
-                    details = await loop.run_in_executor(None, partial(self.ipinfo_client.getDetails, ip))
+            # ── STEP 0: ip-api.com (accurate geo — primary source) ────────────
+            await self._step_ipapi(ip, resolution)
 
-                    # org is \"AS12345 Company Name\" — strip the ASN prefix
-                    raw_org = getattr(details, 'org', None) or ""
-                    if raw_org.startswith("AS") and " " in raw_org:
-                        org = raw_org.split(" ", 1)[1].strip()
-                    else:
-                        org = raw_org or None
+            # ── STEP 1: IPinfo (company data from paid plan) ──────────────────
+            await self._step_ipinfo(ip, resolution)
 
-                    company_attr = getattr(details, 'company', None)
-                    if isinstance(company_attr, dict):
-                        org = company_attr.get("name") or org
-                        domain = company_attr.get("domain") or None
+            # ── STEP 2: Enrich.so IP → Company ───────────────────────────────
+            await self._step_enrich_so_ip(ip, resolution)
 
-                    hostname = getattr(details, 'hostname', None)
-                    if not domain and hostname:
-                        parts = hostname.strip(".").split(".")
-                        has_ip_octets = any(p.isdigit() for p in parts)
-                        if not has_ip_octets and 2 <= len(parts) <= 3:
-                            domain = ".".join(parts[-2:])
+            # ── STEP 3 (Email path): Enrich person from form-captured email ───
+            if resolution["email"]:
+                await self._step_enrich_so_email(resolution)
+                await self._step_bettercontact(resolution)
+                await self._step_contactout_email(resolution)
 
-                    city = getattr(details, 'city', None) or None
-                    region = getattr(details, 'region', None) or None
-                    country = getattr(details, 'country', None) or None
+            # ── STEP 4: ContactOut DM from company domain (IP path) ───────────
+            # Run this even without email if we found a company domain from IP
+            if resolution.get("domain") and not resolution.get("full_name"):
+                await self._step_contactout_dm(resolution)
 
-                    if is_isp_or_cloud(org) or is_isp_or_cloud(domain):
-                        logger.info(f"[Enrichment] Filtered out ISP/Cloud organization: {org} (domain={domain})")
-                        org = None
-                        domain = None
-
-                    if org:
-                        resolution["company"] = org
-                    if domain and not resolution.get("domain"):
-                        resolution["domain"] = domain
-                    if city or country:
-                        resolution["geo"] = {"city": city, "region": region, "country": country}
-                    
-                    if org or domain or city or country:
-                        resolution["confidence"] = max(resolution["confidence"], 0.4)
-                except Exception as e:
-                    logger.error(f"[Enrichment] IPinfo lookup failed: {e}")
-
-            # ──────────────────────────────────────────────
-            # 2. Enrich.so IP → Company
-            # ──────────────────────────────────────────────
-            if self.enrich_api_key:
-                logger.info(f"[Enrichment] Step 2: Enrich.so IP-to-Company for {ip}")
-                enrich_data = await self._enrich_so_lookup(ip)
-                if enrich_data and enrich_data.get("data"):
-                    company_data = enrich_data["data"]
-                    company_name = company_data.get("company_name") or ""
-                    company_domain = company_data.get("company_domain") or ""
-                    if company_name and not is_isp_or_cloud(company_name) and not is_isp_or_cloud(company_domain):
-                        resolution["company"] = company_name
-                        if company_domain and not resolution.get("domain"):
-                            resolution["domain"] = company_domain
-                        resolution["confidence"] = max(resolution["confidence"], 0.7)
-                        resolution["enrich_company"] = company_data
-                        logger.info(f"[Enrichment] Step 2 success: found {company_name}")
-                else:
-                    logger.info(f"[Enrichment] Step 2: Enrich.so IP lookup returned no data")
-
-            # ──────────────────────────────────────────────
-            # 2b. Enrich.so Email → Person
-            # ──────────────────────────────────────────────
-            if resolution.get("email") and self.enrich_api_key:
-                logger.info(f"[Enrichment] Step 2b: Enrich.so email lookup for {resolution['email']}")
-                email_enrich = await self._enrich_so_email_lookup(resolution["email"])
-                if email_enrich and email_enrich.get("data"):
-                    person_data = email_enrich["data"]
-                    resolution["person"] = person_data
-                    resolution["confidence"] = max(resolution["confidence"], 0.8)
-                    resolution["full_name"] = person_data.get("full_name") or person_data.get("name") or resolution.get("full_name")
-                    resolution["phone"] = person_data.get("phone") or resolution.get("phone")
-                    resolution["linkedin_url"] = person_data.get("linkedin_url") or person_data.get("linkedin") or resolution.get("linkedin_url")
-                    resolution["job_title"] = person_data.get("job_title") or person_data.get("title") or resolution.get("job_title")
-                    if person_data.get("company_domain") and not resolution.get("domain"):
-                        resolution["domain"] = person_data["company_domain"]
-                    logger.info(f"[Enrichment] Step 2b success: found {resolution['full_name']}")
-                else:
-                    logger.info(f"[Enrichment] Step 2b: Enrich.so email lookup NO data")
-
-            # ──────────────────────────────────────────────
-            # 2c. BetterContact fallback
-            # ──────────────────────────────────────────────
-            needs_more_data = not resolution.get("full_name") or not resolution.get("phone") or not resolution.get("linkedin_url")
-            if resolution.get("email") and needs_more_data and self.bettercontact.api_key:
-                logger.info(f"[Enrichment] Step 2c: BetterContact fallback for {resolution['email']}")
-                bc_result = await self.bettercontact.enrich_prospect(
-                    email=resolution["email"],
-                    company_name=resolution.get("company") or "",
-                    company_domain=resolution.get("domain") or "",
-                )
-                if bc_result.get("success"):
-                    resolution["full_name"] = bc_result.get("full_name") or resolution.get("full_name")
-                    resolution["phone"] = bc_result.get("phone") or resolution.get("phone")
-                    resolution["linkedin_url"] = bc_result.get("linkedin_url") or resolution.get("linkedin_url")
-                    resolution["job_title"] = bc_result.get("job_title") or resolution.get("job_title")
-                    resolution["confidence"] = max(resolution["confidence"], 0.6)
-                    logger.info(f"[Enrichment] Step 2c success: found {resolution['full_name']}")
-                else:
-                    logger.info(f"[Enrichment] Step 2c: BetterContact NO match")
-
-            # ──────────────────────────────────────────────
-            # 2ca. ContactOut Email → Person
-            # ──────────────────────────────────────────────
-            if resolution.get("email") and not resolution.get("full_name") and self.contactout.api_key:
-                logger.info(f"[Enrichment] Step 2ca: ContactOut email lookup for {resolution['email']}")
-                co_enrich = await self.contactout.enrich_person_by_email(resolution["email"])
-                profile = co_enrich.get("profile", {})
-                if profile:
-                    resolution["full_name"] = profile.get("fullName") or profile.get("full_name") or resolution.get("full_name")
-                    resolution["linkedin_url"] = profile.get("linkedinUrl") or profile.get("linkedin_url") or resolution.get("linkedin_url")
-                    resolution["job_title"] = profile.get("headline") or profile.get("job_title") or resolution.get("job_title")
-                    resolution["confidence"] = max(resolution["confidence"], 0.75)
-                    logger.info(f"[Enrichment] Step 2ca success: found {resolution['full_name']}")
-                else:
-                    logger.info(f"[Enrichment] Step 2ca: ContactOut email lookup NO match")
-
-            # ──────────────────────────────────────────────
-            # 2d. ContactOut DM fallback
-            # ──────────────────────────────────────────────
-            if resolution.get("domain") and not resolution.get("full_name") and self.contactout.api_key:
-                logger.info(f"[Enrichment] Step 2d: ContactOut fallback (DMs) for {resolution['domain']}")
-                co_data = await self.contactout.get_decision_makers(domain=resolution["domain"], reveal_info=False)
-                profiles = co_data.get("profiles", {})
-                if profiles:
-                    dm = next(iter(profiles.values()))
-                    resolution["full_name"] = dm.get("full_name") or resolution.get("full_name")
-                    resolution["job_title"] = dm.get("title") or resolution.get("job_title")
-                    resolution["linkedin_url"] = dm.get("linkedin_url") or resolution.get("linkedin_url")
-                    logger.info(f"[Enrichment] Step 2d success: found DM {resolution['full_name']}")
-
-            # ──────────────────────────────────────────────
-            # 3. Explorium
-            # ──────────────────────────────────────────────
-            if resolution.get("domain"):
-                explorium_data = await self.explorium.search_companies({"domain": resolution["domain"]}, limit=1)
-                if explorium_data.get("companies"):
-                    resolution["explorium"] = explorium_data["companies"][0]
-                    resolution["confidence"] = max(resolution["confidence"], 0.9)
-            elif resolution.get("company"):
-                explorium_data = await self.explorium.search_companies({"name": resolution["company"]}, limit=1)
-                if explorium_data.get("companies"):
-                    resolution["explorium"] = explorium_data["companies"][0]
-                    resolution["confidence"] = max(resolution["confidence"], 0.8)
+            # ── STEP 5: Explorium firmographics ──────────────────────────────
+            await self._step_explorium(resolution)
 
         except Exception as e:
-            logger.error(f"[Enrichment] Fatal error: {e}")
+            logger.error("[Enrichment] Unhandled fatal error: %s", e, exc_info=True)
 
         return resolution
 
-    async def _enrich_so_email_lookup(self, email: str) -> Optional[Dict[str, Any]]:
-        if not self.enrich_api_key:
-            return None
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    \"https://api.enrich.so/v1/api/person\",
-                    params={\"email\": email},
-                    headers={\"Authorization\": f\"Bearer {self.enrich_api_key}\"},
-                    timeout=15.0,
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    raw = result.get(\"data\") or result
-                    if isinstance(raw, dict) and (raw.get(\"displayName\") or raw.get(\"firstName\")):
-                        person = {
-                            \"full_name\": raw.get(\"displayName\") or f\"{raw.get('firstName', '')} {raw.get('lastName', '')}\".strip(),
-                            \"email\": email,
-                            \"phone\": raw.get(\"phoneNumber\") or raw.get(\"phone\") or \"\",
-                            \"linkedin_url\": raw.get(\"linkedInProfileUrl\") or raw.get(\"linkedin_url\") or \"\",
-                            \"job_title\": raw.get(\"headline\") or raw.get(\"title\") or \"\",
-                            \"company_domain\": raw.get(\"companyDomain\") or \"\",
-                        }
-                        return {\"data\": person}
-                return None
-        except Exception:
-            return None
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 0: ip-api.com — accurate geo (no API key, 45 req/min free)
+    # More accurate than IPinfo free for Asia/India because it uses multiple
+    # geo databases and has city-level accuracy ~80% globally vs IPinfo ~55%.
+    # ─────────────────────────────────────────────────────────────────────────
 
-    async def _enrich_so_lookup(self, ip: str) -> Optional[Dict[str, Any]]:
-        if not self.enrich_api_key:
-            return None
+    async def _step_ipapi(self, ip: str, resolution: Dict[str, Any]) -> None:
+        logger.info("[Enrichment] Step 0: ip-api.com geo for %s", ip)
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    \"https://api.enrich.so/v1/api/ip-to-company-lookup\",
-                    params={\"ip\": ip},
-                    headers={\"Authorization\": f\"Bearer {self.enrich_api_key}\"},
-                    timeout=15.0,
+            fields = "status,message,country,countryCode,regionName,city,district,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting"
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(
+                    f"http://ip-api.com/json/{ip}",
+                    params={"fields": fields},
                 )
-                if response.status_code == 200:
-                    result = response.json()
-                    raw = result.get(\"data\") or result
-                    if isinstance(raw, dict) and (raw.get(\"companyName\") or raw.get(\"domain\")):
-                        return {
-                            \"data\": {
-                                \"company_name\": raw.get(\"companyName\") or \"\",
-                                \"company_domain\": raw.get(\"domain\") or \"\",
-                            }
-                        }
-                return None
-        except Exception:
-            return None
+            if resp.status_code != 200:
+                return
+            data = resp.json()
+            if data.get("status") != "success":
+                logger.info("[Enrichment] Step 0: ip-api.com returned status=%s for %s", data.get("status"), ip)
+                return
+
+            city = data.get("city") or None
+            district = data.get("district") or None
+            region = data.get("regionName") or None
+            country = data.get("country") or None
+            country_code = data.get("countryCode") or None
+            lat = data.get("lat")
+            lon = data.get("lon")
+            timezone = data.get("timezone") or None
+            isp = data.get("isp") or None
+            org = data.get("org") or None          # usually "AS12345 Company Name"
+            asname = data.get("asname") or None    # short AS name e.g. "JIO-IN"
+            is_mobile = bool(data.get("mobile"))
+            is_proxy = bool(data.get("proxy"))
+            is_hosting = bool(data.get("hosting"))
+
+            # Store accurate geo — prefer city over district
+            resolution["geo"] = {
+                "city": city or district,
+                "district": district,
+                "region": region,
+                "country": country,
+                "country_code": country_code,
+                "lat": lat,
+                "lon": lon,
+                "timezone": timezone,
+                "is_mobile": is_mobile,
+                "is_proxy": is_proxy,
+                "is_hosting": is_hosting,
+            }
+            resolution["_sources"].append("ipapi")
+            resolution["confidence"] = max(resolution["confidence"], 0.2)
+
+            # Extract company from org field (strip "AS12345 " prefix)
+            org_name = None
+            if org and " " in org:
+                org_name = org.split(" ", 1)[1].strip()
+            elif isp:
+                org_name = isp
+
+            resolution["_ipapi_isp"] = isp
+            resolution["_ipapi_org"] = org_name
+            resolution["_is_mobile"] = is_mobile
+            resolution["_is_proxy"] = is_proxy
+            resolution["_is_hosting"] = is_hosting
+
+            # Only use org as company if it's NOT a consumer ISP / cloud
+            if org_name and not is_isp_or_cloud(org_name) and not is_mobile and not is_hosting:
+                if not resolution.get("company"):
+                    resolution["company"] = org_name
+                    resolution["confidence"] = max(resolution["confidence"], 0.35)
+                    logger.info("[Enrichment] Step 0: org from ip-api = %s", org_name)
+
+            logger.info(
+                "[Enrichment] Step 0 done: %s, %s %s (mobile=%s, proxy=%s, hosting=%s)",
+                city, region, country, is_mobile, is_proxy, is_hosting,
+            )
+
+        except Exception as e:
+            logger.warning("[Enrichment] Step 0: ip-api.com failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 1: IPinfo — company data (best with paid plan, fallback to free org)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_ipinfo(self, ip: str, resolution: Dict[str, Any]) -> None:
+        if not self.ipinfo_client:
+            return
+        logger.info("[Enrichment] Step 1: IPinfo for %s", ip)
+        try:
+            loop = asyncio.get_event_loop()
+            details = await loop.run_in_executor(
+                None, partial(self.ipinfo_client.getDetails, ip)
+            )
+
+            # Paid plan: company object with name + domain
+            company_attr = getattr(details, "company", None)
+            org_name = None
+            domain = None
+            if isinstance(company_attr, dict):
+                org_name = company_attr.get("name") or None
+                domain = _clean_domain(company_attr.get("domain"))
+
+            # Free plan fallback: org field = "AS12345 Company Name"
+            if not org_name:
+                raw_org = getattr(details, "org", None) or ""
+                if raw_org.startswith("AS") and " " in raw_org:
+                    org_name = raw_org.split(" ", 1)[1].strip()
+
+            # Hostname → domain fallback
+            if not domain:
+                hostname = getattr(details, "hostname", None)
+                if hostname:
+                    parts = hostname.strip(".").split(".")
+                    if not any(p.isdigit() for p in parts) and 2 <= len(parts) <= 3:
+                        domain = _clean_domain(".".join(parts[-2:]))
+
+            # Geo fallback (only fill if ip-api.com missed it)
+            if not resolution.get("geo") or not (resolution["geo"] or {}).get("city"):
+                city = getattr(details, "city", None)
+                region = getattr(details, "region", None)
+                country = getattr(details, "country", None)
+                if city or country:
+                    resolution["geo"] = {
+                        **(resolution.get("geo") or {}),
+                        "city": city,
+                        "region": region,
+                        "country": country,
+                    }
+
+            if org_name and is_isp_or_cloud(org_name):
+                logger.info("[Enrichment] Step 1: IPinfo org is ISP/cloud (%s) — skipping", org_name)
+                org_name = None
+                domain = None
+
+            if org_name and not resolution.get("company"):
+                resolution["company"] = org_name
+                resolution["confidence"] = max(resolution["confidence"], 0.35)
+
+            if domain and not resolution.get("domain"):
+                resolution["domain"] = domain
+                resolution["confidence"] = max(resolution["confidence"], 0.4)
+
+            if org_name or domain:
+                resolution["_sources"].append("ipinfo")
+                logger.info("[Enrichment] Step 1: IPinfo company=%s domain=%s", org_name, domain)
+
+        except Exception as e:
+            logger.warning("[Enrichment] Step 1: IPinfo failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 2: Enrich.so IP → Company
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_enrich_so_ip(self, ip: str, resolution: Dict[str, Any]) -> None:
+        if not self.enrich_api_key:
+            logger.info("[Enrichment] Step 2: Enrich.so not configured, skipping")
+            return
+        logger.info("[Enrichment] Step 2: Enrich.so IP→Company for %s", ip)
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    "https://api.enrich.so/v1/api/ip-to-company-lookup",
+                    params={"ip": ip},
+                    headers={"Authorization": f"Bearer {self.enrich_api_key}"},
+                )
+            if resp.status_code != 200:
+                logger.info("[Enrichment] Step 2: Enrich.so returned HTTP %d", resp.status_code)
+                return
+
+            raw = resp.json()
+            data = raw.get("data") or raw
+            company_name = (data.get("companyName") or data.get("company_name") or "").strip()
+            company_domain = _clean_domain(data.get("domain") or data.get("company_domain") or "")
+
+            if not company_name and not company_domain:
+                logger.info("[Enrichment] Step 2: Enrich.so no data for %s", ip)
+                return
+
+            if is_isp_or_cloud(company_name) or is_isp_or_cloud(company_domain):
+                logger.info("[Enrichment] Step 2: Enrich.so result is ISP/cloud (%s) — skipping", company_name)
+                return
+
+            # Enrich.so is a stronger signal than IPinfo — overwrite with its result
+            if company_name:
+                resolution["company"] = company_name
+            if company_domain:
+                resolution["domain"] = company_domain
+
+            resolution["enrich_company"] = {
+                "company_name": company_name,
+                "company_domain": company_domain,
+                "raw": data,
+            }
+            resolution["_sources"].append("enrich_so_ip")
+            resolution["confidence"] = max(resolution["confidence"], 0.7)
+            logger.info("[Enrichment] Step 2 success: company=%s domain=%s", company_name, company_domain)
+
+        except Exception as e:
+            logger.warning("[Enrichment] Step 2: Enrich.so IP lookup failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 3a: Enrich.so Email → Person (form-captured email only)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_enrich_so_email(self, resolution: Dict[str, Any]) -> None:
+        email = resolution.get("email")
+        if not email or not self.enrich_api_key:
+            return
+        logger.info("[Enrichment] Step 3a: Enrich.so email→person for %s", email)
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    "https://api.enrich.so/v1/api/person",
+                    params={"email": email},
+                    headers={"Authorization": f"Bearer {self.enrich_api_key}"},
+                )
+            if resp.status_code != 200:
+                return
+
+            raw_result = resp.json()
+            raw = raw_result.get("data") or raw_result
+
+            if not isinstance(raw, dict):
+                return
+            if not (raw.get("displayName") or raw.get("firstName") or raw.get("fullName")):
+                return
+
+            first = raw.get("firstName", "")
+            last = raw.get("lastName", "")
+            full = (
+                raw.get("displayName")
+                or raw.get("fullName")
+                or f"{first} {last}".strip()
+                or None
+            )
+            person = {
+                "full_name": full,
+                "email": email,
+                "phone": raw.get("phoneNumber") or raw.get("phone") or "",
+                "linkedin_url": raw.get("linkedInProfileUrl") or raw.get("linkedin_url") or "",
+                "job_title": raw.get("headline") or raw.get("title") or "",
+                "company_domain": _clean_domain(raw.get("companyDomain") or "") or "",
+                "company_name": raw.get("companyName") or raw.get("company") or "",
+            }
+
+            resolution["person"] = person
+            resolution["full_name"] = resolution["full_name"] or person["full_name"]
+            resolution["phone"] = resolution["phone"] or person["phone"]
+            resolution["linkedin_url"] = resolution["linkedin_url"] or person["linkedin_url"]
+            resolution["job_title"] = resolution["job_title"] or person["job_title"]
+
+            if person["company_domain"] and not resolution.get("domain"):
+                resolution["domain"] = person["company_domain"]
+            if person["company_name"] and not resolution.get("company"):
+                resolution["company"] = person["company_name"]
+
+            resolution["_sources"].append("enrich_so_email")
+            resolution["confidence"] = max(resolution["confidence"], 0.8)
+            logger.info("[Enrichment] Step 3a success: full_name=%s", full)
+
+        except Exception as e:
+            logger.warning("[Enrichment] Step 3a: Enrich.so email lookup failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 3b: BetterContact fallback (email → more contact details)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_bettercontact(self, resolution: Dict[str, Any]) -> None:
+        email = resolution.get("email")
+        if not email or not self.bettercontact.api_key:
+            return
+        needs_data = not resolution.get("full_name") or not resolution.get("phone")
+        if not needs_data:
+            return
+        logger.info("[Enrichment] Step 3b: BetterContact for %s", email)
+        try:
+            bc = await self.bettercontact.enrich_prospect(
+                email=email,
+                company_name=resolution.get("company") or "",
+                company_domain=resolution.get("domain") or "",
+            )
+            if bc.get("success"):
+                resolution["full_name"] = resolution["full_name"] or bc.get("full_name")
+                resolution["phone"] = resolution["phone"] or bc.get("phone")
+                resolution["linkedin_url"] = resolution["linkedin_url"] or bc.get("linkedin_url")
+                resolution["job_title"] = resolution["job_title"] or bc.get("job_title")
+                resolution["_sources"].append("bettercontact")
+                resolution["confidence"] = max(resolution["confidence"], 0.75)
+                logger.info("[Enrichment] Step 3b success: %s", bc.get("full_name"))
+        except Exception as e:
+            logger.warning("[Enrichment] Step 3b: BetterContact failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 3c: ContactOut Email → Person
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_contactout_email(self, resolution: Dict[str, Any]) -> None:
+        email = resolution.get("email")
+        if not email or not self.contactout.api_key:
+            return
+        if resolution.get("full_name") and resolution.get("linkedin_url"):
+            return  # already have full person data
+        logger.info("[Enrichment] Step 3c: ContactOut email lookup for %s", email)
+        try:
+            co = await self.contactout.enrich_person_by_email(email)
+            profile = co.get("profile", {})
+            if profile:
+                resolution["full_name"] = resolution["full_name"] or profile.get("fullName") or profile.get("full_name")
+                resolution["linkedin_url"] = resolution["linkedin_url"] or profile.get("linkedinUrl") or profile.get("linkedin_url")
+                resolution["job_title"] = resolution["job_title"] or profile.get("headline") or profile.get("job_title")
+                resolution["_sources"].append("contactout_email")
+                resolution["confidence"] = max(resolution["confidence"], 0.75)
+                logger.info("[Enrichment] Step 3c success: %s", resolution["full_name"])
+        except Exception as e:
+            logger.warning("[Enrichment] Step 3c: ContactOut email failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 4: ContactOut DM lookup (company domain → decision makers)
+    # This runs for BOTH email-path AND IP-path when a domain is available.
+    # It finds the top decision maker at the identified company.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_contactout_dm(self, resolution: Dict[str, Any]) -> None:
+        domain = resolution.get("domain")
+        if not domain or not self.contactout.api_key:
+            return
+        logger.info("[Enrichment] Step 4: ContactOut DM for domain %s", domain)
+        try:
+            co_data = await self.contactout.get_decision_makers(domain=domain, reveal_info=False)
+            profiles = co_data.get("profiles", {})
+            if not profiles:
+                logger.info("[Enrichment] Step 4: No DMs found for %s", domain)
+                return
+
+            # Pick the highest-seniority profile
+            dm = next(iter(profiles.values()))
+            resolution["full_name"] = resolution.get("full_name") or dm.get("full_name")
+            resolution["job_title"] = resolution.get("job_title") or dm.get("title")
+            resolution["linkedin_url"] = resolution.get("linkedin_url") or dm.get("linkedin_url")
+            resolution["_sources"].append("contactout_dm")
+            resolution["confidence"] = max(resolution["confidence"], 0.65)
+            logger.info("[Enrichment] Step 4 success: DM=%s (%s)", resolution["full_name"], resolution["job_title"])
+        except Exception as e:
+            logger.warning("[Enrichment] Step 4: ContactOut DM failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 5: Explorium — B2B firmographics by domain or company name
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_explorium(self, resolution: Dict[str, Any]) -> None:
+        domain = resolution.get("domain")
+        company = resolution.get("company")
+        if not domain and not company:
+            logger.info("[Enrichment] Step 5: No domain or company — skipping Explorium")
+            return
+        logger.info("[Enrichment] Step 5: Explorium firmographics (domain=%s, company=%s)", domain, company)
+        try:
+            if domain:
+                result = await self.explorium.search_companies({"domain": domain}, limit=1)
+                confidence_bump = 0.9
+            else:
+                result = await self.explorium.search_companies({"name": company}, limit=1)
+                confidence_bump = 0.8
+
+            companies = result.get("companies") or []
+            if companies:
+                resolution["explorium"] = companies[0]
+                resolution["_sources"].append("explorium")
+                resolution["confidence"] = max(resolution["confidence"], confidence_bump)
+                logger.info(
+                    "[Enrichment] Step 5 success: %s (industry=%s, employees=%s)",
+                    companies[0].get("name"),
+                    companies[0].get("industry"),
+                    companies[0].get("employee_count_range"),
+                )
+            else:
+                logger.info("[Enrichment] Step 5: Explorium no match for domain=%s name=%s", domain, company)
+
+        except Exception as e:
+            logger.warning("[Enrichment] Step 5: Explorium failed: %s", e)

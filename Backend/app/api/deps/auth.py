@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.redis import get_redis
+from app.core.redis import get_redis, RedisManager
 from app.db.deps import get_db
 from app.db.models.user import User
 
@@ -40,9 +40,10 @@ async def get_current_user(
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
         except HTTPException:
             raise
-        except Exception:
-            # Redis failure is non-fatal — degrade gracefully but log it
-            logger.warning("Redis denylist check failed; proceeding without revocation check")
+        except Exception as _redis_err:
+            # Redis connection dropped — reset singleton so next request reconnects
+            logger.warning("Redis denylist check failed (resetting client): %s", _redis_err)
+            RedisManager.reset()
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:

@@ -2,7 +2,7 @@ import logging
 import httpx
 from typing import Dict, Any
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.celery_app import celery_app
 from app.core.redis import RedisManager
@@ -16,12 +16,71 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# ── Celery task ───────────────────────────────────────────────────────────────
+
 @celery_app.task(name="app.tasks.visitors.process_visitor_task")
 def process_visitor_task(org_id: str, data: Dict[str, Any]):
-    """
-    Celery task to enrich visitor data and save to DB.
-    """
+    """Celery task: enrich visitor data and save to DB."""
     return asyncio.run(_process_visitor_data(org_id, data))
+
+
+@celery_app.task(
+    name="app.tasks.visitors.deliver_webhook",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=5,
+)
+def deliver_webhook(self, webhook_url: str, payload: dict, visit_id: str, alert_id: str):
+    """
+    Deliver a single webhook with exponential backoff retry.
+    Retry schedule: 5s → 60s → 300s (3 attempts total).
+    """
+    db = SessionLocal()
+    try:
+        import httpx as _httpx
+        with _httpx.Client(timeout=10.0) as client:
+            response = client.post(webhook_url, json=payload)
+        status = "success" if response.status_code < 300 else "failed"
+
+        # Update alert record
+        alert = db.query(Alert).filter(Alert.id == uuid.UUID(alert_id)).first()
+        if alert:
+            alert.status = status
+            db.commit()
+
+        if response.status_code >= 300:
+            logger.warning("Webhook %s returned %d", webhook_url, response.status_code)
+            # Retry with exponential backoff: attempt 0→5s, 1→60s, 2→300s
+            retry_delays = [5, 60, 300]
+            attempt = self.request.retries
+            if attempt < len(retry_delays):
+                raise self.retry(countdown=retry_delays[attempt], exc=Exception(f"HTTP {response.status_code}"))
+
+    except (httpx.RequestError, httpx.TimeoutException) as exc:
+        logger.error("Webhook delivery error for %s: %s", webhook_url, exc)
+        alert = db.query(Alert).filter(Alert.id == uuid.UUID(alert_id)).first()
+        if alert:
+            alert.status = "error"
+            db.commit()
+        retry_delays = [5, 60, 300]
+        attempt = self.request.retries
+        if attempt < len(retry_delays):
+            raise self.retry(countdown=retry_delays[attempt], exc=exc)
+        # Final failure — mark as failed_final
+        if alert:
+            alert.status = "failed_final"
+            db.commit()
+    except Exception as exc:
+        logger.error("Unexpected webhook error: %s", exc)
+        alert = db.query(Alert).filter(Alert.id == uuid.UUID(alert_id)).first()
+        if alert:
+            alert.status = "error"
+            db.commit()
+    finally:
+        db.close()
+
+
+# ── Main processing pipeline ──────────────────────────────────────────────────
 
 def _normalize_domain(domain: str | None) -> str | None:
     if not domain:
@@ -29,13 +88,11 @@ def _normalize_domain(domain: str | None) -> str | None:
     d = domain.strip().lower()
     if d.startswith("www."):
         d = d[4:]
-    # ipinfo hostname can be a reverse DNS host; keep it but trim trailing dot
     return d.rstrip(".") or None
 
+
 async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
-    """
-    Background task to enrich visitor data and save to DB.
-    """
+    """Background coroutine: enrich visitor data and save to DB."""
     db = SessionLocal()
     try:
         ip = data.get("ip")
@@ -44,22 +101,17 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         intent_score = data.get("intent_score", 0.5)
         visitor_id = data.get("visitor_id")
 
-        # 1. Enrich data
-        logger.info(f"Starting enrichment for IP: {ip} (email={email}, visitor_id={visitor_id}, org={org_id})")
+        logger.info("Starting enrichment for IP: %s (email=%s, visitor_id=%s, org=%s)", ip, email, visitor_id, org_id)
         enricher = VisitorEnricher()
         resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
-        
-        # 1b. Categorize visitor (company vs prospect) and attach matches
+
         resolution = _categorize_and_attach(db, resolution)
         category = resolution.get("category", "unknown")
-        
-        logger.info(f"Categorized visit for {ip}: {category} (org={org_id})")
+        logger.info("Categorized visit for %s: %s (org=%s)", ip, category, org_id)
 
-        # Store visitor_id in resolution for linking
         if visitor_id:
             resolution["visitor_id"] = visitor_id
 
-        # 2. Save Visit
         is_matched = (
             bool(resolution.get("matched_entity"))
             or (
@@ -81,10 +133,9 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         db.add(new_visit)
         db.commit()
         db.refresh(new_visit)
-        logger.info(f"Saved visit {new_visit.id} for IP {ip}. Matched: {new_visit.matched}")
+        logger.info("Saved visit %s for IP %s. Matched: %s", new_visit.id, ip, new_visit.matched)
 
-        # 2c. Retroactive linking: if this visit has email + visitor_id,
-        #     update all previous anonymous visits from the same visitor_id
+        # Retroactive linking: link prior anonymous sessions from same visitor_id
         if visitor_id and email and is_matched:
             try:
                 from sqlalchemy import text
@@ -108,41 +159,41 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                 )
                 db.commit()
                 if updated.rowcount > 0:
-                    logger.info(f"Retroactively linked {updated.rowcount} anonymous visit(s) for visitor_id={visitor_id}")
+                    logger.info("Retroactively linked %d anonymous visit(s) for visitor_id=%s", updated.rowcount, visitor_id)
             except Exception as e:
-                logger.warning(f"Retroactive linking failed: {e}")
+                logger.warning("Retroactive linking failed: %s", e)
 
-        # 2b. Publish realtime event (best-effort)
+        # Real-time SSE publish (best-effort)
         await _publish_visit_event(org_id=str(new_visit.org_id), visit=new_visit)
-        
-        # 3. Trigger Webhooks if matched
+
+        # Webhooks for matched visits
         if new_visit.matched:
-            await trigger_webhooks(db, new_visit)
-            
+            await _enqueue_webhooks(db, new_visit)
+
     except Exception as e:
-        logger.error(f"Error processing visitor data: {e}")
+        logger.error("Error processing visitor data: %s", e)
         db.rollback()
     finally:
         db.close()
 
+
+# ── Categorization ────────────────────────────────────────────────────────────
+
 PERSONAL_DOMAINS = {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "mail.com"}
+
 
 def is_personal_email(email: str | None) -> bool:
     if not email or "@" not in email:
         return False
-    domain = email.split("@")[-1].lower()
-    return domain in PERSONAL_DOMAINS
+    return email.split("@")[-1].lower() in PERSONAL_DOMAINS
+
 
 def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Classify a visitor as a 'company' or 'prospect' and attach matched entities (best-effort).
-
-    - **prospect**: identified individual with a PERSONAL email (gmail, etc.).
-    - **company**: identified organization (by IP or by a WORK email domain).
-    - **unknown**: neither found.
+    Classify a visitor as 'company', 'prospect', or 'unknown' and
+    create/link matching DB records (best-effort, never raises).
     """
     res = dict(resolution or {})
-
     person = res.get("person") or {}
     email = res.get("email") or person.get("email") or person.get("work_email") or person.get("personal_email")
     domain = _normalize_domain(res.get("domain") or person.get("company_domain"))
@@ -168,7 +219,7 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
                     job_title=res.get("job_title") or person.get("title") or person.get("job_title"),
                 )
     except Exception as e:
-        logger.warning(f"Prospect match/create failed: {e}")
+        logger.warning("Prospect match/create failed: %s", e)
 
     try:
         if domain:
@@ -185,24 +236,19 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
                     headquarters_country=(res.get("geo") or {}).get("country") if isinstance(res.get("geo"), dict) else None,
                 )
     except Exception as e:
-        logger.warning(f"Company match/create failed: {e}")
+        logger.warning("Company match/create failed: %s", e)
 
-    # MANDATORY: If we have a personal email, this is a PROSPECT visit.
     if email and is_personal_email(email):
         res["category"] = "prospect"
         res["matched_entity"] = "prospect"
-        
-        # If we identified it as an ISP/Cloud previously, clear it to avoid "Bharti Airtel" showing as the company
         if not domain or is_isp_or_cloud(company_name):
             res["company"] = None
             res["domain"] = None
-
         res["matched_prospect"] = {
             "id": str(matched_prospect.id) if matched_prospect else None,
             "email": matched_prospect.email if matched_prospect else email,
             "full_name": matched_prospect.full_name if matched_prospect else res.get("full_name"),
         }
-        # Even if it's a prospect, we can still link them to the company identified by IP
         if matched_company:
             res["matched_company"] = {
                 "id": str(matched_company.id) if getattr(matched_company, "id", None) else None,
@@ -211,16 +257,12 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
             }
         return res
 
-    # Otherwise, if we have a domain or work email, it's a COMPANY visit
     if domain or (email and not is_personal_email(email)):
         res["category"] = "company"
         res["matched_entity"] = "company"
-        
-        # Ensure top-level fields are populated for the UI from our matched entities
         if matched_company:
             res["company"] = getattr(matched_company, "name", None) or res.get("company") or domain
             res["domain"] = getattr(matched_company, "domain", None) or res.get("domain") or domain
-        
         res["matched_company"] = {
             "id": str(matched_company.id) if getattr(matched_company, "id", None) else None,
             "domain": res.get("domain") or domain,
@@ -236,6 +278,9 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
         res["matched_entity"] = None
 
     return res
+
+
+# ── Real-time pub/sub ─────────────────────────────────────────────────────────
 
 async def _publish_visit_event(org_id: str, visit: Visit) -> None:
     try:
@@ -255,15 +300,17 @@ async def _publish_visit_event(org_id: str, visit: Visit) -> None:
             },
         }
         msg = json.dumps(payload, default=str)
-        # Publish only to the org-scoped channel (no global "visitors:all" to prevent cross-tenant leakage)
         await redis_client.publish(f"visitors:{org_id}", msg)
     except Exception:
-        # Realtime is best-effort; don't fail background processing.
-        return
+        pass  # Real-time is best-effort — never fail the pipeline
 
-async def trigger_webhooks(db, visit: Visit):
+
+# ── Webhook delivery (with Celery retry) ─────────────────────────────────────
+
+async def _enqueue_webhooks(db, visit: Visit) -> None:
     """
-    Send webhook alerts for matched visitors.
+    Create Alert records and enqueue Celery tasks for each webhook URL.
+    Each webhook runs independently with its own retry lifecycle.
     """
     site_config = db.query(SiteConfig).filter(SiteConfig.org_id == visit.org_id).first()
     if not site_config or not site_config.webhook_urls:
@@ -272,35 +319,47 @@ async def trigger_webhooks(db, visit: Visit):
     payload = {
         "event": "visitor_identified",
         "visit_id": str(visit.id),
-        "ip": visit.ip,
+        "ip": str(visit.ip),
         "url": visit.url,
         "resolution": visit.resolution,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    async with httpx.AsyncClient() as client:
-        for webhook_url in site_config.webhook_urls:
+    for webhook_url in site_config.webhook_urls:
+        # Create a pending Alert record before dispatching
+        alert = Alert(
+            id=uuid.uuid4(),
+            visit_id=visit.id,
+            webhook_type="general",
+            status="pending",
+            payload=payload,
+        )
+        db.add(alert)
+        db.commit()
+
+        try:
+            # Dispatch as Celery task (async, with retry)
+            deliver_webhook.delay(
+                webhook_url=webhook_url,
+                payload=payload,
+                visit_id=str(visit.id),
+                alert_id=str(alert.id),
+            )
+        except Exception as e:
+            # Celery unavailable — attempt synchronous delivery
+            logger.warning("Celery unavailable for webhook, trying synchronous: %s", e)
             try:
-                response = await client.post(webhook_url, json=payload, timeout=10.0)
-                
-                # Save Alert record
-                alert = Alert(
-                    id=uuid.uuid4(),
-                    visit_id=visit.id,
-                    webhook_type="general",
-                    status="success" if response.status_code < 300 else "failed",
-                    payload=payload
-                )
-                db.add(alert)
-                db.commit()
-            except Exception as e:
-                logger.error(f"Webhook failed for {webhook_url}: {e}")
-                alert = Alert(
-                    id=uuid.uuid4(),
-                    visit_id=visit.id,
-                    webhook_type="general",
-                    status="error",
-                    payload={"error": str(e)}
-                )
-                db.add(alert)
-                db.commit()
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(webhook_url, json=payload)
+                alert.status = "success" if resp.status_code < 300 else "failed"
+            except Exception as ex:
+                logger.error("Synchronous webhook delivery failed: %s", ex)
+                alert.status = "error"
+            db.commit()
+
+
+# ── Legacy synchronous trigger (kept for backwards compat) ───────────────────
+
+async def trigger_webhooks(db, visit: Visit):
+    """Backwards-compatible alias → now delegates to _enqueue_webhooks."""
+    await _enqueue_webhooks(db, visit)
