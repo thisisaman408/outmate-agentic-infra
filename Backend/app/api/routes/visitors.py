@@ -202,14 +202,15 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
 
         site_config = await _run_db(_get_config)
 
-        # 1.1.1.1 → IPinfo: Cloudflare Inc., San Francisco, US, domain=cloudflare.com
-        ip = "1.1.1.1"
+        # Use the real IP of the user making the request
+        x_forwarded = request.headers.get("x-forwarded-for")
+        ip = x_forwarded.split(",")[0].strip() if x_forwarded else (request.client.host if request.client else "127.0.0.1")
         logger.info("test-hit: user=%s org=%s using IP %s", current_user.id, site_config.org_id, ip)
 
         from app.tasks.visitors import _process_visitor_data
         payload = {
             "ip": ip,
-            "url": "http://localhost:3000/pricing",
+            "url": "https://app.outmate.ai/pricing",
             "referrer": "https://google.com",
             "user_agent": request.headers.get("user-agent", "Outmate-Test"),
             "intent_score": 1.0,
@@ -278,6 +279,7 @@ async def track_visitor(request: Request):
         pixel_key = data.get("pixel_key") or x_pixel_key or data.get("pixelKey") or data.get("key")
         email = data.get("email")
         referrer = data.get("referrer") or data.get("ref") or data.get("Ref")
+        visitor_id = data.get("visitor_id")
 
         if not url:
             # If still missing, we return a detailed debug error
@@ -335,6 +337,7 @@ async def track_visitor(request: Request):
             "user_agent": user_agent,
             "intent_score": intent_score,
             "email": email,
+            "visitor_id": visitor_id,
         }
 
         queued_via = "celery"

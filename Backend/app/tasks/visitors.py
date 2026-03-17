@@ -42,9 +42,10 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         url = data.get("url")
         email = data.get("email")
         intent_score = data.get("intent_score", 0.5)
-        
+        visitor_id = data.get("visitor_id")
+
         # 1. Enrich data
-        logger.info(f"Starting enrichment for IP: {ip} (email={email}, org={org_id})")
+        logger.info(f"Starting enrichment for IP: {ip} (email={email}, visitor_id={visitor_id}, org={org_id})")
         enricher = VisitorEnricher()
         resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
         
@@ -54,7 +55,18 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         
         logger.info(f"Categorized visit for {ip}: {category} (org={org_id})")
 
+        # Store visitor_id in resolution for linking
+        if visitor_id:
+            resolution["visitor_id"] = visitor_id
+
         # 2. Save Visit
+        is_matched = (
+            bool(resolution.get("matched_entity"))
+            or (
+                resolution.get("confidence", 0) >= 0.4
+                and bool(resolution.get("company") or resolution.get("domain"))
+            )
+        )
         new_visit = Visit(
             id=uuid.uuid4(),
             org_id=uuid.UUID(org_id),
@@ -64,23 +76,41 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
             user_agent=data.get("user_agent"),
             intent_score=intent_score,
             resolution=resolution,
-            # A visit is "matched" (Identified) when we have real data:
-            # - a DB-matched entity (prospect or company record), OR
-            # - high confidence (≥0.7) from Enrich.so/Explorium, OR
-            # - IPinfo returned a real org/domain (confidence ≥0.4) — ASN orgs
-            #   are real companies even without person-level enrichment
-            matched=(
-                bool(resolution.get("matched_entity"))
-                or (
-                    resolution.get("confidence", 0) >= 0.4
-                    and bool(resolution.get("company") or resolution.get("domain"))
-                )
-            )
+            matched=is_matched,
         )
         db.add(new_visit)
         db.commit()
         db.refresh(new_visit)
         logger.info(f"Saved visit {new_visit.id} for IP {ip}. Matched: {new_visit.matched}")
+
+        # 2c. Retroactive linking: if this visit has email + visitor_id,
+        #     update all previous anonymous visits from the same visitor_id
+        if visitor_id and email and is_matched:
+            try:
+                from sqlalchemy import text
+                updated = db.execute(
+                    text("""
+                        UPDATE visits
+                        SET matched = true,
+                            resolution = jsonb_set(
+                                jsonb_set(
+                                    COALESCE(resolution, '{}'::jsonb),
+                                    '{email}', to_jsonb(:email::text)
+                                ),
+                                '{retrolinked}', 'true'::jsonb
+                            )
+                        WHERE org_id = :org_id
+                          AND matched = false
+                          AND resolution->>'visitor_id' = :visitor_id
+                          AND id != :current_id
+                    """),
+                    {"email": email, "org_id": org_id, "visitor_id": visitor_id, "current_id": str(new_visit.id)}
+                )
+                db.commit()
+                if updated.rowcount > 0:
+                    logger.info(f"Retroactively linked {updated.rowcount} anonymous visit(s) for visitor_id={visitor_id}")
+            except Exception as e:
+                logger.warning(f"Retroactive linking failed: {e}")
 
         # 2b. Publish realtime event (best-effort)
         await _publish_visit_event(org_id=str(new_visit.org_id), visit=new_visit)
