@@ -122,65 +122,38 @@ class VisitorEnricher:
                     logger.error(f"[Enrichment] IPinfo lookup failed: {e}")
 
             # ──────────────────────────────────────────────
-            # 2. Enrich.so (IP → Person/Email/Phone)
+            # 2. Enrich.so IP → Company
             # ──────────────────────────────────────────────
-            is_high_intent = intent_score > 0.7 or any(
-                x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]
-            )
             should_enrich = bool(self.enrich_api_key)
 
             if should_enrich:
-                logger.info(f"[Enrichment] Step 2: Enrich.so lookup for {ip} (high intent={is_high_intent})")
+                logger.info(f"[Enrichment] Step 2: Enrich.so IP-to-Company for {ip}")
                 enrich_data = await self._enrich_so_lookup(ip)
-                
+
                 if enrich_data and enrich_data.get("data"):
-                    person_data = enrich_data["data"]
-                    resolution["person"] = person_data
-                    resolution["confidence"] = 0.8
-                    
-                    # Extract contact details from Enrich.so response
-                    resolution["email"] = (
-                        person_data.get("email") or 
-                        person_data.get("work_email") or
-                        person_data.get("personal_email")
-                    )
-                    resolution["phone"] = (
-                        person_data.get("phone") or 
-                        person_data.get("mobile_phone") or
-                        person_data.get("work_phone")
-                    )
-                    resolution["full_name"] = (
-                        person_data.get("full_name") or 
-                        person_data.get("name") or
-                        f"{person_data.get('first_name', '')} {person_data.get('last_name', '')}".strip()
-                    )
-                    resolution["linkedin_url"] = (
-                        person_data.get("linkedin_url") or 
-                        person_data.get("linkedin") or
-                        person_data.get("linkedin_profile_url")
-                    )
-                    resolution["job_title"] = (
-                        person_data.get("title") or 
-                        person_data.get("job_title") or
-                        person_data.get("position")
-                    )
-                    
-                    # Company data from Enrich.so
-                    if person_data.get("company_domain"):
-                        resolution["domain"] = person_data["company_domain"]
-                    if person_data.get("company_name"):
-                        resolution["company"] = person_data["company_name"]
-                    
-                    logger.info(f"[Enrichment] Enrich.so found: {resolution['full_name']}, {resolution['email']}")
+                    company_data = enrich_data["data"]
+                    company_name = company_data.get("company_name") or ""
+                    company_domain = company_data.get("company_domain") or ""
+
+                    # Only use if NOT an ISP/cloud provider
+                    if company_name and not is_isp_or_cloud(company_name):
+                        resolution["company"] = company_name
+                        resolution["domain"] = company_domain or resolution["domain"]
+                        resolution["confidence"] = max(resolution["confidence"], 0.7)
+                        # Store extra company info
+                        resolution["enrich_company"] = company_data
+                        logger.info(f"[Enrichment] Enrich.so IP found company: {company_name} ({company_domain})")
+                    else:
+                        logger.info(f"[Enrichment] Enrich.so IP returned ISP/cloud: {company_name} — skipped")
                 else:
-                    logger.info(f"[Enrichment] Enrich.so returned no data for {ip}")
+                    logger.info(f"[Enrichment] Enrich.so IP returned no company data for {ip}")
 
             # ──────────────────────────────────────────────
-            # 2b. Enrich.so Email → Person fallback
-            #     When IP lookup yielded nothing but we have an email (e.g. logged-in user),
-            #     try enriching by email to get person details.
+            # 2b. Enrich.so Email → Person
+            #     Enrich by email to get person details (name, LinkedIn, title, phone).
+            #     Works for both work and personal emails.
             # ──────────────────────────────────────────────
-            if not resolution.get("person") and resolution.get("email") and self.enrich_api_key:
+            if resolution.get("email") and self.enrich_api_key:
                 logger.info(f"[Enrichment] Step 2b: Enrich.so email lookup for {resolution['email']}")
                 email_enrich = await self._enrich_so_email_lookup(resolution["email"])
                 if email_enrich and email_enrich.get("data"):
@@ -282,22 +255,43 @@ class VisitorEnricher:
         return resolution
 
     async def _enrich_so_email_lookup(self, email: str) -> Optional[Dict[str, Any]]:
-        """Call Enrich.so API for Email to Person lookup."""
+        """Call Enrich.so API for Email to Person lookup (GET /v1/api/person?email=)."""
         if not self.enrich_api_key:
             return None
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://api.enrich.so/v1/persons",
-                    json={"email": email},
+                response = await client.get(
+                    "https://api.enrich.so/v1/api/person",
+                    params={"email": email},
                     headers={
                         "Authorization": f"Bearer {self.enrich_api_key}",
                         "Content-Type": "application/json",
                     },
-                    timeout=10.0,
+                    timeout=15.0,
                 )
                 if response.status_code == 200:
-                    return response.json()
+                    result = response.json()
+                    # Normalize Enrich.so response to our standard person format
+                    raw = result.get("data") or result
+                    if isinstance(raw, dict) and (raw.get("displayName") or raw.get("firstName")):
+                        person = {
+                            "full_name": raw.get("displayName") or f"{raw.get('firstName', '')} {raw.get('lastName', '')}".strip(),
+                            "first_name": raw.get("firstName") or "",
+                            "last_name": raw.get("lastName") or "",
+                            "email": email,
+                            "work_email": raw.get("workEmail") or raw.get("work_email") or "",
+                            "personal_email": raw.get("personalEmail") or raw.get("personal_email") or email,
+                            "phone": raw.get("phoneNumber") or raw.get("phone") or "",
+                            "linkedin_url": raw.get("linkedInProfileUrl") or raw.get("profileUrl") or raw.get("linkedin_url") or "",
+                            "title": raw.get("headline") or raw.get("occupation") or raw.get("title") or "",
+                            "job_title": raw.get("occupation") or raw.get("headline") or raw.get("title") or "",
+                            "company_name": raw.get("companyName") or raw.get("company_name") or "",
+                            "company_domain": raw.get("companyDomain") or raw.get("company_domain") or "",
+                            "summary": raw.get("summary") or "",
+                            "location": raw.get("location") or raw.get("geoLocation") or "",
+                        }
+                        return {"data": person}
+                    return result
                 else:
                     logger.warning(f"[Enrichment] Enrich.so email API error: {response.status_code} - {response.text}")
         except Exception as e:
@@ -306,24 +300,42 @@ class VisitorEnricher:
 
     async def _enrich_so_lookup(self, ip: str) -> Optional[Dict[str, Any]]:
         """
-        Call Enrich.so API for IP to Person/Email lookup.
+        Call Enrich.so IP to Company API (GET /v1/api/ip-to-company-lookup?ip=).
+        Returns company data — Enrich.so does not have IP-to-person.
         """
         if not self.enrich_api_key:
             return None
-            
+
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://api.enrich.so/ip-to-person",
-                    json={"ip": ip},
-                    headers={"Authorization": f"Bearer {self.enrich_api_key}"},
-                    timeout=10.0
+                response = await client.get(
+                    "https://api.enrich.so/v1/api/ip-to-company-lookup",
+                    params={"ip": ip},
+                    headers={
+                        "Authorization": f"Bearer {self.enrich_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=15.0,
                 )
                 if response.status_code == 200:
-                    return response.json()
+                    result = response.json()
+                    raw = result.get("data") or result
+                    if isinstance(raw, dict) and (raw.get("companyName") or raw.get("name") or raw.get("domain")):
+                        # Return in a format compatible with our enrichment flow
+                        company_data = {
+                            "company_name": raw.get("companyName") or raw.get("name") or "",
+                            "company_domain": raw.get("domain") or raw.get("companyDomain") or "",
+                            "industry": raw.get("industry") or "",
+                            "employee_count": raw.get("employeeCount") or raw.get("employee_count") or "",
+                            "linkedin_url": raw.get("linkedInUrl") or raw.get("linkedin_url") or "",
+                            "website": raw.get("website") or "",
+                            "description": raw.get("description") or "",
+                        }
+                        return {"data": company_data, "type": "company"}
+                    return result
                 else:
-                    logger.warning(f"[Enrichment] Enrich.so API error: {response.status_code} - {response.text}")
+                    logger.warning(f"[Enrichment] Enrich.so IP API error: {response.status_code} - {response.text}")
         except Exception as e:
-            logger.error(f"[Enrichment] Enrich.so API call failed: {e}")
-        
+            logger.error(f"[Enrichment] Enrich.so IP API call failed: {e}")
+
         return None
