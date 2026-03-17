@@ -213,6 +213,7 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
             "referrer": "https://google.com",
             "user_agent": request.headers.get("user-agent", "Outmate-Test"),
             "intent_score": 1.0,
+            "email": current_user.email,
         }
         asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
         return {"status": "queued", "ip": ip, "message": f"Test visit queued for IP {ip} — refresh in a few seconds"}

@@ -10,7 +10,7 @@ from app.db.session import SessionLocal
 from app.db.models.visitor import Visit, SiteConfig, Alert
 from app.db.repositories.company_repository import CompanyRepository
 from app.db.repositories.prospect_repository import ProspectRepository
-from app.services.visitor_enrich import VisitorEnricher
+from app.services.visitor_enrich import VisitorEnricher, is_isp_or_cloud
 import asyncio
 import json
 
@@ -44,14 +44,16 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         intent_score = data.get("intent_score", 0.5)
         
         # 1. Enrich data
-        logger.info(f"Starting enrichment for IP: {ip} (email={email})")
+        logger.info(f"Starting enrichment for IP: {ip} (email={email}, org={org_id})")
         enricher = VisitorEnricher()
         resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
-        logger.info(f"Enrichment completed for IP: {ip}. Confidence: {resolution.get('confidence')}")
-
+        
         # 1b. Categorize visitor (company vs prospect) and attach matches
         resolution = _categorize_and_attach(db, resolution)
+        category = resolution.get("category", "unknown")
         
+        logger.info(f"Categorized visit for {ip}: {category} (org={org_id})")
+
         # 2. Save Visit
         new_visit = Visit(
             id=uuid.uuid4(),
@@ -159,6 +161,12 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     if email and is_personal_email(email):
         res["category"] = "prospect"
         res["matched_entity"] = "prospect"
+        
+        # If we identified it as an ISP/Cloud previously, clear it to avoid "Bharti Airtel" showing as the company
+        if not domain or is_isp_or_cloud(company_name):
+            res["company"] = None
+            res["domain"] = None
+
         res["matched_prospect"] = {
             "id": str(matched_prospect.id) if matched_prospect else None,
             "email": matched_prospect.email if matched_prospect else email,

@@ -152,7 +152,11 @@ export default function VisitorsPage() {
         setSiteConfigLoading(true)
         try {
             const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
-            if (res.ok) setSiteConfig(await res.json())
+            if (res.ok) {
+                const config = await res.json()
+                setSiteConfig(config)
+                console.log("[VisitorsPage] Active SiteConfig:", config)
+            }
         } catch { /* non-fatal */ } finally {
             setSiteConfigLoading(false)
         }
@@ -161,7 +165,7 @@ export default function VisitorsPage() {
     const sendTestHit = async () => {
         setTestLoading(true)
         try {
-            const res = await fetch(`${API}/test-hit`, { method: "POST" })
+            const res = await fetch(`${API}/test-hit`, { method: "POST", headers: getAuthHeaders() })
             const data = await res.json()
             if (res.ok) {
                 toast.success(`Test visit queued from IP ${data.ip} — refreshing in 3s…`)
