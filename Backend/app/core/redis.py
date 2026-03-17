@@ -47,9 +47,11 @@ class RedisManager:
                 cls.client = redis.from_url(
                     settings.REDIS_URL,
                     retry=retry,
+                    retry_on_error=[ConnectionError, TimeoutError],
                     health_check_interval=30,
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
+                    socket_connect_timeout=10,
+                    socket_timeout=10,
+                    socket_keepalive=True,
                     decode_responses=True,
                 )
                 logger.info("Redis async client created with retry strategy")
@@ -80,6 +82,13 @@ class RedisManager:
         if cls.client is None:
             cls.connect()
         return cls.client
+
+    @classmethod
+    def reset(cls) -> None:
+        """Discard the current client so the next get_client() call
+        creates a fresh connection. Call this after a connection error."""
+        cls.client = None
+        cls.ready = False
 
     @classmethod
     async def health_check(cls) -> bool:

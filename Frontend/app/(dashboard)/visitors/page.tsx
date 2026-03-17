@@ -86,6 +86,14 @@ type PeriodHours = (typeof PERIODS)[number]["hours"]
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
 const API = "/api/v1/visitors"
 
+// The pixel snippet shown to customers must use the public-facing app URL,
+// NOT the backend URL. It goes through Next.js which proxies to the backend
+// and correctly forwards the real client IP.
+const PIXEL_HOST =
+    typeof window !== "undefined"
+        ? window.location.origin                         // always correct at runtime
+        : process.env.NEXT_PUBLIC_APP_URL || "https://app.outmate.ai"
+
 function getAuthHeaders(): Record<string, string> {
     const token = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
     return token ? { Authorization: `Bearer ${token}` } : {}
@@ -254,14 +262,21 @@ export default function VisitorsPage() {
     const [siteConfigLoading, setSiteConfigLoading] = useState(true)
     const pixelKey = siteConfig?.pixel_key ?? "loading..."
 
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(0)
+    const [totalVisits, setTotalVisits] = useState(0)
+    const PAGE_SIZE = 50
+
     // UI State
     const [activeTab, setActiveTab] = useState("companies")
     const [searchQuery, setSearchQuery] = useState("")
     const [filter, setFilter] = useState<"all" | "hot" | "icp" | "new">("all")
+    const [icpMinScore, setIcpMinScore] = useState(0)
     const [selectedVisit, setSelectedVisit] = useState<Visit | null>(null)
     const [selectedCompanyGroup, setSelectedCompanyGroup] = useState<ReturnType<typeof groupByCompany>[0] | null>(null)
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [revealedContacts, setRevealedContacts] = useState<Set<string>>(new Set())
+    const [isExporting, setIsExporting] = useState(false)
 
     const fetchSiteConfig = async () => {
         setSiteConfigLoading(true)
@@ -274,7 +289,31 @@ export default function VisitorsPage() {
     const sendTestHit = async () => {
         setTestLoading(true)
         try {
-            const res = await fetch(`${API}/test-hit`, { method: "POST", headers: getAuthHeaders() })
+            // Resolve real public IP — needed because Next.js rewrites proxy the
+            // test-hit request via localhost, so the backend would see 127.0.0.1.
+            // Strategy: try our own route first (works in production behind a
+            // reverse proxy that sets x-forwarded-for), then fall back to ipify
+            // (always works in local dev, direct browser fetch).
+            let realIp: string | undefined
+            try {
+                const ipRes = await fetch("/api/my-ip", { cache: "no-store" })
+                if (ipRes.ok) {
+                    const { ip } = await ipRes.json()
+                    if (ip && ip !== "unknown" && ip !== "127.0.0.1" && ip !== "::1") realIp = ip
+                }
+            } catch { }
+            if (!realIp) {
+                try {
+                    const ipRes = await fetch("https://api64.ipify.org?format=json", { cache: "no-store" })
+                    if (ipRes.ok) realIp = (await ipRes.json()).ip
+                } catch { }
+            }
+
+            const res = await fetch(`${API}/test-hit`, {
+                method: "POST",
+                headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                body: JSON.stringify(realIp ? { ip: realIp } : {}),
+            })
             const data = await res.json()
             if (res.ok) {
                 toast.success(`Test visit queued from IP ${data.ip} — refreshing in 3s…`)
@@ -286,18 +325,26 @@ export default function VisitorsPage() {
         } catch { toast.error("Cannot reach backend") } finally { setTestLoading(false) }
     }
 
-    const fetchData = async () => {
+    const fetchData = async (page = currentPage) => {
         setError(null)
         try {
             const headers = getAuthHeaders()
+            const offset = page * PAGE_SIZE
             const [visitsRes, statsRes] = await Promise.all([
-                fetch(`${API}`, { headers }),
+                fetch(`${API}?limit=${PAGE_SIZE}&offset=${offset}`, { headers }),
                 fetch(`${API}/stats`, { headers })
             ])
             if (visitsRes.ok) {
                 const data = await visitsRes.json()
-                if (Array.isArray(data)) setVisits(data)
-                else if (data.error) setError(data.error)
+                // Handle new paginated format { visits, total, has_more } OR legacy array
+                if (Array.isArray(data)) {
+                    setVisits(data)
+                } else if (data.visits) {
+                    setVisits(data.visits)
+                    setTotalVisits(data.total ?? data.visits.length)
+                } else if (data.error) {
+                    setError(data.error)
+                }
             } else if (visitsRes.status === 503) {
                 const errData = await visitsRes.json()
                 setError(errData.error || "Database temporarily unavailable")
@@ -306,7 +353,7 @@ export default function VisitorsPage() {
                 const statsData = await statsRes.json()
                 setStats({ total_visits: statsData.total_visits ?? 0, matched_visits: statsData.matched_visits ?? 0, match_rate: statsData.match_rate ?? 0 })
             }
-        } catch (err) {
+        } catch {
             setError("Cannot connect to backend. Ensure the server is running on port 8000.")
         } finally { setIsLoading(false) }
     }
@@ -326,22 +373,26 @@ export default function VisitorsPage() {
     const handlePeriodChange = (h: PeriodHours) => { setPeriod(h); fetchAnalytics(h) }
 
     const copyPixel = () => {
-        navigator.clipboard.writeText(`<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`)
+        navigator.clipboard.writeText(`<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}"></script>`)
         toast.success("Pixel snippet copied to clipboard!")
     }
 
-    const exportCsv = () => {
-        const rows = [["Company", "Name", "Email", "Title", "Page", "Intent", "Time"]]
-        for (const v of filteredVisits) {
-            const d = extractVisitData(v)
-            rows.push([d.company || "", d.fullName || "", d.email || "", d.jobTitle || "", d.pagePath, `${(v.intent_score * 100).toFixed(0)}%`, v.created_at])
-        }
-        const csv = rows.map(r => r.map(c => `"${(c || "").replace(/"/g, '""')}"`).join(",")).join("\n")
-        const blob = new Blob([csv], { type: "text/csv" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a"); a.href = url; a.download = "visitors.csv"; a.click()
-        URL.revokeObjectURL(url)
-        toast.success("CSV exported!")
+    const exportCsv = async (matchedOnly = false) => {
+        setIsExporting(true)
+        try {
+            const hours = period
+            const params = new URLSearchParams({ format: "csv", hours: String(hours), matched_only: String(matchedOnly) })
+            const res = await fetch(`${API}/export?${params}`, { headers: getAuthHeaders() })
+            if (!res.ok) { toast.error("Export failed"); return }
+            const blob = await res.blob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `visitors_${hours}h${matchedOnly ? "_identified" : ""}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+            toast.success("CSV exported!")
+        } catch { toast.error("Export failed") } finally { setIsExporting(false) }
     }
 
     useEffect(() => {
@@ -397,8 +448,9 @@ export default function VisitorsPage() {
             const today = new Date(); today.setHours(0, 0, 0, 0)
             result = result.filter(v => new Date(v.created_at) >= today)
         }
+        if (icpMinScore > 0) result = result.filter(v => getIcpScore(v) >= icpMinScore)
         return result
-    }, [visits, searchQuery, filter])
+    }, [visits, searchQuery, filter, icpMinScore])
 
     const companyGroups = useMemo(() => groupByCompany(filteredVisits), [filteredVisits])
 
@@ -437,8 +489,9 @@ export default function VisitorsPage() {
                         {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
                         {testLoading ? "Sending…" : "Test Hit"}
                     </Button>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
-                        <Download className="h-3.5 w-3.5" /> Export CSV
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => exportCsv(false)} disabled={isExporting}>
+                        {isExporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                        {isExporting ? "Exporting…" : "Export CSV"}
                     </Button>
                 </div>
             </div>
@@ -660,8 +713,8 @@ export default function VisitorsPage() {
                 {/* ── People Tab ──────────────────────────────── */}
                 <TabsContent value="people" className="space-y-4 mt-4">
                     {/* Search + Filters */}
-                    <div className="flex items-center gap-3">
-                        <div className="relative flex-1 max-w-sm">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="relative flex-1 min-w-[180px] max-w-sm">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input placeholder="Search people, emails..." className="pl-9 h-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                         </div>
@@ -677,6 +730,28 @@ export default function VisitorsPage() {
                                 </Button>
                             ))}
                         </div>
+                        {/* ICP minimum score filter */}
+                        <div className="flex items-center gap-2 ml-auto">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">ICP ≥ {icpMinScore}%</span>
+                            <input
+                                type="range"
+                                min={0}
+                                max={80}
+                                step={10}
+                                value={icpMinScore}
+                                onChange={e => setIcpMinScore(Number(e.target.value))}
+                                className="w-24 h-2 accent-primary cursor-pointer"
+                            />
+                            {icpMinScore > 0 && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setIcpMinScore(0)}>
+                                    <X className="h-3 w-3" />
+                                </Button>
+                            )}
+                        </div>
+                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => exportCsv(false)} disabled={isExporting}>
+                            <Download className="h-3.5 w-3.5" />
+                            Export
+                        </Button>
                     </div>
 
                     <Card>
@@ -746,6 +821,38 @@ export default function VisitorsPage() {
                             </Table>
                         </CardContent>
                     </Card>
+
+                    {/* Pagination Controls */}
+                    {totalVisits > PAGE_SIZE && (
+                        <div className="flex items-center justify-between pt-1">
+                            <span className="text-xs text-muted-foreground">
+                                Showing {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, totalVisits)} of {totalVisits} visits
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-3 text-xs"
+                                    disabled={currentPage === 0 || isLoading}
+                                    onClick={() => { const p = currentPage - 1; setCurrentPage(p); fetchData(p) }}
+                                >
+                                    ← Prev
+                                </Button>
+                                <span className="text-xs text-muted-foreground">
+                                    Page {currentPage + 1} / {Math.ceil(totalVisits / PAGE_SIZE)}
+                                </span>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-3 text-xs"
+                                    disabled={(currentPage + 1) * PAGE_SIZE >= totalVisits || isLoading}
+                                    onClick={() => { const p = currentPage + 1; setCurrentPage(p); fetchData(p) }}
+                                >
+                                    Next →
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </TabsContent>
 
                 {/* ── Analytics Tab ───────────────────────────── */}
@@ -938,9 +1045,9 @@ export default function VisitorsPage() {
 
                             {/* Snippets */}
                             {[
-                                { title: "HTML / Any website", icon: <Code2 className="h-4 w-4 text-primary" />, desc: <>Paste inside <code>&lt;head&gt;</code> or before <code>&lt;/body&gt;</code>.</>, snippet: `<script\n  src="${API_BASE}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey}"\n  async\n></script>` },
-                                { title: "Next.js (App Router)", icon: <ExternalLink className="h-4 w-4 text-primary" />, desc: <>Add to <code>app/layout.tsx</code> inside <code>&lt;head&gt;</code>.</>, snippet: `// app/layout.tsx\n<head>\n  <script\n    src="${API_BASE}/api/v1/visitors/pixel.js"\n    data-pixel-key="${pixelKey}"\n    async\n  />\n</head>` },
-                                { title: "WordPress / Shopify", icon: <Globe className="h-4 w-4 text-primary" />, desc: <>Paste before <code>&lt;/head&gt;</code> in your theme.</>, snippet: `<script src="${API_BASE}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>` },
+                                { title: "HTML / Any website", icon: <Code2 className="h-4 w-4 text-primary" />, desc: <>Paste inside <code>&lt;head&gt;</code> or before <code>&lt;/body&gt;</code>.</>, snippet: `<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey}"\n  async\n></script>` },
+                                { title: "Next.js (App Router)", icon: <ExternalLink className="h-4 w-4 text-primary" />, desc: <>Add to <code>app/layout.tsx</code> inside <code>&lt;head&gt;</code>.</>, snippet: `// app/layout.tsx\n<head>\n  <script\n    src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n    data-pixel-key="${pixelKey}"\n    async\n  />\n</head>` },
+                                { title: "WordPress / Shopify", icon: <Globe className="h-4 w-4 text-primary" />, desc: <>Paste before <code>&lt;/head&gt;</code> in your theme.</>, snippet: `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>` },
                             ].map(s => (
                                 <div key={s.title}>
                                     <p className="font-semibold mb-1.5 flex items-center gap-2 text-sm">{s.icon} {s.title}</p>

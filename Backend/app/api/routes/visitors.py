@@ -7,6 +7,8 @@ import asyncio
 import httpx
 import jwt as pyjwt
 import secrets
+import io
+import csv
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -22,8 +24,6 @@ from app.db.models.user import User
 from app.api.deps.auth import get_current_user
 
 # ── Default test SiteConfig ──────────────────────────────────────────────────
-# This pixel key is what the dashboard's "Setup Tracking Pixel" dialog shows.
-# It is seeded automatically at module load so the tracker works out-of-the-box.
 _DEFAULT_PIXEL_KEY = "outmate_test_key_123"
 _DEFAULT_ORG_ID = _uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -48,7 +48,6 @@ def _get_or_create_site_config(db, user_id: _uuid.UUID) -> SiteConfig:
     """
     Return the SiteConfig for a user's org, creating one if it doesn't exist.
     Uses user.id as org_id (1:1 user→org model).
-    Pixel key format: pk_<16 random hex chars> — unique, URL-safe.
     """
     cfg = db.query(SiteConfig).filter(SiteConfig.org_id == user_id).first()
     if not cfg:
@@ -61,19 +60,48 @@ def _get_or_create_site_config(db, user_id: _uuid.UUID) -> SiteConfig:
     return cfg
 
 
-# public_router: no JWT required — used by the tracking pixel and pixel.js file
-# (registered in main.py WITHOUT auth_dependencies)
+# public_router: no JWT required — tracking pixel and pixel.js
 public_router = APIRouter(prefix="/api/v1/visitors", tags=["visitors"])
 
-# router: JWT required — used by the dashboard UI
-# (registered in main.py WITH auth_dependencies)
+# router: JWT required — dashboard UI
 router = APIRouter(prefix="/api/v1/visitors", tags=["visitors"])
 
 logger = logging.getLogger(__name__)
 
-# Thread pool for running synchronous DB operations with timeouts
 _db_executor = ThreadPoolExecutor(max_workers=4)
-DB_TIMEOUT = 15  # seconds — if DB doesn't respond within this, return 503
+DB_TIMEOUT = 15  # seconds
+
+# ── Intent scoring signals ────────────────────────────────────────────────────
+_HIGH_INTENT_PATHS = {
+    "/pricing", "/demo", "/contact", "/signup", "/book",
+    "/get-started", "/trial", "/checkout", "/buy", "/upgrade",
+    "/schedule", "/request", "/start", "/register",
+}
+_MED_INTENT_PATHS = {
+    "/features", "/product", "/solutions", "/use-cases",
+    "/case-studies", "/customers", "/about", "/integrations",
+}
+
+
+def _compute_intent_score(url: str) -> float:
+    """
+    Multi-signal intent scoring (0.0 – 1.0).
+    High-intent pages → 1.0, medium-intent → 0.7, else → 0.5.
+    """
+    if not url:
+        return 0.5
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        path = url.lower()
+
+    for segment in _HIGH_INTENT_PATHS:
+        if segment in path:
+            return 1.0
+    for segment in _MED_INTENT_PATHS:
+        if segment in path:
+            return 0.7
+    return 0.5
 
 
 async def _run_db(func, timeout=DB_TIMEOUT):
@@ -92,7 +120,7 @@ async def _run_db(func, timeout=DB_TIMEOUT):
 def _visit_to_dict(v: Visit) -> dict:
     res = v.resolution or {}
     person = res.get("person") or {}
-    exp = res.get("explorium") or {}  # Explorium company firmographic data
+    exp = res.get("explorium") or {}
     return {
         "id": str(v.id),
         "ip": str(v.ip),
@@ -106,19 +134,16 @@ def _visit_to_dict(v: Visit) -> dict:
         "matched_entity": res.get("matched_entity"),
         "matched_company": res.get("matched_company"),
         "matched_prospect": res.get("matched_prospect"),
-        # Company identity
         "company": res.get("company") or exp.get("name"),
         "domain": res.get("domain") or exp.get("domain"),
         "website": exp.get("website") or res.get("website"),
         "geo": res.get("geo"),
         "confidence": res.get("confidence", 0),
-        # Person contact (from Enrich.so)
         "email": res.get("email") or person.get("email"),
         "phone": res.get("phone") or person.get("phone") or exp.get("phone"),
         "full_name": res.get("full_name") or person.get("full_name") or person.get("name"),
         "linkedin_url": res.get("linkedin_url") or person.get("linkedin_url") or person.get("linkedin"),
         "job_title": res.get("job_title") or person.get("title") or person.get("job_title"),
-        # Company firmographics (from Explorium)
         "company_linkedin_url": exp.get("linkedin_url"),
         "industry": exp.get("industry") or exp.get("linkedin_industry_category"),
         "employee_count_range": exp.get("employee_count_range"),
@@ -133,9 +158,272 @@ def _visit_to_dict(v: Visit) -> dict:
     }
 
 
+# ── Rate limiting helpers ─────────────────────────────────────────────────────
+
+async def _check_track_rate_limit(ip: str, pixel_key: str) -> bool:
+    """
+    Returns True (allow), False (rate-limited).
+    Limits: 30 req/min per IP, 1000 req/min per pixel_key.
+    Uses Redis sliding-window counters (INCR + EXPIRE).
+    """
+    try:
+        redis_client = RedisManager.get_client()
+        if redis_client is None:
+            return True  # Redis unavailable — allow through
+
+        window = 60  # seconds
+        ip_key = f"rl:track:ip:{ip}"
+        pk_key = f"rl:track:pk:{pixel_key}"
+
+        pipe = redis_client.pipeline()
+        pipe.incr(ip_key)
+        pipe.expire(ip_key, window)
+        pipe.incr(pk_key)
+        pipe.expire(pk_key, window)
+        results = await pipe.execute()
+
+        ip_count = results[0]
+        pk_count = results[2]
+
+        if ip_count > 30:
+            logger.warning("Rate limit hit: IP %s (%d req/min)", ip, ip_count)
+            return False
+        if pk_count > 1000:
+            logger.warning("Rate limit hit: pixel_key %s (%d req/min)", pixel_key, pk_count)
+            return False
+        return True
+    except Exception as e:
+        logger.warning("Rate limit check failed (allowing): %s", e)
+        return True  # Fail open — don't block on Redis error
+
+
+# ── Public Routes ─────────────────────────────────────────────────────────────
+
+@public_router.get("/pixel.js")
+async def get_pixel():
+    """Serves the tracking pixel JavaScript."""
+    import os
+    from fastapi.responses import FileResponse
+    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/pixel.js"))
+    if not os.path.exists(pixel_path):
+        logger.error("pixel.js not found at %s", pixel_path)
+        return JSONResponse(status_code=404, content={"error": "pixel.js not found"})
+    return FileResponse(pixel_path, media_type="application/javascript")
+
+
+@public_router.post("/track")
+async def track_visitor(request: Request):
+    """
+    Public tracking endpoint — accepts JSON, form-data, or query params.
+    Rate limited: 30 req/min per IP, 1000 req/min per pixel_key.
+    """
+    try:
+        user_agent = request.headers.get("user-agent", "Unknown")
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        x_pixel_key = request.headers.get("x-pixel-key")
+
+        # Extract body — query params, then JSON, then form (priority order)
+        data: dict = {}
+        data.update(dict(request.query_params))
+        try:
+            json_data = await request.json()
+            if isinstance(json_data, dict):
+                data.update(json_data)
+        except Exception:
+            pass
+        try:
+            form_data = await request.form()
+            if form_data:
+                data.update(dict(form_data))
+        except Exception:
+            pass
+
+        url = data.get("url") or data.get("page_url") or data.get("URL")
+        pixel_key = data.get("pixel_key") or x_pixel_key or data.get("pixelKey") or data.get("key")
+        email = data.get("email") or None
+        referrer = data.get("referrer") or data.get("ref") or data.get("Ref")
+        visitor_id = data.get("visitor_id")
+
+        if not url:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Missing url", "received_keys": list(data.keys())}
+            )
+        if not pixel_key:
+            return JSONResponse(status_code=400, content={"error": "Missing pixel key"})
+
+        # Validate pixel key
+        def _validate_key():
+            db = SessionLocal()
+            try:
+                return db.query(SiteConfig).filter(SiteConfig.pixel_key == pixel_key).first()
+            finally:
+                db.close()
+
+        site_config = await _run_db(_validate_key)
+        if not site_config:
+            return JSONResponse(status_code=401, content={"error": "Invalid pixel key"})
+
+        # Extract real IP — check all proxy headers in priority order
+        def _first_real_ip(raw: Optional[str]) -> Optional[str]:
+            if not raw:
+                return None
+            val = raw.split(",")[0].strip()
+            return val if val not in ("127.0.0.1", "::1", "localhost", "") else None
+
+        ip = (
+            _first_real_ip(request.headers.get("cf-connecting-ip"))      # Cloudflare
+            or _first_real_ip(request.headers.get("x-real-ip"))          # nginx / Next.js proxy route
+            or _first_real_ip(x_forwarded_for)                           # standard
+            or (request.client.host if request.client else "127.0.0.1")
+        )
+
+        # Rate limiting (after pixel key validated, before enrichment)
+        if not await _check_track_rate_limit(ip, pixel_key):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many requests"},
+                headers={"Retry-After": "60"},
+            )
+
+        intent_score = _compute_intent_score(url)
+
+        # Redis deduplication (skip for identified visitors)
+        if not email:
+            try:
+                dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
+                if dedupe_seconds > 0:
+                    redis_client = RedisManager.get_client()
+                    if redis_client is not None:
+                        domain = urlparse(url).netloc
+                        dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
+                        if await redis_client.get(dedupe_key):
+                            return {"status": "deduplicated"}
+                        await redis_client.setex(dedupe_key, dedupe_seconds, "1")
+            except Exception as e:
+                logger.warning("Redis deduplication failed: %s", e)
+
+        from app.tasks.visitors import process_visitor_task, _process_visitor_data
+
+        payload = {
+            "ip": ip,
+            "url": url,
+            "referrer": referrer,
+            "user_agent": user_agent,
+            "intent_score": intent_score,
+            "email": email,
+            "visitor_id": visitor_id,
+        }
+
+        queued_via = "celery"
+        try:
+            process_visitor_task.delay(str(site_config.org_id), payload)
+        except Exception as e:
+            logger.warning("Celery unavailable, processing inline: %s", e)
+            queued_via = "inline"
+            asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
+
+        logger.info("Visitor tracked: %s for org %s", ip, site_config.org_id)
+        return {"status": "queued", "queued_via": queued_via}
+
+    except HTTPException:
+        raise
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+    except Exception as e:
+        logger.error("Error in /track: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@public_router.get("/stream")
+async def stream_visitors(request: Request, org_id: str = "all", token: Optional[str] = Query(None)):
+    """
+    Server-Sent Events stream for real-time visitor updates.
+    JWT via ?token= query param (EventSource cannot send custom headers).
+    """
+    raw_token = token or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not raw_token:
+        return JSONResponse(status_code=401, content={"error": "Authentication required"})
+    try:
+        payload_data = pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+        user_id_from_token = payload_data.get("sub")
+    except pyjwt.ExpiredSignatureError:
+        return JSONResponse(status_code=401, content={"error": "Token expired"})
+    except pyjwt.PyJWTError:
+        return JSONResponse(status_code=401, content={"error": "Invalid token"})
+
+    scoped_org_id = user_id_from_token or org_id
+
+    try:
+        redis_client = RedisManager.get_client()
+        await redis_client.ping()
+    except Exception as exc:
+        logger.error("Redis unavailable for stream: %s", exc)
+        return JSONResponse(status_code=503, content={"error": "Realtime stream unavailable — Redis connection failed."})
+
+    channel = f"visitors:{scoped_org_id}"
+
+    async def event_generator():
+        pubsub = None
+        reconnect_delay = 1.0
+
+        while True:
+            try:
+                # (Re)connect Redis and subscribe
+                rc = RedisManager.get_client()
+                pubsub = rc.pubsub()
+                await pubsub.subscribe(channel)
+                yield f": subscribed {channel}\n\n"
+                reconnect_delay = 1.0  # reset backoff on successful connect
+
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+                    if message and message.get("type") == "message":
+                        data = message.get("data")
+                        if data is not None:
+                            yield f"data: {data}\n\n"
+                    else:
+                        yield ": heartbeat\n\n"
+                    await asyncio.sleep(0.1)
+
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning("SSE Redis connection lost (%s) — reconnecting in %.0fs", e, reconnect_delay)
+                # Reset the singleton so next get_client() creates a fresh connection
+                RedisManager.reset()
+                yield f": reconnecting\n\n"
+            finally:
+                if pubsub is not None:
+                    try:
+                        await pubsub.unsubscribe(channel)
+                        await pubsub.aclose()
+                    except Exception:
+                        pass
+                    pubsub = None
+
+            # Exponential backoff before reconnect (cap at 30s)
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 30.0)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ── Authenticated Routes ──────────────────────────────────────────────────────
+
 @router.get("/site-config")
 async def get_site_config(current_user: User = Depends(get_current_user)):
-    """Return the authenticated user's SiteConfig (pixel_key, domain, webhooks). Auto-creates if missing."""
+    """Return the authenticated user's SiteConfig. Auto-creates if missing."""
     def _get():
         db = SessionLocal()
         try:
@@ -158,12 +446,10 @@ async def get_site_config(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/site-config")
-async def update_site_config(
-    request: Request,
-    current_user: User = Depends(get_current_user),
-):
+async def update_site_config(request: Request, current_user: User = Depends(get_current_user)):
     """Update domain, webhook_urls, or icp_filters for the user's SiteConfig."""
     body = await request.json()
+
     def _update():
         db = SessionLocal()
         try:
@@ -189,8 +475,9 @@ async def update_site_config(
 async def send_test_hit(request: Request, current_user: User = Depends(get_current_user)):
     """
     Fire a synthetic visitor event scoped to the authenticated user's org.
-    Uses 1.1.1.1 (Cloudflare) as the test IP — well-known corporate IP with
-    full IPinfo + Explorium data (Cloudflare Inc., San Francisco, US).
+    Uses the caller's real IP address so enrichment returns real data.
+    Accepts optional { "ip": "x.x.x.x" } in the body to override IP detection
+    (needed when Next.js rewrites proxy the request via localhost).
     """
     try:
         def _get_config():
@@ -202,10 +489,37 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
 
         site_config = await _run_db(_get_config)
 
-        # Use the real IP of the user making the request
-        x_forwarded = request.headers.get("x-forwarded-for")
-        ip = x_forwarded.split(",")[0].strip() if x_forwarded else (request.client.host if request.client else "127.0.0.1")
-        logger.info("test-hit: user=%s org=%s using IP %s", current_user.id, site_config.org_id, ip)
+        # IP resolution — check all sources in priority order:
+        # 1. Body IP override (sent by Next.js proxy route in local dev)
+        # 2. CF-Connecting-IP (Cloudflare)
+        # 3. X-Real-IP (nginx / Next.js proxy route)
+        # 4. X-Forwarded-For (standard)
+        # 5. Socket connection IP (fallback)
+        body_ip: Optional[str] = None
+        try:
+            body = await request.json()
+            body_ip = (body.get("ip") or "").strip() or None
+        except Exception:
+            pass
+
+        def _first_real(raw: Optional[str]) -> Optional[str]:
+            if not raw:
+                return None
+            ip_val = raw.split(",")[0].strip()
+            return ip_val if ip_val not in ("127.0.0.1", "::1", "localhost", "") else None
+
+        ip = (
+            body_ip
+            or _first_real(request.headers.get("cf-connecting-ip"))
+            or _first_real(request.headers.get("x-real-ip"))
+            or _first_real(request.headers.get("x-forwarded-for"))
+            or (request.client.host if request.client else "127.0.0.1")
+        )
+        logger.info("test-hit: body_ip=%s x-real-ip=%s x-forwarded-for=%s using=%s",
+                    body_ip,
+                    request.headers.get("x-real-ip"),
+                    request.headers.get("x-forwarded-for"),
+                    ip)
 
         from app.tasks.visitors import _process_visitor_data
         payload = {
@@ -214,7 +528,7 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
             "referrer": "https://google.com",
             "user_agent": request.headers.get("user-agent", "Outmate-Test"),
             "intent_score": 1.0,
-            "email": current_user.email,
+            # No email — enrichment must resolve company/person from IP alone
         }
         asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
         return {"status": "queued", "ip": ip, "message": f"Test visit queued for IP {ip} — refresh in a few seconds"}
@@ -222,176 +536,59 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
         raise
     except Exception as e:
         logger.error("test-hit error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
-@public_router.get("/pixel.js")
-async def get_pixel():
-    """Serves the tracking pixel JavaScript."""
-    import os
-    from fastapi.responses import FileResponse
-    # Use path relative to this file's directory: app/api/routes -> ../../static/pixel.js
-    pixel_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/pixel.js"))
-    
-    if not os.path.exists(pixel_path):
-        logger.error(f"pixel.js not found at {pixel_path}")
-        return JSONResponse(status_code=404, content={"error": "pixel.js not found"})
-        
-    return FileResponse(pixel_path, media_type="application/javascript")
-
-
-@public_router.post("/track")
-async def track_visitor(request: Request):
+@router.get("")
+@router.get("/")
+async def list_visitors(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    matched_only: bool = Query(default=False),
+    category: Optional[str] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+):
     """
-    Robust tracking endpoint that accepts both Form and JSON data
-    delivered via various cross-origin methods.
+    Get visits scoped to the authenticated user's org.
+    Supports pagination (offset/limit) and optional filtering.
+    Returns: { visits, total, has_more, offset, limit }
     """
-    try:
-        # 1. Extract Headers
-        user_agent = request.headers.get("user-agent", "Unknown")
-        x_forwarded_for = request.headers.get("x-forwarded-for")
-        x_pixel_key = request.headers.get("x-pixel-key")
-        
-        # 2. Extract Body (Ultra-Robust Combined Extraction)
-        data = {}
-        
-        # Priority 1: Query Parameters (easy to parse, impossible to fail)
-        data.update(dict(request.query_params))
-        
-        # Priority 2: JSON Body
-        try:
-            json_data = await request.json()
-            if isinstance(json_data, dict):
-                data.update(json_data)
-        except Exception:
-            pass
-            
-        # Priority 3: Form Data (if not already handled by JSON)
-        try:
-            form_data = await request.form()
-            if form_data:
-                data.update(dict(form_data))
-        except Exception:
-            pass
-
-        # 3. Consolidate Fields and Aliases
-        url = data.get("url") or data.get("page_url") or data.get("URL")
-        pixel_key = data.get("pixel_key") or x_pixel_key or data.get("pixelKey") or data.get("key")
-        email = data.get("email")
-        referrer = data.get("referrer") or data.get("ref") or data.get("Ref")
-        visitor_id = data.get("visitor_id")
-
-        if not url:
-            # If still missing, we return a detailed debug error
-            return JSONResponse(
-                status_code=400, 
-                content={
-                    "error": "Missing url", 
-                    "received_keys": list(data.keys()),
-                    "content_type": request.headers.get("content-type")
-                }
-            )
-        if not pixel_key:
-            return JSONResponse(status_code=400, content={"error": "Missing pixel key"})
-        
-        # 5. Validate Pixel Key
-        def _validate_key():
-            db = SessionLocal()
-            try:
-                return db.query(SiteConfig).filter(SiteConfig.pixel_key == pixel_key).first()
-            finally:
-                db.close()
-        
-        site_config = await _run_db(_validate_key)
-        if not site_config:
-            return JSONResponse(status_code=401, content={"error": "Invalid pixel key"})
-
-        # 5. Geolocation / IP
-        ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (request.client.host if request.client else "127.0.0.1")
-        
-        # 6. Intent Score
-        intent_score = 1.0 if any(x in url.lower() for x in ["/pricing", "/demo", "/contact", "/signup", "/book"]) else 0.5
-        
-        # 7. Redis Deduplication (Skip if identified)
-        if not email:
-            try:
-                dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
-                if dedupe_seconds > 0:
-                    redis_client = RedisManager.get_client()
-                    if redis_client is not None:
-                        domain = urlparse(url).netloc
-                        dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-                        if await redis_client.get(dedupe_key):
-                            return {"status": "deduplicated"}
-                        await redis_client.setex(dedupe_key, dedupe_seconds, "1")
-            except Exception as e:
-                logger.warning(f"Redis deduplication failed: {e}")
-
-        # 8. Process Visitor (Async via Celery)
-        from app.tasks.visitors import process_visitor_task, _process_visitor_data
-        
-        payload = {
-            "ip": ip,
-            "url": url,
-            "referrer": referrer,
-            "user_agent": user_agent,
-            "intent_score": intent_score,
-            "email": email,
-            "visitor_id": visitor_id,
-        }
-
-        queued_via = "celery"
-        try:
-            process_visitor_task.delay(str(site_config.org_id), payload)
-        except Exception as e:
-            # Common in local dev when Redis (Celery broker) isn't running.
-            logger.warning(f"Celery unavailable, processing inline: {e}")
-            queued_via = "inline"
-            asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
-        
-        logger.info(f"Visitor tracked: {ip} for org {site_config.org_id}")
-        return {"status": "queued", "queued_via": queued_via, "message": "Visitor tracking data received"}
-    
-    except HTTPException:
-        raise
-    except (OperationalError, asyncio.TimeoutError) as e:
-        logger.error(f"Database unavailable in /track: {e}")
-        return JSONResponse(status_code=503, content={
-            "error": "Database temporarily unavailable"
-        })
-    except Exception as e:
-        logger.error(f"Error in /track: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@router.get("")   # matches /api/v1/visitors  (Next.js proxy strips trailing slash)
-@router.get("/")  # matches /api/v1/visitors/ (direct calls)
-async def list_visitors(limit: int = 100, current_user: User = Depends(get_current_user)):
-    """Get recent visits scoped to the authenticated user's org."""
     org_id = current_user.id
     try:
         def _query():
             db = SessionLocal()
             try:
+                q = db.query(Visit).filter(Visit.org_id == org_id)
+                if matched_only:
+                    q = q.filter(Visit.matched == True)  # noqa: E712
+                total = q.count()
                 visits = (
-                    db.query(Visit)
-                    .filter(Visit.org_id == org_id)
-                    .order_by(Visit.created_at.desc())
+                    q.order_by(Visit.created_at.desc())
+                    .offset(offset)
                     .limit(limit)
                     .all()
                 )
-                return [_visit_to_dict(v) for v in visits]
+                items = [_visit_to_dict(v) for v in visits]
+                # Client-side category filter (applied after JSONB fetch)
+                if category and category in ("company", "prospect", "unknown"):
+                    items = [v for v in items if v.get("category") == category]
+                return {
+                    "visits": items,
+                    "total": total,
+                    "has_more": (offset + limit) < total,
+                    "offset": offset,
+                    "limit": limit,
+                }
             finally:
                 db.close()
 
         return await _run_db(_query)
 
     except (OperationalError, asyncio.TimeoutError):
-        return JSONResponse(status_code=503, content={
-            "error": "Database temporarily unavailable. Please check your Supabase connection."
-        })
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.error("list_visitors error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
 @router.get("/stats")
@@ -403,7 +600,7 @@ async def get_visitor_stats(current_user: User = Depends(get_current_user)):
             db = SessionLocal()
             try:
                 total = db.query(Visit).filter(Visit.org_id == org_id).count()
-                matched = db.query(Visit).filter(Visit.org_id == org_id, Visit.matched == True).count()
+                matched = db.query(Visit).filter(Visit.org_id == org_id, Visit.matched == True).count()  # noqa: E712
                 recent = (
                     db.query(Visit.resolution)
                     .filter(Visit.org_id == org_id)
@@ -429,9 +626,82 @@ async def get_visitor_stats(current_user: User = Depends(get_current_user)):
             "total_visits": 0, "matched_visits": 0, "match_rate": 0
         })
     except Exception as e:
+        logger.error("get_visitor_stats error: %s", e)
         return JSONResponse(status_code=503, content={
-            "error": str(e), "total_visits": 0, "matched_visits": 0, "match_rate": 0
+            "error": "Internal server error", "total_visits": 0, "matched_visits": 0, "match_rate": 0
         })
+
+
+@router.get("/export")
+async def export_visitors(
+    format: str = Query(default="csv", pattern="^(csv|json)$"),
+    hours: int = Query(default=168, ge=1, le=744),
+    matched_only: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Export visits as CSV or JSON.
+    - format: "csv" (default) or "json"
+    - hours: time window (default 168h = 7 days, max 744h = 31 days)
+    - matched_only: only export identified visitors
+    """
+    org_id = current_user.id
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    try:
+        def _query():
+            db = SessionLocal()
+            try:
+                q = db.query(Visit).filter(Visit.org_id == org_id, Visit.created_at >= since)
+                if matched_only:
+                    q = q.filter(Visit.matched == True)  # noqa: E712
+                return [_visit_to_dict(v) for v in q.order_by(Visit.created_at.desc()).limit(10000).all()]
+            finally:
+                db.close()
+
+        rows = await _run_db(_query)
+
+        if format == "json":
+            import json
+            content = json.dumps(rows, default=str, indent=2)
+            return StreamingResponse(
+                iter([content]),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=visitors_{hours}h.json"},
+            )
+
+        # CSV export
+        CSV_FIELDS = [
+            "id", "created_at", "ip", "url", "referrer", "matched", "category",
+            "company", "domain", "industry", "employee_count_range", "revenue_range",
+            "funding_stage", "headquarters_city", "headquarters_country",
+            "full_name", "email", "phone", "job_title", "linkedin_url",
+            "intent_score", "confidence",
+        ]
+
+        def _stream_csv():
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            yield output.getvalue()
+            for row in rows:
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
+                writer.writerow({k: row.get(k, "") for k in CSV_FIELDS})
+                yield output.getvalue()
+
+        filename = f"visitors_{hours}h{'_identified' if matched_only else ''}.csv"
+        return StreamingResponse(
+            _stream_csv(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+    except Exception as e:
+        logger.error("export_visitors error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
 @router.get("/analytics")
@@ -442,15 +712,14 @@ async def get_visitor_analytics(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Visitor analytics for charts on the Visitors page.
-    - hours ≤ 48  → hourly timeseries buckets
-    - hours > 48  → daily timeseries buckets (supports up to 31 days / 744 hours)
-    Returns 503 if database is unavailable.
+    Visitor analytics for charts.
+    - hours ≤ 48  → hourly buckets
+    - hours > 48  → daily buckets (up to 31 days)
     """
-    hours = max(1, min(int(hours), 744))   # 1h..31d
+    hours = max(1, min(int(hours), 744))
     live_window_minutes = max(1, min(int(live_window_minutes), 60))
     top_n = max(3, min(int(top_n), 50))
-    use_daily = hours > 48                 # daily buckets for 7d / 30d views
+    use_daily = hours > 48
     org_id = current_user.id
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=hours)
@@ -471,22 +740,21 @@ async def get_visitor_analytics(
                     .all()
                 )
 
-                live_ips = set()
-                buckets = defaultdict(lambda: {"total": 0, "matched": 0, "company": 0, "prospect": 0, "unknown": 0})
-                page_counts = Counter()
-                ref_counts = Counter()
-                intent_buckets = Counter({"0-49": 0, "50-69": 0, "70-84": 0, "85-100": 0})
-                geo_country = Counter()
-                geo_city = Counter()
-                industry_counts = Counter()
-                tech_counts = Counter()
+                live_ips: set = set()
+                buckets: dict = defaultdict(lambda: {"total": 0, "matched": 0, "company": 0, "prospect": 0, "unknown": 0})
+                page_counts: Counter = Counter()
+                ref_counts: Counter = Counter()
+                intent_buckets: Counter = Counter({"0-49": 0, "50-69": 0, "70-84": 0, "85-100": 0})
+                geo_country: Counter = Counter()
+                geo_city: Counter = Counter()
+                industry_counts: Counter = Counter()
+                tech_counts: Counter = Counter()
                 total = matched_count = company_count = prospect_count = 0
 
                 for created_at, ip, url, ref, intent, matched, res, ua in rows:
                     if not created_at:
                         continue
 
-                    # Bucket key: daily (YYYY-MM-DD) or hourly (YYYY-MM-DDTHH:00:00)
                     if use_daily:
                         bucket_key = created_at.strftime("%Y-%m-%d")
                     else:
@@ -537,7 +805,6 @@ async def get_visitor_analytics(
                     else:
                         intent_buckets["85-100"] += 1
 
-                    # Geo breakdown
                     geo = res.get("geo") or {}
                     country = geo.get("country") or (res.get("explorium") or {}).get("headquarters_country")
                     city = geo.get("city") or (res.get("explorium") or {}).get("headquarters_city")
@@ -546,13 +813,10 @@ async def get_visitor_analytics(
                     if city and country:
                         geo_city[f"{city}, {country}"] += 1
 
-                    # Industry breakdown (from Explorium)
                     exp = res.get("explorium") or {}
                     industry = exp.get("industry") or exp.get("linkedin_industry_category")
                     if industry:
                         industry_counts[industry] += 1
-
-                    # Technology breakdown
                     for tech in (exp.get("technologies") or [])[:5]:
                         tech_counts[tech] += 1
 
@@ -593,74 +857,3 @@ async def get_visitor_analytics(
         return await _run_db(_query)
     except (OperationalError, asyncio.TimeoutError):
         return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
-
-
-@public_router.get("/stream")
-async def stream_visitors(request: Request, org_id: str = "all", token: Optional[str] = Query(None)):
-    """
-    Server-Sent Events stream for realtime visitor updates.
-    Accepts JWT via ?token= query param (EventSource cannot send headers).
-    Requires Redis (pubsub); if unavailable responds with 503.
-    """
-    # Validate JWT — accept via query param (EventSource) or Authorization header
-    raw_token = token or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-    if not raw_token:
-        return JSONResponse(status_code=401, content={"error": "Authentication required"})
-    try:
-        payload_data = pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
-        user_id_from_token = payload_data.get("sub")
-    except pyjwt.ExpiredSignatureError:
-        return JSONResponse(status_code=401, content={"error": "Token expired"})
-    except pyjwt.PyJWTError:
-        return JSONResponse(status_code=401, content={"error": "Invalid token"})
-
-    # Scope channel to authenticated user's org — prevents cross-tenant SSE leakage
-    # (org_id query param is kept for backwards compat but overridden by token sub)
-    scoped_org_id = user_id_from_token or org_id
-
-    try:
-        redis_client = RedisManager.get_client()
-        await redis_client.ping()
-    except Exception as exc:
-        logger.error(f"Redis unavailable for stream: {exc}")
-        return JSONResponse(status_code=503, content={
-            "error": "Realtime stream unavailable - Redis connection failed."
-        })
-
-    channel = f"visitors:{scoped_org_id}"
-    pubsub = redis_client.pubsub()
-
-    async def event_generator():
-        try:
-            await pubsub.subscribe(channel)
-            yield f": subscribed {channel}\n\n"
-            while True:
-                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
-                if message and message.get("type") == "message":
-                    data = message.get("data")
-                    if data is not None:
-                        yield f"data: {data}\n\n"
-                else:
-                    yield ": heartbeat\n\n"
-                await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.error(f"Error in SSE generator: {e}")
-            yield f"event: error\ndata: {str(e)}\n\n"
-        finally:
-            try:
-                await pubsub.unsubscribe(channel)
-                await pubsub.close()
-            except Exception:
-                pass
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # disables nginx/Azure front-door buffering
-            "Connection": "keep-alive",
-        },
-    )
