@@ -179,6 +179,15 @@ class LeadActionType(str, Enum):
     find_similar = "find_similar"
     objection_handler = "objection_handler"
     custom = "custom"
+    crossfire = "crossfire"
+    compliance = "compliance"
+    bombora_intent = "bombora_intent"
+    talent_radar = "talent_radar"
+    virality = "virality"
+    regime_shift = "regime_shift"
+    website_traffic = "website_traffic"
+    business_events = "business_events"
+    linkedin_posts = "linkedin_posts"
 
 
 class LeadActionRequest(BaseModel):

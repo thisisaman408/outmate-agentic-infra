@@ -21,7 +21,7 @@ _HEADERS = {
 }
 
 _MODEL_HAIKU = "anthropic/claude-3.5-haiku"
-_MODEL_PERPLEXITY = "perplexity/sonar-pro"
+_MODEL_PERPLEXITY = "anthropic/claude-3.5-haiku"
 _TIMEOUT = 120.0
 
 

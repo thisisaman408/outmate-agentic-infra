@@ -43,8 +43,9 @@ The Co-Pilot is an AI-powered sales assistant integrated into the Outmate platfo
 - Context-aware AI assistant built directly into prospect profiles
 - Actionable side panel on any prospect row
 - **Quick Actions**: Draft personalized emails, prepare for meetings, research leads, find similar companies, and handle objections
-- **Proactive Suggestions**: Intelligent prompts based on newly detected signals
-- **Phase 3 Automation (Coming Soon)**: Workflow playbooks, one-click CRM exports, automated follow-ups, and cross-session conversation memory tracking
+- **Find Similar Companies**: AI-powered discovery of lookalike accounts using Explorium's search engine.
+- **Enrichment Credits**: Email lookup (1 credit), Phone number lookup (10 credits) using ContactOut/BetterContact waterfall logic.
+- **Phase 3 Automation (Coming Soon)**: Workflow playbooks, one-click CRM exports, automated follow-ups, and cross-session conversation memory tracking.
 
 ---
 
@@ -115,6 +116,7 @@ All endpoints require authentication (`Authorization: Bearer <token>`).
 | `POST` | `/api/copilot/meeting-prep` | Generate meeting prep for a company |
 | `GET` | `/api/copilot/meeting-prep/history` | List past meeting preps |
 | `POST` | `/api/copilot/campaign-optimizer` | Analyze and score an email campaign |
+| `POST` | `/api/copilot/email-optimizer` | rewriting an email with lead-specific enrichment |
 | `GET` | `/api/copilot/pipeline-alerts` | List active pipeline alerts |
 | `POST` | `/api/copilot/pipeline-alerts/scan` | Scan deals for pipeline risks |
 | `PUT` | `/api/copilot/pipeline-alerts/{alert_id}/resolve` | Mark an alert as resolved |
@@ -123,6 +125,9 @@ All endpoints require authentication (`Authorization: Bearer <token>`).
 | `GET` | `/api/copilot/lead-context/{prospect_id}` | Aggregate known DB/enrichment data for prospect panel |
 | `POST` | `/api/copilot/lead-action` | Execute AI command on prospect profile |
 | `GET` | `/api/copilot/lead-suggestions/{prospect_id}` | Generate proactive AI suggestions for prospect |
+| `POST` | `/api/bettercontact/enrich-prospect` | Waterfall enrichment for email/phone (1-10 credits) |
+| `POST` | `/api/contactout/reveal-contact` | Reveal verified contact info (Email: 1, Phone: 10 credits) |
+| `POST` | `/api/enrichment/company` | Enrich company info (Waterfall) |
 
 ---
 
@@ -154,6 +159,8 @@ All endpoints require authentication (`Authorization: Bearer <token>`).
 | `SMTP_USER` | SMTP username / sender email | `None` |
 | `SMTP_PASSWORD` | SMTP password | `None` |
 | `SMTP_FROM_EMAIL` | From address for outgoing emails | Falls back to `SMTP_USER` |
+| `BETTERCONTACT_API_KEY` | API key for BetterContact waterfall enrichment | — |
+| `CONTACTOUT_API_KEY` | API key for ContactOut email/phone enrichment | — |
 
 > **Note**: Explorium and Tavily keys are optional. If missing or if API calls fail, the copilot gracefully falls back to LLM-only generation (without real-time data enrichment).
 
@@ -251,4 +258,16 @@ All copilot features follow a **"Enrich First, LLM Second"** pattern:
 | **Campaign Optimizer** | — | Target audience industry news | — |
 
 ### Fallback Behavior
-Every enrichment call is wrapped in `try/except`. If any API is unavailable, the service falls back to the same LLM-only behavior as before — no errors are surfaced to the user.
+Every enrichment call is wrapped in `try/except`. If any API is unavailable, the service falls back to the same LLM-only behavior as before. 
+
+### Credit Policy
+- **New Users**: Receive **100 free credits** upon signup (configured in `User` model).
+- **Enrichment**:
+    - **Email Reveal**: 1 Credit (BetterContact/ContactOut waterfall)
+    - **Phone Reveal**: 10 Credits (BetterContact/ContactOut waterfall)
+- **AI Actions**:
+    - **Daily Brief**: 1 Credit (charged once per day; subsequent views are cached)
+    - **Meeting Prep**: 2 Credits
+    - **Campaign/Email Optimization**: 1-2 Credits (2 with enrichment)
+    - **Pipeline Scan**: 2 Credits
+    - **Lead Panel Actions**: 1-2 Credits (Research: 2, Similar Companies: 1, Suggestions: 1)
