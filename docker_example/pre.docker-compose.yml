@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  outmate:
+    image: outmateai/outmate:1.0-alpha
+    ports:
+      - "7860:7860"
+    depends_on:
+      - postgres
+    environment:
+      - OUTMATE_DATABASE_URL=postgresql://outmate:outmate@postgres:5432/outmate
+      # This variable defines where the logs, file storage, monitor data and secret keys are stored.
+      - OUTMATE_CONFIG_DIR=app/outmate
+    volumes:
+      - outmate-data:/app/outmate
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: outmate
+      POSTGRES_PASSWORD: outmate
+      POSTGRES_DB: outmate
+    ports:
+      - "5432:5432"
+    volumes:
+      - outmate-postgres:/var/lib/postgresql/data
+
+volumes:
+  outmate-postgres:
+  outmate-data:

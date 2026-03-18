@@ -1,0 +1,45 @@
+import ForwardedIconComponent from "@/components/common/genericIconComponent";
+import { Button } from "@/components/ui/button";
+import { useCustomNavigate } from "@/customization/hooks/use-custom-navigate";
+import type { FC } from "react";
+
+export const MCPServerNotice: FC<{
+  handleDismissDialog: () => void;
+}> = ({ handleDismissDialog }) => {
+  const navigate = useCustomNavigate();
+  return (
+    <div className="relative flex flex-col gap-3 rounded-xl border p-4 shadow-md bg-muted/30">
+      <Button
+        unstyled
+        className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"
+        onClick={handleDismissDialog}
+      >
+        <ForwardedIconComponent name="X" className="h-5 w-5" />
+      </Button>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="font-mono text-sm text-muted-foreground uppercase tracking-wider">New</div>
+          <div className="font-semibold">Projects as MCP Servers</div>
+        </div>
+        <div className="flex items-center justify-center h-32 w-full bg-muted rounded-xl border-dashed border-2">
+           <ForwardedIconComponent name="Monitor" className="h-12 w-12 text-muted-foreground" />
+        </div>
+        <p className="text-sm text-secondary-foreground">
+          Expose flows as tools from clients like Cursor or Claude.
+        </p>
+      </div>
+
+      <div className="flex gap-3">
+        <Button
+          onClick={() => {
+            navigate("/mcp");
+            handleDismissDialog();
+          }}
+          className="w-full"
+        >
+          <span>Go to Server</span>
+        </Button>
+      </div>
+    </div>
+  );
+};

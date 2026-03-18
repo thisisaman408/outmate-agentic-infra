@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800" width="600" height="800">
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0f1a;stop-opacity:1"/>
+      <stop offset="50%" style="stop-color:#0d1b2a;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1b2838;stop-opacity:1"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="30%" cy="70%" r="60%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0.3"/>
+      <stop offset="50%" style="stop-color:#0099cc;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#0a0f1a;stop-opacity:0"/>
+    </radialGradient>
+    <radialGradient id="glow1b" cx="80%" cy="20%" r="45%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:0.25"/>
+      <stop offset="60%" style="stop-color:#4c1d95;stop-opacity:0.08"/>
+      <stop offset="100%" style="stop-color:#0a0f1a;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="blur1">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg1)"/>
+  <rect width="600" height="800" fill="url(#glow1)"/>
+  <rect width="600" height="800" fill="url(#glow1b)"/>
+  <!-- Network nodes -->
+  <g opacity="0.15" filter="url(#blur1)">
+    <circle cx="150" cy="300" r="4" fill="#00d4ff"/>
+    <circle cx="300" cy="200" r="5" fill="#00d4ff"/>
+    <circle cx="420" cy="350" r="4" fill="#7c3aed"/>
+    <circle cx="200" cy="500" r="3" fill="#00d4ff"/>
+    <circle cx="450" cy="550" r="4" fill="#7c3aed"/>
+    <circle cx="350" cy="450" r="6" fill="#00d4ff"/>
+    <circle cx="100" cy="600" r="3" fill="#00d4ff"/>
+    <circle cx="500" cy="250" r="3" fill="#7c3aed"/>
+    <line x1="150" y1="300" x2="300" y2="200" stroke="#00d4ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="300" y1="200" x2="420" y2="350" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+    <line x1="420" y1="350" x2="350" y2="450" stroke="#7c3aed" stroke-width="0.5" opacity="0.3"/>
+    <line x1="350" y1="450" x2="200" y2="500" stroke="#00d4ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="200" y1="500" x2="150" y2="300" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+    <line x1="350" y1="450" x2="450" y2="550" stroke="#7c3aed" stroke-width="0.5" opacity="0.3"/>
+    <line x1="300" y1="200" x2="500" y2="250" stroke="#7c3aed" stroke-width="0.5" opacity="0.2"/>
+    <line x1="100" y1="600" x2="200" y2="500" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+  </g>
+  <!-- Flowing waves -->
+  <g opacity="0.08">
+    <path d="M0,500 Q150,440 300,500 T600,480" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+    <path d="M0,530 Q150,470 300,530 T600,510" fill="none" stroke="#00d4ff" stroke-width="1"/>
+    <path d="M0,560 Q150,510 300,560 T600,540" fill="none" stroke="#7c3aed" stroke-width="0.8"/>
+    <path d="M0,590 Q150,550 300,590 T600,570" fill="none" stroke="#7c3aed" stroke-width="0.6"/>
+  </g>
+  <!-- Search/magnifying glass icon outline -->
+  <g opacity="0.06" transform="translate(320,480)">
+    <circle cx="0" cy="0" r="60" fill="none" stroke="#00d4ff" stroke-width="2"/>
+    <line x1="42" y1="42" x2="80" y2="80" stroke="#00d4ff" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

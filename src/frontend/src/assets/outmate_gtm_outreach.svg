@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800" width="600" height="800">
+  <defs>
+    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a1a14;stop-opacity:1"/>
+      <stop offset="50%" style="stop-color:#0d2e1b;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1b3a28;stop-opacity:1"/>
+    </linearGradient>
+    <radialGradient id="glow3" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:0.25"/>
+      <stop offset="50%" style="stop-color:#059669;stop-opacity:0.08"/>
+      <stop offset="100%" style="stop-color:#0a1a14;stop-opacity:0"/>
+    </radialGradient>
+    <radialGradient id="glow3b" cx="80%" cy="70%" r="40%">
+      <stop offset="0%" style="stop-color:#06b6d4;stop-opacity:0.2"/>
+      <stop offset="60%" style="stop-color:#0891b2;stop-opacity:0.05"/>
+      <stop offset="100%" style="stop-color:#0a1a14;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="blur3">
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg3)"/>
+  <rect width="600" height="800" fill="url(#glow3)"/>
+  <rect width="600" height="800" fill="url(#glow3b)"/>
+  <!-- Email/envelope shapes -->
+  <g opacity="0.08" filter="url(#blur3)">
+    <g transform="translate(200,350) rotate(-5)">
+      <rect x="-60" y="-40" width="120" height="80" rx="6" fill="none" stroke="#10b981" stroke-width="1.5"/>
+      <path d="M-60,-40 L0,10 L60,-40" fill="none" stroke="#10b981" stroke-width="1.5"/>
+    </g>
+    <g transform="translate(380,280) rotate(8) scale(0.8)">
+      <rect x="-60" y="-40" width="120" height="80" rx="6" fill="none" stroke="#06b6d4" stroke-width="1.2"/>
+      <path d="M-60,-40 L0,10 L60,-40" fill="none" stroke="#06b6d4" stroke-width="1.2"/>
+    </g>
+    <g transform="translate(300,500) rotate(-3) scale(0.6)">
+      <rect x="-60" y="-40" width="120" height="80" rx="6" fill="none" stroke="#10b981" stroke-width="1"/>
+      <path d="M-60,-40 L0,10 L60,-40" fill="none" stroke="#10b981" stroke-width="1"/>
+    </g>
+  </g>
+  <!-- Personalization lines/connections -->
+  <g opacity="0.1">
+    <path d="M200,350 Q290,300 380,280" fill="none" stroke="#10b981" stroke-width="0.8" stroke-dasharray="4,4"/>
+    <path d="M200,350 Q250,430 300,500" fill="none" stroke="#06b6d4" stroke-width="0.8" stroke-dasharray="4,4"/>
+    <path d="M380,280 Q340,390 300,500" fill="none" stroke="#06b6d4" stroke-width="0.6" stroke-dasharray="4,4"/>
+  </g>
+  <!-- Person silhouettes -->
+  <g opacity="0.06">
+    <circle cx="150" cy="250" r="12" fill="#10b981"/>
+    <path d="M130,280 Q150,270 170,280 L170,300 L130,300 Z" fill="#10b981"/>
+    <circle cx="450" cy="450" r="10" fill="#06b6d4"/>
+    <path d="M432,475 Q450,465 468,475 L468,492 L432,492 Z" fill="#06b6d4"/>
+    <circle cx="100" cy="550" r="9" fill="#10b981"/>
+    <path d="M85,573 Q100,565 115,573 L115,588 L85,588 Z" fill="#10b981"/>
+  </g>
+  <!-- Flowing waves -->
+  <g opacity="0.06">
+    <path d="M0,620 Q150,580 300,630 T600,600" fill="none" stroke="#10b981" stroke-width="1.2"/>
+    <path d="M0,660 Q150,630 300,670 T600,640" fill="none" stroke="#06b6d4" stroke-width="0.8"/>
+    <path d="M0,700 Q150,680 300,710 T600,690" fill="none" stroke="#10b981" stroke-width="0.5"/>
+  </g>
+  <!-- Sparkle/star -->
+  <g opacity="0.08" transform="translate(480,180)">
+    <path d="M0,-15 L3,-3 L15,0 L3,3 L0,15 L-3,3 L-15,0 L-3,-3 Z" fill="#10b981"/>
+  </g>
+  <g opacity="0.05" transform="translate(120,420)">
+    <path d="M0,-10 L2,-2 L10,0 L2,2 L0,10 L-2,2 L-10,0 L-2,-2 Z" fill="#06b6d4"/>
+  </g>
+</svg>
