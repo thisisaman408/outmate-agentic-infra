@@ -44,6 +44,7 @@ from app.api.routes import gtm_agents
 from app.api.routes import visitors
 from app.api.routes import diagnostics
 from app.api.routes import copilot
+from app.api.routes import events_routes
 
 # Register routers
 
@@ -234,6 +235,9 @@ logger.info("Diagnostics router registered")
 
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
 logger.info("Copilot router registered")
+
+app.include_router(events_routes.router, prefix="/api/v1/events", tags=["events"], dependencies=auth_dependencies)
+logger.info("Events router registered")
 
 @app.on_event("startup")
 async def startup_event():
