@@ -129,6 +129,7 @@ interface Visit {
     headquarters_city: string | null
     headquarters_country: string | null
     description: string | null
+    source_site: string | null  // pixel owner's domain (set at track time)
 }
 
 interface VisitorAnalytics {
@@ -203,9 +204,10 @@ function extractVisitData(visit: Visit) {
     const revenueRange = visit.revenue_range || visit.resolution?.explorium?.revenue_range
     const technologies: string[] = visit.technologies || visit.resolution?.explorium?.technologies || []
     const fundingStage = visit.funding_stage || visit.resolution?.explorium?.funding_stage
+    const sourceSite = visit.source_site || visit.resolution?.source_site || ""
     let pagePath = visit.url
     try { pagePath = new URL(visit.url).pathname } catch { }
-    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath }
+    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath, sourceSite }
 }
 
 // Group visits by company for Companies tab
@@ -260,6 +262,8 @@ export default function VisitorsPage() {
     const [testLoading, setTestLoading] = useState(false)
     const [siteConfig, setSiteConfig] = useState<{ pixel_key: string; domain: string; org_id: string } | null>(null)
     const [siteConfigLoading, setSiteConfigLoading] = useState(true)
+    const [domainInput, setDomainInput] = useState("")
+    const [savingDomain, setSavingDomain] = useState(false)
     const pixelKey = siteConfig?.pixel_key ?? "loading..."
 
     // Pagination state
@@ -282,7 +286,7 @@ export default function VisitorsPage() {
         setSiteConfigLoading(true)
         try {
             const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
-            if (res.ok) setSiteConfig(await res.json())
+            if (res.ok) { const cfg = await res.json(); setSiteConfig(cfg); setDomainInput(cfg.domain || "") }
         } catch { } finally { setSiteConfigLoading(false) }
     }
 
@@ -377,6 +381,26 @@ export default function VisitorsPage() {
         toast.success("Pixel snippet copied to clipboard!")
     }
 
+    const saveDomain = async () => {
+        if (!domainInput.trim()) return
+        setSavingDomain(true)
+        try {
+            const domain = domainInput.trim().replace(/^https?:\/\//, "").replace(/\/.*/, "")
+            const res = await fetch(`${API}/site-config`, {
+                method: "POST",
+                headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                body: JSON.stringify({ domain }),
+            })
+            if (res.ok) {
+                setSiteConfig(prev => prev ? { ...prev, domain } : prev)
+                setDomainInput(domain)
+                toast.success("Website domain saved! Visitors will now be tagged with this site.")
+            } else {
+                toast.error("Failed to save domain")
+            }
+        } catch { toast.error("Failed to save domain") } finally { setSavingDomain(false) }
+    }
+
     const exportCsv = async (matchedOnly = false) => {
         setIsExporting(true)
         try {
@@ -405,28 +429,60 @@ export default function VisitorsPage() {
         const analyticsInterval = setInterval(() => fetchAnalytics(period), 60000)
 
         const streamToken = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
+        // Use the backend URL directly for SSE (EventSource can't add headers,
+        // and Next.js rewrites don't stream properly in all deploy configs).
         const streamBase = API_BASE
         const streamUrl = streamToken
             ? `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(streamToken)}`
             : `${streamBase}/api/v1/visitors/stream`
-        const es = new EventSource(streamUrl)
-        es.onmessage = (evt) => {
-            try {
-                const msg = JSON.parse(evt.data)
-                if (msg?.type === "visit_created" && msg?.visit) {
-                    const v = msg.visit as Visit
-                    setVisits((prev) => [v, ...prev].slice(0, 200))
-                    setStats((s) => {
-                        const total = (s.total_visits ?? 0) + 1
-                        const matched = (s.matched_visits ?? 0) + (v.matched ? 1 : 0)
-                        return { total_visits: total, matched_visits: matched, match_rate: total > 0 ? (matched / total) * 100 : 0 }
-                    })
-                }
-            } catch { }
-        }
-        es.onerror = () => { es.close() }
 
-        return () => { clearInterval(interval); clearInterval(analyticsInterval); es.close() }
+        let es: EventSource | null = null
+        let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+        let reconnectDelay = 1000
+
+        const connectSSE = () => {
+            if (es) { try { es.close() } catch { } }
+            es = new EventSource(streamUrl)
+            es.onmessage = (evt) => {
+                try {
+                    const msg = JSON.parse(evt.data)
+                    if (msg?.type === "visit_created" && msg?.visit) {
+                        const v = msg.visit as Visit
+                        // Prepend new visit and refresh full list to get DB-persisted data
+                        setVisits((prev) => {
+                            const already = prev.some(x => x.id === v.id)
+                            if (already) return prev
+                            return [v, ...prev].slice(0, 200)
+                        })
+                        setStats((s) => {
+                            const total = (s.total_visits ?? 0) + 1
+                            const matched = (s.matched_visits ?? 0) + (v.matched ? 1 : 0)
+                            return { total_visits: total, matched_visits: matched, match_rate: total > 0 ? (matched / total) * 100 : 0 }
+                        })
+                        // After 3s, do a full refresh to get the enriched version
+                        // (enrichment runs async after the SSE event fires)
+                        setTimeout(() => fetchData(), 3000)
+                        reconnectDelay = 1000 // reset backoff on success
+                    }
+                } catch { }
+            }
+            es.onerror = () => {
+                try { es?.close() } catch { }
+                es = null
+                reconnectTimeout = setTimeout(() => {
+                    reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+                    connectSSE()
+                }, reconnectDelay)
+            }
+        }
+        connectSSE()
+
+        return () => {
+            clearInterval(interval)
+            clearInterval(analyticsInterval)
+            if (reconnectTimeout) clearTimeout(reconnectTimeout)
+            if (es) try { es.close() } catch { }
+        }
     }, [])
 
     // Filtered visits
@@ -791,7 +847,16 @@ export default function VisitorsPage() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <span className="text-sm">{d.company || "—"}</span>
+                                                    {d.company ? (
+                                                        <span className="text-sm font-medium">{d.company}</span>
+                                                    ) : d.sourceSite ? (
+                                                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                                            <Globe className="h-3 w-3 flex-shrink-0" />
+                                                            {d.sourceSite}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-muted-foreground">—</span>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="flex items-center gap-2">
@@ -1032,6 +1097,33 @@ export default function VisitorsPage() {
                             <CardDescription>Embed this pixel on any website to identify anonymous B2B visitors in real-time.</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            {/* Website domain — used to label visitors in the dashboard */}
+                            <div className="space-y-2">
+                                <p className="text-sm font-medium">Your Website Domain</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Enter the domain where you installed the pixel. Visitors tracked from your site will be labelled with this name in the dashboard.
+                                </p>
+                                <div className="flex gap-2">
+                                    <Input
+                                        placeholder="e.g. mycompany.com"
+                                        value={domainInput}
+                                        onChange={e => setDomainInput(e.target.value)}
+                                        onKeyDown={e => e.key === "Enter" && saveDomain()}
+                                        className="font-mono text-sm"
+                                    />
+                                    <Button onClick={saveDomain} disabled={savingDomain || !domainInput.trim()} size="sm" className="shrink-0">
+                                        {savingDomain ? "Saving…" : siteConfig?.domain ? "Update" : "Save"}
+                                    </Button>
+                                </div>
+                                {siteConfig?.domain && (
+                                    <p className="text-xs text-success flex items-center gap-1">
+                                        <CheckCircle2 className="h-3 w-3" /> Currently tracking: <strong>{siteConfig.domain}</strong>
+                                    </p>
+                                )}
+                            </div>
+
+                            <Separator />
+
                             {/* Pixel key banner */}
                             <div className="flex items-center justify-between bg-muted/60 border rounded-lg px-4 py-3">
                                 <div>
@@ -1113,6 +1205,7 @@ export default function VisitorsPage() {
                                         { label: "Intent", value: intent.label, icon: <Flame className="h-3.5 w-3.5" /> },
                                         { label: "Last Seen", value: new Date(selectedVisit.created_at).toLocaleDateString([], { month: "short", day: "numeric" }), icon: <Clock className="h-3.5 w-3.5" /> },
                                         { label: "Location", value: d.geo ? [d.geo.city, (d.geo as any).country].filter(Boolean).join(", ") : "Unknown", icon: <MapPin className="h-3.5 w-3.5" /> },
+                                        ...(d.sourceSite ? [{ label: "Tracked On", value: d.sourceSite, icon: <Globe className="h-3.5 w-3.5" /> }] : []),
                                     ].map(s => (
                                         <div key={s.label} className="bg-muted/50 rounded-lg p-3">
                                             <div className="flex items-center gap-1.5 text-muted-foreground mb-1">{s.icon}<span className="text-xs">{s.label}</span></div>

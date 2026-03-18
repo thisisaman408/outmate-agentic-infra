@@ -100,10 +100,17 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         email = data.get("email")
         intent_score = data.get("intent_score", 0.5)
         visitor_id = data.get("visitor_id")
+        source_site = data.get("source_site") or ""
 
         logger.info("Starting enrichment for IP: %s (email=%s, visitor_id=%s, org=%s)", ip, email, visitor_id, org_id)
         enricher = VisitorEnricher()
         resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
+
+        # Tag every visit with the pixel owner's domain so the dashboard can
+        # show which customer site the visitor came from even when IP enrichment
+        # can't identify their company.
+        if source_site:
+            resolution["source_site"] = source_site
 
         resolution = _categorize_and_attach(db, resolution)
         category = resolution.get("category", "unknown")
@@ -285,6 +292,9 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
 async def _publish_visit_event(org_id: str, visit: Visit) -> None:
     try:
         redis_client = RedisManager.get_client()
+        res = visit.resolution or {}
+        person = res.get("person") or {}
+        exp = res.get("explorium") or {}
         payload = {
             "type": "visit_created",
             "org_id": org_id,
@@ -296,7 +306,16 @@ async def _publish_visit_event(org_id: str, visit: Visit) -> None:
                 "intent_score": visit.intent_score,
                 "matched": visit.matched,
                 "created_at": visit.created_at.isoformat() if visit.created_at else None,
-                "resolution": visit.resolution or {},
+                "resolution": res,
+                "category": res.get("category"),
+                "company": res.get("company") or exp.get("name"),
+                "domain": res.get("domain") or exp.get("domain"),
+                "geo": res.get("geo"),
+                "full_name": res.get("full_name") or person.get("full_name"),
+                "email": res.get("email") or person.get("email"),
+                "source_site": res.get("source_site") or "",
+                "industry": exp.get("industry"),
+                "employee_count_range": exp.get("employee_count_range"),
             },
         }
         msg = json.dumps(payload, default=str)

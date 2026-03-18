@@ -155,6 +155,8 @@ def _visit_to_dict(v: Visit) -> dict:
         "headquarters_city": exp.get("headquarters_city"),
         "headquarters_country": exp.get("headquarters_country"),
         "description": exp.get("description"),
+        # Which customer site this visit came from (set at track time from SiteConfig.domain)
+        "source_site": res.get("source_site") or "",
     }
 
 
@@ -313,6 +315,9 @@ async def track_visitor(request: Request):
             "intent_score": intent_score,
             "email": email,
             "visitor_id": visitor_id,
+            # Pixel owner's domain — used to label visit source when company
+            # cannot be identified from IP enrichment alone.
+            "source_site": site_config.domain or "",
         }
 
         queued_via = "celery"
