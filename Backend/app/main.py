@@ -28,6 +28,7 @@ from sqlalchemy import inspect, text
 
 from app.db.deps import get_db
 from app.db.models.user import User
+from app.db.models.watcher import Watcher as WatcherModel  # ensures table is created
 from app.core.redis import RedisManager
 
 from app.api.routes import leads, contactout_routes, crustdata_routes
@@ -44,6 +45,7 @@ from app.api.routes import gtm_agents
 from app.api.routes import visitors
 from app.api.routes import diagnostics
 from app.api.routes import copilot
+from app.api.routes import watchers
 
 # Register routers
 
@@ -229,6 +231,8 @@ app.include_router(visitors.public_router)
 # Protected dashboard endpoints — JWT required
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
+app.include_router(watchers.router, prefix="/api/watchers", tags=["watchers"], dependencies=auth_dependencies)
+logger.info("Watchers router registered")
 
 # Diagnostics endpoints for health checks
 app.include_router(diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"])
@@ -267,6 +271,15 @@ async def startup_event():
                     conn.execute(text(ddl))
                     logger.info(f"Added missing users.{col_name} column")
 
+        if "hashed_password" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
+            logger.info("Added missing users.hashed_password column")
+        watcher_columns = {col["name"] for col in inspector.get_columns("watchers")} if inspector.has_table("watchers") else set()
+        if "watchers" in {t for t in inspector.get_table_names()} and "matches" not in watcher_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"))
+            logger.info("Added missing watchers.matches column")
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
         logger.info("✓ Database tables ensured")

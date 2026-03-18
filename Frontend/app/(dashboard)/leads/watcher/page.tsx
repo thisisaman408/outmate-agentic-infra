@@ -7,28 +7,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Eye, Search, Download, Plus,
   Activity, UserCheck, Building2,
-  AlertCircle, RefreshCw
+  AlertCircle, RefreshCw, Mail, ExternalLink
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { WatcherFilterSidebar } from "@/components/leads/watcher/watcher-filter-sidebar"
+import { WatcherFilterSidebar, WatcherSidebarFilters } from "@/components/leads/watcher/watcher-filter-sidebar"
 import { WatcherCard } from "@/components/leads/watcher/watcher-card"
 import { CreateWatcherDialog } from "@/components/leads/watcher/create-watcher-dialog"
+import { WatcherDetailsDialog } from "@/components/leads/watcher/watcher-details-dialog"
+import { Watcher } from "@/components/leads/watcher/watcher-types"
 import { Badge } from "@/components/ui/badge"
-
-// ──────────────────────────────────────────────
-// Types  (mirrors Pydantic WatcherResponse)
-// ──────────────────────────────────────────────
-interface Watcher {
-  id: string
-  name: string
-  description: string | null
-  type: "event" | "account" | "lead"
-  status: "active" | "paused" | "draft"
-  match_count: number
-  new_matches_count: number
-  last_triggered_at: string | null
-  created_at: string
-}
 
 // ──────────────────────────────────────────────
 // API layer
@@ -54,7 +41,9 @@ const api = {
   createLead:    (p: Record<string, unknown>)   => req<Watcher>("/api/watchers/lead",    { method: "POST", body: JSON.stringify(p) }),
   toggle:        (id: string)                   => req<Watcher>(`/api/watchers/${id}/toggle`, { method: "POST" }),
   remove:        (id: string)                   => req<void>   (`/api/watchers/${id}`,        { method: "DELETE" }),
-  sync:          (id: string)                   => req<Watcher>(`/api/watchers/${id}/sync`,   { method: "POST" })
+  sync:          (id: string)                   => req<Watcher>(`/api/watchers/${id}/sync`,   { method: "POST" }),
+  gmailStatus:   ()                             => req<{ connected: boolean; email: string | null }>("/api/watchers/gmail/status"),
+  gmailAuthUrl:  ()                             => req<{ auth_url: string }>(`/api/campaigns/gmail/auth-url?return_to=/leads/watcher`),
 }
 
 // ──────────────────────────────────────────────
@@ -63,6 +52,7 @@ const api = {
 export default function WatcherPage() {
   const [activeTab, setActiveTab] = useState<"events"|"accounts"|"leads">("events")
   const [q, setQ] = useState("")
+  const [sidebarFilters, setSidebarFilters] = useState<WatcherSidebarFilters>({ status: [] })
 
   const [events,   setEvents]   = useState<Watcher[]>([])
   const [accounts, setAccounts] = useState<Watcher[]>([])
@@ -71,17 +61,33 @@ export default function WatcherPage() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null)
+
+  const [detailsWatcher, setDetailsWatcher] = useState<Watcher | null>(null)
+  const [detailsOpen,    setDetailsOpen]    = useState(false)
+
+  // ── connect Gmail ──────────────────────────────────────────
+  const handleConnectGmail = async () => {
+    try {
+      const { auth_url } = await api.gmailAuthUrl()
+      window.location.href = auth_url
+    } catch (e) {
+      setError("Could not get Gmail auth URL: " + (e as Error).message)
+    }
+  }
 
   // ── fetch ─────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [ev, ac, ld] = await Promise.all([
+      const [ev, ac, ld, gmail] = await Promise.all([
         api.listByType("event"),
         api.listByType("account"),
-        api.listByType("lead")
+        api.listByType("lead"),
+        api.gmailStatus().catch(() => ({ connected: false, email: null }))
       ])
       setEvents(ev); setAccounts(ac); setLeads(ld)
+      setGmailConnected(gmail.connected)
     } catch (e) { setError((e as Error).message) }
     finally     { setLoading(false) }
   }, [])
@@ -127,20 +133,76 @@ export default function WatcherPage() {
     }
   }
 
-  // ── local search ──────────────────────────────────────────
-  const filter = (list: Watcher[]) =>
-    q ? list.filter(w =>
-      w.name.toLowerCase().includes(q.toLowerCase()) ||
-      (w.description ?? "").toLowerCase().includes(q.toLowerCase())
-    ) : list
+  // ── sync ──────────────────────────────────────────────────
+  const handleSync = async (w: Watcher) => {
+    try {
+      const updated = await api.sync(w.id)
+      setterFor(w.type)(prev => prev.map(x => x.id === w.id ? updated : x))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  // ── apply sidebar filters ─────────────────────────────────
+  const applyFilters = (list: Watcher[]): Watcher[] => {
+    let result = list
+
+    // Text search
+    if (q) {
+      const lq = q.toLowerCase()
+      result = result.filter(w =>
+        w.name.toLowerCase().includes(lq) ||
+        (w.description ?? "").toLowerCase().includes(lq) ||
+        (w as any).leadName?.toLowerCase().includes(lq) ||
+        (w as any).leadCompany?.toLowerCase().includes(lq) ||
+        (w as any).accountName?.toLowerCase().includes(lq) ||
+        (w as any).accountDomain?.toLowerCase().includes(lq)
+      )
+    }
+
+    // Status filter
+    if (sidebarFilters.status && sidebarFilters.status.length > 0) {
+      result = result.filter(w => sidebarFilters.status.includes(w.status))
+    }
+
+    return result
+  }
 
   const activeCount = (list: Watcher[]) => list.filter(w => w.status === "active").length
+
+  // ── export CSV ──────────────────────────────────────────
+  const handleExport = () => {
+    const listMap: Record<string, Watcher[]> = { events, accounts, leads }
+    const watchers = applyFilters(listMap[activeTab] || [])
+    if (!watchers.length) return
+
+    const rows: string[][] = [["Name", "Type", "Status", "Match Count", "Last Triggered", "Created"]]
+    for (const w of watchers) {
+      rows.push([
+        w.name,
+        w.type ?? (activeTab === "events" ? "event" : activeTab === "accounts" ? "account" : "lead"),
+        w.status,
+        String((w as any).match_count ?? (w as any).matchCount ?? 0),
+        (w as any).last_triggered_at ?? (w as any).lastTriggered ?? "",
+        (w as any).created_at ?? (w as any).createdAt ?? "",
+      ])
+    }
+
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `watchers-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   // ── render ────────────────────────────────────────────────
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
-      <WatcherFilterSidebar activeTab={activeTab} />
+      <WatcherFilterSidebar activeTab={activeTab} onFiltersChange={setSidebarFilters} />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-muted/5">
         <div className="flex-1 overflow-y-auto">
@@ -161,7 +223,7 @@ export default function WatcherPage() {
                   <Button variant="outline" className="gap-2 bg-background" onClick={load} disabled={loading}>
                     <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
                   </Button>
-                  <Button variant="outline" className="gap-2 bg-background">
+                  <Button variant="outline" className="gap-2 bg-background" onClick={handleExport}>
                     <Download className="h-4 w-4" /> Export
                   </Button>
                   <Button className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20" onClick={() => setCreateOpen(true)}>
@@ -177,6 +239,24 @@ export default function WatcherPage() {
               </div>
             </div>
           </div>
+
+          {/* Gmail not-connected banner */}
+          {gmailConnected === false && (
+            <div className="mx-4 mt-4 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/8 p-3">
+              <Mail className="h-5 w-5 text-amber-500 flex-shrink-0" />
+              <p className="text-sm text-amber-700 dark:text-amber-400 flex-1">
+                Gmail is not connected. Connect Gmail to receive email notifications from your watchers.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 gap-1.5"
+                onClick={handleConnectGmail}
+              >
+                Connect Gmail <ExternalLink className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
 
           {/* error banner */}
           {error && (
@@ -197,23 +277,28 @@ export default function WatcherPage() {
               </TabsList>
 
               <TabsContent value="events"   className="mt-0">
-                <TabBody watchers={filter(events)}   loading={loading} emptyIcon={Activity}  emptyTitle="No event watchers yet"   emptyDesc="Create watchers to discover accounts or leads based on funding rounds, tech stack changes, or executive hires."  emptyAction="Create Event Watcher"   onToggle={handleToggle} onDelete={handleDelete} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(events)}   loading={loading} emptyIcon={Activity}  emptyTitle="No event watchers yet"   emptyDesc="Create watchers to discover accounts or leads based on funding rounds, tech stack changes, or executive hires."  emptyAction="Create Event Watcher"   onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
               <TabsContent value="accounts" className="mt-0">
-                <TabBody watchers={filter(accounts)} loading={loading} emptyIcon={Building2} emptyTitle="No account watchers yet" emptyDesc="Track real-time updates on specific companies including funding, hiring, and technology changes."                 emptyAction="Create Account Watcher" onToggle={handleToggle} onDelete={handleDelete} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(accounts)} loading={loading} emptyIcon={Building2} emptyTitle="No account watchers yet" emptyDesc="Track real-time updates on specific companies including funding, hiring, and technology changes."                 emptyAction="Create Account Watcher" onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
               <TabsContent value="leads"    className="mt-0">
-                <TabBody watchers={filter(leads)}    loading={loading} emptyIcon={UserCheck} emptyTitle="No lead watchers yet"    emptyDesc="Monitor decision makers for job changes, published content, speaking engagements, and other key signals."            emptyAction="Create Lead Watcher"    onToggle={handleToggle} onDelete={handleDelete} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(leads)}    loading={loading} emptyIcon={UserCheck} emptyTitle="No lead watchers yet"    emptyDesc="Monitor decision makers for job changes, published content, speaking engagements, and other key signals."            emptyAction="Create Lead Watcher"    onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
             </Tabs>
           </div>
         </div>
       </div>
     </div>
-    <CreateWatcherDialog 
-     open={createOpen} 
-     onOpenChange={setCreateOpen} 
-     onCreateWatcher={handleCreate} 
+    <CreateWatcherDialog
+     open={createOpen}
+     onOpenChange={setCreateOpen}
+     onCreateWatcher={handleCreate}
+    />
+    <WatcherDetailsDialog
+      watcher={detailsWatcher}
+      open={detailsOpen}
+      onOpenChange={setDetailsOpen}
     />
     </>
   );
@@ -229,12 +314,16 @@ interface TabBodyProps {
   emptyTitle: string; emptyDesc: string; emptyAction: string
   onToggle: (w: Watcher) => void
   onDelete: (w: Watcher) => void
+  onSync: (w: Watcher) => void
+  onViewDetails: (w: Watcher) => void
   onEmpty: () => void
 }
 
-function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, emptyAction, onToggle, onDelete, onEmpty }: TabBodyProps) {
+function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, emptyAction, onToggle, onDelete, onSync, onViewDetails, onEmpty }: TabBodyProps) {
   const handleToggleFor = (w: Watcher) => () => onToggle(w);
   const handleDeleteFor = (w: Watcher) => () => onDelete(w);
+  const handleSyncFor = (w: Watcher) => () => onSync(w);
+  const handleViewDetailsFor = (w: Watcher) => () => onViewDetails(w);
   /* skeleton */
   if (loading) return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -282,6 +371,8 @@ function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, em
           watcher={w}
           onToggle={handleToggleFor(w)}
           onDelete={handleDeleteFor(w)}
+          onSync={handleSyncFor(w)}
+          onViewDetails={handleViewDetailsFor(w)}
         />
       ))}
     </div>

@@ -18,6 +18,7 @@ from app.db.models.copilot_meeting_prep import CopilotMeetingPrep
 from app.db.models.copilot_campaign_analysis import CopilotCampaignAnalysis
 from app.db.models.copilot_pipeline_alert import CopilotPipelineAlert
 from app.db.models.copilot_preferences import CopilotUserPreferences
+from app.db.models.watcher import Watcher
 
 __all__ = [
     "User",

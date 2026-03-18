@@ -1,31 +1,30 @@
-// Watcher Type Definitions for CrustData Integration
-
 export type WatcherStatus = "active" | "paused" | "draft"
-
 export type WatcherType = "event" | "account" | "lead"
 
-// Event types from CrustData Watcher API
+// Event types from Explorium Event-Based APIs
 export type EventType =
-    | "funding"
-    | "job_change"
-    | "technology_adoption"
-    | "leadership_change"
-    | "expansion"
-    | "partnership"
+    | "ipo_announcement"
+    | "new_funding_round"
+    | "new_investment"
+    | "merger_and_acquisitions"
+    | "cost_cutting"
+    | "team_expansion"
+    | "team_reduction"
     | "product_launch"
     | "acquisition"
-    | "news_mention"
-    | "web_traffic_change"
+    | "website_content_changes"
 
 // Base watcher interface
 export interface BaseWatcher {
     id: string
     name: string
-    description: string
+    description: string | null
     status: WatcherStatus
-    createdAt: Date
-    updatedAt: Date
-    lastTriggered?: Date
+    createdAt: string
+    updatedAt: string
+    last_triggered_at?: string
+    match_count?: number
+    new_matches_count?: number
     notificationSettings?: {
         email: boolean
         slack: boolean
@@ -49,8 +48,6 @@ export interface EventWatcher extends BaseWatcher {
         location?: string[]
         keywords?: string[]
     }
-    matchCount: number
-    newMatches: number
     matches?: EventMatch[]
 }
 
@@ -81,7 +78,6 @@ export interface AccountWatcher extends BaseWatcher {
     accountIndustry?: string
     triggers: WatcherTrigger[]
     recentUpdates: AccountUpdate[]
-    updateCount: number
 }
 
 export type WatcherTrigger =
@@ -116,7 +112,6 @@ export interface LeadWatcher extends BaseWatcher {
     leadAvatar?: string
     triggers: LeadTrigger[]
     recentUpdates: LeadUpdate[]
-    updateCount: number
 }
 
 export type LeadTrigger =
