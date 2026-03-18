@@ -133,6 +133,15 @@ export function useLeadAction() {
             })
             break
           case "error":
+            // Show error as inline assistant message so it's always visible
+            addMessage({
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              action_type: request.action_type,
+              result: { error: event.message || "Action failed" },
+              credits_used: 0,
+              timestamp: Date.now(),
+            })
             toast({
               title: "Error",
               description: event.message || "Action failed",

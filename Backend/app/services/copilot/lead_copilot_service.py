@@ -476,7 +476,7 @@ class LeadCopilotService:
 
         user_prompt_text = self._build_user_prompt(prospect, company, lead_context, extra=extra)
 
-        max_tokens_map = {"draft_email": 900, "research": 900, "objection_handler": 800, "custom": 900}
+        max_tokens_map = {"draft_email": 800, "research": 700, "objection_handler": 700, "custom": 700}
         temp_map = {"draft_email": 0.4, "research": 0.3, "objection_handler": 0.3, "custom": 0.4}
 
         try:
@@ -485,7 +485,7 @@ class LeadCopilotService:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt_text,
                 temperature=temp_map.get(action_type, 0.3),
-                max_tokens=max_tokens_map.get(action_type, 900),
+                max_tokens=max_tokens_map.get(action_type, 500),
             ):
                 if chunk["type"] == "token":
                     yield {"stage": "token", "content": chunk["content"]}
@@ -528,7 +528,7 @@ class LeadCopilotService:
             system_prompt=ANNOTATED_EMAIL_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=900,
+            max_tokens=700,
         )
         return result
 
@@ -562,7 +562,7 @@ class LeadCopilotService:
             system_prompt=LEAD_RESEARCH_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=900,
+            max_tokens=700,
         )
         return result
 
@@ -644,7 +644,7 @@ class LeadCopilotService:
                 system_prompt=OBJECTION_HANDLER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.3,
-                max_tokens=800,
+                max_tokens=700,
             )
             return result
         except Exception as exc:
@@ -686,7 +686,7 @@ class LeadCopilotService:
             system_prompt=LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=900,
+            max_tokens=700,
         )
         return result
 
@@ -708,7 +708,7 @@ class LeadCopilotService:
                 system_prompt=CROSSFIRE_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.4,
-                max_tokens=800,
+                max_tokens=700,
             )
             return {"result": result}
         except Exception as e:
@@ -733,7 +733,7 @@ class LeadCopilotService:
                 system_prompt=COMPLIANCE_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.2,
-                max_tokens=800,
+                max_tokens=700,
             )
             return {"result": result}
         except Exception as e:
@@ -773,7 +773,7 @@ class LeadCopilotService:
                 system_prompt=BOMBORA_INTENT_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=700,
             )
             return result
         except Exception as e:
@@ -796,7 +796,7 @@ class LeadCopilotService:
                 system_prompt=TALENT_RADAR_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=700,
             )
             return {"result": result}
         except Exception as e:
@@ -817,7 +817,7 @@ class LeadCopilotService:
                 system_prompt=VIRALITY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.5,
-                max_tokens=600,
+                max_tokens=700,
             )
             return {"result": result}
         except Exception as e:
@@ -877,7 +877,7 @@ class LeadCopilotService:
                 system_prompt=WEBSITE_TRAFFIC_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.5,
-                max_tokens=600,
+                max_tokens=700,
             )
             return result
         except Exception as e:
@@ -909,7 +909,7 @@ class LeadCopilotService:
                 system_prompt=BUSINESS_EVENTS_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.5,
-                max_tokens=600,
+                max_tokens=700,
             )
             return result
         except Exception as e:
@@ -948,7 +948,7 @@ class LeadCopilotService:
                 system_prompt=LINKEDIN_POSTS_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.5,
-                max_tokens=600,
+                max_tokens=700,
             )
             return result
         except Exception as e:
@@ -979,7 +979,7 @@ class LeadCopilotService:
             system_prompt=LEAD_SUGGESTIONS_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=800,
+            max_tokens=700,
         )
         return result
 
