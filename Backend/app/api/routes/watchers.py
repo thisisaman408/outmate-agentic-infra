@@ -14,7 +14,10 @@ from app.db.models.watcher import Watcher as WatcherModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["watchers"])
+router = APIRouter(
+    prefix="/api/v1/watchers",
+    tags=["watchers"]
+)
 
 # ─────────────────────────────────────────
 # Helper: ORM → dict (camelCase for frontend)

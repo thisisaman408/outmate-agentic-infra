@@ -231,7 +231,7 @@ app.include_router(visitors.public_router)
 # Protected dashboard endpoints — JWT required
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
-app.include_router(watchers.router, prefix="/api/watchers", tags=["watchers"], dependencies=auth_dependencies)
+app.include_router(watchers.router, dependencies=auth_dependencies)
 logger.info("Watchers router registered")
 
 # Diagnostics endpoints for health checks
