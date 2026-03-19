@@ -1,4 +1,4 @@
-// Auth service — integrates with Backend API via Next.js proxy
+// Auth service - integrates with Backend API via Next.js proxy
 const API_URL = "/api/v1/auth"
 
 export interface User {
@@ -56,7 +56,7 @@ export const authService = {
       throw new Error(error.detail || "Signup failed")
     }
 
-    // Registration succeeded — user still needs OTP verification; don't auto-login
+    // Registration succeeded - user still needs OTP verification; don't auto-login
     const data = await response.json()
     return data.user
   },
@@ -119,7 +119,7 @@ export const authService = {
           headers: { Authorization: `Bearer ${token}` },
         })
       } catch {
-        // Non-fatal — local session is cleared regardless
+        // Non-fatal - local session is cleared regardless
       }
     }
     localStorage.removeItem(AUTH_KEY)

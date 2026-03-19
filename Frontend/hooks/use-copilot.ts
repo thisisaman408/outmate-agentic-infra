@@ -31,7 +31,7 @@ export function useCopilotCredits() {
       setCredits(data)
       return data
     } catch {
-      // silent — credits display is non-critical
+      // silent - credits display is non-critical
     } finally {
       setIsLoading(false)
     }

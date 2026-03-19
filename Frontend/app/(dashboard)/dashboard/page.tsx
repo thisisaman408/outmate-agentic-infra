@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [today, setToday] = useState("")
+  const [mounted, setMounted] = useState(false)
 
   const fetchData = async (isRefresh = false) => {
     if (isRefresh) setIsRefreshing(true)
@@ -60,6 +61,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData()
     setToday(new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }))
+    setMounted(true)
   }, [])
   const buildStamp = process.env.NEXT_PUBLIC_BUILD_SHA ?? "local"
 
@@ -69,7 +71,9 @@ export default function DashboardPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">GTM Overview</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{today} · Your pipeline at a glance</p>
+          <p className="text-sm text-muted-foreground mt-0.5" suppressHydrationWarning>
+            {mounted ? `${today} - Your pipeline at a glance` : "Your pipeline at a glance"}
+          </p>
           <p className="text-[11px] text-muted-foreground/70 mt-1">Build: {buildStamp.slice(0, 7)}</p>
         </div>
         <Button

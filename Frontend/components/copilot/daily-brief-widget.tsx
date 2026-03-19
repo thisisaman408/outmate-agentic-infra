@@ -34,7 +34,7 @@ export function DailyBriefWidget() {
         {isLoading && (
           <div className="flex items-center gap-2 py-6 justify-center">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground">Generating brief…</span>
+            <span className="text-xs text-muted-foreground">Generating brief...</span>
           </div>
         )}
 
@@ -66,8 +66,8 @@ export function DailyBriefWidget() {
             </div>
 
             <div className="flex gap-3 text-[11px] text-muted-foreground pt-1">
-              <span>📡 {brief.key_metrics?.signals_detected ?? 0} signals</span>
-              <span>👥 {brief.key_metrics?.new_leads_today ?? 0} leads</span>
+              <span>Signals: {brief.key_metrics?.signals_detected ?? 0}</span>
+              <span>Leads: {brief.key_metrics?.new_leads_today ?? 0}</span>
             </div>
 
             <Button asChild variant="ghost" size="sm" className="w-full mt-1 text-xs">

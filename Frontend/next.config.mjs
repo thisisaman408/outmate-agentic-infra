@@ -1,3 +1,9 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -7,8 +13,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Next.js 16 uses Turbopack by default — acknowledge it
-  turbopack: {},
+  // Next.js 16 uses Turbopack by default - pin the root to this app folder
+  turbopack: {
+    root: __dirname,
+  },
   async headers() {
     const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || process.env.GITHUB_SHA || 'unknown';
     return [
