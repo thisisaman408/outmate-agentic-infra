@@ -173,6 +173,22 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
 
     try:
         if w["type"] == "account":
+            # Map frontend trigger names to Explorium event types
+            _acct_trigger_map = {
+                "Funding Events": ["new_funding_round", "new_investment"],
+                "Website Content Changes": [],  # handled by enrich_website_changes
+                "Job Changes": ["team_expansion", "team_reduction"],
+                "Technology Changes": ["product_launch"],
+                "News Mentions": ["merger_and_acquisitions", "ipo_announcement", "acquisition"],
+                "Web Traffic Changes": [],  # handled by website traffic enrichment
+                # Legacy API-style triggers
+                "funding": ["new_funding_round", "new_investment"],
+                "job_changes": ["team_expansion", "team_reduction"],
+                "technology_changes": ["product_launch"],
+                "news_mentions": ["merger_and_acquisitions", "ipo_announcement"],
+            }
+            raw_triggers = db_w.triggers or []
+
             bid = db_w.business_id
             if not bid and w.get("accountDomain"):
                 try:
@@ -187,77 +203,138 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
 
             updates = []
             if bid:
-                # 1. Website changes
-                try:
-                    ts_from = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-                    ws_res = await svc.enrich_website_changes(bid, timestamp_from=ts_from)
-                    ws_data = ws_res.get("data") or []
-                    if isinstance(ws_data, dict):
-                        ws_data = [ws_data]
-                    for chg in ws_data:
-                        desc = None
-                        if isinstance(chg, dict):
-                            desc = chg.get("change_description") or chg.get("summary")
-                            if not desc:
-                                inner = chg.get("data") or {}
-                                if isinstance(inner, list):
-                                    inner = inner[0] if inner else {}
-                                desc = inner.get("change_description") or inner.get("change_implication")
-                        if desc:
+                # Build the set of Explorium event types from selected triggers
+                api_event_types = set()
+                wants_website_changes = False
+                for t in raw_triggers:
+                    mapped = _acct_trigger_map.get(t, [])
+                    api_event_types.update(mapped)
+                    if t in ("Website Content Changes", "Web Traffic Changes"):
+                        wants_website_changes = True
+                # If no specific triggers selected, fetch everything
+                if not raw_triggers:
+                    api_event_types = {"new_funding_round", "merger_and_acquisitions",
+                                       "ipo_announcement", "team_expansion", "team_reduction"}
+                    wants_website_changes = True
+
+                # 1. Enroll the business for event monitoring (idempotent)
+                if api_event_types:
+                    try:
+                        await svc.enroll_business_events([bid], list(api_event_types))
+                        logger.info(f">>> [Account Sync] Enrolled {bid} for events: {api_event_types}")
+                    except Exception as e:
+                        logger.warning(f"Event enrollment failed (may already be enrolled): {e}")
+
+                # 2. Fetch business events
+                if api_event_types:
+                    try:
+                        ts_from = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+                        ev_res = await svc.fetch_business_events([bid], list(api_event_types), timestamp_from=ts_from)
+                        ev_data = ev_res.get("data", [])
+                        for ev in ev_data:
+                            ev_type = ev.get("event_type", "business_signal")
                             updates.append({
-                                "id": f"web-{uuid4()}",
-                                "type": "website_change",
-                                "description": desc,
-                                "date": chg.get("date", datetime.now(timezone.utc).isoformat())
+                                "id": f"bev-{ev.get('event_id') or uuid4()}",
+                                "type": ev_type,
+                                "description": ev.get("event_description") or ev.get("description") or f"Signal: {ev_type.replace('_', ' ')}",
+                                "date": ev.get("event_timestamp") or ev.get("timestamp") or datetime.now(timezone.utc).isoformat()
                             })
-                except Exception as e:
-                    logger.error(f"Website changes failed: {e}")
+                    except Exception as e:
+                        logger.error(f"Business events failed: {e}")
 
-                # 2. Business events (funding, M&A, etc.)
-                try:
-                    event_types = ["new_funding_round", "merger_and_acquisitions",
-                                   "ipo_announcement", "cost_cutting", "team_expansion"]
-                    ts_from = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-                    ev_res = await svc.fetch_business_events([bid], event_types, timestamp_from=ts_from)
-                    ev_data = ev_res.get("data", [])
-                    for ev in ev_data:
-                        updates.append({
-                            "id": f"bev-{ev.get('event_id') or uuid4()}",
-                            "type": ev.get("event_type", "business_signal"),
-                            "description": ev.get("event_description") or f"Signal: {ev.get('event_type', 'update')}",
-                            "date": ev.get("event_timestamp", datetime.now(timezone.utc).isoformat())
-                        })
-                except Exception as e:
-                    logger.error(f"Business events failed: {e}")
+                # 3. Website changes
+                if wants_website_changes or not updates:
+                    try:
+                        ts_from = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                        ws_res = await svc.enrich_website_changes(bid, timestamp_from=ts_from)
+                        ws_data = ws_res.get("data") or []
+                        if isinstance(ws_data, dict):
+                            ws_data = [ws_data]
+                        for chg in ws_data:
+                            desc = None
+                            if isinstance(chg, dict):
+                                desc = chg.get("change_description") or chg.get("summary")
+                                if not desc:
+                                    inner = chg.get("data") or {}
+                                    if isinstance(inner, list):
+                                        inner = inner[0] if inner else {}
+                                    desc = inner.get("change_description") or inner.get("change_implication")
+                            if desc:
+                                updates.append({
+                                    "id": f"web-{uuid4()}",
+                                    "type": "website_change",
+                                    "description": desc,
+                                    "date": chg.get("date", datetime.now(timezone.utc).isoformat())
+                                })
+                    except Exception as e:
+                        logger.error(f"Website changes failed: {e}")
 
-                # 3. Firmographics as fallback info
+                # 4. Use fetch_businesses as alternative event source
+                if not updates and api_event_types:
+                    try:
+                        # Search for this specific company by domain with the selected event types
+                        search_criteria = {
+                            "event_type": list(api_event_types),
+                            "last_occurrence": 365,
+                            "company_name": w.get("accountName", ""),
+                        }
+                        res = await svc.fetch_businesses(search_criteria, size=3, mode="full")
+                        data = res.get("data", [])
+                        account_domain = (w.get("accountDomain") or "").lower()
+                        for item in data:
+                            biz = svc.normalize_company(item)
+                            biz_domain = (biz.get("domain") or "").lower()
+                            # Only include results matching this account
+                            if account_domain and biz_domain and (account_domain in biz_domain or biz_domain in account_domain):
+                                display_events = ", ".join(t.replace("_", " ") for t in api_event_types)
+                                updates.append({
+                                    "id": f"fb-{biz.get('id', uuid4())}",
+                                    "type": "business_signal",
+                                    "description": biz.get("description") or f"Recent activity detected: {display_events}",
+                                    "date": datetime.now(timezone.utc).isoformat()
+                                })
+                    except Exception as e:
+                        logger.error(f"Fetch businesses fallback failed: {e}")
+
+                # 5. Firmographics as last resort
                 if not updates:
+                    selected_triggers_str = ", ".join(raw_triggers) if raw_triggers else "all activity"
+                    updates.append({
+                        "id": f"info-{uuid4()}",
+                        "type": "monitoring",
+                        "description": f"No recent {selected_triggers_str.lower()} detected for {w.get('accountName', 'this account')}. Monitoring is now active and will alert on new events.",
+                        "date": datetime.now(timezone.utc).isoformat()
+                    })
                     try:
                         fg_res = await svc.bulk_enrich_firmographics([bid])
                         fg_data = fg_res.get("data", [])
                         if fg_data:
                             raw_info = fg_data[0].get("data") or fg_data[0]
-                            # Use normalize_company for consistent field extraction
                             normalized = svc.normalize_company(raw_info)
                             name = normalized.get("name") or w.get("accountName", "Company")
-                            industry = normalized.get("industry") or raw_info.get("linkedin_category") or raw_info.get("primary_industry") or "N/A"
+                            industry = normalized.get("industry") or raw_info.get("linkedin_category") or raw_info.get("primary_industry") or ""
                             employees = (
                                 normalized.get("employees")
                                 or raw_info.get("number_of_employees")
                                 or raw_info.get("employee_count")
                                 or raw_info.get("linkedin_employee_count")
-                                or "N/A"
+                                or ""
                             )
                             revenue = normalized.get("revenue") or raw_info.get("estimated_revenue") or ""
-                            desc_parts = [f"Industry: {industry}", f"Employees: {employees}"]
+                            desc_parts = []
+                            if industry:
+                                desc_parts.append(f"Industry: {industry}")
+                            if employees:
+                                desc_parts.append(f"Employees: {employees}")
                             if revenue:
                                 desc_parts.append(f"Revenue: {revenue}")
-                            updates.append({
-                                "id": f"fg-{uuid4()}",
-                                "type": "company_profile",
-                                "description": f"{name} — {', '.join(desc_parts)}",
-                                "date": datetime.now(timezone.utc).isoformat()
-                            })
+                            if desc_parts:
+                                updates.append({
+                                    "id": f"fg-{uuid4()}",
+                                    "type": "company_profile",
+                                    "description": f"{name} — {', '.join(desc_parts)}",
+                                    "date": datetime.now(timezone.utc).isoformat()
+                                })
                     except Exception as e:
                         logger.error(f"Firmographics fallback failed: {e}")
             else:
