@@ -41,7 +41,7 @@ def watcher_to_dict(w: WatcherModel) -> Dict[str, Any]:
         "last_triggered_at": w.last_synced_at.isoformat() if w.last_synced_at else None,
         "lastTriggered":     w.last_synced_at.isoformat() if w.last_synced_at else None,
         "created_at": w.created_at.isoformat() if w.created_at else None,
-        "criteria": w.criteria or {},
+        "criteria": {k: v for k, v in (w.criteria or {}).items() if v} if w.criteria else {},
         # Account
         "accountName":   w.account_name,
         "accountDomain": w.account_domain,
@@ -236,14 +236,26 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                         fg_res = await svc.bulk_enrich_firmographics([bid])
                         fg_data = fg_res.get("data", [])
                         if fg_data:
-                            info = fg_data[0].get("data") or fg_data[0]
-                            name = info.get("company_name") or w.get("accountName", "Company")
-                            industry = info.get("industry") or "N/A"
-                            employees = info.get("employee_count") or info.get("number_of_employees") or "N/A"
+                            raw_info = fg_data[0].get("data") or fg_data[0]
+                            # Use normalize_company for consistent field extraction
+                            normalized = svc.normalize_company(raw_info)
+                            name = normalized.get("name") or w.get("accountName", "Company")
+                            industry = normalized.get("industry") or raw_info.get("linkedin_category") or raw_info.get("primary_industry") or "N/A"
+                            employees = (
+                                normalized.get("employees")
+                                or raw_info.get("number_of_employees")
+                                or raw_info.get("employee_count")
+                                or raw_info.get("linkedin_employee_count")
+                                or "N/A"
+                            )
+                            revenue = normalized.get("revenue") or raw_info.get("estimated_revenue") or ""
+                            desc_parts = [f"Industry: {industry}", f"Employees: {employees}"]
+                            if revenue:
+                                desc_parts.append(f"Revenue: {revenue}")
                             updates.append({
                                 "id": f"fg-{uuid4()}",
-                                "type": "firmographics",
-                                "description": f"Company profile: {name} — Industry: {industry}, Employees: {employees}",
+                                "type": "company_profile",
+                                "description": f"{name} — {', '.join(desc_parts)}",
                                 "date": datetime.now(timezone.utc).isoformat()
                             })
                     except Exception as e:
@@ -316,30 +328,46 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                         "date": ev.get("event_timestamp", datetime.now(timezone.utc).isoformat())
                     })
 
-                # Fallback: contact enrichment
+                # Fallback: contact enrichment + lead profile
                 if not updates:
+                    # Add a note that no trigger events were detected yet
+                    selected_triggers = ", ".join(raw_triggers) if raw_triggers else "all activity"
+                    updates.append({
+                        "id": f"pev-info-{uuid4()}",
+                        "type": "monitoring",
+                        "description": f"No recent {selected_triggers.lower()} events detected. Monitoring is active and will alert on new activity.",
+                        "date": datetime.now(timezone.utc).isoformat()
+                    })
+
+                    # Enrich with contact info
                     try:
                         info_res = await svc.bulk_enrich_contacts_information([prospect_id])
                         info_data = info_res.get("data", [])
-                        logger.info(f">>> [Lead Sync] Got info_data length: {len(info_data)}")
                         if info_data:
                             contact_info = info_data[0].get("data") or info_data[0]
                             emails = contact_info.get("emails") or []
                             phones = contact_info.get("phone_numbers") or contact_info.get("mobile_phone") or []
+                            title = contact_info.get("title") or contact_info.get("job_title") or db_w.lead_title or ""
+                            company = contact_info.get("company_name") or db_w.lead_company or ""
+
+                            # Build a profile summary
+                            profile_parts = []
+                            if title:
+                                profile_parts.append(f"Title: {title}")
+                            if company:
+                                profile_parts.append(f"Company: {company}")
                             if emails:
                                 addr = emails[0].get("address") if isinstance(emails[0], dict) else emails[0]
-                                email_type = emails[0].get("type", "professional") if isinstance(emails[0], dict) else "professional"
+                                profile_parts.append(f"Email: {addr}")
+                            if phones:
+                                phone = phones[0].get("number") if isinstance(phones[0], dict) else phones[0]
+                                profile_parts.append(f"Phone: {phone}")
+
+                            if profile_parts:
                                 updates.append({
                                     "id": f"pev-c-{uuid4()}",
-                                    "type": "contact_update",
-                                    "description": f"Verified contact: {addr} ({email_type})",
-                                    "date": datetime.now(timezone.utc).isoformat()
-                                })
-                            elif phones:
-                                updates.append({
-                                    "id": f"pev-c-{uuid4()}",
-                                    "type": "contact_update",
-                                    "description": "Verified direct dial phone number.",
+                                    "type": "lead_profile",
+                                    "description": f"Enriched profile — {'; '.join(profile_parts)}",
                                     "date": datetime.now(timezone.utc).isoformat()
                                 })
                     except Exception as e:
