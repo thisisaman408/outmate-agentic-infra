@@ -59,6 +59,7 @@ export default function DashboardPage() {
   useEffect(() => { fetchData() }, [])
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
+  const buildStamp = process.env.NEXT_PUBLIC_BUILD_SHA ?? "local"
 
   return (
     <div className="space-y-6">
@@ -67,6 +68,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">GTM Overview</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{today} · Your pipeline at a glance</p>
+          <p className="text-[11px] text-muted-foreground/70 mt-1">Build: {buildStamp.slice(0, 7)}</p>
         </div>
         <Button
           variant="outline"
