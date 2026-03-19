@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
+import { ShieldCheck, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { gtmAgentsApi, type GTMAgentRunResponse } from "@/lib/api/gtm-agents"
 
@@ -15,7 +16,6 @@ function extractResultText(res: GTMAgentRunResponse): string {
   if (keys.length > 0) return keys.map(k => `${k}: ${JSON.stringify(res[k])}`).join("\n\n")
   return "Agent completed — no output returned."
 }
-import { ShieldCheck, Loader2 } from "lucide-react"
 
 export function ComplianceOraclePanel() {
   const { toast } = useToast()
