@@ -235,7 +235,7 @@ function AddEnrollDialog({ open, onClose, entityType, eventTypeOptions, onSave }
                         <div className="flex gap-2">
                             <Input
                                 id="entity-query"
-                                placeholder={isProspect ? "e.g. John Smith or john@acme.com" : "e.g. Salesforce or salesforce.com"}
+                                placeholder={isProspect ? "e.g. john@acme.com or LinkedIn URL" : "e.g. Salesforce or salesforce.com"}
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -569,7 +569,7 @@ export default function EventsPage() {
             if (activeTab === "business") {
                 await eventsApi.addBusinessEnrollment({ business_ids: [entityId], event_types: eventTypes, business_name: entityName })
             } else {
-                await eventsApi.addProspectEnrollment({ prospect_ids: [entityId], event_types: eventTypes })
+                await eventsApi.addProspectEnrollment({ prospect_ids: [entityId], event_types: eventTypes, prospect_names: entityName ? [entityName] : undefined })
             }
             toast.success("Enrollment added")
             await loadEnrollments()

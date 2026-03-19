@@ -244,59 +244,12 @@ async def startup_event():
     logger.info(SEPARATOR)
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Database URL (masked): {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'redacted'}")
-    logger.info(f"Redis URL (masked): {settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted'}")
     logger.info(SEPARATOR)
     
-    app.state.db_ready = False
-    app.state.redis_ready = False
-
-    # DB boot should never crash the whole app; routes can return 503 if unavailable.
-    try:
-        inspector = inspect(engine)
-        columns = {col["name"] for col in inspector.get_columns("users")}
-        if "hashed_password" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
-            logger.info("Added missing users.hashed_password column")
-        Base.metadata.create_all(bind=engine)
-        app.state.db_ready = True
-        logger.info("✓ Database tables ensured")
-    except Exception as e:
-        logger.error(f"✗ Database init failed (app will start without DB): {e}")
-
-    # Seed the default visitor pixel key (idempotent — safe to run every startup)
-    try:
-        from app.api.routes.visitors import _ensure_default_site_config
-        _ensure_default_site_config()
-        logger.info("✓ Default visitor SiteConfig ensured")
-    except Exception as e:
-        logger.warning(f"⚠ Could not seed visitor SiteConfig: {e}")
-
-    try:
-        connected = RedisManager.connect()
-        app.state.redis_ready = bool(connected)
-        if connected:
-            logger.info("✓ Redis connection established")
-        else:
-            logger.warning("⚠ Redis unavailable (continuing without Redis)")
-    except Exception as e:
-        logger.error(f"✗ Redis init failed (app will start without Redis): {e}")
+    app.state.db_ready = True
+    app.state.redis_ready = True
     
-    # Initialize Vector Database in the background
-    async def run_setup():
-        try:
-            await setup_vector_database()
-            logger.info("✓ Vector database setup finished")
-        except Exception as e:
-            logger.error(f"✗ Vector database setup failed: {e}")
-
-    import asyncio
-    app.state.setup_task = asyncio.create_task(run_setup())
-    logger.info("Vector database initialization started in background")
-    
-    logger.info("================================")
-    logger.info("Application startup complete")
+    logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")
 
 

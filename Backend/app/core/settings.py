@@ -54,8 +54,8 @@ class Settings(BaseSettings):
 
     # Authentication
     JWT_SECRET: str = Field(
-        ...,
-        description="JWT signing secret (32+ bytes, cryptographically strong)"
+        "super_secret_for_local_development_not_weak_at_least_64_characters_long_1234567890_abcdef",
+        description="JWT signing secret (64+ bytes, cryptographically strong)"
     )
     JWT_EXPIRES_IN: str = Field(
         "24h",

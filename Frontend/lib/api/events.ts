@@ -97,6 +97,7 @@ export interface FetchProspectEventsPayload {
 export interface EnrollProspectPayload {
     prospect_ids: string[]
     event_types: string[]
+    prospect_names?: string[]  // Optional parallel list of display names for the enrolled prospects
 }
 
 export interface UpdateProspectEnrollmentPayload {
