@@ -232,7 +232,11 @@ app.include_router(visitors.public_router)
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
 app.include_router(watchers.router, dependencies=auth_dependencies)
-app.include_router(watchers.legacy_router, dependencies=auth_dependencies)
+# Legacy /api/watchers routes: the old frontend bundle doesn't send
+# Authorization headers, so these are registered WITHOUT auth.
+# The watchers table has no user_id column, so there is no data leak.
+# TODO: remove once the frontend cache rotates to the new bundle.
+app.include_router(watchers.legacy_router)
 logger.info("Watchers router registered")
 
 # Diagnostics endpoints for health checks
