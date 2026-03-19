@@ -19,6 +19,12 @@ router = APIRouter(
     tags=["watchers"]
 )
 
+# Alias router so legacy frontend bundles calling /api/watchers still work
+legacy_router = APIRouter(
+    prefix="/api/watchers",
+    tags=["watchers"]
+)
+
 # ─────────────────────────────────────────
 # Helper: ORM → dict (camelCase for frontend)
 # ─────────────────────────────────────────
@@ -384,3 +390,17 @@ async def gmail_status():
     from app.services.gmail_service import GmailService
     svc = GmailService()
     return svc.is_connected()
+
+
+# ─────────────────────────────────────────
+# Legacy /api/watchers routes (no /v1/)
+# Mirrors all endpoints above so older frontend bundles still work.
+# ─────────────────────────────────────────
+legacy_router.get("/")(list_watchers)
+legacy_router.post("/event")(create_event_watcher)
+legacy_router.post("/account")(create_account_watcher)
+legacy_router.post("/lead")(create_lead_watcher)
+legacy_router.post("/{id}/toggle")(toggle_watcher)
+legacy_router.delete("/{id}")(delete_watcher)
+legacy_router.post("/{id}/sync")(sync_watcher)
+legacy_router.get("/gmail/status")(gmail_status)
