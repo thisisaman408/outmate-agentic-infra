@@ -23,9 +23,11 @@ export function ComplianceOraclePanel() {
   const [jurisdictions, setJurisdictions] = useState("US, EU, UK")
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+  const [inlineError, setInlineError] = useState<string | null>(null)
 
   const handleRun = async () => {
     if (!template.trim()) {
+      setInlineError("Paste the outbound copy to analyze.")
       toast({
         title: "Message required",
         description: "Paste the outbound copy you want the Compliance Oracle to review and rewrite.",
@@ -33,6 +35,7 @@ export function ComplianceOraclePanel() {
       })
       return
     }
+    setInlineError(null)
     setIsRunning(true)
     setOutput(null)
     try {
@@ -94,8 +97,12 @@ export function ComplianceOraclePanel() {
               rows={7}
               placeholder="Paste your cold email, LinkedIn sequence, or multi-step outreach here..."
             />
+            {inlineError && (
+              <p className="text-xs text-red-500">{inlineError}</p>
+            )}
           </div>
           <Button
+            type="button"
             onClick={handleRun}
             disabled={isRunning}
             className="mt-2 w-full md:w-auto h-11 font-semibold rounded-xl"
