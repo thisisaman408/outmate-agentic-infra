@@ -46,6 +46,7 @@ from app.api.routes import visitors
 from app.api.routes import diagnostics
 from app.api.routes import copilot
 from app.api.routes import watchers
+from app.api.routes import dashboard
 
 # Register routers
 
@@ -243,6 +244,9 @@ logger.info("Watchers router registered")
 app.include_router(diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"])
 logger.info("Diagnostics router registered")
 
+app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"], dependencies=auth_dependencies)
+logger.info("Dashboard router registered")
+
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
 logger.info("Copilot router registered")
 
@@ -390,4 +394,3 @@ def openai_models():
         ],
         "object": "list"
     }
-

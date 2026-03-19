@@ -1,4 +1,6 @@
-// Mock API service for dashboard data - ready for backend integration
+import { authService } from "@/lib/auth"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 export interface KPIData {
   totalLeads: number
   activeSignals: number
@@ -34,7 +36,7 @@ export interface Signal {
 export interface CampaignPerformance {
   id: string
   name: string
-  status: "running" | "paused" | "completed"
+  status: "running" | "paused" | "completed" | "draft"
   sent: number
   opened: number
   replied: number
@@ -57,196 +59,53 @@ export interface TimeSeriesData {
   campaigns: number
 }
 
+const fetchWithAuth = (path: string, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers ?? {})
+  const authHeaders = authService.getAuthHeaders()
+  Object.entries(authHeaders).forEach(([key, value]) => {
+    if (value) {
+      headers.set(key, value)
+    }
+  })
+  return fetch(`${API_BASE_URL}${path}`, { ...init, headers })
+}
+
+const parseJson = async <T>(response: Response): Promise<T> => {
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || `Request failed: ${response.status}`)
+  }
+  return response.json() as Promise<T>
+}
+
 export const dashboardApi = {
   getKPIs: async (): Promise<KPIData> => {
-    // Mock data - replace with actual API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          totalLeads: 1247,
-          activeSignals: 342,
-          runningCampaigns: 8,
-          conversionRate: 23.5,
-          changePercentage: {
-            totalLeads: 12.5,
-            activeSignals: 8.3,
-            runningCampaigns: -2.1,
-            conversionRate: 3.2,
-          },
-        })
-      }, 800)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/kpis")
+    return parseJson<KPIData>(response)
   },
 
   getRecentLeads: async (): Promise<RecentLead[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          {
-            id: "1",
-            companyName: "TechCorp Solutions",
-            contactName: "Sarah Johnson",
-            title: "VP of Sales",
-            industry: "SaaS",
-            signalsCount: 5,
-            addedAt: "2 hours ago",
-          },
-          {
-            id: "2",
-            companyName: "InnovateLabs",
-            contactName: "Michael Chen",
-            title: "CTO",
-            industry: "AI/ML",
-            signalsCount: 3,
-            addedAt: "5 hours ago",
-          },
-          {
-            id: "3",
-            companyName: "DataDrive Inc",
-            contactName: "Emily Rodriguez",
-            title: "Head of Marketing",
-            industry: "Analytics",
-            signalsCount: 7,
-            addedAt: "1 day ago",
-          },
-          {
-            id: "4",
-            companyName: "CloudScale Systems",
-            contactName: "David Kim",
-            title: "Director of Engineering",
-            industry: "Cloud Infrastructure",
-            signalsCount: 4,
-            addedAt: "1 day ago",
-          },
-          {
-            id: "5",
-            companyName: "Nexus Enterprises",
-            contactName: "Lisa Wang",
-            title: "CEO",
-            industry: "Enterprise Software",
-            signalsCount: 6,
-            addedAt: "2 days ago",
-          },
-        ])
-      }, 900)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/recent-leads?limit=5")
+    return parseJson<RecentLead[]>(response)
   },
 
   getActiveSignals: async (): Promise<Signal[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          {
-            id: "1",
-            companyName: "TechCorp Solutions",
-            type: "Job Posting",
-            confidence: 92,
-            description: "Hiring for VP of Sales - expansion signal",
-            timestamp: "1 hour ago",
-          },
-          {
-            id: "2",
-            companyName: "InnovateLabs",
-            type: "Funding",
-            confidence: 88,
-            description: "Series B funding announced - $50M",
-            timestamp: "3 hours ago",
-          },
-          {
-            id: "3",
-            companyName: "DataDrive Inc",
-            type: "Tech Stack",
-            confidence: 85,
-            description: "Recently adopted similar tools",
-            timestamp: "6 hours ago",
-          },
-        ])
-      }, 850)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/active-signals?limit=3")
+    return parseJson<Signal[]>(response)
   },
 
   getCampaignPerformance: async (): Promise<CampaignPerformance[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          {
-            id: "1",
-            name: "Q1 Enterprise Outreach",
-            status: "running",
-            sent: 450,
-            opened: 234,
-            replied: 67,
-            openRate: 52,
-            replyRate: 14.9,
-          },
-          {
-            id: "2",
-            name: "Product Launch Campaign",
-            status: "running",
-            sent: 320,
-            opened: 198,
-            replied: 45,
-            openRate: 61.9,
-            replyRate: 14.1,
-          },
-          {
-            id: "3",
-            name: "Webinar Follow-up",
-            status: "paused",
-            sent: 180,
-            opened: 95,
-            replied: 23,
-            openRate: 52.8,
-            replyRate: 12.8,
-          },
-        ])
-      }, 950)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/campaign-performance?limit=3")
+    return parseJson<CampaignPerformance[]>(response)
   },
 
   getAIAgentActivity: async (): Promise<AIAgentActivity[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          {
-            id: "1",
-            agentType: "Research Agent",
-            action: "Analyzed TechCorp Solutions",
-            result: "High-fit prospect identified",
-            timestamp: "30 min ago",
-          },
-          {
-            id: "2",
-            agentType: "Lookalike Agent",
-            action: "Found 12 similar companies",
-            result: "Added to pipeline",
-            timestamp: "1 hour ago",
-          },
-          {
-            id: "3",
-            agentType: "Predictive Agent",
-            action: "Scored 45 leads",
-            result: "15 high-probability conversions",
-            timestamp: "2 hours ago",
-          },
-        ])
-      }, 900)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/ai-activity?limit=3")
+    return parseJson<AIAgentActivity[]>(response)
   },
 
   getTimeSeriesData: async (): Promise<TimeSeriesData[]> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          { date: "Jan 1", leads: 120, signals: 45, campaigns: 5 },
-          { date: "Jan 8", leads: 145, signals: 52, campaigns: 6 },
-          { date: "Jan 15", leads: 178, signals: 68, campaigns: 7 },
-          { date: "Jan 22", leads: 195, signals: 75, campaigns: 8 },
-          { date: "Jan 29", leads: 210, signals: 82, campaigns: 8 },
-          { date: "Feb 5", leads: 245, signals: 95, campaigns: 9 },
-          { date: "Feb 12", leads: 267, signals: 103, campaigns: 10 },
-        ])
-      }, 1000)
-    })
+    const response = await fetchWithAuth("/api/v1/dashboard/time-series?days=7")
+    return parseJson<TimeSeriesData[]>(response)
   },
 }
