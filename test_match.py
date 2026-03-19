@@ -10,7 +10,7 @@ from app.services.explorium_service import ExploriumService
 async def main():
     svc = ExploriumService()
     try:
-        res = await svc.match_prospects([{"name": "Satya Nadella"}])
+        res = await svc.match_prospects([{"email": "gautam@Outmate.ai"}])
         print(json.dumps(res, indent=2))
     except Exception as e:
         print("Error Type:", type(e))

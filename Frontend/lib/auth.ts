@@ -28,12 +28,31 @@ export const authService = {
         body: JSON.stringify({ email, password }),
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || error.message || "Login failed")
+      // Read the body ONCE and then try to interpret it
+      const rawBody = await response.text()
+      let parsed: any | null = null
+      if (rawBody) {
+        try {
+          parsed = JSON.parse(rawBody)
+        } catch {
+          parsed = null
+        }
       }
 
-      const data = await response.json()
+      if (!response.ok) {
+        const error = parsed
+        const message =
+          (error && (error.detail || error.message)) ||
+          rawBody ||
+          "Login failed"
+        throw new Error(message)
+      }
+
+      if (!parsed) {
+        throw new Error("Unexpected response from server. Please try again later.")
+      }
+
+      const data = parsed
 
       // Store token and user
       localStorage.setItem(AUTH_KEY, data.token)

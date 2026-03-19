@@ -99,39 +99,70 @@ interface EnrollmentItemProps {
 
 function EnrollmentItem({ enrollment, onDelete, onEdit }: EnrollmentItemProps) {
     const displayId = enrollment.entityName || enrollment.entityId
+  
     return (
-        <div className="flex items-start gap-2 py-3 border-b border-border/40 last:border-0">
-            <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{displayId}</p>
-                <div className="flex flex-wrap gap-1 mt-1">
-                    {enrollment.eventTypes.slice(0, 3).map((t) => (
-                        <Badge key={t} variant="outline" className="text-xs px-1.5 py-0">
-                            {t.replace(/_/g, " ")}
-                        </Badge>
-                    ))}
-                    {enrollment.eventTypes.length > 3 && (
-                        <Badge variant="outline" className="text-xs px-1.5 py-0">
-                            +{enrollment.eventTypes.length - 3}
-                        </Badge>
-                    )}
-                </div>
-            </div>
-            <div className="flex gap-1 flex-shrink-0">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(enrollment)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => onDelete(enrollment.entityId)}
-                >
-                    <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-            </div>
+      <div className="flex flex-col gap-2 py-3 border-b border-border/40 last:border-0">
+        
+        {/* Top row */}
+        <div className="flex items-start justify-between gap-2">
+          
+          {/* Entity name/email/link */}
+          <p
+            className="text-sm font-medium leading-snug break-all flex-1 pr-2"
+            title={displayId}
+          >
+            {displayId}
+          </p>
+  
+          {/* Action buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:text-primary"
+              onClick={() => onEdit(enrollment)}
+              title="Edit enrollment"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+  
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-destructive hover:bg-destructive/10"
+              onClick={() => onDelete(enrollment.entityId)}
+              title="Delete enrollment"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+  
         </div>
+  
+        {/* Event badges */}
+        <div className="flex flex-wrap gap-1.5">
+          {enrollment.eventTypes.slice(0, 3).map((t) => (
+            <Badge
+              key={t}
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 leading-tight capitalize"
+            >
+              {t.replace(/_/g, " ")}
+            </Badge>
+          ))}
+  
+          {enrollment.eventTypes.length > 3 && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0"
+            >
+              +{enrollment.eventTypes.length - 3}
+            </Badge>
+          )}
+        </div>
+      </div>
     )
-}
+  }
 
 // ---------------------------------------------------------------------------
 // Add enrollment dialog
