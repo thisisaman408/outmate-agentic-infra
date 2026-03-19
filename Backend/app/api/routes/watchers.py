@@ -21,7 +21,6 @@ router = APIRouter(
 
 # Alias router so legacy frontend bundles calling /api/watchers still work
 legacy_router = APIRouter(
-    prefix="/api/watchers",
     tags=["watchers"]
 )
 
@@ -395,12 +394,15 @@ async def gmail_status():
 # ─────────────────────────────────────────
 # Legacy /api/watchers routes (no /v1/)
 # Mirrors all endpoints above so older frontend bundles still work.
+# Uses explicit full paths (no prefix) to avoid trailing-slash 404s
+# since redirect_slashes=False in the FastAPI app.
 # ─────────────────────────────────────────
-legacy_router.get("/")(list_watchers)
-legacy_router.post("/event")(create_event_watcher)
-legacy_router.post("/account")(create_account_watcher)
-legacy_router.post("/lead")(create_lead_watcher)
-legacy_router.post("/{id}/toggle")(toggle_watcher)
-legacy_router.delete("/{id}")(delete_watcher)
-legacy_router.post("/{id}/sync")(sync_watcher)
-legacy_router.get("/gmail/status")(gmail_status)
+legacy_router.get("/api/watchers")(list_watchers)
+legacy_router.get("/api/watchers/")(list_watchers)
+legacy_router.post("/api/watchers/event")(create_event_watcher)
+legacy_router.post("/api/watchers/account")(create_account_watcher)
+legacy_router.post("/api/watchers/lead")(create_lead_watcher)
+legacy_router.post("/api/watchers/{id}/toggle")(toggle_watcher)
+legacy_router.delete("/api/watchers/{id}")(delete_watcher)
+legacy_router.post("/api/watchers/{id}/sync")(sync_watcher)
+legacy_router.get("/api/watchers/gmail/status")(gmail_status)
