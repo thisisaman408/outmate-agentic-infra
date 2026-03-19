@@ -9,6 +9,7 @@ import logging
 
 from app.services.copilot.copilot_service import CopilotService
 from app.services.copilot.lead_copilot_service import LeadCopilotService
+from app.services.copilot.product_assistant_service import ProductAssistantService
 from app.schemas.copilot import (
     MeetingPrepRequest,
     CampaignOptimizerRequest,
@@ -17,6 +18,8 @@ from app.schemas.copilot import (
     CopilotPreferencesRequest,
     LeadActionType,
     LeadActionRequest,
+    ProductAssistantRequest,
+    ProductAssistantResponse,
 )
 from app.api.deps.auth import get_current_user
 from app.db.deps import get_db
@@ -53,6 +56,7 @@ COPILOT_CREDIT_COSTS = {
     LeadActionType.website_traffic: 1,
     LeadActionType.business_events: 1,
     LeadActionType.linkedin_posts: 2,
+    "product_assistant": 1,
 }
 
 
@@ -508,3 +512,70 @@ async def get_lead_suggestions(
     except Exception as e:
         logger.error(f"Lead suggestions error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
+
+
+# ── Product Assistant (Global Chatbot) ────────────────────────
+
+@router.post("/product-assistant", response_model=ProductAssistantResponse)
+async def ask_product_assistant(
+    request: ProductAssistantRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask the global product assistant a question about Outmate.
+    Costs 1 credit.
+    """
+    cost = COPILOT_CREDIT_COSTS["product_assistant"]
+    _check_credits(db, current_user.id, cost)
+    try:
+        service = ProductAssistantService(db)
+        result = await service.ask(
+            question=request.question,
+            route=request.context.route if request.context else None
+        )
+        _deduct(db, current_user.id, cost, "Copilot: Product assistant query")
+        return result
+    except Exception as e:
+        logger.error(f"Product assistant error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to answer product question: {str(e)}")
+
+
+@router.post("/product-assistant/stream")
+async def ask_product_assistant_stream(
+    request: ProductAssistantRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask the global product assistant a question and stream the answer via SSE.
+    Costs 1 credit (deducted on completion).
+    """
+    cost = COPILOT_CREDIT_COSTS["product_assistant"]
+    _check_credits(db, current_user.id, cost)
+
+    async def event_generator():
+        service = ProductAssistantService(db)
+        credits_deducted = False
+        try:
+            async for chunk in service.stream_ask(
+                question=request.question,
+                route=request.context.route if request.context else None
+            ):
+                if chunk.get("type") == "done" and not credits_deducted:
+                    _deduct(db, current_user.id, cost, "Copilot: Product assistant query (stream)")
+                    credits_deducted = True
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            logger.error(f"Product assistant streaming error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

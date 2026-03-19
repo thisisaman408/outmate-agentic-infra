@@ -1,0 +1,118 @@
+{
+  "features": [
+    {
+      "id": "dashboard",
+      "name": "Main Dashboard",
+      "description": "Overview of your sales performance and active signals.",
+      "route": "/dashboard"
+    },
+    {
+      "id": "signals",
+      "name": "Signals",
+      "description": "Track market-moving events like funding, hiring, and technology changes.",
+      "route": "/signals"
+    },
+    {
+      "id": "leads",
+      "name": "Leads & Prospects",
+      "description": "Search and manage potential companies and decision-makers.",
+      "route": "/leads"
+    },
+    {
+      "id": "campaigns",
+      "name": "Email Campaigns",
+      "description": "Create and manage personalized outreach sequences.",
+      "route": "/campaigns"
+    },
+    {
+      "id": "copilot_daily_brief",
+      "name": "Daily Brief",
+      "description": "A prioritized action list generated for you every morning.",
+      "route": "/copilot/daily-brief"
+    },
+    {
+      "id": "copilot_meeting_prep",
+      "name": "Meeting Prep",
+      "description": "AI-generated research and talking points for upcoming calls.",
+      "route": "/copilot/meeting-prep"
+    },
+    {
+      "id": "copilot_campaign_optimizer",
+      "name": "Campaign Optimizer",
+      "description": "Analyze and improve your email sequences for higher open rates.",
+      "route": "/copilot/campaign-optimizer"
+    },
+    {
+      "id": "settings",
+      "name": "Settings",
+      "description": "Configure your account, integrations, and copilot preferences.",
+      "route": "/settings"
+    },
+    {
+      "id": "ai_agents",
+      "name": "AI Agents",
+      "description": "Deploy specialized AI agents for GTM, compliance, and growth tasks.",
+      "route": "/ai-agents"
+    },
+    {
+      "id": "ai_powered_search",
+      "name": "AI Powered Search",
+      "description": "Search for companies and prospects using AI-driven filtering.",
+      "route": "/ai-powered-search"
+    },
+    {
+      "id": "analytics",
+      "name": "Analytics",
+      "description": "Detailed insights into your sales performance and agent effectiveness.",
+      "route": "/analytics"
+    },
+    {
+      "id": "copilot_pipeline_alerts",
+      "name": "Pipeline Alerts",
+      "description": "Identify stale deals and risk factors in your sales pipeline.",
+      "route": "/copilot/pipeline-alerts"
+    },
+    {
+      "id": "copilot_settings",
+      "name": "Copilot Settings",
+      "description": "Customize your AI copilot's behavior and notification triggers.",
+      "route": "/copilot/settings"
+    },
+    {
+      "id": "integrations",
+      "name": "Integrations",
+      "description": "Connect Outmate with your CRM and other third-party tools.",
+      "route": "/integrations"
+    },
+    {
+      "id": "prompt_search",
+      "name": "Prompt Search",
+      "description": "Natural language search interface for finding leads and companies.",
+      "route": "/prompt-search"
+    },
+    {
+      "id": "scoring",
+      "name": "Lead Scoring",
+      "description": "Predictive scoring for lead conversion and prioritization.",
+      "route": "/scoring"
+    },
+    {
+      "id": "visitors",
+      "name": "Visitor Tracker",
+      "description": "Monitor and identify anonymous visitors on your website.",
+      "route": "/visitors"
+    },
+    {
+      "id": "workflows",
+      "name": "Workflows",
+      "description": "Automate your sales motions with custom playbooks.",
+      "route": "/workflows"
+    },
+    {
+      "id": "copilot_main",
+      "name": "Copilot Dashboard",
+      "description": "The central hub for all AI-powered sales assistance.",
+      "route": "/copilot"
+    }
+  ]
+}

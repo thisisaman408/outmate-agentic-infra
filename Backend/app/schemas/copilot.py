@@ -297,3 +297,26 @@ class LeadSuggestion(BaseModel):
 class LeadSuggestionsResponse(BaseModel):
     suggestions: List[LeadSuggestion] = []
     signals_detected: int = 0
+
+
+# ── Product Assistant (Global Chatbot) ────────────────────────
+
+class ProductAssistantContext(BaseModel):
+    route: Optional[str] = None
+    feature_hint: Optional[str] = None
+
+
+class ProductAssistantRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    context: Optional[ProductAssistantContext] = None
+
+
+class ProductAssistantLink(BaseModel):
+    label: str
+    url: str
+
+
+class ProductAssistantResponse(BaseModel):
+    answer: str
+    related_links: List[ProductAssistantLink] = []
+    feature_tags: List[str] = []
