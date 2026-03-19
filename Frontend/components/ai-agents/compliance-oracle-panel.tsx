@@ -24,8 +24,12 @@ export function ComplianceOraclePanel() {
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
   const [inlineError, setInlineError] = useState<string | null>(null)
+  const [clickCount, setClickCount] = useState(0)
+  const [lastClickAt, setLastClickAt] = useState<string | null>(null)
 
   const handleRun = async () => {
+    setClickCount((prev) => prev + 1)
+    setLastClickAt(new Date().toLocaleTimeString())
     if (!template.trim()) {
       setInlineError("Paste the outbound copy to analyze.")
       toast({
@@ -61,7 +65,7 @@ export function ComplianceOraclePanel() {
 
   return (
     <div className="space-y-6">
-      <Card className="glass-effect border-white/10">
+      <Card className="glass-effect border-white/10 pointer-events-auto">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl font-bold">
             <span className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
@@ -73,7 +77,7 @@ export function ComplianceOraclePanel() {
             Check and rewrite your sequences for global outreach compliance without killing performance.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pointer-events-auto">
           <div className="space-y-2">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Jurisdictions
@@ -105,7 +109,7 @@ export function ComplianceOraclePanel() {
             type="button"
             onClick={handleRun}
             disabled={isRunning}
-            className="mt-2 w-full md:w-auto h-11 font-semibold rounded-xl"
+            className="mt-2 w-full md:w-auto h-11 font-semibold rounded-xl pointer-events-auto"
           >
             {isRunning ? (
               <>
@@ -119,6 +123,9 @@ export function ComplianceOraclePanel() {
               </>
             )}
           </Button>
+          <p className="text-[10px] text-muted-foreground">
+            Clicks: {clickCount} {lastClickAt ? `· Last click ${lastClickAt}` : ""}
+          </p>
         </CardContent>
       </Card>
 
