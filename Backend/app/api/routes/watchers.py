@@ -175,14 +175,19 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
         if w["type"] == "account":
             bid = db_w.business_id
             if not bid and w.get("accountDomain"):
-                match_res = await svc.match_businesses([{"domain": w["accountDomain"], "name": w.get("accountName")}])
-                matched = match_res.get("matched_businesses") or []
-                if matched:
-                    bid = matched[0].get("business_id")
-                    db_w.business_id = bid
+                try:
+                    match_res = await svc.match_businesses([{"domain": w["accountDomain"], "name": w.get("accountName")}])
+                    matched = match_res.get("matched_businesses") or []
+                    if matched:
+                        bid = matched[0].get("business_id")
+                        db_w.business_id = bid
+                        logger.info(f">>> [Account Sync] Matched business_id: {bid} for {w.get('accountDomain')}")
+                except Exception as e:
+                    logger.error(f"Business match failed for {w.get('accountDomain')}: {e}")
 
             updates = []
             if bid:
+                # 1. Website changes
                 try:
                     ts_from = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
                     ws_res = await svc.enrich_website_changes(bid, timestamp_from=ts_from)
@@ -208,6 +213,50 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                 except Exception as e:
                     logger.error(f"Website changes failed: {e}")
 
+                # 2. Business events (funding, M&A, etc.)
+                try:
+                    event_types = ["new_funding_round", "merger_and_acquisitions",
+                                   "ipo_announcement", "cost_cutting", "team_expansion"]
+                    ts_from = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                    ev_res = await svc.fetch_business_events([bid], event_types, timestamp_from=ts_from)
+                    ev_data = ev_res.get("data", [])
+                    for ev in ev_data:
+                        updates.append({
+                            "id": f"bev-{ev.get('event_id') or uuid4()}",
+                            "type": ev.get("event_type", "business_signal"),
+                            "description": ev.get("event_description") or f"Signal: {ev.get('event_type', 'update')}",
+                            "date": ev.get("event_timestamp", datetime.now(timezone.utc).isoformat())
+                        })
+                except Exception as e:
+                    logger.error(f"Business events failed: {e}")
+
+                # 3. Firmographics as fallback info
+                if not updates:
+                    try:
+                        fg_res = await svc.bulk_enrich_firmographics([bid])
+                        fg_data = fg_res.get("data", [])
+                        if fg_data:
+                            info = fg_data[0].get("data") or fg_data[0]
+                            name = info.get("company_name") or w.get("accountName", "Company")
+                            industry = info.get("industry") or "N/A"
+                            employees = info.get("employee_count") or info.get("number_of_employees") or "N/A"
+                            updates.append({
+                                "id": f"fg-{uuid4()}",
+                                "type": "firmographics",
+                                "description": f"Company profile: {name} — Industry: {industry}, Employees: {employees}",
+                                "date": datetime.now(timezone.utc).isoformat()
+                            })
+                    except Exception as e:
+                        logger.error(f"Firmographics fallback failed: {e}")
+            else:
+                logger.warning(f">>> [Account Sync] Could not match business for domain: {w.get('accountDomain')}")
+                updates.append({
+                    "id": f"info-{uuid4()}",
+                    "type": "info",
+                    "description": f"Could not find a matching business record for {w.get('accountDomain') or w.get('accountName', 'this account')}. Please verify the domain is correct.",
+                    "date": datetime.now(timezone.utc).isoformat()
+                })
+
             db_w.recent_updates = updates
             db_w.match_count = str(len(updates))
 
@@ -225,26 +274,34 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                         if matched and matched[0].get("prospect_id"):
                             prospect_id = matched[0].get("prospect_id")
                             db_w.prospect_id = prospect_id
+                            logger.info(f">>> [Lead Sync] Matched prospect_id: {prospect_id}")
                     except Exception as e:
                         logger.error(f"Lead match failed: {e}")
 
             updates = []
             if prospect_id:
-                try:
-                    raw_triggers = db_w.triggers or []
-                    mapped = []
-                    for t in raw_triggers:
-                        if t == "job_change":
-                            mapped.extend(["prospect_changed_role", "prospect_changed_company"])
-                        elif t == "promotion":
-                            mapped.append("prospect_changed_role")
-                        elif t == "employee_joined_company":
-                            mapped.append("prospect_changed_company")
-                    if not mapped:
-                        mapped = ["prospect_changed_role", "prospect_changed_company", "prospect_job_start_anniversary"]
-                    else:
-                        mapped = list(set(mapped))
+                # Map human-readable trigger names from frontend to Explorium event types
+                trigger_map = {
+                    "Role Change": ["prospect_changed_role"],
+                    "Company Change": ["prospect_changed_company"],
+                    "Job Anniversary": ["prospect_job_start_anniversary"],
+                    "Content Published": ["prospect_changed_role"],
+                    "Speaking Engagements": ["prospect_changed_role"],
+                    "Social Media Activity": ["prospect_changed_role"],
+                    # Legacy API-style triggers
+                    "job_change": ["prospect_changed_role", "prospect_changed_company"],
+                    "promotion": ["prospect_changed_role"],
+                    "employee_joined_company": ["prospect_changed_company"],
+                }
+                raw_triggers = db_w.triggers or []
+                mapped = []
+                for t in raw_triggers:
+                    mapped.extend(trigger_map.get(t, []))
+                mapped = list(set(mapped)) if mapped else [
+                    "prospect_changed_role", "prospect_changed_company", "prospect_job_start_anniversary"
+                ]
 
+                try:
                     events_res = await svc.fetch_prospect_events([prospect_id], mapped)
                     events_data = events_res.get("data", [])
                 except Exception as e:
@@ -275,22 +332,27 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                                 updates.append({
                                     "id": f"pev-c-{uuid4()}",
                                     "type": "contact_update",
-                                    "description": f"Verified new contact information: {addr} ({email_type})",
+                                    "description": f"Verified contact: {addr} ({email_type})",
                                     "date": datetime.now(timezone.utc).isoformat()
                                 })
-                                logger.info(">>> [Lead Sync] Appended email update.")
                             elif phones:
                                 updates.append({
                                     "id": f"pev-c-{uuid4()}",
                                     "type": "contact_update",
-                                    "description": "Verified new direct dial phone number.",
+                                    "description": "Verified direct dial phone number.",
                                     "date": datetime.now(timezone.utc).isoformat()
                                 })
-                                logger.info(">>> [Lead Sync] Appended phone update.")
-                            else:
-                                logger.info(">>> [Lead Sync] No emails or phones found.")
                     except Exception as e:
                         logger.error(f"Fallback contact enrich failed: {e}")
+            else:
+                lead_desc = db_w.lead_name or db_w.lead_email or "this lead"
+                logger.warning(f">>> [Lead Sync] Could not match prospect for: {lead_desc}")
+                updates.append({
+                    "id": f"info-{uuid4()}",
+                    "type": "info",
+                    "description": f"Could not find a matching prospect record for {lead_desc}. Try adding an email address for better matching.",
+                    "date": datetime.now(timezone.utc).isoformat()
+                })
 
             logger.info(f">>> [Lead Sync] Total updates: {len(updates)}")
             db_w.recent_updates = updates
@@ -298,8 +360,11 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
 
         elif w["type"] == "event" and w.get("criteria"):
             criteria = w.get("criteria") or {}
-            if not criteria.get("event_type"):
-                criteria["event_type"] = ["merger_and_acquisitions", "new_funding_round"]
+            # Use the user-selected event types; only fall back when none were chosen
+            user_event_types = criteria.get("event_type") or []
+            if not user_event_types:
+                user_event_types = ["New Funding Round", "Merger & Acquisitions"]
+                criteria["event_type"] = user_event_types
             if "last_occurrence" not in criteria:
                 criteria["last_occurrence"] = 90
 
@@ -309,7 +374,8 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
             matches = []
             for item in data:
                 biz = svc.normalize_company(item)
-                event_types = criteria.get("event_type", ["merger_and_acquisitions"])
+                # Display the user's chosen event type(s), not the API identifier
+                display_type = user_event_types[0] if user_event_types else "Business Signal"
                 matches.append({
                     "id": f"match-{biz['id']}",
                     "company": {
@@ -318,8 +384,8 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                         "logo": biz["logo_url"] or f"https://api.dicebear.com/7.x/initials/svg?seed={biz['name'][:2]}"
                     },
                     "event": {
-                        "type": event_types[0] if event_types else "Business Signal",
-                        "description": biz["description"] or "Recent signal identified via Explorium Event Stream.",
+                        "type": display_type,
+                        "description": biz["description"] or f"Recent {display_type.lower()} signal identified via Explorium Event Stream.",
                         "date": datetime.now(timezone.utc).isoformat()
                     },
                     "matchedAt": datetime.now(timezone.utc).isoformat()
