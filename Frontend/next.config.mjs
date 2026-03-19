@@ -9,6 +9,17 @@ const nextConfig = {
   },
   // Next.js 16 uses Turbopack by default — acknowledge it
   turbopack: {},
+  async headers() {
+    return [
+      {
+        // HTML pages should always be revalidated so new deployments take effect
+        source: '/((?!_next/static|_next/image|favicon.ico).*)',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     // In development we may want to proxy requests to a local backend. In
     // production the frontend uses NEXT_PUBLIC_API_URL when making fetch calls,
