@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [timeSeriesData, setTimeSeriesData] = useState<TimeSeriesData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [today, setToday] = useState("")
 
   const fetchData = async (isRefresh = false) => {
     if (isRefresh) setIsRefreshing(true)
@@ -56,9 +57,10 @@ export default function DashboardPage() {
     }
   }
 
-  useEffect(() => { fetchData() }, [])
-
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
+  useEffect(() => {
+    fetchData()
+    setToday(new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }))
+  }, [])
   const buildStamp = process.env.NEXT_PUBLIC_BUILD_SHA ?? "local"
 
   return (

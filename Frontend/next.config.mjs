@@ -10,7 +10,14 @@ const nextConfig = {
   // Next.js 16 uses Turbopack by default — acknowledge it
   turbopack: {},
   async headers() {
+    const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || process.env.GITHUB_SHA || 'unknown';
     return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Outmate-Build', value: buildSha },
+        ],
+      },
       {
         // HTML pages should always be revalidated so new deployments take effect
         source: '/((?!_next/static|_next/image|favicon.ico).*)',
