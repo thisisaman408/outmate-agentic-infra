@@ -38,6 +38,7 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://dev.outmate.ai
           NEXT_PUBLIC_PIXEL_KEY: pk_8673a1dd795f70ba14f96478d7409ac2
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
           NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
           NEXT_DISABLE_TURBOPACK: "1"
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder

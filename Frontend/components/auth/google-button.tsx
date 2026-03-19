@@ -58,7 +58,13 @@ export function GoogleButton({ onCredential, text = "continue_with", disabled }:
     if (ready) renderButton()
   }, [ready, text, disabled])
 
-  if (!clientId) return null
+  if (!clientId) {
+    return (
+      <div className="w-full text-center text-xs text-muted-foreground">
+        Google sign-in is unavailable. Missing client ID.
+      </div>
+    )
+  }
 
   return (
     <>
