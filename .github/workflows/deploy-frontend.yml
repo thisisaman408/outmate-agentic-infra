@@ -29,9 +29,11 @@ jobs:
         working-directory: Frontend
         run: npm install --force
 
-      - name: Build
+      - name: Build (clean)
         working-directory: Frontend
-        run: npm run build
+        run: |
+          rm -rf .next
+          npm run build
         env:
           NEXT_PUBLIC_API_URL: https://dev.outmate.ai
           NEXT_PUBLIC_PIXEL_KEY: pk_8673a1dd795f70ba14f96478d7409ac2
@@ -44,7 +46,7 @@ jobs:
       - name: Build and push image
         run: |
           cd Frontend
-          docker build --platform linux/amd64 -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest .
+          docker build --no-cache --platform linux/amd64 -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest .
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
 
