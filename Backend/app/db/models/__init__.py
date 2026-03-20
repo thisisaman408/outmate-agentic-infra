@@ -19,6 +19,7 @@ from app.db.models.copilot_campaign_analysis import CopilotCampaignAnalysis
 from app.db.models.copilot_pipeline_alert import CopilotPipelineAlert
 from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.db.models.watcher import Watcher
+from app.db.models.identity_graph import IdentityNode
 
 __all__ = [
     "User",
@@ -44,4 +45,5 @@ __all__ = [
     "CopilotCampaignAnalysis",
     "CopilotPipelineAlert",
     "CopilotUserPreferences",
+    "IdentityNode",
 ]

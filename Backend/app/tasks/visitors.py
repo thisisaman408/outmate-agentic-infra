@@ -131,7 +131,7 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
 
         logger.info("Starting enrichment for IP: %s (email=%s, visitor_id=%s, org=%s)", ip, email, visitor_id, org_id)
         enricher = VisitorEnricher()
-        resolution = await enricher.enrich_ip(ip, url, intent_score, email=email)
+        resolution = await enricher.enrich_ip(ip, url, intent_score, email=email, visitor_id=visitor_id)
 
         # Tag every visit with the pixel owner's domain so the dashboard can
         # show which customer site the visitor came from even when IP enrichment
