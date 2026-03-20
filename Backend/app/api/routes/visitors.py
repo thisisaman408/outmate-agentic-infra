@@ -245,6 +245,8 @@ async def track_visitor(request: Request):
         email = data.get("email") or None
         referrer = data.get("referrer") or data.get("ref") or data.get("Ref")
         visitor_id = data.get("visitor_id")
+        action = data.get("action") or "pageview"
+        dwell_time = data.get("dwell_time")
 
         if not url:
             return JSONResponse(
@@ -308,6 +310,8 @@ async def track_visitor(request: Request):
         from app.tasks.visitors import process_visitor_task, _process_visitor_data
 
         payload = {
+            "action": action,
+            "dwell_time": dwell_time,
             "ip": ip,
             "url": url,
             "referrer": referrer,
@@ -551,6 +555,7 @@ async def list_visitors(
     offset: int = Query(default=0, ge=0),
     matched_only: bool = Query(default=False),
     category: Optional[str] = Query(default=None),
+    min_icp_score: Optional[int] = Query(default=None, ge=0, le=100),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -563,9 +568,18 @@ async def list_visitors(
         def _query():
             db = SessionLocal()
             try:
+                from sqlalchemy import cast, Integer
                 q = db.query(Visit).filter(Visit.org_id == org_id)
+                
                 if matched_only:
                     q = q.filter(Visit.matched == True)  # noqa: E712
+                    
+                if category and category in ("company", "prospect", "unknown"):
+                    q = q.filter(Visit.resolution.op("->>")("category") == category)
+                    
+                if min_icp_score is not None:
+                    q = q.filter(cast(Visit.resolution.op("->>")("icp_score"), Integer) >= min_icp_score)
+
                 total = q.count()
                 visits = (
                     q.order_by(Visit.created_at.desc())
@@ -574,9 +588,7 @@ async def list_visitors(
                     .all()
                 )
                 items = [_visit_to_dict(v) for v in visits]
-                # Client-side category filter (applied after JSONB fetch)
-                if category and category in ("company", "prospect", "unknown"):
-                    items = [v for v in items if v.get("category") == category]
+                
                 return {
                     "visits": items,
                     "total": total,
@@ -837,6 +849,23 @@ async def get_visitor_analytics(
                     for k, v in sorted(buckets.items(), key=lambda kv: kv[0])
                 ]
 
+                # Calculate bounce rate and conversions
+                visitor_pageviews = Counter()
+                conversions = 0
+                for r in rows:
+                    res = r.resolution or {}
+                    if res.get("visitor_id"):
+                        visitor_pageviews[res["visitor_id"]] += 1
+                    try:
+                        if float(r.intent_score or 0) >= 1.0:
+                            conversions += 1
+                    except Exception:
+                        pass
+
+                total_sessions = len(visitor_pageviews)
+                sessions_one_pageview = sum(1 for count in visitor_pageviews.values() if count == 1)
+                bounce_rate = round((sessions_one_pageview / total_sessions * 100), 1) if total_sessions > 0 else 0
+
                 return {
                     "window": {"hours": hours, "since": since.isoformat(), "use_daily": use_daily},
                     "live": {"window_minutes": live_window_minutes, "unique_ips": len(live_ips)},
@@ -846,6 +875,9 @@ async def get_visitor_analytics(
                         "companies": company_count,
                         "prospects": prospect_count,
                         "match_rate": round(matched_count / total * 100, 1) if total else 0,
+                        "bounce_rate": bounce_rate,
+                        "total_sessions": total_sessions,
+                        "conversions": conversions,
                     },
                     "timeseries": timeseries,
                     "top_pages": [{"page": p, "count": c} for p, c in page_counts.most_common(top_n)],
