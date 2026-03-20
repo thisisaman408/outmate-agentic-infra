@@ -1078,8 +1078,8 @@ export default function DatabaseFinderPage() {
     const queryLower = query.toLowerCase()
     const prospectKeywords = [
       'people', 'prospects', 'person', 'contacts', 'vp', 'ceo', 'cto', 'head of', 'manager',
-      'engineer', 'decision makers', 'directors', 'founders', 'who is', 'who are', 'who works',
-      'profiles', 'emails', 'phones'
+      'engineer', 'decision makers', 'decision maker', 'decisions', 'directors', 'founders',
+      'who is', 'who are', 'who works', 'profiles', 'emails', 'phones', 'leaders', 'executives'
     ]
 
     // If ANY prospect keyword or signal is found, it's a prospect search
@@ -1163,36 +1163,74 @@ export default function DatabaseFinderPage() {
       extractedFilters.company_type = ['B2C']
     }
 
-    // 4. Extract company size
+    // 4. Extract company size — normalize to valid CrustData ranges
+    const CRUSTDATA_RANGES = [
+      { min: 1, max: 10, label: "1-10" },
+      { min: 11, max: 50, label: "11-50" },
+      { min: 51, max: 200, label: "51-200" },
+      { min: 201, max: 500, label: "201-500" },
+      { min: 501, max: 1000, label: "501-1000" },
+      { min: 1001, max: 5000, label: "1001-5000" },
+      { min: 5001, max: 10000, label: "5001-10000" },
+      { min: 10001, max: Infinity, label: "10001+" },
+    ]
+    const mapToCrustdataRanges = (low: number, high: number): string[] =>
+      CRUSTDATA_RANGES.filter(r => r.max >= low && r.min <= high).map(r => r.label)
+    const mapSingleNumber = (n: number): string[] =>
+      CRUSTDATA_RANGES.filter(r => n >= r.min && n <= r.max).map(r => r.label)
+
     const sizePatterns = [
       { pattern: /(\d+)\s*-\s*(\d+)/i, range: true },
       { pattern: /(\d+)\s+to\s+(\d+)/i, range: true },
-      { pattern: /\b(small|startup)\b/i, values: ['1-50'] },
+      { pattern: /company\s+(?:size|of)\s+(\d+)\b/i, single: true },
+      { pattern: /(\d+)\s+employees?\b/i, single: true },
+      { pattern: /\b(small|startup)\b/i, values: ['1-10', '11-50'] },
       { pattern: /\b(mid-size|medium)\b/i, values: ['51-200', '201-500'] },
-      { pattern: /\b(large|enterprise)\b/i, values: ['501-1000', '1001-5000', '5001+'] },
+      { pattern: /\b(large|enterprise)\b/i, values: ['501-1000', '1001-5000', '5001-10000'] },
     ]
 
-    for (const { pattern, range, values } of sizePatterns as any[]) {
-      const match = queryLower.match(pattern)
-      if (match && range) {
-        extractedFilters.company_size = [`${match[1]}-${match[2]}`]
+    for (const sp of sizePatterns as any[]) {
+      const match = queryLower.match(sp.pattern)
+      if (match && sp.range) {
+        extractedFilters.company_size = mapToCrustdataRanges(parseInt(match[1]), parseInt(match[2]))
         break
-      } else if (match && values) {
-        extractedFilters.company_size = values
+      } else if (match && sp.single) {
+        extractedFilters.company_size = mapSingleNumber(parseInt(match[1]))
+        break
+      } else if (match && sp.values) {
+        extractedFilters.company_size = sp.values
         break
       }
     }
 
     // 5. Extract Job Titles (for prospect searches)
-    const titleKeywords = [
-      'marketing', 'sales', 'ceo', 'cto', 'vpo', 'vp', 'executive', 'founder',
-      'developer', 'engineer', 'manager', 'director', 'head of', 'product',
-      'operations', 'finance', 'hr', 'recruiter', 'legal'
+    const titleKeywords: { pattern: RegExp; label: string }[] = [
+      { pattern: /\bmarket+ing\b/, label: 'Marketing' },
+      { pattern: /\bsales\b/, label: 'Sales' },
+      { pattern: /\bceo\b/, label: 'CEO' },
+      { pattern: /\bcto\b/, label: 'CTO' },
+      { pattern: /\bcmo\b/, label: 'CMO' },
+      { pattern: /\bvpo?\b/, label: 'VP' },
+      { pattern: /\bexecutive\b/, label: 'Executive' },
+      { pattern: /\bfounder\b/, label: 'Founder' },
+      { pattern: /\bdeveloper\b/, label: 'Developer' },
+      { pattern: /\bengine+r\b/, label: 'Engineer' },
+      { pattern: /\bmanager\b/, label: 'Manager' },
+      { pattern: /\bdirector\b/, label: 'Director' },
+      { pattern: /\bhead of\b/, label: 'Head of' },
+      { pattern: /\bproduct\b/, label: 'Product' },
+      { pattern: /\boperations\b/, label: 'Operations' },
+      { pattern: /\bfinance\b/, label: 'Finance' },
+      { pattern: /\bhr\b/, label: 'HR' },
+      { pattern: /\brecruiter\b/, label: 'Recruiter' },
+      { pattern: /\blegal\b/, label: 'Legal' },
+      { pattern: /\bgtm\b/, label: 'GTM' },
+      { pattern: /\brevops\b/, label: 'RevOps' },
     ]
     const extractedTitles: string[] = []
     for (const tk of titleKeywords) {
-      if (queryLower.includes(tk)) {
-        extractedTitles.push(tk.charAt(0).toUpperCase() + tk.slice(1))
+      if (tk.pattern.test(queryLower)) {
+        extractedTitles.push(tk.label)
       }
     }
     if (extractedTitles.length > 0) {
