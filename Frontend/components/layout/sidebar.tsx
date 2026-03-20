@@ -26,6 +26,8 @@ import {
   Globe,
   Eye,
   Sparkles,
+  Cpu,
+  ExternalLink,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -36,8 +38,11 @@ type NavItem = {
   name: string
   href: string
   icon: any
+  external?: boolean
   children?: { name: string; href: string; icon?: any }[]
 }
+
+const AGENTIC_INFRA_URL = process.env.NEXT_PUBLIC_AGENTIC_URL || (process.env.NODE_ENV === "production" ? "https://outmate-agentic.greenbeach-bf0c913b.eastus.azurecontainerapps.io" : "http://localhost:7860")
 
 const navItems: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -72,6 +77,7 @@ const navItems: NavItem[] = [
   { name: "Workflows", href: "/workflows", icon: Workflow },
   { name: "Co-Pilot", href: "/copilot", icon: Sparkles },
   { name: "AI Agents", href: "/ai-agents", icon: Bot },
+  { name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true },
   { name: "Integrations", href: "/integrations", icon: Plug },
   { name: "Settings", href: "/settings", icon: Settings },
 ]
@@ -210,6 +216,30 @@ export function Sidebar() {
                       )}
                     </AnimatePresence>
                   </>
+                ) : item.external ? (
+                  <a href={item.href}>
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 relative group",
+                        "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                        !sidebarCollapsed && "justify-start",
+                        sidebarCollapsed && "justify-center",
+                      )}
+                    >
+                      <Icon className="h-5 w-5 shrink-0" />
+                      {!sidebarCollapsed && (
+                        <span className="tracking-tight flex-1">{item.name}</span>
+                      )}
+                      {!sidebarCollapsed && (
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                      )}
+                      {sidebarCollapsed && (
+                        <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                          {item.name}
+                        </div>
+                      )}
+                    </div>
+                  </a>
                 ) : (
                   <Link href={item.href}>
                     <div

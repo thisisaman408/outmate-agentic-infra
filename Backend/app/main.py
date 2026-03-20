@@ -46,6 +46,7 @@ from app.api.routes import visitors
 from app.api.routes import diagnostics
 from app.api.routes import copilot
 from app.api.routes import watchers
+from app.api.routes import dashboard
 
 # Register routers
 
@@ -231,12 +232,20 @@ app.include_router(visitors.public_router)
 # Protected dashboard endpoints — JWT required
 app.include_router(visitors.router, dependencies=auth_dependencies)
 logger.info("Visitors router registered")
-app.include_router(watchers.router, prefix="/api/watchers", tags=["watchers"], dependencies=auth_dependencies)
+app.include_router(watchers.router, dependencies=auth_dependencies)
+# Legacy /api/watchers routes: the old frontend bundle doesn't send
+# Authorization headers, so these are registered WITHOUT auth.
+# The watchers table has no user_id column, so there is no data leak.
+# TODO: remove once the frontend cache rotates to the new bundle.
+app.include_router(watchers.legacy_router)
 logger.info("Watchers router registered")
 
 # Diagnostics endpoints for health checks
 app.include_router(diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"])
 logger.info("Diagnostics router registered")
+
+app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"], dependencies=auth_dependencies)
+logger.info("Dashboard router registered")
 
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
 logger.info("Copilot router registered")
@@ -385,4 +394,3 @@ def openai_models():
         ],
         "object": "list"
     }
-

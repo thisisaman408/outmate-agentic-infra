@@ -23,27 +23,47 @@ import { Badge } from "@/components/ui/badge"
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
-    ...init
-  })
-  if (res.status === 204) return null as unknown as T
-  const body = await res.json()
-  if (!res.ok) throw new Error(body.detail ?? res.statusText)
-  return body as T
+  const token = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null;
+  console.log(`[Watcher API Request] Fetching: ${path}`, { hasToken: !!token });
+  
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      credentials: "include",
+      headers: { 
+        "Content-Type": "application/json", 
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}) 
+      },
+      ...init
+    })
+    
+    if (res.status === 204) return null as unknown as T
+    
+    if (!res.ok) {
+      console.error(`[Watcher API Error] ${res.status} ${res.statusText} for ${path}`);
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || res.statusText || `Request failed with status ${res.status}`);
+    }
+    
+    const body = await res.json()
+    console.log(`[Watcher API Success] ${path} returned:`, body);
+    return body as T
+  } catch (err) {
+    console.error(`[Watcher API Fetch Catch] ${path}:`, err);
+    throw err;
+  }
 }
 
 const api = {
-  listByType:    (type: string)                  => req<Watcher[]>(`/api/watchers?type=${type}`),
-  createEvent:   (p: Record<string, unknown>)   => req<Watcher>("/api/watchers/event",   { method: "POST", body: JSON.stringify(p) }),
-  createAccount: (p: Record<string, unknown>)   => req<Watcher>("/api/watchers/account", { method: "POST", body: JSON.stringify(p) }),
-  createLead:    (p: Record<string, unknown>)   => req<Watcher>("/api/watchers/lead",    { method: "POST", body: JSON.stringify(p) }),
-  toggle:        (id: string)                   => req<Watcher>(`/api/watchers/${id}/toggle`, { method: "POST" }),
-  remove:        (id: string)                   => req<void>   (`/api/watchers/${id}`,        { method: "DELETE" }),
-  sync:          (id: string)                   => req<Watcher>(`/api/watchers/${id}/sync`,   { method: "POST" }),
-  gmailStatus:   ()                             => req<{ connected: boolean; email: string | null }>("/api/watchers/gmail/status"),
-  gmailAuthUrl:  ()                             => req<{ auth_url: string }>(`/api/campaigns/gmail/auth-url?return_to=/leads/watcher`),
+  listByType:    (type: string)                  => req<Watcher[]>(`/api/v1/watchers/?type=${type}`),
+  createEvent:   (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/event/",   { method: "POST", body: JSON.stringify(p) }),
+  createAccount: (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/account/", { method: "POST", body: JSON.stringify(p) }),
+  createLead:    (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/lead/",    { method: "POST", body: JSON.stringify(p) }),
+  toggle:        (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/toggle/`, { method: "POST" }),
+  remove:        (id: string)                   => req<void>   (`/api/v1/watchers/${id}/`,        { method: "DELETE" }),
+  sync:          (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/sync/`,   { method: "POST" }),
+  gmailStatus:   ()                             => req<{ connected: boolean; email: string | null }>("/api/v1/watchers/gmail/status/"),
+  gmailAuthUrl:  ()                             => req<{ auth_url: string }>(`/api/v1/campaigns/gmail/auth-url?return_to=/leads/watcher`),
 }
 
 // ──────────────────────────────────────────────
@@ -260,10 +280,15 @@ export default function WatcherPage() {
 
           {/* error banner */}
           {error && (
-            <div className="mx-4 mt-4 flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/8 p-3">
-              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-              <p className="text-sm text-red-600 flex-1">{error}</p>
-              <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-500/10" onClick={() => setError(null)}>Dismiss</Button>
+            <div className="mx-4 mt-4 flex flex-col gap-3 rounded-lg border border-red-500/30 bg-red-500/8 p-4">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                <p className="text-sm font-bold text-red-600 flex-1">DEBUG ERROR: {error}</p>
+                <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-500/10" onClick={() => setError(null)}>Dismiss</Button>
+              </div>
+              <div className="mt-2 p-2 bg-black/10 rounded text-[10px] font-mono text-red-800 break-all">
+                BASE: {BASE} | API Path: /api/v1/watchers
+              </div>
             </div>
           )}
 

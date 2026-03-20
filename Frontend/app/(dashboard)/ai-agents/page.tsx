@@ -194,7 +194,7 @@ export default function AIAgentsPage() {
       >
         <div className="absolute -inset-4 bg-primary/5 blur-3xl rounded-[3rem] -z-10" />
         <div className="p-1 rounded-[2.5rem] bg-gradient-to-br from-white/10 to-transparent border border-white/5">
-          <div className="rounded-[2.4rem] bg-background/60 dark:bg-card/40 backdrop-blur-3xl overflow-hidden p-8 min-h-[500px]">
+          <div className="rounded-[2.4rem] bg-background/60 dark:bg-card/40 backdrop-blur-3xl overflow-hidden p-8 min-h-[500px] pointer-events-auto relative z-10">
             {activeAgent && <activeAgent.component />}
           </div>
         </div>
