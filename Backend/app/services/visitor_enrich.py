@@ -142,6 +142,8 @@ class VisitorEnricher:
             "full_name": None,
             "linkedin_url": None,
             "job_title": None,
+            "decision_makers": [],
+            "logo_url": None,
             # Enrichment source flags (for debugging)
             "_sources": [],
         }
@@ -181,6 +183,10 @@ class VisitorEnricher:
 
             # ── STEP 5: Explorium firmographics ──────────────────────────────
             await self._step_explorium(resolution)
+
+            # ── Append default Logo ──────────────────────────────────────────
+            if resolution.get("domain") and not resolution.get("logo_url"):
+                resolution["logo_url"] = f"https://logo.clearbit.com/{resolution['domain']}"
 
         except Exception as e:
             logger.error("[Enrichment] Unhandled fatal error: %s", e, exc_info=True)
@@ -523,14 +529,29 @@ class VisitorEnricher:
                 logger.info("[Enrichment] Step 4: No DMs found for %s", domain)
                 return
 
-            # Pick the highest-seniority profile
-            dm = next(iter(profiles.values()))
-            resolution["full_name"] = resolution.get("full_name") or dm.get("full_name")
-            resolution["job_title"] = resolution.get("job_title") or dm.get("title")
-            resolution["linkedin_url"] = resolution.get("linkedin_url") or dm.get("linkedin_url")
+            # Extract up to 5 top decision makers
+            top_dms = []
+            for profile_id, dm_data in list(profiles.items())[:5]:
+                top_dms.append({
+                    "full_name": dm_data.get("full_name") or dm_data.get("name"),
+                    "job_title": dm_data.get("title") or dm_data.get("headline"),
+                    "linkedin_url": dm_data.get("linkedin_url") or dm_data.get("linkedin"),
+                    "email": dm_data.get("work_email") or dm_data.get("personal_email"),
+                })
+            
+            resolution["decision_makers"] = top_dms
+
+            # Still pick the highest-seniority for the primary person fields (if missing)
+            if top_dms:
+                primary = top_dms[0]
+                resolution["full_name"] = resolution.get("full_name") or primary.get("full_name")
+                resolution["job_title"] = resolution.get("job_title") or primary.get("job_title")
+                resolution["linkedin_url"] = resolution.get("linkedin_url") or primary.get("linkedin_url")
+                resolution["email"] = resolution.get("email") or primary.get("email")
+
             resolution["_sources"].append("contactout_dm")
             resolution["confidence"] = max(resolution["confidence"], 0.65)
-            logger.info("[Enrichment] Step 4 success: DM=%s (%s)", resolution["full_name"], resolution["job_title"])
+            logger.info("[Enrichment] Step 4 success: %d DMs found (Primary: %s)", len(top_dms), resolution["full_name"])
         except Exception as e:
             logger.warning("[Enrichment] Step 4: ContactOut DM failed: %s", e)
 

@@ -100,7 +100,34 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         email = data.get("email")
         intent_score = data.get("intent_score", 0.5)
         visitor_id = data.get("visitor_id")
+        action = data.get("action", "pageview")
+        dwell_time = data.get("dwell_time")
         source_site = data.get("source_site") or ""
+
+        if action == "leave" and visitor_id and dwell_time is not None:
+            try:
+                from sqlalchemy import text
+                updated = db.execute(
+                    text("""
+                        UPDATE visits
+                        SET resolution = jsonb_set(
+                            COALESCE(resolution, '{}'::jsonb),
+                            '{dwell_time}', to_jsonb(:dwell::numeric)
+                        )
+                        WHERE id = (
+                            SELECT id FROM visits 
+                            WHERE org_id = :org_id AND resolution->>'visitor_id' = :visitor_id AND url = :url
+                            ORDER BY created_at DESC LIMIT 1
+                        )
+                    """),
+                    {"dwell": dwell_time, "org_id": org_id, "visitor_id": visitor_id, "url": url}
+                )
+                db.commit()
+                if updated.rowcount > 0:
+                    logger.info("Updated dwell_time for visitor_id=%s to %sms", visitor_id, dwell_time)
+            except Exception as e:
+                logger.warning("Failed to update dwell_time: %s", e)
+            return
 
         logger.info("Starting enrichment for IP: %s (email=%s, visitor_id=%s, org=%s)", ip, email, visitor_id, org_id)
         enricher = VisitorEnricher()
@@ -114,7 +141,23 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
 
         resolution = _categorize_and_attach(db, resolution)
         category = resolution.get("category", "unknown")
-        logger.info("Categorized visit for %s: %s (org=%s)", ip, category, org_id)
+        
+        # Calculate ICP score
+        def get_icp_score(res: dict) -> int:
+            score = 0
+            if res.get("company"): score += 25
+            if res.get("full_name") or res.get("email"): score += 20
+            exp = res.get("explorium") or {}
+            if exp.get("industry") or exp.get("linkedin_industry_category"): score += 15
+            if exp.get("employee_count_range") or exp.get("employee_count_exact"): score += 15
+            if exp.get("revenue_range"): score += 10
+            if res.get("linkedin_url") or exp.get("linkedin_url"): score += 10
+            if res.get("domain"): score += 5
+            return min(score, 100)
+
+        resolution["icp_score"] = get_icp_score(resolution)
+        
+        logger.info("Categorized visit for %s: %s (ICP: %s, org=%s)", ip, category, resolution["icp_score"], org_id)
 
         if visitor_id:
             resolution["visitor_id"] = visitor_id

@@ -63,19 +63,23 @@
     let _lastTrackedUrl = null;
     let _pageEntryTime = Date.now();
 
-    function track(email, forcedUrl) {
+    function track(email, forcedUrl, action = 'pageview') {
         const url = forcedUrl ?? globalThis.location.href;
 
-        // Avoid double-tracking the exact same URL in the same session (unless email)
-        if (!email && url === _lastTrackedUrl) return;
-        _lastTrackedUrl = url;
+        // Avoid double-tracking the exact same URL in the same session (unless email or leave action)
+        if (!email && action === 'pageview' && url === _lastTrackedUrl) return;
+        if (action === 'pageview') {
+            _lastTrackedUrl = url;
+        }
 
         const payload = JSON.stringify({
+            action: action,
             url,
             referrer: document.referrer || '',
             pixel_key: PIXEL_KEY,
             email: email ?? storageGet(EMAIL_KEY),
             visitor_id: getVisitorId(),
+            dwell_time: action === 'leave' ? (Date.now() - _pageEntryTime) : undefined
         });
 
         // Prefer sendBeacon (reliable on page-unload), fallback to fetch
@@ -106,10 +110,11 @@
             const newUrl = globalThis.location.href;
             if (newUrl !== prevUrl) {
                 const dwell = Date.now() - _pageEntryTime;
-                _pageEntryTime = Date.now();
                 if (dwell >= MIN_DWELL_MS) {
-                    setTimeout(() => track(null, newUrl), 100);
+                    track(null, prevUrl, 'leave'); // finalize previous page
                 }
+                _pageEntryTime = Date.now();
+                setTimeout(() => track(null, newUrl, 'pageview'), 100);
             }
             return result;
         };
@@ -120,9 +125,21 @@
         patchHistoryMethod('replaceState');
         globalThis.addEventListener('popstate', () => {
             const dwell = Date.now() - _pageEntryTime;
-            _pageEntryTime = Date.now();
             if (dwell >= MIN_DWELL_MS) {
-                setTimeout(() => track(null, globalThis.location.href), 100);
+                track(null, _lastTrackedUrl || globalThis.location.href, 'leave');
+            }
+            _pageEntryTime = Date.now();
+            setTimeout(() => track(null, globalThis.location.href, 'pageview'), 100);
+        });
+
+        globalThis.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                const dwell = Date.now() - _pageEntryTime;
+                if (dwell >= MIN_DWELL_MS) {
+                    track(null, globalThis.location.href, 'leave');
+                }
+            } else {
+                _pageEntryTime = Date.now(); // reset clock on re-entry
             }
         });
     }

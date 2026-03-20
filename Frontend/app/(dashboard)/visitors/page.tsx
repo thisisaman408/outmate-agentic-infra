@@ -135,7 +135,7 @@ interface Visit {
 interface VisitorAnalytics {
     window: { hours: number; since: string; use_daily: boolean }
     live: { window_minutes: number; unique_ips: number }
-    summary: { total: number; matched: number; companies: number; prospects: number; match_rate: number }
+    summary: { total: number; matched: number; companies: number; prospects: number; match_rate: number; bounce_rate?: number; total_sessions?: number; conversions?: number }
     timeseries: Array<{
         bucket: string
         total: number
@@ -205,9 +205,11 @@ function extractVisitData(visit: Visit) {
     const technologies: string[] = visit.technologies || visit.resolution?.explorium?.technologies || []
     const fundingStage = visit.funding_stage || visit.resolution?.explorium?.funding_stage
     const sourceSite = visit.source_site || visit.resolution?.source_site || ""
+    const logoUrl = visit.resolution?.logo_url || visit.resolution?.explorium?.logo_url || null
+    const decisionMakers = visit.resolution?.decision_makers || []
     let pagePath = visit.url
     try { pagePath = new URL(visit.url).pathname } catch { }
-    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath, sourceSite }
+    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath, sourceSite, logoUrl, decisionMakers }
 }
 
 // Group visits by company for Companies tab
@@ -230,9 +232,18 @@ function groupByCompany(visits: Visit[]): Array<{
         const contacts = new Map<string, { name: string | null; email: string | null; title: string | null }>()
         for (const v of groupVisits) {
             const d = extractVisitData(v)
-            const key = d.email || d.fullName || v.ip
-            if (!contacts.has(key)) {
-                contacts.set(key, { name: d.fullName || null, email: d.email || null, title: d.jobTitle || null })
+            if (d.decisionMakers && d.decisionMakers.length > 0) {
+                for (const dm of d.decisionMakers) {
+                    const key = dm.email || dm.full_name || dm.linkedin_url
+                    if (key && !contacts.has(key)) {
+                        contacts.set(key, { name: dm.full_name || null, email: dm.email || null, title: dm.job_title || null })
+                    }
+                }
+            } else {
+                const key = d.email || d.fullName || v.ip
+                if (!contacts.has(key)) {
+                    contacts.set(key, { name: d.fullName || null, email: d.email || null, title: d.jobTitle || null })
+                }
             }
         }
         const sorted = [...groupVisits].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -499,12 +510,12 @@ export default function VisitorsPage() {
             })
         }
         if (filter === "hot") result = result.filter(v => v.intent_score >= 0.7)
-        else if (filter === "icp") result = result.filter(v => getIcpScore(v) >= 50)
+        else if (filter === "icp") result = result.filter(v => (v.resolution?.icp_score ?? getIcpScore(v)) >= 50)
         else if (filter === "new") {
             const today = new Date(); today.setHours(0, 0, 0, 0)
             result = result.filter(v => new Date(v.created_at) >= today)
         }
-        if (icpMinScore > 0) result = result.filter(v => getIcpScore(v) >= icpMinScore)
+        if (icpMinScore > 0) result = result.filter(v => (v.resolution?.icp_score ?? getIcpScore(v)) >= icpMinScore)
         return result
     }, [visits, searchQuery, filter, icpMinScore])
 
@@ -513,7 +524,7 @@ export default function VisitorsPage() {
     const hotAccounts = useMemo(() => companyGroups.filter(g => g.totalIntent >= 0.7).length, [companyGroups])
     const icpMatchRate = useMemo(() => {
         if (!visits.length) return 0
-        const matched = visits.filter(v => getIcpScore(v) >= 50).length
+        const matched = visits.filter(v => (v.resolution?.icp_score ?? getIcpScore(v)) >= 50).length
         return Math.round((matched / visits.length) * 100)
     }, [visits])
 
@@ -596,13 +607,15 @@ export default function VisitorsPage() {
                 </div>
 
                 {/* ── Stats Row ────────────────────────────────── */}
-                <div className="grid gap-3 grid-cols-2 md:grid-cols-5 mt-4">
+                <div className="grid gap-3 grid-cols-2 md:grid-cols-4 lg:grid-cols-7 mt-4">
                     {[
-                        { label: "Companies Identified", value: analytics?.summary?.companies ?? companyGroups.length, icon: <Building2 className="h-4 w-4" /> },
-                        { label: "ICP Match Rate", value: `${icpMatchRate}%`, icon: <Target className="h-4 w-4" /> },
+                        { label: "Companies", value: analytics?.summary?.companies ?? companyGroups.length, icon: <Building2 className="h-4 w-4" /> },
+                        { label: "ICP Match", value: `${icpMatchRate}%`, icon: <Target className="h-4 w-4" /> },
                         { label: "Hot Accounts", value: hotAccounts, icon: <Flame className="h-4 w-4" /> },
                         { label: "Prospects", value: analytics?.summary?.prospects ?? "—", icon: <Users className="h-4 w-4" /> },
-                        { label: "Live Online", value: analytics?.live?.unique_ips ?? "—", icon: <Activity className="h-4 w-4" /> },
+                        { label: "Bounce Rate", value: analytics?.summary?.bounce_rate !== undefined ? `${analytics.summary.bounce_rate}%` : "—", icon: <Activity className="h-4 w-4" /> },
+                        { label: "Sessions", value: analytics?.summary?.total_sessions ?? "—", icon: <Layers className="h-4 w-4" /> },
+                        { label: "Conversions", value: analytics?.summary?.conversions ?? "—", icon: <Zap className="h-4 w-4" /> },
                     ].map((s) => (
                         <Card key={s.label} className="py-3">
                             <CardContent className="px-4 py-0">
@@ -832,7 +845,7 @@ export default function VisitorsPage() {
                                     ) : filteredVisits.map((visit) => {
                                         const d = extractVisitData(visit)
                                         const intent = getIntent(visit.intent_score)
-                                        const icp = getIcpScore(visit)
+                                        const icp = visit.resolution?.icp_score ?? getIcpScore(visit)
                                         return (
                                             <TableRow key={visit.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openSidebar(visit)}>
                                                 <TableCell>
@@ -1170,15 +1183,20 @@ export default function VisitorsPage() {
                 <SheetContent className="w-[420px] sm:max-w-[420px] overflow-y-auto">
                     {selectedVisit && (() => {
                         const d = extractVisitData(selectedVisit)
-                        const icp = getIcpScore(selectedVisit)
+                        const icp = selectedVisit.resolution?.icp_score ?? getIcpScore(selectedVisit)
                         const intent = getIntent(selectedVisit.intent_score)
                         const group = selectedCompanyGroup
                         return (
                             <>
                                 <SheetHeader className="pb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center text-lg font-bold text-muted-foreground">
-                                            {(d.company || d.fullName || "?").charAt(0).toUpperCase()}
+                                        <div className="h-12 w-12 overflow-hidden rounded-xl bg-muted flex items-center justify-center text-lg font-bold text-muted-foreground shrink-0 border shadow-sm">
+                                            {d.logoUrl ? (
+                                                <img src={d.logoUrl} alt={d.company || ""} className="h-full w-full object-contain bg-white" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling!.setAttribute('style', 'display: flex;') }} />
+                                            ) : null}
+                                            <div className="flex h-full w-full items-center justify-center font-bold text-lg" style={{ display: d.logoUrl ? 'none' : 'flex' }}>
+                                                {(d.company || d.fullName || "?").charAt(0).toUpperCase()}
+                                            </div>
                                         </div>
                                         <div>
                                             <SheetTitle className="text-lg">{d.company || d.fullName || d.email || "Anonymous Visitor"}</SheetTitle>
