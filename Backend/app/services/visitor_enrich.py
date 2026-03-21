@@ -6,7 +6,7 @@ Enrichment layers (in order of execution):
   0. ip-api.com       — primary geo (accurate city/region, ISP, mobile/proxy flags)
   1. IPinfo           — secondary geo + company data (paid plan features)
   2. Enrich.so        — IP → Company lookup
-  3. [Email only]     — Enrich.so + BetterContact + ContactOut + FullContact person
+  3. [Email only]     — Enrich.so + BetterContact + ContactOut person
   4. ContactOut DMs   — company domain → decision maker contacts
   5. Explorium        — company firmographics by domain
   6. Identity graph   — store results back for future lookups
@@ -98,17 +98,15 @@ class VisitorEnricher:
         self.explorium = ExploriumService()
         self.bettercontact = BetterContactService()
         self.contactout = ContactOutService()
-        self.fullcontact = FullContactService()
 
         logger.info(
             "[VisitorEnricher] APIs: IPINFO=%s, ENRICH_SO=%s, EXPLORIUM=%s, "
-            "BETTERCONTACT=%s, CONTACTOUT=%s, FULLCONTACT=%s",
+            "BETTERCONTACT=%s, CONTACTOUT=%s",
             bool(self.ipinfo_client),
             bool(self.enrich_api_key),
             bool(self.explorium.api_key),
             bool(self.bettercontact.api_key),
             bool(self.contactout.api_key),
-            bool(self.fullcontact.api_key),
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -220,9 +218,6 @@ class VisitorEnricher:
                     await self._step_enrich_so_email(resolution)
                     await self._step_bettercontact(resolution)
                     await self._step_contactout_email(resolution)
-                    # FullContact enrichment as fallback
-                    await self._step_fullcontact(ip, resolution)
-
                 # ── STEP 4: ContactOut DM from company domain (supplementary data) ──
                 if resolution.get("domain"):
                     await self._step_contactout_dm(resolution)
@@ -637,33 +632,6 @@ class VisitorEnricher:
 
         except Exception as e:
             logger.warning("[Enrichment] Step 5: Explorium failed: %s", e)
-
-    # ── Step 3.5: FullContact resolve (email/IP → person) ──────────────────
-
-    async def _step_fullcontact(self, ip: str, resolution: Dict[str, Any]) -> None:
-        email = resolution.get("email")
-        if not self.fullcontact.api_key:
-            return
-        if resolution.get("full_name") and resolution.get("linkedin_url"):
-            return  # already have full person data
-        logger.info("[Enrichment] Step 3.5: FullContact for email=%s ip=%s", email, ip)
-        try:
-            person = await self.fullcontact.resolve_person(email=email, ip=ip)
-            if not person:
-                return
-            for key in ("full_name", "job_title", "linkedin_url", "phone"):
-                if not resolution.get(key) and person.get(key):
-                    resolution[key] = person[key]
-            if not resolution.get("domain") and person.get("company_domain"):
-                resolution["domain"] = person["company_domain"]
-            if not resolution.get("company") and person.get("company_name"):
-                resolution["company"] = person["company_name"]
-
-            resolution["_sources"].append("fullcontact")
-            resolution["confidence"] = max(resolution["confidence"], 0.8)
-            logger.info("[Enrichment] Step 3.5 success: %s", person.get("full_name"))
-        except Exception as e:
-            logger.warning("[Enrichment] Step 3.5: FullContact failed: %s", e)
 
     # ── Identity graph lookup ────────────────────────────────────────────────
 

@@ -247,10 +247,6 @@ class Settings(BaseSettings):
         None,
         description="Contextual AI API key (optional)"
     )
-    FULLCONTACT_API_KEY: Optional[str] = Field(
-        None,
-        description="FullContact API key for person enrichment (optional)"
-    )
 
     # OpenAI Configuration (routed through OpenRouter)
     OPENAI_API_KEY: Optional[str] = Field(
