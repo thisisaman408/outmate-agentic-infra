@@ -37,9 +37,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div>
           <Link href="/" className="inline-flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="h-4 w-4 text-primary-foreground" />
-            </div>
+            <img src="/image.png" alt="Outmate" className="w-8 h-8 rounded-lg object-cover" />
             <span className="text-lg font-bold tracking-tight text-white">
               Outmate<span className="text-primary">.ai</span>
             </span>
@@ -94,9 +92,7 @@ export default function LoginPage() {
         {/* Mobile logo */}
         <div className="lg:hidden mb-8">
           <Link href="/" className="inline-flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="h-3.5 w-3.5 text-primary-foreground" />
-            </div>
+            <img src="/image.png" alt="Outmate" className="w-7 h-7 rounded-lg object-cover" />
             <span className="text-base font-bold tracking-tight">
               Outmate<span className="text-primary">.ai</span>
             </span>

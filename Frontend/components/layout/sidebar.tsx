@@ -118,17 +118,13 @@ export function Sidebar() {
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
           {!sidebarCollapsed && (
             <Link href="/dashboard" className="flex items-center gap-3 group">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold text-base shadow-lg shadow-primary/20 group-hover:shadow-primary/30 transition-shadow">
-                O
-              </div>
+              <img src="/image.png" alt="Outmate" className="h-9 w-9 rounded-xl object-cover" />
               <span className="text-lg font-semibold text-sidebar-foreground tracking-tight">Outmate.ai</span>
             </Link>
           )}
           {sidebarCollapsed && (
             <Link href="/dashboard" className="flex items-center justify-center w-full group">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold text-base shadow-lg shadow-primary/20 group-hover:shadow-primary/30 transition-shadow">
-                O
-              </div>
+              <img src="/image.png" alt="Outmate" className="h-9 w-9 rounded-xl object-cover" />
             </Link>
           )}
         </div>

@@ -21,21 +21,8 @@ export const metadata: Metadata = {
   title: "Outmate.ai - B2B GTM Intelligence Platform",
   description: "AI-powered B2B lead generation, buying signals, and GTM automation",
   icons: {
-    icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
-    ],
-    apple: "/apple-icon.png",
+    icon: "/image.png",
+    apple: "/image.png",
   },
 }
 
