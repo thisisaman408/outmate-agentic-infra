@@ -12,6 +12,9 @@ from app.db.models.api_log import ApiUsageLog
 # Keep both lines below
 from app.db.models.chat_session import NLPChatSession
 from app.db.models.visitor import SiteConfig, Visit, Alert
+# Events enrollment + cache
+from app.db.models.event_enrollment import EventEnrollment
+from app.db.models.event_cache import EventCache
 # Copilot models
 from app.db.models.copilot_brief import CopilotBrief
 from app.db.models.copilot_meeting_prep import CopilotMeetingPrep
@@ -41,6 +44,9 @@ __all__ = [
     "SiteConfig",
     "Visit",
     "Alert",
+    # Events
+    "EventEnrollment",
+    "EventCache",
     # Copilot models
     "CopilotBrief",
     "CopilotMeetingPrep",

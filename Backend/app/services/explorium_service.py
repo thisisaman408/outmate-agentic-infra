@@ -1584,3 +1584,141 @@ class ExploriumService:
                     response=resp,
                 )
             return resp.json()
+
+    async def get_business_enrollments(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(
+                f"{self.base_url}/businesses/events/enrollments",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def update_business_enrollment(self, business_id: str, event_types: List[str]) -> Dict[str, Any]:
+        payload = {"business_id": business_id, "event_types": event_types}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.patch(
+                f"{self.base_url}/businesses/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def delete_business_enrollment(self, business_id: str) -> Dict[str, Any]:
+        payload = {"business_id": business_id}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.request(
+                "DELETE",
+                f"{self.base_url}/businesses/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def enroll_prospect_events(self, prospect_ids: List[str], event_types: List[str]) -> Dict[str, Any]:
+        payload = {"prospect_ids": prospect_ids, "event_types": event_types}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.base_url}/prospects/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def get_prospect_enrollments(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(
+                f"{self.base_url}/prospects/events/enrollments",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def update_prospect_enrollment(self, prospect_id: str, event_types: List[str]) -> Dict[str, Any]:
+        payload = {"prospect_id": prospect_id, "event_types": event_types}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.patch(
+                f"{self.base_url}/prospects/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()
+
+    async def delete_prospect_enrollment(self, prospect_id: str) -> Dict[str, Any]:
+        payload = {"prospect_id": prospect_id}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.request(
+                "DELETE",
+                f"{self.base_url}/prospects/events/enrollments",
+                headers=self._headers(),
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"message": resp.text}
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase}: {data.get('message') or data}",
+                    request=resp.request,
+                    response=resp,
+                )
+            return resp.json()

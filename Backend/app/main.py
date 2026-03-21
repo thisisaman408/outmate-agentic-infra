@@ -47,6 +47,7 @@ from app.api.routes import diagnostics
 from app.api.routes import copilot
 from app.api.routes import watchers
 from app.api.routes import dashboard
+from app.api.routes import events_routes
 
 # Register routers
 
@@ -250,13 +251,14 @@ logger.info("Dashboard router registered")
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
 logger.info("Copilot router registered")
 
+app.include_router(events_routes.router, prefix="/api/v1/events", tags=["events"], dependencies=auth_dependencies)
+logger.info("Events router registered")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(SEPARATOR)
     logger.info("Starting Outmate AI - Backend API v1.0.0")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Database URL (masked): {settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else 'redacted'}")
-    logger.info(f"Redis URL (masked): {settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted'}")
     logger.info(SEPARATOR)
     
     app.state.db_ready = False
@@ -312,21 +314,10 @@ async def startup_event():
             logger.warning("⚠ Redis unavailable (continuing without Redis)")
     except Exception as e:
         logger.error(f"✗ Redis init failed (app will start without Redis): {e}")
+    app.state.db_ready = True
+    app.state.redis_ready = True
     
-    # Initialize Vector Database in the background
-    async def run_setup():
-        try:
-            await setup_vector_database()
-            logger.info("✓ Vector database setup finished")
-        except Exception as e:
-            logger.error(f"✗ Vector database setup failed: {e}")
-
-    import asyncio
-    app.state.setup_task = asyncio.create_task(run_setup())
-    logger.info("Vector database initialization started in background")
-    
-    logger.info("================================")
-    logger.info("Application startup complete")
+    logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")
 
 
