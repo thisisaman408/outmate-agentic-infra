@@ -3,12 +3,15 @@ from typing import Optional
 import logging
 import random
 import uuid
+import os
+from urllib.parse import urlencode, quote_plus
 
 logger = logging.getLogger(__name__)
 
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Security
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.hash import pbkdf2_sha256
 from pydantic import BaseModel, EmailStr
@@ -381,3 +384,138 @@ async def logout(
         await redis.setex(f"revoked_jti:{jti}", ttl, "1")
 
     return {"detail": "Logged out"}
+
+
+# ─── Google OAuth2 (authorization-code flow with Gmail scope) ────────────────
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send"
+
+
+@router.get("/google/auth-url")
+async def google_oauth_url(terms_accepted: bool = False):
+    """Return a Google OAuth2 authorization URL that includes Gmail send scope."""
+    client_id = settings.GOOGLE_CLIENT_ID
+    if not client_id:
+        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+
+    redirect_uri = os.getenv(
+        "GOOGLE_REDIRECT_URI",
+        "http://localhost:8000/api/v1/auth/google/callback",
+    )
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": GOOGLE_SCOPES,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": f"terms={terms_accepted}",
+    }
+    return {"auth_url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+
+
+@router.get("/google/callback")
+async def google_oauth_callback(
+    code: str,
+    state: str = "",
+    db: Session = Depends(get_db),
+):
+    """Exchange Google authorization code for tokens, create/update user, redirect to frontend."""
+    client_id = settings.GOOGLE_CLIENT_ID
+    client_secret = settings.GOOGLE_CLIENT_SECRET
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+
+    redirect_uri = os.getenv(
+        "GOOGLE_REDIRECT_URI",
+        "http://localhost:8000/api/v1/auth/google/callback",
+    )
+
+    # Exchange code for tokens
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(GOOGLE_TOKEN_URL, data={
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        })
+
+    if resp.status_code != 200:
+        logger.error("Google token exchange failed: %s", resp.text[:300])
+        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+        return RedirectResponse(url=f"{frontend_base}/auth/login?error=google_token_exchange_failed")
+
+    tokens = resp.json()
+    access_token = tokens["access_token"]
+    refresh_token = tokens.get("refresh_token")
+    id_token_raw = tokens.get("id_token")
+
+    # Decode id_token to get user info (unverified decode is fine here —
+    # we just exchanged the code directly with Google over HTTPS).
+    try:
+        claims = jwt.decode(id_token_raw, options={"verify_signature": False})
+    except Exception:
+        claims = {}
+
+    google_id = claims.get("sub")
+    email = claims.get("email", "").lower()
+    name = claims.get("name") or claims.get("given_name", "")
+    email_verified_by_google = claims.get("email_verified", False)
+
+    if not email or not google_id:
+        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+        return RedirectResponse(url=f"{frontend_base}/auth/login?error=incomplete_google_profile")
+
+    # Parse terms_accepted from state
+    terms_accepted = "terms=True" in state or "terms=true" in state
+
+    # Find or create user
+    user = db.query(User).filter(User.google_id == google_id).first()
+    if not user:
+        user = db.query(User).filter(User.email == email).first()
+
+    if user:
+        if not user.google_id:
+            user.google_id = google_id
+        if email_verified_by_google and not user.is_email_verified:
+            user.is_email_verified = True
+        if not user.terms_accepted_at and terms_accepted:
+            user.terms_accepted_at = datetime.utcnow()
+        user.gmail_access_token = access_token
+        if refresh_token:
+            user.gmail_refresh_token = refresh_token
+        user.last_login_at = datetime.utcnow()
+        db.commit()
+    else:
+        if not terms_accepted:
+            frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+            return RedirectResponse(url=f"{frontend_base}/auth/signup?error=terms_required")
+        user = User(
+            email=email,
+            full_name=name,
+            google_id=google_id,
+            hashed_password=None,
+            is_email_verified=bool(email_verified_by_google),
+            terms_accepted_at=datetime.utcnow(),
+            last_login_at=datetime.utcnow(),
+            gmail_access_token=access_token,
+            gmail_refresh_token=refresh_token,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    jwt_token = create_access_token(user)
+    frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+
+    import base64
+    user_json = base64.b64encode(
+        __import__("json").dumps(user_response(user)).encode()
+    ).decode()
+
+    return RedirectResponse(
+        url=f"{frontend_base}/auth/callback?token={jwt_token}&user={quote_plus(user_json)}"
+    )

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Inbox, BarChart3, Mail, Shield } from "lucide-react"
+import { Plus, Inbox, BarChart3, Shield } from "lucide-react"
 import { CampaignsList } from "@/components/campaigns/campaigns-list"
 import { campaignsApi, type Campaign } from "@/lib/api/campaigns"
 import { useToast } from "@/hooks/use-toast"
@@ -168,23 +168,6 @@ export default function CampaignsPage() {
       toast({
         title: "Global Analytics failed",
         description: "Unable to refresh analytics right now.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleAddEmailAccount = async () => {
-    const email = window.prompt("Enter the email address to add to the campaign pool:", "new@outmate.ai")
-    if (!email) return
-    const provider = window.prompt("Enter the provider (Gmail, Outlook, etc.):", "Gmail") || "Gmail"
-    try {
-      const payload = await campaignsApi.addEmailAccount(email, provider)
-      setAccounts((prev) => [payload.account, ...prev])
-      toast({ title: "Email account added", description: payload.account.email + " connected" })
-    } catch {
-      toast({
-        title: "Add account failed",
-        description: "We could not add the email account.",
         variant: "destructive",
       })
     }
@@ -356,10 +339,6 @@ export default function CampaignsPage() {
         <Card>
           <CardHeader className="flex items-center justify-between gap-2">
             <CardTitle>Email Accounts</CardTitle>
-            <Button size="sm" onClick={handleAddEmailAccount} variant="outline">
-              <Mail className="mr-1 h-4 w-4" />
-              Add Email Account
-            </Button>
           </CardHeader>
           <CardContent>
             <Table>

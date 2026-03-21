@@ -60,7 +60,6 @@ export function SignupForm() {
   const setUser = useStore((state) => state.setUser)
 
   const [isLoading, setIsLoading] = useState(false)
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [formData, setFormData] = useState({
@@ -112,35 +111,6 @@ export function SignupForm() {
     }
   }
 
-  const handleGoogleCredential = async (credential: string) => {
-    if (!termsAccepted) {
-      toast({
-        title: "Terms required",
-        description: "Please accept the Terms of Service to continue.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsGoogleLoading(true)
-    try {
-      const user = await authService.googleLogin(credential, termsAccepted)
-      setUser(user)
-      toast({ title: "Account created!", description: "Welcome to Outmate.ai." })
-      router.push("/dashboard")
-    } catch (error: any) {
-      toast({
-        title: "Google sign-up failed",
-        description: error?.message || "Could not sign up with Google.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsGoogleLoading(false)
-    }
-  }
-
-  const isAnyLoading = isLoading || isGoogleLoading
-
   return (
     <div className="w-full max-w-[420px] space-y-5">
       {/* Header */}
@@ -160,18 +130,11 @@ export function SignupForm() {
 
       {/* Google Sign-Up */}
       <div>
-        {isGoogleLoading ? (
-          <div className="flex items-center justify-center h-11 w-full rounded-md border border-border bg-background text-sm text-muted-foreground gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Creating account…
-          </div>
-        ) : (
           <GoogleButton
-            onCredential={handleGoogleCredential}
             text="signup_with"
-            disabled={isAnyLoading || !termsAccepted}
+            disabled={isLoading || !termsAccepted}
+            termsAccepted={termsAccepted}
           />
-        )}
       </div>
 
       {/* Divider */}
@@ -201,7 +164,7 @@ export function SignupForm() {
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
-                disabled={isAnyLoading}
+                disabled={isLoading}
                 autoComplete="name"
               />
             </div>
@@ -221,7 +184,7 @@ export function SignupForm() {
                 className="pl-9"
                 value={formData.workspace}
                 onChange={(e) => setFormData({ ...formData, workspace: e.target.value })}
-                disabled={isAnyLoading}
+                disabled={isLoading}
                 autoComplete="organization"
               />
             </div>
@@ -242,7 +205,7 @@ export function SignupForm() {
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               autoComplete="email"
             />
           </div>
@@ -262,7 +225,7 @@ export function SignupForm() {
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               minLength={8}
               autoComplete="new-password"
             />
@@ -284,7 +247,7 @@ export function SignupForm() {
             id="terms"
             checked={termsAccepted}
             onCheckedChange={(v) => setTermsAccepted(Boolean(v))}
-            disabled={isAnyLoading}
+            disabled={isLoading}
             className="mt-0.5"
           />
           <Label htmlFor="terms" className="text-xs leading-relaxed text-muted-foreground cursor-pointer">
@@ -304,7 +267,7 @@ export function SignupForm() {
         <Button
           type="submit"
           className="w-full h-11 font-semibold"
-          disabled={isAnyLoading || !termsAccepted}
+          disabled={isLoading || !termsAccepted}
         >
           {isLoading ? (
             <>

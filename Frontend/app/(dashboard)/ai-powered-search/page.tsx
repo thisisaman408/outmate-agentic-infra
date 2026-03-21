@@ -250,8 +250,6 @@ export default function DatabaseFinderPage() {
   const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "linkedin" | "both">>({})
   const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "linkedin">>({})
   const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
-  const [gmailConnected, setGmailConnected] = useState(false)
-  const [gmailEmail, setGmailEmail] = useState("")
   const [linkedinConnected, setLinkedinConnected] = useState(false)
   const { toast } = useToast()
   const [isImportingFilters, setIsImportingFilters] = useState(false)
@@ -321,28 +319,9 @@ export default function DatabaseFinderPage() {
     }
   }, [])
 
-  // Check Gmail & LinkedIn connection status on mount
+  // Check LinkedIn connection status on mount
   useEffect(() => {
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
-    // Check if redirected back from Gmail OAuth
-    const params = new URLSearchParams(window.location.search)
-    if (params.get("gmail_connected") === "true") {
-      setGmailConnected(true)
-      setGmailEmail(params.get("gmail_email") || "")
-      setClarification(`Gmail connected as ${params.get("gmail_email")}! You can now send emails directly.`)
-      // Clean URL
-      window.history.replaceState({}, "", window.location.pathname)
-    }
-
-    // Check Gmail status
-    fetch(`${API}/api/v1/campaigns/gmail/status`).then(r => r.json()).then(data => {
-      if (data.connected) {
-        setGmailConnected(true)
-        setGmailEmail(data.email || "")
-      }
-    }).catch(() => { })
-
     // Check LinkedIn (Unipile) status
     fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setLinkedinConnected(true)
@@ -387,23 +366,6 @@ export default function DatabaseFinderPage() {
     }
     window.localStorage.setItem(CAMPAIGN_STATE_KEY, JSON.stringify(payload))
   }, [detectedSignals, campaignDraft, campaignApproved, selectedRecipients, sentRecipients, sendingRecipients, sendErrors, creditUsage])
-
-  const handleConnectGmail = async () => {
-    try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const returnPath = window.location.pathname || "/ai-powered-search"
-      const res = await fetch(
-        `${API}/api/v1/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
-      )
-      const data = await res.json()
-      if (data.auth_url) {
-        window.location.href = data.auth_url
-      }
-    } catch (e) {
-      console.error("Gmail auth error:", e)
-      setClarification("Failed to start Gmail authentication. Please try again.")
-    }
-  }
 
   const handleSendEmail = async (recipientIdx: number, toEmail: string, subject: string, body: string) => {
     setSendingRecipients(prev => ({ ...prev, [recipientIdx]: "email" }))
@@ -2725,9 +2687,6 @@ export default function DatabaseFinderPage() {
                     {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
                   </Badge>
                 )}
-                {gmailConnected && (
-                  <Badge variant="outline">Gmail connected</Badge>
-                )}
                 {linkedinConnected && (
                   <Badge variant="outline">LinkedIn connected</Badge>
                 )}
@@ -2803,28 +2762,18 @@ export default function DatabaseFinderPage() {
                   <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-4 space-y-4">
                     <p className="text-sm font-medium">Connect your accounts, then approve to send directly</p>
 
-                    {/* Gmail Connection */}
+                    {/* Gmail — uses signed-in account */}
                     <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <Mail className="h-4 w-4" />
                         <div>
                           <p className="text-sm font-medium">Gmail</p>
-                          {gmailConnected ? (
-                            <p className="text-xs text-green-600">Connected as {gmailEmail}</p>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">Send emails directly from your Gmail</p>
-                          )}
+                          <p className="text-xs text-green-600">Uses your signed-in Google account</p>
                         </div>
                       </div>
-                      {gmailConnected ? (
-                        <Badge variant="outline" className="text-green-600 border-green-300">
-                          <CheckCircle2 className="h-3 w-3 mr-1" /> Connected
-                        </Badge>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={handleConnectGmail}>
-                          Connect Gmail
-                        </Button>
-                      )}
+                      <Badge variant="outline" className="text-green-600 border-green-300">
+                        <CheckCircle2 className="h-3 w-3 mr-1" /> Ready
+                      </Badge>
                     </div>
 
                     {/* LinkedIn Connection */}
@@ -2972,8 +2921,8 @@ export default function DatabaseFinderPage() {
                                           variant="default"
                                           size="sm"
                                           className="h-7 px-2 text-xs"
-                                          disabled={!r.email || !gmailConnected || !!sending}
-                                          title={!gmailConnected ? "Connect Gmail first" : !r.email ? "No email available" : `Send to ${r.email}`}
+                                          disabled={!r.email || !!sending}
+                                          title={!r.email ? "No email available" : `Send to ${r.email}`}
                                           onClick={() => handleSendEmail(idx, r.email, personalizedSubject, personalizedBody)}
                                         >
                                           <Send className="h-3 w-3 mr-1" />
@@ -3043,7 +2992,6 @@ export default function DatabaseFinderPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      disabled={!gmailConnected}
                       onClick={async () => {
                         let count = 0
                         for (const idx of Array.from(selectedRecipients)) {

@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Eye, Search, Download, Plus,
   Activity, UserCheck, Building2,
-  AlertCircle, RefreshCw, Mail, ExternalLink
+  AlertCircle, RefreshCw
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { WatcherFilterSidebar, WatcherSidebarFilters } from "@/components/leads/watcher/watcher-filter-sidebar"
@@ -62,8 +62,6 @@ const api = {
   toggle:        (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/toggle/`, { method: "POST" }),
   remove:        (id: string)                   => req<void>   (`/api/v1/watchers/${id}/`,        { method: "DELETE" }),
   sync:          (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/sync/`,   { method: "POST" }),
-  gmailStatus:   ()                             => req<{ connected: boolean; email: string | null }>("/api/v1/watchers/gmail/status/"),
-  gmailAuthUrl:  ()                             => req<{ auth_url: string }>(`/api/v1/campaigns/gmail/auth-url?return_to=/leads/watcher`),
 }
 
 // ──────────────────────────────────────────────
@@ -81,33 +79,20 @@ export default function WatcherPage() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null)
 
   const [detailsWatcher, setDetailsWatcher] = useState<Watcher | null>(null)
   const [detailsOpen,    setDetailsOpen]    = useState(false)
-
-  // ── connect Gmail ──────────────────────────────────────────
-  const handleConnectGmail = async () => {
-    try {
-      const { auth_url } = await api.gmailAuthUrl()
-      window.location.href = auth_url
-    } catch (e) {
-      setError("Could not get Gmail auth URL: " + (e as Error).message)
-    }
-  }
 
   // ── fetch ─────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [ev, ac, ld, gmail] = await Promise.all([
+      const [ev, ac, ld] = await Promise.all([
         api.listByType("event"),
         api.listByType("account"),
         api.listByType("lead"),
-        api.gmailStatus().catch(() => ({ connected: false, email: null }))
       ])
       setEvents(ev); setAccounts(ac); setLeads(ld)
-      setGmailConnected(gmail.connected)
     } catch (e) { setError((e as Error).message) }
     finally     { setLoading(false) }
   }, [])
@@ -259,24 +244,6 @@ export default function WatcherPage() {
               </div>
             </div>
           </div>
-
-          {/* Gmail not-connected banner */}
-          {gmailConnected === false && (
-            <div className="mx-4 mt-4 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/8 p-3">
-              <Mail className="h-5 w-5 text-amber-500 flex-shrink-0" />
-              <p className="text-sm text-amber-700 dark:text-amber-400 flex-1">
-                Gmail is not connected. Connect Gmail to receive email notifications from your watchers.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 gap-1.5"
-                onClick={handleConnectGmail}
-              >
-                Connect Gmail <ExternalLink className="h-3 w-3" />
-              </Button>
-            </div>
-          )}
 
           {/* error banner */}
           {error && (

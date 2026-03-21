@@ -19,7 +19,6 @@ export function LoginForm() {
   const setUser = useStore((state) => state.setUser)
 
   const [isLoading, setIsLoading] = useState(false)
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [formData, setFormData] = useState({ email: "", password: "" })
 
@@ -42,27 +41,6 @@ export function LoginForm() {
     }
   }
 
-  const handleGoogleCredential = async (credential: string) => {
-    console.debug("[Google] credential length:", credential?.length ?? 0)
-    setIsGoogleLoading(true)
-    try {
-      const user = await authService.googleLogin(credential)
-      setUser(user)
-      toast({ title: "Welcome back!", description: "Signed in with Google." })
-      router.push("/dashboard")
-    } catch (error: any) {
-      toast({
-        title: "Google sign-in failed",
-        description: error?.message || "Could not sign in with Google.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsGoogleLoading(false)
-    }
-  }
-
-  const isAnyLoading = isLoading || isGoogleLoading
-
   return (
     <div className="w-full max-w-[400px] space-y-6">
       {/* Header */}
@@ -73,14 +51,7 @@ export function LoginForm() {
 
       {/* Google Sign-In */}
       <div className="space-y-3">
-        {isGoogleLoading ? (
-          <div className="flex items-center justify-center h-11 w-full rounded-md border border-border bg-background text-sm text-muted-foreground gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Signing in with Google…
-          </div>
-        ) : (
-          <GoogleButton onCredential={handleGoogleCredential} text="signin_with" disabled={isAnyLoading} />
-        )}
+        <GoogleButton text="signin_with" disabled={isLoading} />
       </div>
 
       {/* Divider */}
@@ -109,7 +80,7 @@ export function LoginForm() {
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               autoComplete="email"
             />
           </div>
@@ -136,7 +107,7 @@ export function LoginForm() {
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               autoComplete="current-password"
             />
             <button
@@ -150,7 +121,7 @@ export function LoginForm() {
           </div>
         </div>
 
-        <Button type="submit" className="w-full h-11 font-semibold" disabled={isAnyLoading}>
+        <Button type="submit" className="w-full h-11 font-semibold" disabled={isLoading}>
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

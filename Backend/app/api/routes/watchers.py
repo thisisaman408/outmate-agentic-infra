@@ -528,18 +528,23 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
         try:
             from app.services.gmail_service import GmailService
             gmail = GmailService()
-            status = gmail.is_connected()
-            if status.get("connected"):
-                email = status["email"]
+            # For watcher notifications, we need the watcher owner's user record
+            # Use the watcher's user_id if available, otherwise skip
+            owner = None
+            if db_w and hasattr(db_w, 'user_id') and db_w.user_id:
+                from app.db.models.user import User as UserModel
+                owner = db.query(UserModel).filter(UserModel.id == db_w.user_id).first() if db else None
+            if owner and owner.gmail_refresh_token:
                 await gmail.send_email(
-                    to_email=email,
+                    user=owner,
+                    to_email=owner.email,
                     subject=f"Watcher Alert: {name}",
                     body=f"You have {update_count} new updates for your Watcher '{name}'.\nLog in to your dashboard to view the details.",
-                    from_email=email
+                    db=db,
                 )
-                logger.info(f">>> [Notification] Email delivered to {email}")
+                logger.info(f">>> [Notification] Email delivered to {owner.email}")
             else:
-                logger.info(f">>> [Notification] Gmail not connected. Skipping email for {name}.")
+                logger.info(f">>> [Notification] Gmail not connected for watcher owner. Skipping email for {name}.")
         except Exception as e:
             logger.error(f"Email notification failed: {e}")
 
@@ -553,13 +558,6 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
             except Exception as e:
                 logger.error(f"Slack notification failed: {e}")
 
-
-@router.get("/gmail/status")
-async def gmail_status():
-    """Check Gmail connection status."""
-    from app.services.gmail_service import GmailService
-    svc = GmailService()
-    return svc.is_connected()
 
 
 # ─────────────────────────────────────────
@@ -576,4 +574,4 @@ legacy_router.post("/api/watchers/lead")(create_lead_watcher)
 legacy_router.post("/api/watchers/{id}/toggle")(toggle_watcher)
 legacy_router.delete("/api/watchers/{id}")(delete_watcher)
 legacy_router.post("/api/watchers/{id}/sync")(sync_watcher)
-legacy_router.get("/api/watchers/gmail/status")(gmail_status)
+
