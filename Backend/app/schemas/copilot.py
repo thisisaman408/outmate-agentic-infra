@@ -179,6 +179,15 @@ class LeadActionType(str, Enum):
     find_similar = "find_similar"
     objection_handler = "objection_handler"
     custom = "custom"
+    crossfire = "crossfire"
+    compliance = "compliance"
+    bombora_intent = "bombora_intent"
+    talent_radar = "talent_radar"
+    virality = "virality"
+    regime_shift = "regime_shift"
+    website_traffic = "website_traffic"
+    business_events = "business_events"
+    linkedin_posts = "linkedin_posts"
 
 
 class LeadActionRequest(BaseModel):
@@ -288,3 +297,57 @@ class LeadSuggestion(BaseModel):
 class LeadSuggestionsResponse(BaseModel):
     suggestions: List[LeadSuggestion] = []
     signals_detected: int = 0
+
+
+# ── Product Assistant (Global Chatbot) ────────────────────────
+
+class ProductAssistantContext(BaseModel):
+    route: Optional[str] = None
+    feature_hint: Optional[str] = None
+
+
+class ProductAssistantRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    context: Optional[ProductAssistantContext] = None
+
+
+class ProductAssistantLink(BaseModel):
+    label: str
+    url: str
+
+
+class ProductAssistantResponse(BaseModel):
+    answer: str
+    related_links: List[ProductAssistantLink] = []
+    feature_tags: List[str] = []
+
+
+# ── Copilot Chat History ─────────────────────────────────────
+
+class ChatMessageSchema(BaseModel):
+    id: str
+    role: str  # "user" | "assistant"
+    content: str
+    createdAt: int
+    links: Optional[List[ProductAssistantLink]] = None
+    tags: Optional[List[str]] = None
+
+class SaveChatSessionRequest(BaseModel):
+    session_id: Optional[str] = None  # None = create new session
+    title: Optional[str] = None
+    messages: List[ChatMessageSchema]
+
+class ChatSessionSummary(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class ChatSessionFull(BaseModel):
+    id: str
+    title: str
+    messages: List[dict] = []
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

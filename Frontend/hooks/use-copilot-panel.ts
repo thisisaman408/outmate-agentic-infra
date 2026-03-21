@@ -9,6 +9,8 @@ import {
   type LeadActionRequest,
   type LeadActionResponse,
   type LeadSuggestionsResponse,
+  type StreamStage,
+  type StreamEvent,
 } from "@/lib/api/copilot"
 import { useToast } from "@/hooks/use-toast"
 
@@ -75,11 +77,15 @@ export function useLeadContext(prospectId: string | null) {
 
 export function useLeadAction() {
   const [isLoading, setIsLoading] = useState(false)
+  const [streamingStage, setStreamingStage] = useState<StreamStage | null>(null)
+  const [streamingMessage, setStreamingMessage] = useState<string | null>(null)
   const { toast } = useToast()
   const addMessage = useCopilotPanelStore((s) => s.addMessage)
 
   const executeAction = useCallback(async (request: LeadActionRequest): Promise<LeadActionResponse | null> => {
     setIsLoading(true)
+    setStreamingStage(null)
+    setStreamingMessage(null)
 
     // Add user message to conversation
     addMessage({
@@ -91,19 +97,61 @@ export function useLeadAction() {
     })
 
     try {
-      const data = await copilotApi.executeLeadAction(request)
+      let finalResult: LeadActionResponse | null = null
 
-      // Add assistant response to conversation
-      addMessage({
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        action_type: data.action_type,
-        result: data.result,
-        credits_used: data.credits_used,
-        timestamp: Date.now(),
+      await copilotApi.executeLeadActionStream(request, (event: StreamEvent) => {
+        switch (event.stage) {
+          case "enriching":
+            setStreamingStage("enriching")
+            setStreamingMessage(event.message || "Researching lead...")
+            break
+          case "generating":
+            setStreamingStage("generating")
+            setStreamingMessage(event.message || "Generating response...")
+            break
+          case "token":
+            // tokens are streaming in — keep generating stage
+            setStreamingStage("generating")
+            break
+          case "complete":
+            setStreamingStage("complete")
+            setStreamingMessage(null)
+            finalResult = {
+              action_type: event.action_type || request.action_type,
+              result: event.result || {},
+              suggestions: [],
+              credits_used: event.credits_used || 0,
+            }
+            // Add assistant response to conversation
+            addMessage({
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              action_type: finalResult.action_type,
+              result: finalResult.result,
+              credits_used: finalResult.credits_used,
+              timestamp: Date.now(),
+            })
+            break
+          case "error":
+            // Show error as inline assistant message so it's always visible
+            addMessage({
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              action_type: request.action_type,
+              result: { error: event.message || "Action failed" },
+              credits_used: 0,
+              timestamp: Date.now(),
+            })
+            toast({
+              title: "Error",
+              description: event.message || "Action failed",
+              variant: "destructive",
+            })
+            break
+        }
       })
 
-      return data
+      return finalResult
     } catch (err: any) {
       if (err instanceof InsufficientCreditsError) {
         toast({
@@ -112,19 +160,35 @@ export function useLeadAction() {
           variant: "destructive",
         })
       } else {
-        toast({
-          title: "Error",
-          description: err?.message || "Failed to execute action",
-          variant: "destructive",
-        })
+        // Fallback to non-streaming endpoint
+        try {
+          const data = await copilotApi.executeLeadAction(request)
+          addMessage({
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            action_type: data.action_type,
+            result: data.result,
+            credits_used: data.credits_used,
+            timestamp: Date.now(),
+          })
+          return data
+        } catch (fallbackErr: any) {
+          toast({
+            title: "Error",
+            description: fallbackErr?.message || "Failed to execute action",
+            variant: "destructive",
+          })
+        }
       }
       return null
     } finally {
       setIsLoading(false)
+      setStreamingStage(null)
+      setStreamingMessage(null)
     }
   }, [toast, addMessage])
 
-  return { isLoading, executeAction }
+  return { isLoading, streamingStage, streamingMessage, executeAction }
 }
 
 // ── Lead Suggestions Hook ────────────────────────────────────

@@ -4,8 +4,8 @@ import React from "react"
 import { useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import dynamic from "next/dynamic"
-const CopilotSidebar = dynamic(
-    () => import("@/components/copilot/copilot-sidebar").then(mod => mod.CopilotSidebar),
+const GlobalCopilotPanel = dynamic(
+    () => import("@/components/copilot/global-copilot-panel").then(mod => mod.GlobalCopilotPanel),
     { ssr: false }
 )
 import { LeadCopilotPanel } from "@/components/copilot/lead-copilot-panel"
@@ -21,7 +21,7 @@ export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
             )}
         >
             {children}
-            <CopilotSidebar />
+            <GlobalCopilotPanel />
             <LeadCopilotPanel />
         </div>
     )

@@ -7,18 +7,30 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from app.services.openrouter_service import OpenRouterService
 from app.services.copilot.lead_enrichment import LeadContext, LeadEnrichmentService
+from app.services.gtm_agents_service import gtm_agents_service
+from app.services.signal_detection_service import SignalDetectionService
+from app.core.redis import RedisManager
 from app.services.copilot.prompts import (
     ANNOTATED_EMAIL_SYSTEM_PROMPT,
     LEAD_RESEARCH_SYSTEM_PROMPT,
     OBJECTION_HANDLER_SYSTEM_PROMPT,
     LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT,
     LEAD_SUGGESTIONS_SYSTEM_PROMPT,
+    WEBSITE_TRAFFIC_SYSTEM_PROMPT,
+    BUSINESS_EVENTS_SYSTEM_PROMPT,
+    LINKEDIN_POSTS_SYSTEM_PROMPT,
+    CROSSFIRE_SYSTEM_PROMPT,
+    COMPLIANCE_SYSTEM_PROMPT,
+    TALENT_RADAR_SYSTEM_PROMPT,
+    VIRALITY_SYSTEM_PROMPT,
+    REGIME_SHIFT_SYSTEM_PROMPT,
+    BOMBORA_INTENT_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,7 +293,32 @@ class LeadCopilotService:
             "find_similar": self._handle_find_similar,
             "objection_handler": self._handle_objection,
             "custom": self._handle_custom,
+            "crossfire": self._handle_crossfire,
+            "compliance": self._handle_compliance,
+            "bombora_intent": self._handle_bombora_intent,
+            "talent_radar": self._handle_talent_radar,
+            "virality": self._handle_virality,
+            "regime_shift": self._handle_regime_shift,
+            "website_traffic": self._handle_website_traffic,
+            "business_events": self._handle_business_events,
+            "linkedin_posts": self._handle_linkedin_posts,
         }
+
+        # Prepare caching key — include prompt hash for actions that vary by user input
+        import hashlib
+        prompt_suffix = f":{hashlib.md5((prompt or '').encode()).hexdigest()[:8]}" if prompt and action_type in ("crossfire", "compliance", "objection_handler") else ""
+        cache_key = f"copilot:action:{action_type}:{prospect_id}{prompt_suffix}"
+        redis = RedisManager.get_client()
+        
+        # Check cache if not explicitly refreshing
+        if redis and RedisManager.ready and not (context_overrides or {}).get("refresh"):
+            try:
+                cached_data = await redis.get(cache_key)
+                if cached_data:
+                    logger.info("Cache hit for action=%s, prospect=%s", action_type, prospect_id)
+                    return json.loads(cached_data)
+            except Exception as e:
+                logger.warning("Failed to read from cache: %s", e)
 
         handler = handler_map.get(action_type)
         if not handler:
@@ -299,7 +336,172 @@ class LeadCopilotService:
             context_overrides=context_overrides,
         )
 
+        # Store in cache (24h TTL)
+        if redis and RedisManager.ready and result and not result.get("error"):
+            try:
+                await redis.setex(cache_key, 86400, json.dumps(result))
+                logger.info("Cached result for action=%s, prospect=%s", action_type, prospect_id)
+            except Exception as e:
+                logger.warning("Failed to write to cache: %s", e)
+
         return result
+
+    # ── Streaming Execute ────────────────────────────────────
+
+    # Actions that use LeadEnrichmentService + LLM (support token streaming)
+    _LLM_ACTIONS = {"draft_email", "research", "objection_handler", "custom"}
+
+    async def execute_action_stream(
+        self,
+        user_id: str,
+        prospect_id: str,
+        action_type: str,
+        prompt: Optional[str] = None,
+        context_overrides: Optional[Dict[str, Any]] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream progress events + LLM tokens for a lead action.
+
+        Yields SSE-ready dicts:
+          {"stage": "enriching",  "message": "Researching lead..."}
+          {"stage": "generating", "message": "Generating response..."}
+          {"stage": "token",      "content": "<partial text>"}
+          {"stage": "complete",   "result": {<final JSON>}}
+          {"stage": "error",      "message": "..."}
+        """
+        # ── Resolve prospect context (same as execute_action) ──
+        try:
+            context = self.get_lead_context(prospect_id)
+            prospect = context["prospect"]
+            company = context.get("company") or {}
+        except ValueError:
+            if not context_overrides:
+                yield {"stage": "error", "message": f"Prospect not found: {prospect_id}"}
+                return
+            override_prospect = context_overrides.get("prospect") or {}
+            override_company = context_overrides.get("company") or {}
+            prospect = {
+                "id": override_prospect.get("id") or prospect_id,
+                "name": override_prospect.get("name"),
+                "title": override_prospect.get("title"),
+                "email": override_prospect.get("email"),
+                "phone": override_prospect.get("phone"),
+                "linkedin_url": override_prospect.get("linkedin_url"),
+                "location": override_prospect.get("location"),
+                "seniority": override_prospect.get("seniority"),
+                "department": override_prospect.get("department"),
+                "data_quality_score": override_prospect.get("data_quality_score"),
+                "company": override_company.get("name") or override_prospect.get("company"),
+            }
+            company = {
+                "name": override_company.get("name"),
+                "domain": override_company.get("domain"),
+                "industry": override_company.get("industry"),
+                "employee_count": override_company.get("employee_count"),
+                "revenue_range": override_company.get("revenue_range"),
+                "funding_stage": override_company.get("funding_stage"),
+                "funding_total": override_company.get("funding_total"),
+                "technologies": override_company.get("technologies") or [],
+                "headquarters": override_company.get("headquarters"),
+                "employee_growth_6m_percent": override_company.get("employee_growth_6m_percent"),
+            }
+
+        name = prospect.get("name", "")
+        company_name = company.get("name") or prospect.get("company", "")
+        role = prospect.get("title", "")
+        domain = company.get("domain")
+
+        # ── For non-LLM actions, delegate to execute_action directly ──
+        if action_type not in self._LLM_ACTIONS:
+            yield {"stage": "enriching", "message": "Processing..."}
+            try:
+                result = await self.execute_action(
+                    user_id=user_id,
+                    prospect_id=prospect_id,
+                    action_type=action_type,
+                    prompt=prompt,
+                    context_overrides=context_overrides,
+                )
+                yield {"stage": "complete", "result": result}
+            except Exception as e:
+                yield {"stage": "error", "message": str(e)}
+            return
+
+        # ── Mock path ──
+        if self.mock:
+            yield {"stage": "enriching", "message": "Researching lead..."}
+            yield {"stage": "generating", "message": "Generating response..."}
+            mock_map = {
+                "draft_email": MOCK_ANNOTATED_EMAIL,
+                "research": MOCK_RESEARCH,
+                "objection_handler": MOCK_OBJECTION,
+                "custom": MOCK_CUSTOM,
+            }
+            yield {"stage": "complete", "result": mock_map.get(action_type, {})}
+            return
+
+        # ── Phase 1: Enrichment ──
+        yield {"stage": "enriching", "message": "Researching lead..."}
+        try:
+            include_company = action_type in ("research", "custom")
+            lead_context = await LeadEnrichmentService.enrich(
+                name, company_name, role, domain,
+                include_company_data=include_company,
+                include_company_news=include_company,
+            )
+        except Exception as e:
+            logger.warning("Enrichment failed during stream: %s", e)
+            lead_context = LeadContext(name=name, company=company_name, role=role, domain=domain)
+
+        # ── Phase 2: Build prompt + stream LLM ──
+        yield {"stage": "generating", "message": "Generating response..."}
+
+        prompt_map = {
+            "draft_email": (ANNOTATED_EMAIL_SYSTEM_PROMPT, "Write a cold outreach email."),
+            "research": (LEAD_RESEARCH_SYSTEM_PROMPT, None),
+            "objection_handler": (OBJECTION_HANDLER_SYSTEM_PROMPT, None),
+            "custom": (LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT, None),
+        }
+
+        system_prompt, default_extra = prompt_map[action_type]
+
+        if action_type == "draft_email":
+            extra = f"USER INSTRUCTION: {prompt}" if prompt else default_extra
+        elif action_type == "objection_handler":
+            objection_text = prompt or "Not interested right now"
+            extra = f"OBJECTION FROM PROSPECT: <user_command>{objection_text}</user_command>"
+        elif action_type == "custom":
+            extra = f"USER COMMAND: <user_command>{prompt}</user_command>" if prompt else None
+        else:
+            extra = None
+
+        user_prompt_text = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+
+        max_tokens_map = {"draft_email": 800, "research": 700, "objection_handler": 700, "custom": 700}
+        temp_map = {"draft_email": 0.4, "research": 0.3, "objection_handler": 0.3, "custom": 0.4}
+
+        try:
+            final_result = None
+            async for chunk in self.openrouter.chat_completion_structured_stream(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt_text,
+                temperature=temp_map.get(action_type, 0.3),
+                max_tokens=max_tokens_map.get(action_type, 500),
+            ):
+                if chunk["type"] == "token":
+                    yield {"stage": "token", "content": chunk["content"]}
+                elif chunk["type"] == "done":
+                    final_result = chunk["result"]
+
+            if final_result:
+                # Add enrichment sources for draft_email
+                if action_type == "draft_email" and lead_context:
+                    final_result.setdefault("enrichment_sources_used", lead_context.sources_used)
+                yield {"stage": "complete", "result": final_result}
+            else:
+                yield {"stage": "error", "message": "No response from LLM"}
+        except Exception as e:
+            logger.error("Streaming LLM failed for %s: %s", action_type, e)
+            yield {"stage": "error", "message": f"Generation failed: {str(e)}"}
 
     # ── Action Handlers ───────────────────────────────────────
 
@@ -326,7 +528,7 @@ class LeadCopilotService:
             system_prompt=ANNOTATED_EMAIL_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=700,
         )
         return result
 
@@ -360,7 +562,7 @@ class LeadCopilotService:
             system_prompt=LEAD_RESEARCH_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=2500,
+            max_tokens=700,
         )
         return result
 
@@ -442,7 +644,7 @@ class LeadCopilotService:
                 system_prompt=OBJECTION_HANDLER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.3,
-                max_tokens=1500,
+                max_tokens=700,
             )
             return result
         except Exception as exc:
@@ -484,9 +686,274 @@ class LeadCopilotService:
             system_prompt=LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=700,
         )
         return result
+
+    async def _handle_crossfire(self, company_name: str, domain: Optional[str], prospect: dict, company: dict, prompt: Optional[str] = None, **kwargs) -> dict:
+        """Competitive Intelligence — battle card comparing Outmate vs a named competitor."""
+        competitor = prompt.strip() if prompt and prompt.strip() else "the incumbent tool"
+        user_prompt = (
+            f"Competitor they currently use: {competitor}\n"
+            f"Lead's company: {company_name}\n"
+            f"Lead: {prospect.get('name')} ({prospect.get('title')})\n"
+            f"Industry: {company.get('industry', 'Unknown')}\n"
+            f"Company size: {company.get('employee_count', 'Unknown')} employees\n"
+            f"Tech Stack: {', '.join(company.get('technologies', [])) or 'Unknown'}\n\n"
+            f"Generate a battle card: {competitor} vs Outmate AI, specifically for {company_name}. "
+            f"Help the sales rep replace {competitor} at {company_name} with Outmate."
+        )
+        try:
+            result = await self.openrouter.chat_completion_text(
+                system_prompt=CROSSFIRE_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=700,
+            )
+            return {"result": result}
+        except Exception as e:
+            logger.error("Crossfire failed: %s", e)
+            return {"result": f"Could not generate battle card: {e}"}
+
+    async def _handle_compliance(self, prompt: Optional[str], prospect: dict, company: dict, **kwargs) -> dict:
+        """Compliance audit — checks email draft for legal risks."""
+        email_draft = prompt or (
+            f"Hi {prospect.get('name', 'there')},\n\n"
+            f"I wanted to reach out about how we help companies like {company.get('name', 'yours')} "
+            f"in the {company.get('industry', 'B2B')} space. Would you be open to a quick call?\n\n"
+            "Best regards"
+        )
+        user_prompt = (
+            f"Jurisdiction context: Company is based in {company.get('headquarters', 'Unknown')}. "
+            f"Prospect location: {prospect.get('location', 'Unknown')}.\n\n"
+            f"Email to audit:\n{email_draft}"
+        )
+        try:
+            result = await self.openrouter.chat_completion_text(
+                system_prompt=COMPLIANCE_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.2,
+                max_tokens=700,
+            )
+            return {"result": result}
+        except Exception as e:
+            logger.error("Compliance oracle failed: %s", e)
+            return {"result": f"Could not run compliance audit: {e}"}
+
+    async def _handle_bombora_intent(self, company: dict, prospect: dict, **kwargs) -> dict:
+        """Fetch Bombora intent data — falls back to LLM when Explorium credits exhausted."""
+        from app.services.explorium_service import ExploriumService
+        try:
+            explorium = ExploriumService()
+            match_result = await explorium.match_businesses([{"name": company.get("name"), "domain": company.get("domain")}])
+            matched = match_result if isinstance(match_result, list) else match_result.get("matched_businesses") or []
+            if matched:
+                business_id = matched[0].get("business_id")
+                if business_id:
+                    intent_result = await explorium.bulk_enrich_bombora_intent(
+                        [business_id],
+                        "training & development;information technology;marketing;sales;finance"
+                    )
+                    data_list = intent_result.get("data", []) if isinstance(intent_result, dict) else []
+                    intent_data = data_list[0].get("data", {}) if data_list else {}
+                    topics = intent_data.get("intent_topics", [])
+                    if topics:
+                        return {
+                            "intent_topics": topics,
+                            "level_of_intent": intent_data.get("level_of_intent", "Unknown"),
+                            "business_id": business_id,
+                        }
+        except Exception as e:
+            logger.warning("Explorium Bombora failed, using LLM fallback: %s", e)
+
+        # LLM fallback
+        user_prompt = self._build_user_prompt(prospect, company)
+        try:
+            result = await self.openrouter.chat_completion_structured(
+                system_prompt=BOMBORA_INTENT_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=700,
+            )
+            return result
+        except Exception as e:
+            logger.error("Bombora LLM fallback failed: %s", e)
+            return {"intent_topics": [], "level_of_intent": "Unknown"}
+
+    async def _handle_talent_radar(self, company_name: str, prospect: dict, company: dict, **kwargs) -> dict:
+        """Talent Churn Radar — leadership churn and hiring signals."""
+        user_prompt = (
+            f"Company: {company_name}\n"
+            f"Industry: {company.get('industry', 'Unknown')}\n"
+            f"Size: {company.get('employee_count', 'Unknown')} employees\n"
+            f"Growth (6mo): {company.get('employee_growth_6m_percent', 'Unknown')}%\n"
+            f"Funding: {company.get('funding_stage', 'Unknown')}\n"
+            f"Key contact: {prospect.get('name')} ({prospect.get('title')})\n\n"
+            "Analyze talent and leadership signals for this account."
+        )
+        try:
+            result = await self.openrouter.chat_completion_text(
+                system_prompt=TALENT_RADAR_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=700,
+            )
+            return {"result": result}
+        except Exception as e:
+            logger.error("Talent radar failed: %s", e)
+            return {"result": f"Could not run talent analysis: {e}"}
+
+    async def _handle_virality(self, name: str, company_name: str, role: str, prospect: dict, company: dict, **kwargs) -> dict:
+        """Virality Engine — referral loop design."""
+        user_prompt = (
+            f"Prospect: {name}, {role} at {company_name}\n"
+            f"Industry: {company.get('industry', 'Unknown')}\n"
+            f"Company size: {company.get('employee_count', 'Unknown')} employees\n"
+            f"Funding: {company.get('funding_stage', 'Unknown')}\n\n"
+            "Design a viral referral strategy targeting this champion."
+        )
+        try:
+            result = await self.openrouter.chat_completion_text(
+                system_prompt=VIRALITY_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.5,
+                max_tokens=700,
+            )
+            return {"result": result}
+        except Exception as e:
+            logger.error("Virality engine failed: %s", e)
+            return {"result": f"Could not generate virality plan: {e}"}
+
+    async def _handle_regime_shift(self, company_name: str, prospect: dict, company: dict, **kwargs) -> dict:
+        """Regime Shifter — adapt pitch to macro market changes."""
+        user_prompt = (
+            f"Company: {company_name}\n"
+            f"Industry: {company.get('industry', 'Unknown')}\n"
+            f"Prospect role: {prospect.get('title', 'Unknown')}\n"
+            f"Funding stage: {company.get('funding_stage', 'Unknown')}\n"
+            f"HQ: {company.get('headquarters', 'Unknown')}\n\n"
+            "Analyze macro-economic shifts affecting this company and recommend messaging pivots."
+        )
+        try:
+            result = await self.openrouter.chat_completion_text(
+                system_prompt=REGIME_SHIFT_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=700,
+            )
+            return {"result": result}
+        except Exception as e:
+            logger.error("Regime shift failed: %s", e)
+            return {"result": f"Could not run regime analysis: {e}"}
+
+    @staticmethod
+    def _has_valid_signal_structure(signals: list) -> bool:
+        """Check that signals have the expected top-level type/description fields."""
+        return bool(signals) and all(s.get("type") and s.get("description") for s in signals)
+
+    async def _handle_website_traffic(self, domain: Optional[str], company_name: str, prospect: dict, company: dict, **kwargs) -> dict:
+        """Fetch Website Traffic signals, with LLM fallback when APIs return empty or malformed."""
+        real_signals = []
+        if domain:
+            try:
+                signal_service = SignalDetectionService()
+                signals = await signal_service.detect_signals(
+                    companies=[{"domain": domain}],
+                    data_source="explorium",
+                    action="traffic"
+                )
+                traffic_signals = [s for s in signals if s.get("type") in ("growth_signal", "size_signal")]
+                real_signals = traffic_signals or signals
+            except Exception as e:
+                logger.warning("Website traffic API failed: %s", e)
+
+        if self._has_valid_signal_structure(real_signals):
+            return {"signals": real_signals}
+
+        # LLM fallback — generate signal from prospect/company context
+        user_prompt = self._build_user_prompt(prospect, company)
+        try:
+            result = await self.openrouter.chat_completion_structured(
+                system_prompt=WEBSITE_TRAFFIC_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.5,
+                max_tokens=700,
+            )
+            return result
+        except Exception as e:
+            logger.error("Website traffic LLM fallback failed: %s", e)
+            return {"signals": []}
+
+    async def _handle_business_events(self, company_name: str, domain: Optional[str], prospect: dict, company: dict, **kwargs) -> dict:
+        """Fetch Business Events (Funding, M&A, launches), with LLM fallback when APIs return empty or malformed."""
+        real_signals = []
+        try:
+            signal_service = SignalDetectionService()
+            signals = await signal_service.detect_signals(
+                companies=[{"name": company_name, "domain": domain}],
+                data_source="explorium",
+                action="events"
+            )
+            event_signals = [s for s in signals if s.get("type") in ("funding_signal", "startup_signal", "product_launch")]
+            real_signals = event_signals or signals
+        except Exception as e:
+            logger.warning("Business events API failed: %s", e)
+
+        if self._has_valid_signal_structure(real_signals):
+            return {"signals": real_signals}
+
+        # LLM fallback
+        user_prompt = self._build_user_prompt(prospect, company)
+        try:
+            result = await self.openrouter.chat_completion_structured(
+                system_prompt=BUSINESS_EVENTS_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.5,
+                max_tokens=700,
+            )
+            return result
+        except Exception as e:
+            logger.error("Business events LLM fallback failed: %s", e)
+            return {"signals": []}
+
+    async def _handle_linkedin_posts(self, name: str, company_name: str, domain: Optional[str], prospect: dict, company: dict, **kwargs) -> dict:
+        """Research LinkedIn posts, with LLM fallback when APIs return empty or malformed."""
+        real_signals = []
+        try:
+            signal_service = SignalDetectionService()
+            signals = await signal_service.detect_signals(
+                companies=[{"name": name, "company_name": company_name, "domain": domain}],
+                data_source=["crustdata", "explorium"],
+                action="posts"
+            )
+            real_signals = signals
+        except Exception as e:
+            logger.warning("LinkedIn posts API failed: %s", e)
+
+        if self._has_valid_signal_structure(real_signals):
+            return {"signals": real_signals}
+
+        # LLM fallback — use lead enrichment context for better output
+        try:
+            lead_context = await LeadEnrichmentService.enrich(
+                name, company_name, prospect.get("title", ""), domain,
+                include_company_data=False,
+            )
+        except Exception:
+            lead_context = None
+
+        user_prompt = self._build_user_prompt(prospect, company, lead_context)
+        try:
+            result = await self.openrouter.chat_completion_structured(
+                system_prompt=LINKEDIN_POSTS_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                temperature=0.5,
+                max_tokens=700,
+            )
+            return result
+        except Exception as e:
+            logger.error("LinkedIn posts LLM fallback failed: %s", e)
+            return {"signals": []}
 
     # ── Suggestions (Phase 2) ─────────────────────────────────
 
@@ -512,7 +979,7 @@ class LeadCopilotService:
             system_prompt=LEAD_SUGGESTIONS_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=1500,
+            max_tokens=700,
         )
         return result
 

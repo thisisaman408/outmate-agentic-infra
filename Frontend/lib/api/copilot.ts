@@ -91,7 +91,22 @@ export interface CopilotPreferences {
 
 // ── Lead Copilot Types ──────────────────────────────────────
 
-export type LeadActionType = "draft_email" | "meeting_prep" | "research" | "find_similar" | "objection_handler" | "custom"
+export type LeadActionType = 
+  | "draft_email" 
+  | "meeting_prep" 
+  | "research" 
+  | "find_similar" 
+  | "objection_handler" 
+  | "custom"
+  | "crossfire"
+  | "compliance"
+  | "bombora_intent"
+  | "talent_radar"
+  | "virality"
+  | "regime_shift"
+  | "website_traffic"
+  | "business_events"
+  | "linkedin_posts"
 
 export interface LeadActionRequest {
   prospect_id: string
@@ -167,6 +182,17 @@ export interface LeadActionResponse {
   result: Record<string, any>
   suggestions: Record<string, any>[]
   credits_used: number
+}
+
+export type StreamStage = "enriching" | "generating" | "token" | "complete" | "error"
+
+export interface StreamEvent {
+  stage: StreamStage
+  message?: string
+  content?: string
+  result?: Record<string, any>
+  credits_used?: number
+  action_type?: string
 }
 
 export interface LeadSuggestion {
@@ -292,6 +318,67 @@ export const copilotApi = {
       body: JSON.stringify(data),
     })
     return handleResponse(response, "Failed to execute action")
+  },
+
+  executeLeadActionStream: async (
+    data: LeadActionRequest,
+    onEvent: (event: StreamEvent) => void,
+  ): Promise<void> => {
+    const headers = new Headers({ "Content-Type": "application/json" })
+    const authHeaders = authService.getAuthHeaders()
+    Object.entries(authHeaders).forEach(([key, value]) => {
+      if (value) headers.set(key, value)
+    })
+
+    const response = await fetch(`${BACKEND_BASE}/api/copilot/lead-action/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      if (response.status === 402 && error?.detail?.credits_required !== undefined) {
+        throw new InsufficientCreditsError(error.detail)
+      }
+      throw new Error(error?.detail || "Failed to execute action")
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error("No response stream")
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith("data: ")) continue
+        try {
+          const event: StreamEvent = JSON.parse(trimmed.slice(6))
+          onEvent(event)
+        } catch {
+          // skip unparseable lines
+        }
+      }
+    }
+
+    // Process any remaining buffer
+    if (buffer.trim().startsWith("data: ")) {
+      try {
+        const event: StreamEvent = JSON.parse(buffer.trim().slice(6))
+        onEvent(event)
+      } catch {
+        // skip
+      }
+    }
   },
 
   getLeadSuggestions: async (prospectId: string): Promise<LeadSuggestionsResponse> => {

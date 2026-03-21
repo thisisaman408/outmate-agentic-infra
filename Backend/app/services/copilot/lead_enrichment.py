@@ -28,6 +28,24 @@ from app.services.copilot.enrichment import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared httpx client — reused across all enrichment calls to avoid
+# connection setup overhead per request.
+# ---------------------------------------------------------------------------
+
+_shared_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    """Get or create a shared httpx AsyncClient with connection pooling."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=10.0,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _shared_client
+
 
 # ---------------------------------------------------------------------------
 # Lead context dataclass
@@ -117,21 +135,21 @@ async def _serper_search(query: str, num: int = 5) -> List[Dict[str, Any]]:
     if not api_key:
         return []
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        client = _get_shared_client()
+        resp = await client.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": query, "num": num},
+        )
+        if resp.status_code == 429:
+            await asyncio.sleep(1)
             resp = await client.post(
                 "https://google.serper.dev/search",
                 headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
                 json={"q": query, "num": num},
             )
-            if resp.status_code == 429:
-                await asyncio.sleep(1)
-                resp = await client.post(
-                    "https://google.serper.dev/search",
-                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
-                    json={"q": query, "num": num},
-                )
-            resp.raise_for_status()
-            return resp.json().get("organic", [])
+        resp.raise_for_status()
+        return resp.json().get("organic", [])
     except Exception as exc:
         logger.warning("Serper search failed for %r: %s", query, exc)
         return []

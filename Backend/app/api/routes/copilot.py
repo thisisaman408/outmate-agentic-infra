@@ -3,18 +3,26 @@ Co-Pilot API Routes — Daily Brief, Meeting Prep, Campaign Optimizer, Pipeline 
 """
 
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
+import json
 import logging
 
 from app.services.copilot.copilot_service import CopilotService
 from app.services.copilot.lead_copilot_service import LeadCopilotService
+from app.services.copilot.product_assistant_service import ProductAssistantService
 from app.schemas.copilot import (
     MeetingPrepRequest,
     CampaignOptimizerRequest,
     EmailOptimizerRequest,
     PipelineScanRequest,
     CopilotPreferencesRequest,
+    LeadActionType,
     LeadActionRequest,
+    ProductAssistantRequest,
+    ProductAssistantResponse,
+    SaveChatSessionRequest,
 )
+from app.db.models.copilot_chat_session import CopilotChatSession
 from app.api.deps.auth import get_current_user
 from app.db.deps import get_db
 from app.db.models.user import User
@@ -35,8 +43,22 @@ COPILOT_CREDIT_COSTS = {
     "lead_meeting_prep": 2,
     "lead_research": 2,
     "lead_find_similar": 1,
-    "lead_objection_handler": 1,
-    "lead_custom": 1,
+    LeadActionType.draft_email: 1,  # Changed to use LeadActionType
+    LeadActionType.meeting_prep: 2,  # Changed to use LeadActionType
+    LeadActionType.research: 2,  # Changed to use LeadActionType
+    LeadActionType.find_similar: 1,  # Changed to use LeadActionType
+    LeadActionType.objection_handler: 1,  # Changed to use LeadActionType
+    LeadActionType.custom: 1,  # Changed to use LeadActionType
+    LeadActionType.crossfire: 2,  # Changed to use LeadActionType
+    LeadActionType.compliance: 1,  # Changed to use LeadActionType
+    LeadActionType.bombora_intent: 2,  # Changed to use LeadActionType
+    LeadActionType.talent_radar: 2,
+    LeadActionType.virality: 1,
+    LeadActionType.regime_shift: 2,
+    LeadActionType.website_traffic: 1,
+    LeadActionType.business_events: 1,
+    LeadActionType.linkedin_posts: 2,
+    "product_assistant": 1,
     "lead_suggestions": 1,
 }
 
@@ -422,6 +444,56 @@ async def execute_lead_action(
         raise HTTPException(status_code=500, detail=f"Failed to execute lead action: {str(e)}")
 
 
+@router.post("/lead-action/stream")
+async def execute_lead_action_stream(
+    request: LeadActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stream an AI lead action with SSE progress events.
+
+    Returns Server-Sent Events:
+      data: {"stage": "enriching", "message": "Researching lead..."}
+      data: {"stage": "generating", "message": "Generating response..."}
+      data: {"stage": "token", "content": "<partial>"}
+      data: {"stage": "complete", "result": {...}, "credits_used": N}
+    """
+    cost_key = f"lead_{request.action_type.value}"
+    cost = COPILOT_CREDIT_COSTS.get(cost_key, 1)
+    _check_credits(db, current_user.id, cost)
+
+    async def event_generator():
+        service = LeadCopilotService(db)
+        credits_deducted = False
+        try:
+            async for event in service.execute_action_stream(
+                user_id=str(current_user.id),
+                prospect_id=request.prospect_id,
+                action_type=request.action_type.value,
+                prompt=request.prompt,
+                context_overrides=request.context_overrides,
+            ):
+                if event.get("stage") == "complete" and not credits_deducted:
+                    _deduct(db, current_user.id, cost, f"Copilot: Lead {request.action_type.value}")
+                    credits_deducted = True
+                    event["credits_used"] = cost
+                    event["action_type"] = request.action_type.value
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            logger.error(f"Lead action stream error: {e}")
+            yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/lead-suggestions/{prospect_id}")
 async def get_lead_suggestions(
     prospect_id: str,
@@ -443,3 +515,163 @@ async def get_lead_suggestions(
     except Exception as e:
         logger.error(f"Lead suggestions error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
+
+
+# ── Product Assistant (Global Chatbot) ────────────────────────
+
+@router.post("/product-assistant", response_model=ProductAssistantResponse)
+async def ask_product_assistant(
+    request: ProductAssistantRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask the global product assistant a question about Outmate.
+    Free — no credits required.
+    """
+    try:
+        service = ProductAssistantService(db)
+        result = await service.ask(
+            question=request.question,
+            route=request.context.route if request.context else None
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Product assistant error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to answer product question: {str(e)}")
+
+
+@router.post("/product-assistant/stream")
+async def ask_product_assistant_stream(
+    request: ProductAssistantRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask the global product assistant a question and stream the answer via SSE.
+    Free — no credits required.
+    """
+    async def event_generator():
+        service = ProductAssistantService(db)
+        try:
+            async for chunk in service.stream_ask(
+                question=request.question,
+                route=request.context.route if request.context else None
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            logger.error(f"Product assistant streaming error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Copilot Chat History ─────────────────────────────────────
+
+@router.get("/chat-history")
+async def list_chat_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all chat sessions for the current user (summaries only)."""
+    sessions = (
+        db.query(CopilotChatSession)
+        .filter(CopilotChatSession.user_id == str(current_user.id))
+        .order_by(CopilotChatSession.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    return {"sessions": [s.to_summary() for s in sessions]}
+
+
+@router.get("/chat-history/{session_id}")
+async def get_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a specific chat session with full messages."""
+    session = (
+        db.query(CopilotChatSession)
+        .filter(
+            CopilotChatSession.id == session_id,
+            CopilotChatSession.user_id == str(current_user.id),
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session.to_dict()
+
+
+@router.post("/chat-history")
+async def save_chat_session(
+    request: SaveChatSessionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create or update a chat session."""
+    messages_data = [m.model_dump() for m in request.messages]
+
+    # Auto-generate title from first user message
+    title = request.title
+    if not title:
+        first_user_msg = next((m for m in request.messages if m.role == "user"), None)
+        if first_user_msg:
+            title = first_user_msg.content[:80] + ("..." if len(first_user_msg.content) > 80 else "")
+        else:
+            title = "New Conversation"
+
+    if request.session_id:
+        session = (
+            db.query(CopilotChatSession)
+            .filter(
+                CopilotChatSession.id == request.session_id,
+                CopilotChatSession.user_id == str(current_user.id),
+            )
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        session.messages = messages_data
+        session.title = title
+    else:
+        session = CopilotChatSession(
+            user_id=str(current_user.id),
+            title=title,
+            messages=messages_data,
+        )
+        db.add(session)
+
+    db.commit()
+    db.refresh(session)
+    return session.to_dict()
+
+
+@router.delete("/chat-history/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a chat session."""
+    deleted = (
+        db.query(CopilotChatSession)
+        .filter(
+            CopilotChatSession.id == session_id,
+            CopilotChatSession.user_id == str(current_user.id),
+        )
+        .delete()
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    db.commit()
+    return {"success": True}
