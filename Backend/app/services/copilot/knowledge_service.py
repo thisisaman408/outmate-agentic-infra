@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.core.embeddings import get_embedding_model
 from app.db.models.product_knowledge import ProductKnowledge
-from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +24,8 @@ class KnowledgeService:
 
         with open(file_path, 'r', encoding='utf-8') as f:
             text = f.read()
+
+        from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
         # Step 1: Split by H1/H2 headers — keeps each feature section together
         headers_to_split_on = [

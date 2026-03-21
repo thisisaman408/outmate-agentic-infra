@@ -291,6 +291,10 @@ async def startup_event():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"))
             logger.info("Added missing watchers.matches column")
+        # Ensure pgvector extension exists before create_all (needed for Vector columns)
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
         logger.info("✓ Database tables ensured")

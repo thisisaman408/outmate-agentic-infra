@@ -5,7 +5,7 @@ Campaign Draft Generation & Send API Routes
 import httpx
 import os
 from urllib.parse import quote_plus
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Literal, List, Dict, Any
