@@ -687,11 +687,16 @@ class VisitorEnricher:
             try:
                 node = db.query(IdentityNode).filter(IdentityNode.visitor_id == visitor_id).first()
                 if node:
-                    # Update existing — only fill empty fields (never overwrite)
+                    # Update existing — fill empty fields, and always update
+                    # email if visitor explicitly identified via form capture
                     if ip:
                         node.ip = ip
+                    # Email from form capture always wins (explicit identification)
+                    form_email = resolution.get("email")
+                    if form_email and form_email != node.email:
+                        node.email = form_email
                     for attr, res_key in [
-                        ("email", "email"), ("full_name", "full_name"),
+                        ("full_name", "full_name"),
                         ("phone", "phone"), ("linkedin_url", "linkedin_url"),
                         ("job_title", "job_title"), ("company_name", "company"),
                         ("company_domain", "domain"),
