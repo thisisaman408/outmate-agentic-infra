@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react"
-import axios from "axios"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { authService } from "@/lib/auth"
+
+// ── Types ────────────────────────────────────────────────────
 
 export interface Message {
   id: string
@@ -9,134 +10,391 @@ export interface Message {
   createdAt: number
   links?: { label: string; url: string }[]
   tags?: string[]
+  isError?: boolean
+  isCreditError?: boolean
 }
+
+export interface ChatSession {
+  id: string
+  title: string
+  message_count: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Strip JSON wrapper from streamed content to show only the answer text.
+ */
+function stripJSONWrapper(raw: string): string {
+  let s = raw.trim()
+  if (s.startsWith("{")) s = s.substring(1).trim()
+
+  const answerKeyPattern = /^"answer"\s*:\s*"/
+  const match = s.match(answerKeyPattern)
+  if (match) s = s.substring(match[0].length)
+
+  const trailingPatterns = [
+    /",\s*"related_links"\s*:/,
+    /",\s*"feature_tags"\s*:/,
+    /",\s*"raw_text"\s*:/,
+  ]
+  for (const pattern of trailingPatterns) {
+    const trailMatch = s.match(pattern)
+    if (trailMatch && trailMatch.index !== undefined) {
+      s = s.substring(0, trailMatch.index)
+    }
+  }
+
+  if (s.endsWith('"')) s = s.slice(0, -1)
+
+  return s
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\")
+    .replace(/\\r/g, "")
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+function getAuthHeaders(): Record<string, string> {
+  return authService.getAuthHeaders()
+}
+
+// ── Chat History API ─────────────────────────────────────────
+
+async function fetchChatSessions(): Promise<ChatSession[]> {
+  const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.sessions || []
+}
+
+async function fetchChatSession(sessionId: string): Promise<{ messages: Message[]; title: string } | null> {
+  const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  return {
+    messages: (data.messages || []).map((m: any) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt,
+      links: m.links || undefined,
+      tags: m.tags || undefined,
+    })),
+    title: data.title,
+  }
+}
+
+async function saveChatSession(
+  sessionId: string | null,
+  messages: Message[],
+  title?: string
+): Promise<string | null> {
+  const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      title,
+      messages: messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+        links: m.links || null,
+        tags: m.tags || null,
+      })),
+    }),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  return data.id || null
+}
+
+async function deleteChatSession(sessionId: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  })
+  return res.ok
+}
+
+// ── Hook ─────────────────────────────────────────────────────
 
 export function useChatbot() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load sessions list on mount
+  useEffect(() => {
+    fetchChatSessions().then((s) => {
+      setSessions(s)
+      setSessionsLoaded(true)
+    })
+  }, [])
+
+  // Debounced auto-save after messages change (only when there are messages)
+  const saveCurrentSession = useCallback(async (msgs: Message[], sessionId: string | null) => {
+    if (msgs.length < 2) return // Need at least 1 user + 1 assistant message
+    // Don't save if last message is empty (still streaming)
+    const lastMsg = msgs[msgs.length - 1]
+    if (!lastMsg.content) return
+
+    const newId = await saveChatSession(sessionId, msgs)
+    if (newId && !sessionId) {
+      setActiveSessionId(newId)
+      // Refresh sessions list
+      fetchChatSessions().then(setSessions)
+    }
+  }, [])
 
   const sendMessage = useCallback(async (content: string, route?: string) => {
+    const trimmed = content.trim()
+    if (!trimmed) return
+    const safeContent = trimmed.slice(0, 1000)
+
     const userMessage: Message = {
       id: Math.random().toString(36).substring(7),
       role: "user",
-      content,
+      content: safeContent,
       createdAt: Date.now(),
     }
 
     setMessages((prev) => [...prev, userMessage])
     setIsLoading(true)
 
-    // Initial placeholder for assistant message
     const assistantId = Math.random().toString(36).substring(7)
-    const initialAssistantMessage: Message = {
+    setMessages((prev) => [...prev, {
       id: assistantId,
-      role: "assistant",
+      role: "assistant" as const,
       content: "",
       createdAt: Date.now(),
-    }
+    }])
 
-    setMessages((prev) => [...prev, initialAssistantMessage])
+    let accumulatedContent = ""
+    let gotDoneEvent = false
+    let finalMessages: Message[] = []
 
     try {
-      const response = await fetch("/api/copilot/product-assistant/stream", {
+      const response = await fetch(`${API_BASE}/api/copilot/product-assistant/stream`, {
         method: "POST",
         headers: {
-          ...authService.getAuthHeaders(),
+          ...getAuthHeaders(),
           "Accept": "text/event-stream",
         },
         body: JSON.stringify({
-          question: content,
+          question: safeContent,
           context: { route },
         }),
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      if (response.status === 402) {
+        setMessages((prev) => {
+          const updated = prev.map((msg) =>
+            msg.id === assistantId
+              ? {
+                  ...msg,
+                  content: "You've run out of AI credits. Visit **Settings** to manage your plan and continue using Copilot.",
+                  links: [{ label: "Manage Credits", url: "/copilot/settings" }],
+                  isCreditError: true,
+                }
+              : msg
+          )
+          finalMessages = updated
+          return updated
+        })
+        return
       }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
 
       const reader = response.body?.getReader()
       if (!reader) throw new Error("No reader available")
 
-      let accumulatedContent = ""
       const decoder = new TextDecoder()
+      let buffer = ""
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split("\n\n")
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split("\n\n")
+        buffer = parts.pop() || ""
 
-        for (const line of lines) {
+        for (const part of parts) {
+          const line = part.trim()
           if (!line.startsWith("data: ")) continue
-          
+
           try {
             const data = JSON.parse(line.slice(6))
-            
+
             if (data.type === "token") {
               accumulatedContent += data.content
-              
-              let displayContent = accumulatedContent
-              
-              // Try to extract the "answer" string if it exists in the partial JSON
-              // This relies on the LLM outputting the "answer" key first
-              const match = accumulatedContent.match(/"answer"\s*:\s*"([^]*)/)
-              if (match) {
-                displayContent = match[1]
-                  .replace(/\\n/g, '\n')
-                  .replace(/\\"/g, '"')
-                
-                // If the stream has moved on to related_links, stop at the end of the answer
-                const endMatch = displayContent.indexOf('",\n') !== -1 ? displayContent.indexOf('",\n') : displayContent.indexOf('",\r\n')
-                if (endMatch !== -1) {
-                  displayContent = displayContent.substring(0, endMatch)
-                } else {
-                  // Fallback for compact JSON
-                  const compactEndMatch = displayContent.indexOf('","')
-                  if (compactEndMatch !== -1) {
-                    displayContent = displayContent.substring(0, compactEndMatch)
-                  }
-                }
-              }
-
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === assistantId 
-                    ? { ...msg, content: displayContent } 
-                    : msg
+              const displayContent = stripJSONWrapper(accumulatedContent)
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId ? { ...msg, content: displayContent } : msg
                 )
               )
             } else if (data.type === "done") {
-              setMessages((prev) => 
-                prev.map((msg) => 
-                  msg.id === assistantId 
-                    ? { 
-                        ...msg, 
-                        content: data.result.answer || data.result.raw_text || "I couldn't process that properly.",
-                        links: data.result.related_links || [],
-                        tags: data.result.feature_tags || []
-                      } 
+              gotDoneEvent = true
+              let result = data.result
+              if (typeof result === "string") {
+                try { result = JSON.parse(result) } catch { /* keep */ }
+              }
+
+              const answer = result?.answer || stripJSONWrapper(accumulatedContent) || "I couldn't process that properly."
+              const links = result?.related_links || []
+              const tags = result?.feature_tags || []
+
+              setMessages((prev) => {
+                const updated = prev.map((msg) =>
+                  msg.id === assistantId ? { ...msg, content: answer, links, tags } : msg
+                )
+                finalMessages = updated
+                return updated
+              })
+            } else if (data.type === "error") {
+              setMessages((prev) => {
+                const updated = prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, content: "Something went wrong. Please try again.", isError: true, links: [{ label: "Go to Dashboard", url: "/dashboard" }] }
                     : msg
                 )
-              )
+                finalMessages = updated
+                return updated
+              })
             }
           } catch (e) {
             console.error("Error parsing SSE chunk:", e)
           }
         }
       }
+
+      // Process remaining buffer
+      if (buffer.trim().startsWith("data: ")) {
+        try {
+          const data = JSON.parse(buffer.trim().slice(6))
+          if (data.type === "done") {
+            gotDoneEvent = true
+            let result = data.result
+            if (typeof result === "string") {
+              try { result = JSON.parse(result) } catch { /* keep */ }
+            }
+            setMessages((prev) => {
+              const updated = prev.map((msg) =>
+                msg.id === assistantId
+                  ? { ...msg, content: result?.answer || stripJSONWrapper(accumulatedContent), links: result?.related_links || [], tags: result?.feature_tags || [] }
+                  : msg
+              )
+              finalMessages = updated
+              return updated
+            })
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Fallback if no done event
+      if (!gotDoneEvent && accumulatedContent) {
+        try {
+          const start = accumulatedContent.indexOf("{")
+          const end = accumulatedContent.lastIndexOf("}")
+          if (start !== -1 && end > start) {
+            const parsed = JSON.parse(accumulatedContent.substring(start, end + 1))
+            setMessages((prev) => {
+              const updated = prev.map((msg) =>
+                msg.id === assistantId
+                  ? { ...msg, content: parsed.answer || stripJSONWrapper(accumulatedContent), links: parsed.related_links || [], tags: parsed.feature_tags || [] }
+                  : msg
+              )
+              finalMessages = updated
+              return updated
+            })
+          } else {
+            setMessages((prev) => {
+              const updated = prev.map((msg) =>
+                msg.id === assistantId ? { ...msg, content: stripJSONWrapper(accumulatedContent) } : msg
+              )
+              finalMessages = updated
+              return updated
+            })
+          }
+        } catch {
+          setMessages((prev) => {
+            const updated = prev.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: stripJSONWrapper(accumulatedContent) } : msg
+            )
+            finalMessages = updated
+            return updated
+          })
+        }
+      }
     } catch (error) {
       console.error("Chatbot streaming error:", error)
-      setMessages((prev) => 
-        prev.map((msg) => 
-          msg.id === assistantId 
-            ? { ...msg, content: "I'm sorry, I encountered an error. Please try again later." } 
+      setMessages((prev) => {
+        const updated = prev.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, content: "Something went wrong while connecting to Copilot. Please check your connection and try again.", isError: true, links: [{ label: "Go to Dashboard", url: "/dashboard" }] }
             : msg
         )
-      )
+        finalMessages = updated
+        return updated
+      })
     } finally {
       setIsLoading(false)
+      // Auto-save after response completes (debounced)
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = setTimeout(() => {
+        if (finalMessages.length >= 2) {
+          saveCurrentSession(finalMessages, activeSessionId)
+        }
+      }, 1000)
     }
+  }, [activeSessionId, saveCurrentSession])
+
+  const loadSession = useCallback(async (sessionId: string) => {
+    const data = await fetchChatSession(sessionId)
+    if (data) {
+      setMessages(data.messages)
+      setActiveSessionId(sessionId)
+    }
+  }, [])
+
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const success = await deleteChatSession(sessionId)
+    if (success) {
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+      if (activeSessionId === sessionId) {
+        setMessages([])
+        setActiveSessionId(null)
+      }
+    }
+  }, [activeSessionId])
+
+  const startNewChat = useCallback(() => {
+    setMessages([])
+    setActiveSessionId(null)
+  }, [])
+
+  const refreshSessions = useCallback(async () => {
+    const s = await fetchChatSessions()
+    setSessions(s)
   }, [])
 
   return {
@@ -144,5 +402,13 @@ export function useChatbot() {
     isLoading,
     sendMessage,
     setMessages,
+    // Chat history
+    sessions,
+    sessionsLoaded,
+    activeSessionId,
+    loadSession,
+    deleteSession,
+    startNewChat,
+    refreshSessions,
   }
 }

@@ -46,6 +46,7 @@ import {
   ChevronUp,
 } from "lucide-react"
 import { useState, useRef } from "react"
+import ReactMarkdown from "react-markdown"
 import { useToast } from "@/hooks/use-toast"
 import { CopilotCommandInput } from "./copilot-command-input"
 import {
@@ -317,16 +318,22 @@ export function LeadCopilotPanel() {
 
   return (
     <Sheet open={isPanelOpen} onOpenChange={(open) => !open && closePanel()}>
-      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
-        <SheetHeader className="p-4 pb-0">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <SheetTitle className="text-lg">Lead Copilot</SheetTitle>
+      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col border-l border-border/60 bg-background/95 backdrop-blur-xl">
+        <SheetHeader className="px-5 pt-5 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 border border-primary/20">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <div className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary animate-pulse" />
+            </div>
+            <div>
+              <SheetTitle className="text-base font-semibold tracking-tight">Lead Copilot</SheetTitle>
+              <p className="text-[10px] text-muted-foreground font-medium tracking-wide uppercase">AI Intelligence</p>
+            </div>
           </div>
         </SheetHeader>
 
         <ScrollArea ref={scrollAreaRef} className="flex-1 overflow-y-auto">
-          <div className="p-4 space-y-4">
+          <div className="px-5 py-4 space-y-5">
             {/* Profile Header */}
             {contextLoading ? (
               <ProfileSkeleton />
@@ -361,24 +368,24 @@ export function LeadCopilotPanel() {
             <Separator />
 
             {/* Quick Actions */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-muted-foreground">Quick Actions</p>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2.5">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Quick Actions</p>
+              <div className="grid grid-cols-2 gap-1.5">
                 {QUICK_ACTIONS.map((action) => (
                   <Button
                     key={action.type}
                     variant="outline"
                     size="sm"
-                    className="justify-start gap-2 h-9"
+                    className="justify-start gap-2 h-8 px-2.5 text-xs border-border/50 bg-transparent hover:bg-muted/60 hover:border-border hover:shadow-sm active:scale-[0.98] transition-all duration-150"
                     disabled={actionLoading}
                     onClick={() => handleQuickAction(action.type)}
                   >
-                    <action.icon className="h-3.5 w-3.5" />
-                    <span className="text-xs">{action.label}</span>
-                    <Badge variant="secondary" className="ml-auto text-[10px] px-1 py-0">
-                      <Coins className="h-2.5 w-2.5 mr-0.5" />
+                    <action.icon className="h-3 w-3 text-muted-foreground/70" />
+                    <span className="text-[11px] truncate">{action.label}</span>
+                    <span className="ml-auto flex items-center gap-0.5 text-[9px] text-muted-foreground/50 font-mono tabular-nums">
+                      <Coins className="h-2 w-2" />
                       {action.cost}
-                    </Badge>
+                    </span>
                   </Button>
                 ))}
               </div>
@@ -388,7 +395,7 @@ export function LeadCopilotPanel() {
             {awaitingInput && ACTIONS_REQUIRING_INPUT[awaitingInput] && (
               <>
                 <Separator />
-                <div className="space-y-2 p-3 rounded-lg border border-primary/30 bg-primary/5">
+                <div className="space-y-2.5 p-3.5 rounded-xl border border-primary/20 bg-primary/[0.04]">
                   <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
                     <Swords className="h-3.5 w-3.5 text-primary" />
                     {ACTIONS_REQUIRING_INPUT[awaitingInput]!.label}
@@ -447,31 +454,39 @@ function ProfileHeader({
   name: string; title: string; company: string; email?: string; phone?: string
   linkedin?: string; location?: string; seniority?: string
 }) {
+  const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()
   return (
-    <div className="space-y-2">
-      <div>
-        <h3 className="text-base font-semibold">{name}</h3>
-        <p className="text-sm text-muted-foreground">
-          {title}{company ? ` @ ${company}` : ""}
-        </p>
+    <div className="space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="flex items-center justify-center h-10 w-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/15 text-primary font-semibold text-sm shrink-0 select-none">
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-[15px] font-semibold tracking-tight truncate">{name}</h3>
+          <p className="text-[13px] text-muted-foreground truncate">
+            {title}{company ? <span className="text-foreground/50"> @ </span> : ""}{company && <span className="font-medium text-foreground/70">{company}</span>}
+          </p>
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-        {seniority && <Badge variant="secondary" className="text-[10px]">{seniority}</Badge>}
+      <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+        {seniority && <Badge variant="secondary" className="text-[10px] font-medium bg-primary/8 text-primary/80 border-primary/12 hover:bg-primary/12 transition-colors">{seniority}</Badge>}
         {location && (
-          <span className="flex items-center gap-1">
-            <MapPin className="h-3 w-3" />{location}
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted/60 border border-border/50">
+            <MapPin className="h-2.5 w-2.5 text-muted-foreground/60" />{location}
           </span>
         )}
         {email && (
-          <span className="flex items-center gap-1">
-            <Mail className="h-3 w-3" />{email}
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted/60 border border-border/50 truncate max-w-[200px]">
+            <Mail className="h-2.5 w-2.5 text-muted-foreground/60 shrink-0" />{email}
           </span>
         )}
-        {phone && <span>{phone}</span>}
+        {phone && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted/60 border border-border/50">{phone}</span>
+        )}
         {linkedin && (
           <a href={linkedin} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-blue-500 hover:underline">
-            <Linkedin className="h-3 w-3" />LinkedIn
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/8 border border-blue-500/15 text-blue-400 hover:bg-blue-500/15 transition-colors">
+            <Linkedin className="h-2.5 w-2.5" />LinkedIn
           </a>
         )}
       </div>
@@ -483,36 +498,56 @@ function ProfileHeader({
 
 function CompanyCard({ company }: { company: NonNullable<import("@/lib/api/copilot").LeadContextData["company"]> }) {
   return (
-    <Card className="bg-muted/50">
-      <CardContent className="p-3 space-y-2">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">{company.name}</span>
+    <Card className="bg-gradient-to-br from-muted/60 to-muted/30 border-border/60 shadow-sm">
+      <CardContent className="p-3.5 space-y-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-center h-7 w-7 rounded-lg bg-foreground/5 border border-border/50">
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          <span className="text-sm font-semibold tracking-tight">{company.name}</span>
           {company.industry && (
-            <Badge variant="outline" className="text-[10px]">{company.industry}</Badge>
+            <Badge variant="outline" className="text-[10px] ml-auto font-medium border-border/60">{company.industry}</Badge>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {company.employee_count && <span>👥 {company.employee_count.toLocaleString()} employees</span>}
-          {company.revenue_range && <span>💰 {company.revenue_range}</span>}
-          {company.funding_stage && <span>🏦 {company.funding_stage}</span>}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+          {company.employee_count && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs opacity-70">👥</span>
+              <span>{company.employee_count.toLocaleString()} employees</span>
+            </span>
+          )}
+          {company.revenue_range && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs opacity-70">💰</span>
+              <span>{company.revenue_range}</span>
+            </span>
+          )}
+          {company.funding_stage && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs opacity-70">🏦</span>
+              <span>{company.funding_stage}</span>
+            </span>
+          )}
           {company.employee_growth_6m_percent != null && (
-            <span>{company.employee_growth_6m_percent > 0 ? "📈" : "📉"} {company.employee_growth_6m_percent}% growth (6mo)</span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs opacity-70">{company.employee_growth_6m_percent > 0 ? "📈" : "📉"}</span>
+              <span className={company.employee_growth_6m_percent > 0 ? "text-emerald-500" : "text-red-400"}>{company.employee_growth_6m_percent}% growth (6mo)</span>
+            </span>
           )}
           {company.domain && (
-            <span className="flex items-center gap-1"><Globe className="h-3 w-3" />{company.domain}</span>
+            <span className="flex items-center gap-1.5"><Globe className="h-3 w-3 opacity-50" />{company.domain}</span>
           )}
           {company.headquarters && (
-            <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{company.headquarters}</span>
+            <span className="flex items-center gap-1.5"><MapPin className="h-3 w-3 opacity-50" />{company.headquarters}</span>
           )}
         </div>
         {company.technologies && company.technologies.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-1">
+          <div className="flex flex-wrap gap-1 pt-0.5">
             {company.technologies.slice(0, 8).map((tech) => (
-              <Badge key={tech} variant="secondary" className="text-[10px] px-1.5 py-0">{tech}</Badge>
+              <Badge key={tech} variant="secondary" className="text-[9.5px] px-1.5 py-0 font-mono bg-muted/80 border border-border/40">{tech}</Badge>
             ))}
             {company.technologies.length > 8 && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">+{company.technologies.length - 8}</Badge>
+              <Badge variant="secondary" className="text-[9.5px] px-1.5 py-0 font-mono bg-muted/80 border border-border/40">+{company.technologies.length - 8}</Badge>
             )}
           </div>
         )}
@@ -530,31 +565,37 @@ function SuggestionsSection({
 }) {
   if (isLoading) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-          <Sparkles className="h-3.5 w-3.5" /> AI Suggestions
+      <div className="space-y-2.5">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3 text-primary/60" /> AI Suggestions
         </p>
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-14 w-full rounded-lg" />
+        <Skeleton className="h-14 w-full rounded-lg" />
       </div>
     )
   }
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-        <Sparkles className="h-3.5 w-3.5" /> AI Suggestions
+    <div className="space-y-2.5">
+      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+        <Sparkles className="h-3 w-3 text-primary/60" /> AI Suggestions
       </p>
       {suggestions.map((s, i) => (
-        <button key={i} className="w-full text-left p-2 rounded-md border hover:bg-muted/50 transition-colors"
+        <button key={i}
+          className={`w-full text-left p-2.5 rounded-lg border transition-all duration-150 hover:shadow-sm active:scale-[0.99] ${
+            s.priority === "high"
+              ? "border-primary/20 bg-primary/[0.03] hover:bg-primary/[0.06] hover:border-primary/30"
+              : "border-border/50 hover:bg-muted/50 hover:border-border"
+          }`}
+          style={{ animation: `slideIn 0.25s ease ${i * 0.06}s forwards`, opacity: 0 }}
           onClick={() => s.action_type && onSuggestionClick(s.action_type as LeadActionType)}>
-          <div className="flex items-start gap-2">
-            <span className="text-base">{s.icon}</span>
+          <div className="flex items-start gap-2.5">
+            <span className="text-base mt-0.5">{s.icon}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{s.title}</p>
-              <p className="text-xs text-muted-foreground line-clamp-2">{s.description}</p>
+              <p className="text-[13px] font-medium truncate">{s.title}</p>
+              <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">{s.description}</p>
             </div>
             {s.priority === "high" && (
-              <Badge variant="destructive" className="text-[10px] shrink-0">High</Badge>
+              <Badge className="text-[9px] shrink-0 font-bold bg-primary/15 text-primary border-primary/20 hover:bg-primary/15 px-1.5">HIGH</Badge>
             )}
           </div>
         </button>
@@ -583,12 +624,12 @@ function ConversationThread({
 
   return (
     <div className="space-y-4 w-full max-w-full overflow-hidden">
-      <p className="text-sm font-medium text-muted-foreground">Conversation</p>
+      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">Conversation</p>
       {messages.map((msg) => (
         <div key={msg.id} className={msg.role === "user" ? "flex justify-end w-full" : "w-full max-w-full overflow-hidden"}>
           {msg.role === "user" ? (
-            <div className="bg-primary text-primary-foreground rounded-lg px-3 py-2 max-w-[85%] break-words">
-              <p className="text-sm whitespace-pre-wrap break-words">{msg.prompt}</p>
+            <div className="bg-primary/90 text-primary-foreground rounded-2xl rounded-br-md px-3.5 py-2 max-w-[85%] break-words shadow-sm">
+              <p className="text-[13px] whitespace-pre-wrap break-words leading-relaxed">{msg.prompt}</p>
             </div>
           ) : (
             <AssistantMessage msg={msg} onFollowUpAction={onFollowUpAction} isLoading={isLoading} />
@@ -597,23 +638,28 @@ function ConversationThread({
       ))}
       <div ref={messagesEndRef} />
       {isLoading && (
-        <div className="bg-muted rounded-lg px-3 py-2 space-y-2">
+        <div className="rounded-xl border border-border/40 bg-muted/40 px-3.5 py-3 space-y-2">
           {stageDisplay ? (
-            <div className="flex items-center gap-2">
-              <stageDisplay.icon className={`h-4 w-4 animate-pulse ${stageDisplay.color}`} />
-              <span className="text-sm text-muted-foreground">{stageDisplay.text}</span>
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <stageDisplay.icon className={`h-4 w-4 ${stageDisplay.color}`} />
+                <div className={`absolute inset-0 ${stageDisplay.color} animate-ping opacity-30`}>
+                  <stageDisplay.icon className="h-4 w-4" />
+                </div>
+              </div>
+              <span className="text-[12px] text-muted-foreground font-medium">{stageDisplay.text}</span>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Thinking...</span>
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="h-4 w-4 animate-spin text-primary/60" />
+              <span className="text-[12px] text-muted-foreground font-medium">Thinking...</span>
             </div>
           )}
           {streamingStage === "enriching" && (
-            <div className="flex gap-1 ml-6">
-              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-              <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+            <div className="flex gap-1.5 ml-6">
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <div className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
           )}
         </div>
@@ -646,35 +692,35 @@ function AssistantMessage({ msg, onFollowUpAction, isLoading }: { msg: CopilotMe
     <div className="space-y-2 w-full max-w-full overflow-hidden">
       {/* Action chip header */}
       <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-muted border border-border text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold bg-muted/70 border border-border/50 text-muted-foreground tracking-wide">
           {display.emoji} {display.label}
         </span>
-        {relativeTime && <span className="text-[10px] text-muted-foreground ml-auto">{relativeTime}</span>}
+        {relativeTime && <span className="text-[9.5px] text-muted-foreground/60 ml-auto font-mono tabular-nums">{relativeTime}</span>}
       </div>
 
       {/* Result card */}
-      <div className="bg-muted rounded-lg px-2.5 py-2 space-y-2 w-full max-w-full overflow-x-hidden break-words">
+      <div className="rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 space-y-2 w-full max-w-full overflow-x-hidden break-words">
         {msg.result && (
-          <div className="w-full max-w-full overflow-hidden pt-1">
+          <div className="w-full max-w-full overflow-hidden">
             <ActionResult actionType={msg.action_type} result={msg.result} />
           </div>
         )}
       </div>
 
       {/* Footer: credits + copy all */}
-      <div className="flex items-center justify-between px-0.5">
+      <div className="flex items-center justify-between px-1">
         {msg.credits_used != null && (
-          <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-mono">
-            <Coins className="h-2.5 w-2.5" />{msg.credits_used} credit{msg.credits_used !== 1 ? "s" : ""} used
+          <span className="text-[9.5px] text-muted-foreground/50 flex items-center gap-1 font-mono tabular-nums">
+            <Coins className="h-2.5 w-2.5" />{msg.credits_used} credit{msg.credits_used !== 1 ? "s" : ""}
           </span>
         )}
         {fullText && (
           <button
             onClick={() => copy(fullText, `msg-${msg.id}`)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground border border-border rounded-md px-2 py-1 hover:bg-muted transition-colors ml-auto"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground/60 border border-border/40 rounded-md px-2 py-0.5 hover:bg-muted/60 hover:text-foreground hover:border-border transition-all duration-150 ml-auto"
           >
-            {copiedKey === `msg-${msg.id}` ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copiedKey === `msg-${msg.id}` ? "Copied" : "Copy All"}
+            {copiedKey === `msg-${msg.id}` ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
+            {copiedKey === `msg-${msg.id}` ? "Copied" : "Copy"}
           </button>
         )}
       </div>
@@ -682,19 +728,54 @@ function AssistantMessage({ msg, onFollowUpAction, isLoading }: { msg: CopilotMe
       {/* Smart follow-up suggestions */}
       {followUps.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-          <span className="text-[10px] text-muted-foreground">Next:</span>
+          <span className="text-[9.5px] text-muted-foreground/50 font-medium uppercase tracking-wider">Next</span>
           {followUps.map((f) => (
             <button
               key={f.type}
               disabled={isLoading}
               onClick={() => onFollowUpAction(f.type)}
-              className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-muted hover:bg-muted/80 active:scale-95 transition-all text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 text-[10.5px] px-2.5 py-1 rounded-lg border border-border/40 bg-transparent hover:bg-muted/50 hover:border-border active:scale-[0.97] transition-all duration-150 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {f.emoji} {f.label}
             </button>
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Lead Panel Markdown Renderer ─────────────────────────────
+
+function LeadMarkdown({ content }: { content: string }) {
+  return (
+    <div className="text-[12.5px] leading-snug text-foreground/80">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          ul: ({ children }) => <ul className="mb-2 ml-3 list-disc space-y-0.5 last:mb-0">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-2 ml-3 list-decimal space-y-0.5 last:mb-0">{children}</ol>,
+          li: ({ children }) => <li className="text-[12px] leading-snug">{children}</li>,
+          h1: ({ children }) => <h3 className="mb-1.5 mt-3 text-[12.5px] font-bold text-foreground tracking-tight first:mt-0">{children}</h3>,
+          h2: ({ children }) => <h3 className="mb-1 mt-2.5 text-xs font-bold text-foreground tracking-tight first:mt-0">{children}</h3>,
+          h3: ({ children }) => <h4 className="mb-1 mt-2 text-[10.5px] font-semibold text-foreground/80 uppercase tracking-widest first:mt-0">{children}</h4>,
+          code: ({ children }) => (
+            <code className="rounded bg-muted px-1 py-0.5 text-[10.5px] font-mono">{children}</code>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors">
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-primary/30 pl-3 my-2 text-foreground/60 italic">{children}</blockquote>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   )
 }
@@ -718,12 +799,15 @@ function ActionResult({ actionType, result }: { actionType?: string; result: Rec
   if (actionType === "custom" && result.response) {
     return (
       <div className="space-y-2 w-full max-w-full overflow-hidden">
-        <p className="text-sm whitespace-pre-wrap break-words">{result.response}</p>
+        <LeadMarkdown content={result.response} />
         {result.action_items?.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground">Action Items</p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Action Items</p>
             {result.action_items.map((item: string, i: number) => (
-              <p key={i} className="text-xs break-words whitespace-pre-wrap">• {item}</p>
+              <div key={i} className="flex gap-2 items-start">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0 mt-1.5" />
+                <p className="text-xs text-foreground/80 leading-snug break-words">{item}</p>
+              </div>
             ))}
           </div>
         )}
@@ -735,17 +819,26 @@ function ActionResult({ actionType, result }: { actionType?: string; result: Rec
   if (["website_traffic", "business_events", "linkedin_posts"].includes(actionType || "")) return <SignalResult result={result} />
   if (actionType === "crossfire") return <BattleCard result={result} />
   if (["compliance", "virality", "regime_shift", "talent_radar"].includes(actionType || "")) return <GTMActionResult result={result} />
-  // Fallback: show raw_text if present (truncated JSON from LLM), else raw JSON
-  if (result.raw_text) return <p className="text-xs whitespace-pre-wrap break-words text-foreground/80">{result.raw_text}</p>
-  return <pre className="text-xs whitespace-pre-wrap text-foreground/70">{JSON.stringify(result, null, 2)}</pre>
+  // Fallback: render raw_text or response with markdown, else friendly message with collapsible raw
+  if (result.raw_text) return <LeadMarkdown content={result.raw_text} />
+  if (result.response) return <LeadMarkdown content={result.response} />
+  return (
+    <div className="space-y-1.5 w-full max-w-full overflow-hidden">
+      <p className="text-xs text-muted-foreground italic">Unable to format this response nicely.</p>
+      <details className="text-xs">
+        <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">Show raw data</summary>
+        <pre className="mt-1 text-[10px] whitespace-pre-wrap text-foreground/60 bg-muted/30 rounded p-2 border border-border/50 max-h-40 overflow-y-auto">{JSON.stringify(result, null, 2)}</pre>
+      </details>
+    </div>
+  )
 }
 
 // ── Signal Cards ─────────────────────────────────────────────
 
-const URGENCY_STYLES: Record<string, { border: string; badge: string; badgeText: string }> = {
-  high:   { border: "border-l-red-500",   badge: "bg-red-500/[0.15] border border-red-500/25 text-red-400",   badgeText: "HIGH" },
-  medium: { border: "border-l-amber-500", badge: "bg-amber-500/[0.12] border border-amber-500/25 text-amber-400", badgeText: "MEDIUM" },
-  low:    { border: "border-l-teal-500",  badge: "bg-teal-500/[0.12] border border-teal-500/25 text-teal-400",  badgeText: "LOW" },
+const URGENCY_STYLES: Record<string, { border: string; badge: string; badgeText: string; glow: string }> = {
+  high:   { border: "border-l-red-500",   badge: "bg-red-500/[0.15] border border-red-500/25 text-red-400",   badgeText: "HIGH",   glow: "shadow-red-500/5" },
+  medium: { border: "border-l-amber-500", badge: "bg-amber-500/[0.12] border border-amber-500/25 text-amber-400", badgeText: "MEDIUM", glow: "" },
+  low:    { border: "border-l-teal-500",  badge: "bg-teal-500/[0.12] border border-teal-500/25 text-teal-400",  badgeText: "LOW",    glow: "" },
 }
 
 function SignalCard({ signal, index }: { signal: any; index: number }) {
@@ -756,7 +849,7 @@ function SignalCard({ signal, index }: { signal: any; index: number }) {
 
   return (
     <div
-      className={`relative rounded-xl border border-border border-l-4 ${styles.border} bg-muted/30 p-3 space-y-2 transition-transform hover:translate-x-0.5`}
+      className={`relative rounded-xl border border-border/50 border-l-4 ${styles.border} bg-muted/20 p-3 space-y-2 transition-all duration-200 hover:translate-x-0.5 hover:bg-muted/30 ${styles.glow}`}
       style={{ animation: `slideIn 0.3s ease ${index * 0.08}s forwards`, opacity: 0 }}
     >
       {/* Top row */}
@@ -850,14 +943,14 @@ function BattleSectionPanel({ section, points, defaultOpen }: { section: typeof 
   const copyText = points.join("\n")
 
   return (
-    <div className="border-b border-border last:border-0">
+    <div className="border-b border-border/40 last:border-0">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/30 transition-colors text-left"
+        className="w-full flex items-center justify-between px-3.5 py-2.5 hover:bg-muted/20 transition-all duration-150 text-left"
       >
         <div className="flex items-center gap-2">
           <span className="text-sm">{section.icon}</span>
-          <span className="text-xs font-medium text-muted-foreground">{section.label}</span>
+          <span className="text-[11px] font-semibold text-muted-foreground tracking-wide">{section.label}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {open && points.length > 0 && (
@@ -900,12 +993,12 @@ function BattleCard({ result }: { result: Record<string, any> }) {
   if (!hasSections) return <GTMActionResult result={result} />
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden w-full">
+    <div className="rounded-xl border border-red-500/15 overflow-hidden w-full bg-gradient-to-b from-red-500/[0.03] to-transparent">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 bg-red-500/[0.05] border-b border-border">
-        <span className="text-[12px] font-semibold text-red-300">{competitor} vs Outmate AI</span>
-        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/[0.15] text-red-500 font-mono tracking-wide">BATTLE CARD</span>
-        {company && <span className="ml-auto text-[10.5px] text-muted-foreground">{company}</span>}
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-red-500/10">
+        <span className="text-[12px] font-semibold text-red-400/90 tracking-tight">{competitor} vs Outmate AI</span>
+        <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-md bg-red-500/[0.12] text-red-500 font-mono tracking-widest">BATTLE CARD</span>
+        {company && <span className="ml-auto text-[10px] text-muted-foreground/60 font-medium">{company}</span>}
       </div>
       {/* Sections */}
       {BATTLE_SECTIONS.map((sec) => (
@@ -924,143 +1017,22 @@ function BattleCard({ result }: { result: Record<string, any> }) {
 
 function GTMActionResult({ result }: { result: Record<string, any> }) {
   const [expanded, setExpanded] = useState(false)
-  const [showBlock, setShowBlock] = useState<number | null>(null)
   const content = result.result || result.battle_card || result.response || ""
 
-  // Parse into typed blocks
-  type KVBlock  = { kind: "kv";   key: string; value: string }
-  type ListBlock = { kind: "list"; heading: string; items: string[] }
-  type TextBlock = { kind: "text"; heading: string; body: string }
-  type Block = KVBlock | ListBlock | TextBlock
-
-  const blocks: Block[] = []
-  let currentList: ListBlock | null = null
-  let currentText: TextBlock | null = null
-
-  const flushCurrent = () => {
-    if (currentList) { blocks.push(currentList); currentList = null }
-    if (currentText) { blocks.push(currentText); currentText = null }
-  }
-
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-
-    // Markdown heading → new list block
-    if (/^#{1,3}\s/.test(trimmed)) {
-      flushCurrent()
-      currentList = { kind: "list", heading: trimmed.replace(/^#+\s*/, ""), items: [] }
-      continue
-    }
-
-    // Bullet line
-    if (/^[-•*]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
-      const cleaned = trimmed.replace(/^[-•*]\s+/, "").replace(/^\d+\.\s+/, "")
-      if (currentList) { currentList.items.push(cleaned); continue }
-      if (!currentList) { currentList = { kind: "list", heading: "", items: [] } }
-      currentList.items.push(cleaned)
-      continue
-    }
-
-    // "Key: Value" line (short value on same line, not a section intro)
-    const kvMatch = trimmed.match(/^([A-Z][^:]{2,30}):\s+(.+)$/)
-    if (kvMatch && kvMatch[2].length < 60 && !currentList && !currentText) {
-      blocks.push({ kind: "kv", key: kvMatch[1], value: kvMatch[2] })
-      continue
-    }
-
-    // "Section Heading:" with no value → start a list section
-    const sectionMatch = trimmed.match(/^([A-Z][^:]{2,40}):$/)
-    if (sectionMatch) {
-      flushCurrent()
-      currentList = { kind: "list", heading: sectionMatch[1], items: [] }
-      continue
-    }
-
-    // Plain text line — goes into a text block (e.g. email body)
-    if (currentList && currentList.items.length === 0) {
-      // Convert empty list block to text block
-      currentText = { kind: "text", heading: currentList.heading, body: trimmed }
-      currentList = null
-    } else if (currentText) {
-      currentText.body += " " + trimmed
-    } else {
-      flushCurrent()
-      currentText = { kind: "text", heading: "", body: trimmed }
-    }
-  }
-  flushCurrent()
-
-  // Separate KV blocks from the rest
-  const kvBlocks = blocks.filter((b): b is KVBlock => b.kind === "kv")
-  const contentBlocks = blocks.filter((b): b is ListBlock | TextBlock => b.kind !== "kv")
-  const LIMIT = 3
+  // Preview: first ~400 chars for collapsed view
+  const previewEnd = content.indexOf("\n", 350)
+  const preview = previewEnd > 0 && previewEnd < 500 ? content.slice(0, previewEnd) : content.slice(0, 400)
+  const hasMore = content.length > preview.length
 
   return (
     <div className="space-y-2 w-full max-w-full overflow-hidden">
-      {/* KV badges row — always shown */}
-      {kvBlocks.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {kvBlocks.map((kv, i) => (
-            <span key={i} className="inline-flex items-center gap-1 text-[10.5px] bg-muted border border-border rounded-md px-2 py-0.5">
-              <span className="text-muted-foreground">{kv.key}:</span>
-              <span className="text-foreground/80 font-medium">{kv.value}</span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Content blocks */}
-      {contentBlocks.map((block, bi) => {
-        if (block.kind === "list") {
-          const shown = expanded ? block.items : block.items.slice(0, LIMIT)
-          const hidden = block.items.length - LIMIT
-          return (
-            <div key={bi} className="space-y-1">
-              {block.heading && (
-                <p className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide">{block.heading}</p>
-              )}
-              {shown.map((item, ii) => (
-                <div key={ii} className="flex gap-2 items-start">
-                  <div className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0 mt-[7px]" />
-                  <p className="text-[12px] text-foreground/75 leading-snug line-clamp-2">{item}</p>
-                </div>
-              ))}
-              {!expanded && hidden > 0 && (
-                <button onClick={() => setExpanded(true)}
-                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline underline-offset-2 transition-colors ml-3">
-                  +{hidden} more
-                </button>
-              )}
-            </div>
-          )
-        }
-        // Text block (email body etc.) — collapsed behind toggle
-        if (block.kind === "text") {
-          const isOpen = showBlock === bi
-          return (
-            <div key={bi} className="space-y-1">
-              <button onClick={() => setShowBlock(isOpen ? null : bi)}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
-                {block.heading && <span className="font-medium">{block.heading}</span>}
-                {!block.heading && <span>Rewrite</span>}
-                {isOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              </button>
-              {isOpen && (
-                <p className="text-[12px] text-foreground/70 leading-snug bg-muted/40 rounded p-2 border border-border/50">
-                  {block.body}
-                </p>
-              )}
-            </div>
-          )
-        }
-        return null
-      })}
-
-      {expanded && (
-        <button onClick={() => setExpanded(false)}
-          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline underline-offset-2 transition-colors">
-          Show less
+      <LeadMarkdown content={expanded ? content : (hasMore ? preview + "\n\n…" : content)} />
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline underline-offset-2 transition-colors"
+        >
+          {expanded ? "Show less" : "Show more"}
         </button>
       )}
     </div>
@@ -1074,19 +1046,21 @@ function BomboraIntentResult({ result }: { result: Record<string, any> }) {
   return (
     <div className="space-y-2 w-full max-w-full overflow-hidden">
       <div className="flex items-center gap-2">
-        <Zap className="h-3.5 w-3.5 text-yellow-500" />
-        <p className="text-sm font-semibold">Intent Analysis</p>
-        <Badge variant="outline" className="text-[10px] ml-auto">{result.level_of_intent} Level</Badge>
+        <div className="flex items-center justify-center h-6 w-6 rounded-md bg-yellow-500/10 border border-yellow-500/15">
+          <Zap className="h-3 w-3 text-yellow-500" />
+        </div>
+        <p className="text-[13px] font-semibold tracking-tight">Intent Analysis</p>
+        <Badge variant="outline" className="text-[9.5px] ml-auto font-semibold border-border/50">{result.level_of_intent} Level</Badge>
       </div>
       <div className="space-y-1.5">
         {topics.map((topic: any, i: number) => (
-          <div key={topic.name || i} className="p-2 rounded bg-muted/30 border border-border/50">
+          <div key={topic.name || i} className="p-2.5 rounded-lg bg-muted/20 border border-border/40">
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-xs font-medium truncate pr-2">{topic.name}</span>
               <span className="text-[10px] text-muted-foreground whitespace-nowrap">Score: {topic.score}</span>
             </div>
-            <div className="h-1 w-full bg-secondary rounded-full overflow-hidden">
-              <div className="h-full bg-primary transition-all" style={{ width: `${topic.score}%` }} />
+            <div className="h-1.5 w-full bg-secondary/50 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-primary/80 to-primary rounded-full transition-all duration-500" style={{ width: `${topic.score}%` }} />
             </div>
           </div>
         ))}
@@ -1117,10 +1091,12 @@ function AnnotatedEmailResult({ result }: { result: Record<string, any> }) {
     <TooltipProvider>
       <div className="space-y-2 w-full max-w-full overflow-hidden">
         <div className="flex items-start justify-between gap-2 overflow-hidden w-full">
-          <p className="text-xs font-medium break-words whitespace-pre-wrap flex-1">Subject: {result.subject_line}</p>
-          <Button variant="ghost" size="sm" className="h-6 px-2 shrink-0" onClick={handleCopy}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            <span className="text-[10px] ml-1">{copied ? "Copied" : "Copy"}</span>
+          <p className="text-[12px] font-semibold break-words whitespace-pre-wrap flex-1 tracking-tight">
+            <span className="text-muted-foreground/60 font-medium">Subject:</span> {result.subject_line}
+          </p>
+          <Button variant="ghost" size="sm" className="h-6 px-2 shrink-0 hover:bg-muted/60" onClick={handleCopy}>
+            {copied ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
+            <span className="text-[9.5px] ml-1">{copied ? "Copied" : "Copy"}</span>
           </Button>
         </div>
         <div className="space-y-1 w-full max-w-full overflow-hidden break-words text-wrap">
@@ -1171,7 +1147,7 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
 
   return (
     <div className="space-y-2 w-full max-w-full overflow-hidden">
-      <p className="text-[12.5px] leading-snug text-foreground/80 break-words">{result.executive_summary}</p>
+      <LeadMarkdown content={result.executive_summary} />
       {allPoints.length > 0 && (
         <div className="space-y-1">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Talking Points</p>
@@ -1209,7 +1185,7 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
               {result.recommended_approach && (
                 <div className="pt-1">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Recommended Approach</p>
-                  <p className="text-xs text-foreground/80 leading-snug mt-0.5">{result.recommended_approach}</p>
+                  <div className="mt-0.5"><LeadMarkdown content={result.recommended_approach} /></div>
                 </div>
               )}
               <button onClick={() => setExpanded(false)}
@@ -1229,10 +1205,10 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
 function ObjectionResult({ result }: { result: Record<string, any> }) {
   return (
     <div className="space-y-2 w-full max-w-full overflow-hidden">
-      <p className="text-xs text-muted-foreground italic break-words whitespace-pre-wrap">{result.objection_analysis}</p>
+      <div className="text-xs text-muted-foreground italic"><LeadMarkdown content={result.objection_analysis} /></div>
       {result.rebuttals?.map((r: any, i: number) => (
-        <div key={i} className={`p-2 rounded border text-xs w-full overflow-hidden ${i === result.recommended_rebuttal ? "border-primary bg-primary/5" : ""}`}>
-          <Badge variant="outline" className="text-[9px] mb-1">{r.approach}</Badge>
+        <div key={i} className={`p-2.5 rounded-lg border text-xs w-full overflow-hidden transition-colors ${i === result.recommended_rebuttal ? "border-primary/30 bg-primary/[0.04]" : "border-border/40 bg-muted/10"}`}>
+          <Badge variant="outline" className="text-[9px] mb-1.5 font-semibold border-border/50">{r.approach}</Badge>
           <p className="text-sm break-words whitespace-pre-wrap">{r.response}</p>
           <p className="text-[10px] text-muted-foreground mt-1 break-words whitespace-pre-wrap">{r.reasoning}</p>
         </div>
@@ -1251,13 +1227,13 @@ function ObjectionResult({ result }: { result: Record<string, any> }) {
 function FindSimilarResult({ result }: { result: Record<string, any> }) {
   return (
     <div className="space-y-2 w-full max-w-full overflow-hidden">
-      <p className="text-xs text-muted-foreground break-words whitespace-pre-wrap">
+      <p className="text-[11px] text-muted-foreground/70 font-medium">
         Found {result.total_found} similar companies
       </p>
       {result.similar_companies?.map((c: any, i: number) => (
-        <div key={i} className="p-2 rounded border text-xs w-full overflow-hidden">
-          <p className="font-medium break-words whitespace-pre-wrap">{c.name || c.company_name}</p>
-          <p className="text-muted-foreground break-words whitespace-pre-wrap">
+        <div key={i} className="p-2.5 rounded-lg border border-border/40 bg-muted/10 text-xs w-full overflow-hidden hover:bg-muted/20 transition-colors">
+          <p className="font-semibold text-[12px] break-words whitespace-pre-wrap">{c.name || c.company_name}</p>
+          <p className="text-muted-foreground/70 text-[11px] break-words whitespace-pre-wrap mt-0.5">
             {c.industry} • {c.employee_count_range || c.employee_count_exact || c.employee_count || "N/A"} employees
           </p>
         </div>
@@ -1332,12 +1308,15 @@ function MeetingPrepResult({ result }: { result: Record<string, any> }) {
 
 function ProfileSkeleton() {
   return (
-    <div className="space-y-2">
-      <Skeleton className="h-5 w-40" />
-      <Skeleton className="h-4 w-56" />
-      <div className="flex gap-2">
-        <Skeleton className="h-4 w-24" />
+    <div className="flex items-start gap-3">
+      <Skeleton className="h-10 w-10 rounded-xl" />
+      <div className="space-y-2 flex-1">
         <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-3.5 w-48" />
+        <div className="flex gap-1.5 pt-0.5">
+          <Skeleton className="h-5 w-16 rounded-md" />
+          <Skeleton className="h-5 w-24 rounded-md" />
+        </div>
       </div>
     </div>
   )

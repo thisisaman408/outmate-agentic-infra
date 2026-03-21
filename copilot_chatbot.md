@@ -1,3 +1,4 @@
+
 ## Global Copilot Chatbot PRD
 **Project**: Outmate Global Copilot Chatbot  
 **Owner**: _(TBD)_  

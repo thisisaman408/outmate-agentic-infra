@@ -1,0 +1,1297 @@
+# Outmate.ai — Complete Product Documentation for AI Copilot Knowledge Base
+
+**Version:** 1.0 | **Date:** March 2026 | **Audience:** AI Copilot / RAG System
+
+> This document is structured for chunked retrieval. Each section is independently retrievable by an AI assistant to answer user questions about Outmate.ai features and workflows.
+
+---
+
+## Platform Overview
+
+### What Is Outmate.ai?
+
+Outmate.ai is a **B2B Go-To-Market (GTM) Intelligence Platform** that combines data aggregation from multiple third-party providers with AI-driven prospecting, signal detection, and outreach automation.
+
+**In simple terms:** Outmate helps sales and marketing teams discover high-quality leads, understand their buying signals, research target companies, and send personalized outreach—all in one platform.
+
+### Who Is It For?
+
+- **B2B Sales Representatives** who need to prospect and reach out to potential customers
+- **Sales Development Representatives (SDRs)** running outbound campaigns
+- **Revenue Operations teams** managing lead pipelines and intent data
+- **Marketing teams** building targeted audience lists and running multi-channel campaigns
+- **GTM (Go-To-Market) strategists** analyzing competitive landscapes and market trends
+
+### Main Workflows
+
+1. **Lead Discovery** → Find companies and people that match your Ideal Customer Profile (ICP)
+2. **Signal Detection** → Identify buying triggers like funding rounds, hiring peaks, or tech adoption
+3. **Research** → Deep-dive into target companies before reaching out
+4. **Outreach** → Generate and send personalized emails and LinkedIn messages
+5. **Campaign Management** → Orchestrate multi-step outreach sequences
+6. **Analytics** → Measure campaign performance and lead quality
+
+---
+
+## Core Concepts
+
+| Term | Definition |
+|---|---|
+| **Prospect** | An individual person (lead) at a target company. Has job title, email, LinkedIn URL, and seniority level. |
+| **Company** | A business entity in the database, identified by domain, with firmographic data (industry, employees, revenue, location). |
+| **Signal** | A real-time buying trigger or event associated with a company or prospect — e.g., a new funding round, hiring activity, or technology adoption. |
+| **Intent Data** | Bombora-powered behavioral data showing which topics a company is actively researching online. |
+| **Campaign** | A structured outreach sequence targeting a list of prospects or companies, via email and/or LinkedIn. |
+| **AI Agent** | A specialized AI-powered workflow within Outmate that performs complex research or analysis tasks autonomously. |
+| **Credits** | The usage-based currency inside Outmate. Each search query or enrichment action deducts credits from your balance. New accounts start with 100 free credits. |
+| **ICP (Ideal Customer Profile)** | The definition of the perfect target company/persona for your product. |
+| **Enrichment** | Adding additional data (email, phone, firmographics) to an existing prospect or company record. |
+| **Firmographics** | Company-level data: industry, employee count, revenue range, HQ location, funding stage. |
+| **Technographics** | The technology tools a company is using (e.g., Salesforce, HubSpot, AWS). |
+| **GTM (Go-To-Market)** | Strategy and execution for bringing a product to market - includes ICP targeting, messaging, and outreach. |
+
+---
+
+## Main Workflows
+
+### Workflow 1: Prospect Discovery
+
+```
+Leads Page → Set Filters (Industry, Location, Employee Count, Technology, Signals)
+  → View Prospect List → Enrich Contact Data → Export or Add to Campaign
+```
+
+### Workflow 2: AI-Driven Research
+
+```
+AI Agents → Research Agent → Enter Company Name → Select Depth Level
+  → View Structured Intelligence Report → Use Insights in Outreach
+```
+
+### Workflow 3: Signal-Based Outreach
+
+```
+Signals → Create Signal (e.g., New Funding Rounds) → Run Signal
+  → View Companies with Active Signals → Generate Campaign Draft → Send
+```
+
+### Workflow 4: Campaign Creation
+
+```
+Campaigns → New Campaign → Set Objective + Audience + Message
+  → AI generates Email + LinkedIn draft → Review → Schedule → Launch
+```
+
+### Workflow 5: Visitor Intelligence
+
+```
+Get Tracking Pixel → Embed on Website → Visitors Identified Automatically
+  → View Visitor Company + Contact Details → Add to Outreach Pipeline
+```
+
+---
+
+# Feature: Database Finder (Lead Search)
+
+## Category
+Prospecting
+
+## What It Does
+The Database Finder allows users to search for companies and people (prospects) across multiple B2B data providers simultaneously. It aggregates results from Crustdata, Explorium, ContactOut, and BetterContact to deliver a unified, enriched list of leads matching the user's filters.
+
+**Problem it solves:** Instead of manually searching across multiple data tools, Outmate aggregates everything in one search with intelligent caching and enrichment.
+
+## Where to Find It
+`Dashboard Sidebar → Leads → Companies` (for company search)
+`Dashboard Sidebar → Leads → Prospects` (for people search)
+
+## How To Use
+
+1. Navigate to **Leads** in the sidebar
+2. Select either **Companies** or **Prospects**
+3. Apply filters in the filter panel (Industry, Location, Employee Count, Revenue, Technology Stack, Funding Stage, etc.)
+4. Click **Search** or **Generate Leads**
+5. Review the table of results
+6. Click any row to view detailed company or prospect info
+7. Select records and click **Export** (CSV or XLSX) or **Add to Campaign**
+
+## Inputs Required
+
+- **Industry** (e.g., SaaS, FinTech, Healthcare) — optional
+- **Location / Country** — optional (supports region groupings like North America, Europe, APAC)
+- **Employee Count Range** — optional (e.g., 50–200, 1,000+)
+- **Revenue Range** — optional
+- **Technology Stack** — optional (filter by tools used, e.g., Salesforce, AWS)
+- **Funding Stage** — optional (Seed, Series A, Series B, etc.)
+
+## Output
+
+- Table of matching companies or prospects
+- Each record includes: company name, domain, industry, location, employee count, revenue estimate, technology stack, LinkedIn URL
+- For prospects: job title, seniority level, department, work email (if available), phone number
+- Credits are deducted per search
+
+## Example Use Case
+An SDR targeting mid-market SaaS companies in Europe that use HubSpot filters by: Industry = SaaS, Location = Europe, Employee Count = 100–500, Technology = HubSpot. Outmate returns a ranked list of matching companies with contacts.
+
+## Common Errors
+
+- **No results returned**: Filters may be too narrow. Try broadening industry or location filters.
+- **Credits exhausted**: You've hit your credit limit. Upgrade your plan or purchase additional credits.
+- **Enrichment incomplete**: Some records may not have email or phone data if providers don't have it. Try using the enrichment button on the specific record.
+
+## Related Features
+- NLP Search (AI-Powered Search)
+- Signal Detection
+- Campaign Management
+- CSV Export
+
+---
+
+# Feature: AI-Powered Search (NLP Search)
+
+## Category
+Prospecting / Intelligence
+
+## What It Does
+AI-Powered Search lets users find companies and people using **plain natural language queries** instead of structured filters. The system uses a LangGraph NLP pipeline (OpenRouter LLM + HuggingFace embeddings) to understand the user's intent, extract relevant filters, and route the query to the correct data provider.
+
+**Problem it solves:** Users don't need to know the exact filter names — they just describe what they're looking for in plain English.
+
+## Where to Find It
+`Dashboard Sidebar → AI-Powered Search`
+Also accessible as: `Dashboard Sidebar → Prompt Search`
+
+## How To Use
+
+1. Navigate to **AI-Powered Search** in the sidebar
+2. Type your query in the search bar in natural language
+3. Press Enter or click Search
+4. Review the AI-generated results (companies or prospects, depending on detected intent)
+
+## Inputs Required
+
+- **Natural language query** — e.g.:
+  - "Find Series B SaaS startups in DACH region actively hiring engineers"
+  - "Show me VP-level sales leaders at FinTech companies in the US with over 500 employees"
+  - "Healthcare companies in California that recently raised funding"
+
+## Output
+
+- Structured list of matching companies or prospects
+- Displayed in the same table format as the standard Database Finder
+- The system auto-detects whether the query is person-focused (prospects) or company-focused
+
+## Example Use Case
+A sales rep types: *"Find fast-growing B2B SaaS startups in Canada hiring sales people"* — Outmate automatically extracts filters (Country = Canada, Industry = SaaS, Hiring Signal = active) and returns matching companies.
+
+## Common Errors
+
+- **Ambiguous query**: If the system can't determine intent, it defaults to company search. Clarify by specifying "companies" or "people" in the query.
+- **No results**: The query may reference an overly niche combination. Try a broader query first.
+- **Slow response**: The NLP pipeline involves multiple LLM calls. Response typically takes 5–15 seconds.
+
+## Related Features
+- Database Finder (standard filter-based search)
+- Agentic Search (AI Agent)
+
+---
+
+# Feature: Agentic Search (AI Agent)
+
+## Category
+Intelligence / Prospecting
+
+## What It Does
+Agentic Search is an advanced multi-layer AI agent that discovers real companies matching a B2B target profile. Unlike basic search, it uses a 7-layer pipeline: Google Search discovery, evidence collection on each candidate, Claude + Perplexity AI scoring, and contact extraction. The result is a curated shortlist of best-fit companies with stakeholder contact details.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Agentic Search tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Agentic Search** tab
+3. Enter a descriptive query about your target profile
+4. Click **Search**
+5. Wait for the simulated activity feed (shows AI processing steps)
+6. Review the results — each company shows score, signals, and contacts
+7. Click **Add to Pipeline** on any promising company
+
+## Inputs Required
+
+- **Query (natural language)** — Describe your ideal prospect profile. Examples:
+  - "Series B SaaS startups in DACH region hiring engineers"
+  - "Healthcare tech companies actively hiring sales leadership"
+  - "Fintech companies funded in the last 6 months in North America"
+
+## Output
+
+For each discovered company:
+- Company name, domain, industry, location, employee count
+- **Score (0–99)**: How well the company matches the query
+- **Signals**: Hiring status (Active/Moderate/Low), product activity, business momentum
+- **Evidence**: Specific URLs/snippets supporting the signal
+- **Contacts**: Up to 3 stakeholders with name, title, email, LinkedIn
+
+## Example Use Case
+A sales rep targeting Series B healthcare SaaS companies enters: *"Healthcare SaaS companies in the US that recently raised Series B and are hiring sales reps."* Agentic Search discovers 15–20 matching companies with scored profiles and verified contact details.
+
+## Common Errors
+
+- **Few results returned**: The query may be too restrictive. Remove one constraint (e.g., drop the funding stage requirement).
+- **Contacts not found**: Some companies may not have public contact data. Use the enrichment tools for those records.
+- **Slow response (30–120 seconds)**: This is normal — the agent runs multiple parallel web searches and LLM calls.
+- **Credits**: Each Agentic Search run does not directly deduct Outmate credits, but Serper/Tavily API calls are made in the background.
+
+## Related Features
+- Lookalike Agent (find similar companies to known targets)
+- Predictive Scoring Agent (score individual leads)
+- AI-Powered Search (simpler NLP search)
+
+---
+
+# Feature: Research Agent
+
+## Category
+Intelligence
+
+## What It Does
+The Research Agent generates a structured deep-intelligence report on any specific company. It uses real-time web research (Tavily) combined with Perplexity AI to produce a comprehensive profile including business model, competitive landscape, market position, recent developments, and risks.
+
+**Problem it solves:** Sales reps spend hours manually researching companies before calls. Research Agent does it in seconds.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Research tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Research** tab
+3. Enter the company name
+4. Choose depth level: Quick / Standard / Deep
+5. Click **Research**
+6. View the structured AI intelligence report
+
+## Inputs Required
+
+- **Company Name** (required) — e.g., "Notion", "Stripe", "HubSpot"
+- **Depth Level**:
+  - **Quick**: Fast summary — executive overview, products, market position, top competitors, recent news, key risks
+  - **Standard**: Full analysis — adds business model, revenue streams, full competitive landscape, opportunities
+  - **Deep**: Comprehensive M&A analysis — adds regulatory environment, M&A signals, technology stack, GTM strategy, financial indicators
+
+## Output
+
+Structured JSON report including:
+- Executive Summary
+- Company Type (B2B/B2C/Marketplace)
+- Business Model & Revenue Streams
+- Products & Services
+- Market Position & Key Differentiators
+- Competitive Landscape (direct + indirect competitors)
+- Recent Developments with strategic impact
+- Opportunities & Risks
+- Confidence Level (High/Medium/Low)
+
+## Example Use Case
+Before a discovery call with a prospect at Freshworks, a sales rep runs a **Standard** Research on Freshworks. They get a 2-minute briefing on the company's business model, top competitors, recent news, and key risks — enabling a much more informed conversation.
+
+## Common Errors
+
+- **Unknown company**: If the company is very small or niche, Perplexity may not have data. Try adding the domain name.
+- **Stale data**: Research is based on real-time web search at time of run. Re-run for updated results.
+- **Deep takes longest** (~60–90 seconds): This is expected — it runs a more comprehensive research pipeline.
+
+## Related Features
+- Agentic Search
+- Predictive Scoring Agent
+- Meeting Prep (external use case, internal to Research Agent output)
+
+---
+
+# Feature: Lookalike Agent
+
+## Category
+Prospecting / Intelligence
+
+## What It Does
+The Lookalike Agent finds companies that are highly similar to a set of known "seed" companies. It uses Explorium's lookalike database, scored by matching factors like industry, company size, revenue, ICP segment, and business model. This is useful for expanding a target account list based on your best existing customers.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Lookalike tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Lookalike** tab
+3. Enter seed company names (comma-separated or select from existing leads)
+4. Click **Find Lookalikes**
+5. Review the returned similar companies (each with a similarity score)
+6. Click **Add to Pipeline** to save promising matches
+
+## Inputs Required
+
+- **Seed Company IDs or Names** — e.g., "Stripe, Airbnb, Notion" (up to ~5 seeds recommended)
+
+## Output
+
+For each lookalike company:
+- Company Name, Website, Industry, Location, Employees, Revenue estimate
+- **Similarity Score** (0.0–1.0) and label (High / Medium / Low)
+- **Matching Factors** — specific reasons for similarity (e.g., "Same ICP segment", "Comparable ARR", "Enterprise SaaS")
+- Description
+
+**Pipeline Integration:** Adding a company to Pipeline stores it in Redis and shows count of pipeline additions.
+
+## Example Use Case
+A sales team knows Stripe and Twilio are their best customers. They run Lookalike with these as seeds to find 10–20 similar high-growth API-first companies to target next quarter.
+
+## Common Errors
+
+- **Low quality results**: Results depend on Explorium's database. If seed companies are very niche, Claude AI fallback reasoning is used but with lower accuracy.
+- **Unknown seed company**: If the seed name isn't recognized, try entering the company's domain.
+
+## Related Features
+- Agentic Search
+- Predictive Scoring
+- Database Finder
+
+---
+
+# Feature: Predictive Scoring Agent
+
+## Category
+Intelligence / Analytics
+
+## What It Does
+The Predictive Scoring Agent scores individual leads at a target company for conversion propensity. It uses multi-signal intelligence: Wikipedia company data, SEC EDGAR financial records (for US companies), and Claude 3.5 Sonnet AI analysis to rank contacts by their likelihood to convert, with specific guidance on outreach strategy.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Predictive tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Predictive** tab
+3. Enter a target company (name, domain, industry, country)
+4. Click **Score Leads**
+5. Review scored contacts sorted by conversion likelihood
+
+## Inputs Required
+
+- **Company Name** (required)
+- **Domain** (optional but improves accuracy)
+- **Industry** (optional)
+- **Country** (optional — enables SEC EDGAR data for US companies)
+
+## Output
+
+Up to 5 scored contacts per company:
+- Contact name, title, email, LinkedIn
+- **Score (0–100)**: Overall conversion likelihood
+- **Conversion Likelihood** (0.0–1.0)
+- **Confidence** (%)
+- **Prediction**: High / Medium / Low
+- **Factors**: Positive and negative signals affecting the score
+- **Guidance**: Specific outreach strategy recommendation
+- **Recommendation**: Priority action (e.g., "Prioritize outreach this week")
+
+## Example Use Case
+Before reaching out to Salesforce, a rep runs Predictive Scoring. The agent returns 5 contacts ranked by conversion potential, showing that the VP of RevOps scores 89/100 due to recent tech stack changes and a recent LinkedIn post about CRM consolidation.
+
+## Common Errors
+
+- **Generic results**: If the company is not public and has no web presence, scoring will be lower confidence.
+- **SEC data only for US**: For non-US companies, SEC EDGAR step is skipped automatically.
+- **Placeholder contacts**: If real contacts can't be found, the agent may return representative titles rather than specific names.
+
+## Related Features
+- Research Agent
+- Agentic Search
+- Signal Detection
+
+---
+
+# Feature: Crossfire Agent (Competitive Intelligence)
+
+## Category
+Intelligence
+
+## What It Does
+The Crossfire Agent analyzes a competitor's weaknesses, identifies accounts that could be "poached," and generates battle cards and outreach sequences for displaced accounts. It uses Perplexity AI with real-time web research to find pricing complaints, product gaps, leadership churn, and competitor vulnerabilities.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Crossfire tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Crossfire** tab
+3. Enter the competitor's domain (e.g., `apollo.io`)
+4. Optionally specify a target region (US, EU, global)
+5. Optionally add context notes about your ICP
+6. Click **Run Crossfire**
+7. Review the plain-text competitive intelligence report
+
+## Inputs Required
+
+- **Competitor Domain** (required) — e.g., `salesforce.com`, `hubspot.com`
+- **Target Region** (optional) — e.g., "US", "EU", "APAC", "global"
+- **Notes** (optional) — e.g., "Our ICP is SMB teams under 50 people"
+
+## Output
+
+Plain-text report with 5 sections:
+1. **Competitor Profile** — Market overview and size
+2. **Stealable Account Segments** — Which of their customers have complaints or gaps
+3. **Objection Handles** — How to rebut "we're already using [competitor]" objections
+4. **Battle Card Differentiators** — Your advantages vs. their weaknesses
+5. **Poaching Sequences** — Specific outreach cadence for competitor accounts
+
+## Example Use Case
+A GTM team wants to steal accounts from a competitor that recently raised prices. They run Crossfire with the competitor's domain and get targeted outreach sequences for affected customer segments.
+
+## Common Errors
+
+- **Outdated competitor info**: Perplexity uses real-time web data but limited to indexed sources. Very recent changes may not be reflected.
+- **Takes 30–60 seconds**: Normal processing time for real-time research.
+
+## Related Features
+- Compliance Oracle (to check outreach compliance)
+- Campaign Management (to execute the poaching sequences)
+- Research Agent (for deep company intelligence)
+
+---
+
+# Feature: Compliance Oracle Agent
+
+## Category
+Intelligence / Outreach
+
+## What It Does
+The Compliance Oracle audits outbound messages or email templates against global outreach compliance laws (GDPR, CAN-SPAM, CASL, UK GDPR, etc.) and produces compliant rewrites. It uses Claude 3.5 Haiku at low temperature for legal precision.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Compliance Oracle tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Compliance Oracle** tab
+3. Paste your outreach message or email template
+4. Specify the jurisdictions to check (default: US, EU, UK)
+5. Click **Run Compliance Check**
+6. Review the compliance report and use the rewritten compliant version
+
+## Inputs Required
+
+- **Message Template** (required) — The outreach message or email sequence to audit
+- **Jurisdictions** (optional, default: `"US, EU, UK"`) — Comma-separated list of regions (e.g., "US, EU, UK, CA, Australia")
+
+## Output
+
+Plain-text compliance report with 4 sections:
+1. **Risk Assessment** — Overall compliance risk level (High/Medium/Low)
+2. **Jurisdiction Analysis** — Per-country breakdown of what's compliant and what isn't
+3. **Required Changes** — Specific edits that must be made
+4. **Compliant Rewrite** — A fully rewritten, compliant version of the message
+
+## Example Use Case
+A sales team plans to send 10,000 emails to EU prospects. The Compliance Oracle reviews the template, flags missing opt-out language and GDPR consent requirements, and provides a GDPR-safe rewrite.
+
+## Common Errors
+
+- **Jurisdictions not recognized**: Use standard region/country names (US, EU, UK, CA, AU).
+- **Template too vague**: More specific messages get more precise compliance feedback.
+
+## Related Features
+- Campaign Management (apply compliant messages)
+- Crossfire Agent (check competitor poaching sequences)
+
+---
+
+# Feature: Virality Engine Agent
+
+## Category
+Intelligence / Outreach
+
+## What It Does
+The Virality Engine designs a B2B referral / viral growth loop from a set of champion customers or personas. It identifies champion profiles, designs self-propagating referral mechanics, and generates step-by-step cascade outreach sequences using psychological triggers.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Virality Engine tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Virality Engine** tab
+3. Enter seed champion companies or personas (comma-separated)
+4. Optionally specify channels (default: email, LinkedIn, Slack)
+5. Click **Run Virality Engine**
+6. Review the viral loop design report
+
+## Inputs Required
+
+- **Seed Customers** (required) — Comma-separated company or persona names. e.g., "Stripe, Figma, Notion"
+- **Channels** (optional, default: `"email, linkedin, slack"`) — Outreach channels for cascade
+
+## Output
+
+Plain-text report with 4 sections:
+1. **Champion Profiling** — Characteristics of ideal evangelists per seed
+2. **Viral Loop Design** — Mechanics of the referral loop
+3. **Referral Hooks** — Specific copy and incentive hooks to drive referrals
+4. **Cascade Sequence** — Step-by-step outreach to propagate the referral loop
+
+## Example Use Case
+A company whose best customers are ops teams at Series B startups runs the Virality Engine with seed customers Notion, Linear, and Figma. The agent designs a peer referral loop where ops champions invite similar peers using Slack community messaging.
+
+## Related Features
+- Campaign Management
+- Compliance Oracle
+
+---
+
+# Feature: Talent Radar Agent
+
+## Category
+Intelligence / Signals
+
+## What It Does
+Talent Radar monitors key accounts for executive churn signals — new leadership hires, title changes, job postings — and generates account-specific retention playbooks. It uses Perplexity AI with real-time web search to surface personnel movements at target accounts.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Talent Radar tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Talent Radar** tab
+3. Enter comma-separated account names to monitor
+4. Set the lookback window (7–365 days, default: 90)
+5. Click **Run Talent Radar**
+6. Review the per-account churn risk report and retention playbook
+
+## Inputs Required
+
+- **Accounts** (required) — Comma-separated company names. e.g., "Salesforce, HubSpot, Outreach"
+- **Lookback Days** (optional, default: 90, range: 7–365)
+
+## Output
+
+Plain-text report with 4 sections:
+1. **Churn Risk Assessment** — Risk level per account (High/Medium/Low)
+2. **Leading Indicator Signals** — Specific signals found in lookback window (new hires, open roles, title changes)
+3. **Early Warning Triggers** — Threshold-based early warning criteria
+4. **Retention Playbook** — Recommended actions to re-engage or retain at-risk accounts
+
+## Example Use Case
+A CSM monitors 5 enterprise accounts. Talent Radar shows that the VP of IT at one company was just replaced — a classic churn risk signal. The agent provides a specific re-engagement sequence targeting the new VP.
+
+## Related Features
+- Signal Detection (for ongoing monitoring)
+- Campaign Management (to execute retention outreach)
+
+---
+
+# Feature: Regime Shifter Agent
+
+## Category
+Intelligence
+
+## What It Does
+Regime Shifter adapts ICP targeting and messaging to macro-economic shifts, geopolitical events, or regulatory changes in a specific geography. It uses Perplexity AI to research macro conditions, then produces ICP adjustments, messaging pivots, and a phased GTM plan.
+
+## Where to Find It
+`Dashboard Sidebar → AI Agents → Regime Shifter tab`
+
+## How To Use
+
+1. Navigate to **AI Agents** in the sidebar
+2. Select the **Regime Shifter** tab
+3. Enter the target market / geography (e.g., "EU SaaS mid-market", "US manufacturing")
+4. Optionally specify a macro scenario (e.g., "GDPR enforcement", "tariffs", "recession", "election")
+5. Click **Run Regime Shifter**
+6. Review the GTM adaptation report
+
+## Inputs Required
+
+- **Geo Focus** (required) — Target market + region. e.g., "US SaaS", "DACH manufacturing", "APAC fintech"
+- **Scenario** (optional) — Macro event. e.g., "election", "tariffs", "recession", "GDPR enforcement wave"
+
+## Output
+
+Plain-text report with 4 sections:
+1. **Impact Analysis** — How the scenario affects the target geo/market
+2. **ICP Adjustments** — Which segments to prioritize or de-prioritize
+3. **Messaging Pivots** — Updated value propositions addressing new pain points
+4. **Phased GTM Plan** — Time-phased action plan for the next 90 days
+
+## Example Use Case
+A US SaaS company expanding into Europe runs Regime Shifter for "EU SaaS mid-market" with scenario "GDPR enforcement wave." The agent identifies compliance-focused ICPs to prioritize and provides GDPR-conscious messaging angles.
+
+## Related Features
+- Compliance Oracle
+- Crossfire Agent
+
+---
+
+# Feature: Signals
+
+## Category
+Signals
+
+## What It Does
+Signals are real-time trigger-based alerts for companies and prospects. Users can create custom signals that monitor for specific events (funding rounds, hiring spikes, technology adoption, social mentions), run them on demand or on a schedule, and receive a stream of actionable intelligence cards.
+
+## Where to Find It
+`Dashboard Sidebar → Signals`
+
+Sub-sections:
+- `Signals → Overview` — Signal list and management
+- `Signals → Events` — Live event stream
+- `Signals → Intent` — Intent signal monitoring
+- `Signals → Tracker` — Active signal trackers
+- `Signals → Websights` — Website visitor signals
+- `Signals → Form Complete` — Form completion signals
+
+## How To Use
+
+### Creating a Signal
+
+1. Navigate to **Signals** in the sidebar
+2. Click **Create Signal**
+3. In the dialog, choose a **Signal Type** (see types below)
+4. Fill in the configuration for that signal type
+5. Click **Create**
+6. The signal runs automatically in the background and results appear in the signal list
+
+### Running a Signal Manually
+
+1. Go to **Signals → Overview**
+2. Find the signal in the list
+3. Click the **Run** button on the signal card
+4. Results appear in the results panel
+
+### Previewing a Signal
+
+- Click **Preview** to test a signal without saving it — shows a dry-run of what would be returned
+
+## Signal Types
+
+| Type | What It Monitors |
+|---|---|
+| `x_mentions` | Mentions of a keyword/topic on X (Twitter) |
+| `x_profiles` | Profiles on X matching a persona |
+| `x_hashtags` | Posts using specific hashtags on X |
+| `x_trends` | Trending topics on X |
+| `monitor_rss_feed` | Any RSS feed (news, blog, podcast) matching filters |
+| `monitor_google_search_results` | Google search results for a query, monitored over time |
+| `monitor_professional_posts` | Professional posts (LinkedIn-style) matching keywords |
+| `monitor_interactions_with_professional_post` | Interactions with a specific professional post |
+
+## Signal Categories (Entity Signals via Explorium)
+
+Enhanced signals available when analyzing a specific company or prospect entity:
+
+| Signal Category | Description |
+|---|---|
+| **Intent** | Bombora intent signals — topics the company is actively researching online |
+| **Business Events** | IPO, new funding round, M&A, cost cutting, workforce growth/reduction, new product, new office |
+| **Firmographics** | Revenue range, employee count, industry, HQ location |
+| **Website Traffic** | Monthly website visitor estimates |
+| **Financial** | Estimated revenue, growth rate, financial indicators |
+| **Business Challenges** | AI-identified challenges the company is facing |
+| **Prospect Events** | Changed company, changed role, job anniversary (for individual prospects) |
+
+## Inputs Required
+
+- **Signal Name** (required)
+- **Signal Type** (required) — see Signal Types above
+- **Configuration** — depends on type:
+  - Keywords, hashtags, RSS feed URL, Google query, domain filters, industry, location, employee count, etc.
+
+## Output
+
+For each signal run:
+- A list of **Signal Result cards** with:
+  - Company or person name
+  - Signal title and description
+  - Confidence score (0–100)
+  - Impact level (high/medium/low)
+  - Source URL
+  - Timestamp
+
+## Example Use Case
+A sales rep creates a signal: **Monitor Google Search Results** for "competitor X pricing complaints". The signal runs daily and surfaces new articles, forums, and social posts where competitor customers express frustration — identifying ideal poaching targets.
+
+## Common Errors
+
+- **Explorium credit error**: Signal detection via Explorium fails if API credits are exhausted. Contact admin to top up.
+- **No results for entity signals**: The company may not be in Explorium's database. Try searching by domain instead of name.
+- **RSS feed malformed**: Check that the RSS URL is valid and accessible.
+
+## Related Features
+- Signal Feed (live event stream)
+- Visitor Intelligence
+- Predictive Scoring
+- Campaign Management
+
+---
+
+# Feature: Campaign Management
+
+## Category
+Campaign Management
+
+## What It Does
+Campaign Management lets users create, manage, and execute multi-channel outreach campaigns via email (Gmail integration) and LinkedIn (Unipile integration). Users can generate AI-drafted messages, organize sequences, manage email accounts and blocklists, and track campaign performance.
+
+## Where to Find It
+`Dashboard Sidebar → Campaigns`
+
+## How To Use
+
+### Creating a Campaign
+
+1. Navigate to **Campaigns** in the sidebar
+2. Click **New Campaign** or use the **Campaign Creation Wizard**
+3. Step 1 — **Type**: Choose campaign type (email, LinkedIn, multi-channel)
+4. Step 2 — **Audience**: Select the target prospect list
+5. Step 3 — **Message**: Let AI generate the draft, or write your own
+6. Step 4 — **Schedule**: Set send time and cadence
+7. Click **Launch**
+
+### Generating a Campaign Draft
+
+1. In the Campaign wizard, click **Generate Draft**
+2. Enter a campaign objective (e.g., "Introduce our RevOps automation platform to VP Sales")
+3. Optionally include signal references (e.g., "mention their recent Series B")
+4. AI generates: Email subject, Email body, LinkedIn message
+5. Review and edit the draft
+6. Save and schedule
+
+### Managing Campaigns
+
+- View all campaigns in the **Campaigns list** table
+- Update campaign status: `draft → running → paused → completed`
+- View campaign performance metrics (open rate, lead counts)
+
+### Managing Email Accounts
+
+1. Go to **Campaigns → Email Accounts**
+2. Click **Connect Gmail** to authorize via Google OAuth2
+3. Send emails from your connected inbox
+
+### Blocklist Management
+
+- **Campaigns → Blocklist**: Add domains or companies to prevent accidental outreach
+- Blocklist entries include domain, reason, and who added it
+
+## Inputs Required
+
+For **Draft Generation**:
+- **Objective** (required) — e.g., "Book a discovery call about our data pipeline tool"
+- **Lead IDs** (required) — Selected leads from your list
+- **Signal References** (optional) — Signals to mention in the message (e.g., "recent funding", "hiring signal")
+
+For **Send Email**:
+- Recipient email address
+- Subject line
+- Email body
+- Sender email (optional — defaults to connected Gmail)
+
+For **Send LinkedIn**:
+- Recipient LinkedIn URL
+- Message text
+
+## Output
+
+**Draft Generation** returns:
+- `subject` — AI-generated email subject line
+- `email_body` — Personalized email with `{{firstName}}` and `{{companyName}}` placeholders
+- `linkedin_message` — Companion LinkedIn message
+
+**Campaign** returns:
+- Campaign record with status, name, objective, lead list, schedule
+- Performance data: open rates, lead engagement metrics
+
+## Example Use Case
+After identifying 50 Series B SaaS companies using Agentic Search, a sales rep creates a campaign. They enter the objective: "Introduce our DevOps tool to engineering leaders at recently funded SaaS companies." The AI generates a personalized email referencing funding news and an engineering hiring signal. The campaign is scheduled for Tuesday morning.
+
+## Common Errors
+
+- **Gmail not connected**: Go to Campaigns → Email Accounts and connect via OAuth
+- **LinkedIn send fails**: Unipile must be configured. Contact your admin to set up the Unipile API key.
+- **Empty draft generated**: Ensure the lead list is non-empty and objective is clear
+- **Placeholder not resolved**: `{{firstName}}` and `{{companyName}}` are resolved at send time from lead data; make sure leads have these fields populated
+
+## Related Features
+- Signal Detection (to trigger campaigns)
+- Database Finder (to build lead lists)
+- Compliance Oracle (to audit message compliance)
+- Lead Export (to import leads into campaign)
+
+---
+
+# Feature: Visitor Intelligence
+
+## Category
+Intelligence / Signals
+
+## What It Does
+Visitor Intelligence identifies companies visiting your website using an IP-tracking pixel. When a visitor arrives on your site, their IP is enriched to reveal their company name, location, contact details, and intent signals — even if they never fill out a form.
+
+## Where to Find It
+`Dashboard Sidebar → Visitors`
+
+## How To Use
+
+### Setting Up the Tracking Pixel
+
+1. Navigate to **Visitors** in the sidebar
+2. Copy the provided JavaScript pixel snippet
+3. Embed the snippet on your website (in the `<head>` tag)
+4. Visitors are now automatically tracked and enriched
+
+### Viewing Visitor Intelligence
+
+1. Navigate to **Visitors** in the sidebar
+2. View the list of identified companies that visited your site
+3. Each entry shows: company name, location, visit URL, timestamp, enriched contact info
+4. Click any visitor to see full enrichment details
+
+## Inputs Required
+
+- No manual input required after pixel setup
+- The pixel automatically captures: visitor IP, page URL, referrer, browser user agent
+
+## Output
+
+For each identified visitor:
+- **Company Name** (resolved from IP → domain → Explorium enrichment)
+- **IP Address** + Geolocation data
+- **Country, City** (from IPinfo)
+- **Visit URL** and timestamp
+- **Enriched Company Data**: industry, employee count, revenue
+- **Contact Data**: matched person (name, email, phone) if available
+
+**Alerts**: Webhook-based notifications can be configured to push visitor events to HubSpot, Slack, or any HTTP webhook in real time.
+
+## Example Use Case
+A B2B SaaS company adds the Outmate tracking pixel to their pricing page. Within a week, they can see which companies are visiting the pricing page — high-intent signals. A sales rep then reaches out to those companies with a personalized message referencing "I noticed your team was exploring our pricing."
+
+## Common Errors
+
+- **ISP/residential IPs not resolved**: Visitor tracking works best for business IPs. Consumer residential IPs (working from home) may not resolve to a company.
+- **Duplicate detection**: The system deduplicates by IP + URL within a 1-hour window. Multiple visits from the same user within an hour only count once.
+- **Enrichment missing**: Not all IPs can be mapped to a company. Coverage depends on IPinfo and Explorium data availability.
+
+## Related Features
+- Signals → Websights
+- Signal Detection
+- Campaign Management (to target identified visitors)
+
+---
+
+# Feature: Lead Scoring
+
+## Category
+Analytics / Intelligence
+
+## What It Does
+Lead Scoring lets users configure scoring models to prioritize leads based on intent data, signals, firmographics, and engagement. Scores help sales teams focus on the highest-probability accounts first.
+
+## Where to Find It
+`Dashboard Sidebar → Scoring`
+
+## How To Use
+
+1. Navigate to **Scoring** in the sidebar
+2. Configure scoring rules (intent signals, firmographic weights, tech stack matches)
+3. Apply the scoring model to your lead list
+4. Leads are ranked by score (0–100)
+
+## Inputs Required
+
+- Scoring criteria configuration (intent signals, company size, industry, technology)
+
+## Output
+
+- Leads sorted by score with score breakdown
+- High-score leads flagged for priority outreach
+
+## Example Use Case
+A RevOps manager configures scoring: +20 pts for companies showing intent on "CRM software", +15 pts for headcount 100–500, +10 pts for SaaS industry. All leads are automatically scored and ranked.
+
+## Related Features
+- Signal Detection
+- Database Finder
+- Predictive Scoring Agent
+
+---
+
+# Feature: Lead Watcher
+
+## Category
+Prospecting / Signals
+
+## What It Does
+Lead Watcher lets users set up automated monitoring for specific leads or companies. When a watched lead shows new activity (job change, new post, company news), the user is notified.
+
+## Where to Find It
+`Dashboard Sidebar → Leads → Watcher`
+
+## How To Use
+
+1. Navigate to **Leads → Watcher**
+2. Add companies or prospects to your watch list
+3. Set monitoring preferences (what events to watch for)
+4. Receive alerts when watched entities show new activity
+
+## Output
+
+- Notifications / alerts when watched prospects or companies show new signals
+
+## Related Features
+- Signal Detection
+- Talent Radar Agent
+
+---
+
+# Feature: Search History
+
+## Category
+Prospecting
+
+## What It Does
+Search History preserves all past lead searches with their filter configurations, so users can re-run or revisit any previous query.
+
+## Where to Find It
+`Dashboard Sidebar → Leads → History`
+
+## How To Use
+
+1. Navigate to **Leads → History**
+2. Browse past searches with timestamps and filter state
+3. Click any past search to re-run it with the same filters
+4. Edit filters before re-running to refine results
+
+## Output
+
+- List of past searches with: timestamp, filter summary, result count
+- One-click re-run
+
+---
+
+# Feature: Analytics Dashboard
+
+## Category
+Analytics
+
+## What It Does
+The Analytics Dashboard displays KPI cards and time-series charts showing platform usage statistics — leads discovered, signals triggered, campaigns sent, open rates, and credit consumption.
+
+## Where to Find It
+`Dashboard Sidebar → Analytics`
+
+## Output
+
+- KPI Cards: Total leads, active signals, campaigns running, credits used
+- Time-series charts: Lead discovery trends, signal activity over time
+- Campaign performance: Open rates, response rates, engagement metrics
+
+---
+
+# Feature: Integrations
+
+## Category
+Integrations
+
+## What It Does
+The Integrations section lets users connect Outmate to external tools including Gmail (for email sending), LinkedIn via Unipile (for LinkedIn messaging), and other CRM/webhook-based destinations.
+
+## Where to Find It
+`Dashboard Sidebar → Integrations`
+
+## How To Use
+
+### Connect Gmail
+
+1. Go to **Integrations** (or **Campaigns → Email Accounts**)
+2. Click **Connect Gmail**
+3. Authorize Outmate via Google OAuth2
+4. Your Gmail is now connected for campaign sending
+
+### Connect LinkedIn (via Unipile)
+
+1. Go to **Integrations**
+2. Click **Connect LinkedIn**
+3. Unipile handles multi-channel LinkedIn authentication
+4. LinkedIn messages can now be sent from Campaign Management
+
+### Configure Webhooks
+
+1. Go to **Settings → Site Config**
+2. Enter a webhook URL for visitor events or signal alerts
+3. Events will be pushed in real time as JSON payloads
+
+## Output
+
+- Connection status for each integration
+- OAuth tokens stored securely server-side
+
+## Related Features
+- Campaign Management
+- Visitor Intelligence
+- Signals
+
+---
+
+# Feature: Settings
+
+## Category
+Settings
+
+## What It Does
+Settings gives users access to their profile, subscription tier, API key management, credit balance, and usage preferences.
+
+## Where to Find It
+`Dashboard Sidebar → Settings`
+
+## Available Settings
+
+| Setting | Description |
+|---|---|
+| **Profile** | Name, email, password update |
+| **Subscription** | Current plan tier (Free, Basic, Pro, Enterprise) |
+| **Credits** | Credit balance, transaction history |
+| **API Keys** | View and manage connected API keys (Crustdata, Explorium, etc.) |
+| **Site Config** | Tracking pixel key, ICP filters, webhook URLs |
+| **Preferences** | Theme (dark/light), notification preferences |
+
+---
+
+# Feature: Credit & Usage System
+
+## Category
+Settings / Other
+
+## What It Does
+Outmate uses a credit system to track API usage. Each search, enrichment, or data query deducts credits. Users start with 100 free credits and can purchase more or upgrade their plan.
+
+## Where to Find It
+`Dashboard Header → Credits Display` (always visible)
+`Settings → Credits` (for full history)
+
+## Credit Costs (Approximate)
+
+| Action | Credit Cost |
+|---|---|
+| Company search (per result) | 1 credit |
+| Prospect enrichment (email/phone) | 2–5 credits |
+| Signal detection run | 1–3 credits |
+| AI Agent call | Varies (no direct Outmate credit; uses API quota) |
+
+## How To Top Up Credits
+
+- Upgrade your plan under **Settings → Subscription**
+- Each plan tier comes with a monthly credit allocation
+- Contact support for enterprise credit packages
+
+## Common Errors
+
+- **"Insufficient credits"**: Credit balance is 0 or too low. Go to Settings → Subscription to upgrade.
+- **"Explorium credit error"**: The Explorium data provider is reporting insufficient credits on the server-side API key. Contact your Outmate admin.
+
+---
+
+# Integration Features
+
+## Explorium (Primary Signal & Enrichment Provider)
+
+Explorium powers much of Outmate's business intelligence:
+
+- **Company search and enrichment**: Industry, employees, revenue, location, technology
+- **Intent data (Bombora)**: Topics a company is actively researching online
+- **Business events**: Funding rounds, M&A, workforce changes, product launches
+- **Website traffic enrichment**: Monthly visit estimates
+- **Financial indicators**: Revenue estimates, growth rates
+- **Business challenges**: AI-identified challenges
+- **Lookalike discovery**: Find similar companies to seed accounts
+- **Prospect events**: Job changes, role changes, job anniversaries
+
+**Error handling**: If Explorium returns a 403 HTTP error, it typically means Explorium credits are exhausted. The platform surfaces this as a "Explorium Credit Error."
+
+## Crustdata (People & Company Search)
+
+Crustdata provides B2B company and people search data:
+
+- **People search**: Filter by job title, seniority, company, location, department
+- **Company screener**: Filter companies by firmographics, tech stack, headcount growth
+- **LinkedIn posts**: Monitor LinkedIn post activity from target companies
+- **People enrichment**: Add email, phone, and LinkedIn data to prospect records
+
+## ContactOut (Email & Contact Enrichment)
+
+ContactOut enriches leads with verified work emails and phone numbers:
+
+- Falls back to multiple authentication header formats for robustness
+- Used to fill gaps when Crustdata doesn't have contact data
+
+## BetterContact (Waterfall Email Enrichment)
+
+BetterContact provides an async waterfall enrichment process:
+
+- Accepts: first name, last name, company, LinkedIn URL
+- Returns: verified work email and phone number
+- Uses a poll-based async process (create → poll for results)
+
+## Gmail (Email Sending)
+
+- OAuth 2.0 based Gmail integration
+- Enables sending personalized emails from connected Gmail accounts
+- Required for campaign email delivery
+
+## Unipile (LinkedIn Messaging)
+
+- Multi-channel integration for LinkedIn messaging
+- Enables campaign LinkedIn message delivery
+
+## OpenRouter / Claude AI (LLM Gateway)
+
+All AI-powered features route through OpenRouter:
+
+- **Claude 3.5 Haiku**: Fast tasks (Compliance Oracle, Virality Engine, fallback parsing)
+- **Claude 3.5 Sonnet**: Complex scoring (Predictive Agent)
+- **Perplexity Sonar Pro**: Real-time web research (Crossfire, Talent Radar, Regime Shifter)
+- **Perplexity Sonar Reasoning Pro**: Deep company research (Research Agent — Standard)
+- **Perplexity Sonar Deep Research**: Comprehensive analysis (Research Agent — Deep)
+
+---
+
+# Signal Types Reference
+
+## Business Event Signals
+
+| Signal | When to Use |
+|---|---|
+| **IPO Announcement** | Company is going public — high urgency outreach window |
+| **New Funding Round** | Company just raised — has budget, growing fast |
+| **New Investment** | Company made a strategic investment |
+| **Merger & Acquisition** | M&A activity — potential tool consolidation opportunity |
+| **Cost Cutting** | Company is reducing costs — opportunity to offer efficiency tools |
+| **Workforce Growth** | Headcount increase across departments |
+| **Workforce Reduction** | Layoffs — be sensitive; can signal budget pressure |
+| **Company Award** | Recognition signal — good opening for a congratulatory outreach |
+| **New Product** | Product launch — opportunity for integration pitch |
+| **New Partnership** | New business partnership — potential new ICP or expansion |
+| **Outage / Security Breach** | Company had an incident — opportunity for security/reliability tools |
+
+## Hiring Signals
+
+| Signal | Description |
+|---|---|
+| **Hiring Signal Explorer** | Tracks job openings, expanded teams, remote hiring footprints |
+| **Role-Based Job Alerts** | Notified when a specific role (title/function/location) is posted |
+| **Job Changes & Promotions** | Tracks when key contacts move companies or get promoted |
+| **Filtered Opportunity Streams** | Multi-board monitoring (LinkedIn, Glassdoor, ZipRecruiter) |
+
+## Intent Signals (Bombora)
+
+Intent categories tracked include:
+- CRM Software, Sales Automation
+- Cloud Computing, Cybersecurity
+- Content Marketing, Social Media Marketing
+- Financial Planning, Accounting Software
+- Career Management, Training & Development
+
+**Intent levels**: Early Research → In-Depth Research → Decision Stage
+
+## Prospect Event Signals
+
+| Signal | Description |
+|---|---|
+| `prospect_changed_role` | Key contact got a new title at same company |
+| `prospect_changed_company` | Key contact moved to a new company (high urgency) |
+| `prospect_job_start_anniversary` | Contact's job anniversary — warm touch opportunity |
+
+## Website Traffic Signals
+
+- Monthly website visit estimates surfaced as signals
+- High traffic companies are actively marketing, indicating momentum
+
+## Financial Signals
+
+- Estimated revenue ranges
+- Growth rate indicators
+- SEC EDGAR verified revenue (US public companies)
+
+---
+
+# Dashboard Overview
+
+## What It Shows
+
+The main dashboard presents a high-level snapshot of platform activity:
+
+| Widget | Description |
+|---|---|
+| **KPI Cards** | Total leads, active signals, campaigns running, credits remaining |
+| **Recent Leads** | Latest leads discovered on the platform |
+| **Active Signals** | Summary of running signals and their recent results |
+| **Activity Charts** | Time-series charts for lead discovery and signal activity |
+
+## Where to Find It
+`Dashboard Sidebar → Dashboard` (default landing page)
+
+---
+
+# Authentication & Account Management
+
+## Signing Up
+
+1. Go to the Outmate app URL
+2. Click **Sign Up**
+3. Enter name, email, and password
+4. Account is created with **100 free credits**
+5. You are redirected to the dashboard
+
+## Logging In
+
+1. Go to the Outmate app URL
+2. Enter your email and password
+3. A JWT token is issued and stored in the browser
+4. You stay logged in until the token expires
+
+## Password Reset
+
+- Password reset is available via the login form ("Forgot Password")
+- Contact support if reset doesn't work
+
+## Subscription Tiers
+
+| Tier | Description |
+|---|---|
+| **Free** | 100 credits, basic features |
+| **Basic** | Monthly credit allocation, standard features |
+| **Pro** | Higher credits, all AI Agents, signals, campaigns |
+| **Enterprise** | Custom credits, priority support, advanced integrations |
+
+---
+
+# Common Troubleshooting Guide
+
+| Issue | Likely Cause | Solution |
+|---|---|---|
+| "Insufficient credits" | Credit balance at 0 | Upgrade plan or purchase credits in Settings |
+| "Explorium credit error" | Explorium API key quota exhausted | Contact Outmate admin |
+| No leads returned | Filters too narrow | Broaden filter criteria, try removing one filter |
+| AI Agent taking 60+ seconds | Normal for deep research | Wait — the agent is running web searches |
+| Gmail send fails | Gmail not connected | Connect Gmail via Integrations or Campaigns → Email Accounts |
+| LinkedIn send fails | Unipile not configured | Contact admin to configure Unipile API key |
+| NLP search returns wrong type | Intent detection ambiguity | Explicitly add "companies" or "people" to your query |
+| Visitor IP not resolved | Residential/consumer IP | Coverage is best for corporate IP ranges |
+| Signal no results | Company not in Explorium database | Try using domain instead of company name |
+| Research report empty | Unknown company | Add company domain or use an alternative company name spelling |

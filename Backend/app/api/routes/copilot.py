@@ -20,7 +20,9 @@ from app.schemas.copilot import (
     LeadActionRequest,
     ProductAssistantRequest,
     ProductAssistantResponse,
+    SaveChatSessionRequest,
 )
+from app.db.models.copilot_chat_session import CopilotChatSession
 from app.api.deps.auth import get_current_user
 from app.db.deps import get_db
 from app.db.models.user import User
@@ -57,6 +59,7 @@ COPILOT_CREDIT_COSTS = {
     LeadActionType.business_events: 1,
     LeadActionType.linkedin_posts: 2,
     "product_assistant": 1,
+    "lead_suggestions": 1,
 }
 
 
@@ -524,17 +527,14 @@ async def ask_product_assistant(
 ):
     """
     Ask the global product assistant a question about Outmate.
-    Costs 1 credit.
+    Free — no credits required.
     """
-    cost = COPILOT_CREDIT_COSTS["product_assistant"]
-    _check_credits(db, current_user.id, cost)
     try:
         service = ProductAssistantService(db)
         result = await service.ask(
             question=request.question,
             route=request.context.route if request.context else None
         )
-        _deduct(db, current_user.id, cost, "Copilot: Product assistant query")
         return result
     except Exception as e:
         logger.error(f"Product assistant error: {e}")
@@ -549,22 +549,15 @@ async def ask_product_assistant_stream(
 ):
     """
     Ask the global product assistant a question and stream the answer via SSE.
-    Costs 1 credit (deducted on completion).
+    Free — no credits required.
     """
-    cost = COPILOT_CREDIT_COSTS["product_assistant"]
-    _check_credits(db, current_user.id, cost)
-
     async def event_generator():
         service = ProductAssistantService(db)
-        credits_deducted = False
         try:
             async for chunk in service.stream_ask(
                 question=request.question,
                 route=request.context.route if request.context else None
             ):
-                if chunk.get("type") == "done" and not credits_deducted:
-                    _deduct(db, current_user.id, cost, "Copilot: Product assistant query (stream)")
-                    credits_deducted = True
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
             logger.error(f"Product assistant streaming error: {e}")
@@ -579,3 +572,106 @@ async def ask_product_assistant_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Copilot Chat History ─────────────────────────────────────
+
+@router.get("/chat-history")
+async def list_chat_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all chat sessions for the current user (summaries only)."""
+    sessions = (
+        db.query(CopilotChatSession)
+        .filter(CopilotChatSession.user_id == str(current_user.id))
+        .order_by(CopilotChatSession.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    return {"sessions": [s.to_summary() for s in sessions]}
+
+
+@router.get("/chat-history/{session_id}")
+async def get_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a specific chat session with full messages."""
+    session = (
+        db.query(CopilotChatSession)
+        .filter(
+            CopilotChatSession.id == session_id,
+            CopilotChatSession.user_id == str(current_user.id),
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session.to_dict()
+
+
+@router.post("/chat-history")
+async def save_chat_session(
+    request: SaveChatSessionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create or update a chat session."""
+    messages_data = [m.model_dump() for m in request.messages]
+
+    # Auto-generate title from first user message
+    title = request.title
+    if not title:
+        first_user_msg = next((m for m in request.messages if m.role == "user"), None)
+        if first_user_msg:
+            title = first_user_msg.content[:80] + ("..." if len(first_user_msg.content) > 80 else "")
+        else:
+            title = "New Conversation"
+
+    if request.session_id:
+        session = (
+            db.query(CopilotChatSession)
+            .filter(
+                CopilotChatSession.id == request.session_id,
+                CopilotChatSession.user_id == str(current_user.id),
+            )
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        session.messages = messages_data
+        session.title = title
+    else:
+        session = CopilotChatSession(
+            user_id=str(current_user.id),
+            title=title,
+            messages=messages_data,
+        )
+        db.add(session)
+
+    db.commit()
+    db.refresh(session)
+    return session.to_dict()
+
+
+@router.delete("/chat-history/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a chat session."""
+    deleted = (
+        db.query(CopilotChatSession)
+        .filter(
+            CopilotChatSession.id == session_id,
+            CopilotChatSession.user_id == str(current_user.id),
+        )
+        .delete()
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    db.commit()
+    return {"success": True}

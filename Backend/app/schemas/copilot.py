@@ -320,3 +320,34 @@ class ProductAssistantResponse(BaseModel):
     answer: str
     related_links: List[ProductAssistantLink] = []
     feature_tags: List[str] = []
+
+
+# ── Copilot Chat History ─────────────────────────────────────
+
+class ChatMessageSchema(BaseModel):
+    id: str
+    role: str  # "user" | "assistant"
+    content: str
+    createdAt: int
+    links: Optional[List[ProductAssistantLink]] = None
+    tags: Optional[List[str]] = None
+
+class SaveChatSessionRequest(BaseModel):
+    session_id: Optional[str] = None  # None = create new session
+    title: Optional[str] = None
+    messages: List[ChatMessageSchema]
+
+class ChatSessionSummary(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class ChatSessionFull(BaseModel):
+    id: str
+    title: str
+    messages: List[dict] = []
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

@@ -19,6 +19,7 @@ from app.db.models.copilot_campaign_analysis import CopilotCampaignAnalysis
 from app.db.models.copilot_pipeline_alert import CopilotPipelineAlert
 from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.db.models.product_knowledge import ProductKnowledge
+from app.db.models.copilot_chat_session import CopilotChatSession
 
 __all__ = [
     "User",
@@ -45,4 +46,5 @@ __all__ = [
     "CopilotPipelineAlert",
     "CopilotUserPreferences",
     "ProductKnowledge",
+    "CopilotChatSession",
 ]

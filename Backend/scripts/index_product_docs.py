@@ -17,12 +17,13 @@ def index_all_docs():
     knowledge_service = KnowledgeService(db)
 
     # List of files to index
+    # repo_root = Backend's parent = Outmate_repo/
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     docs_to_index = [
-        os.path.join(repo_root, "Outmate_repo", "COPILOT_README.md"),
-        os.path.join(repo_root, "Outmate_repo", "copilot_chatbot.md"),
-        os.path.join(repo_root, "Outmate_repo", "Backend", "AI_AGENTS_DOCUMENTATION.md"),
-        # Add more as needed
+        os.path.join(repo_root, "outmate_feature_documnetation"),  # Primary: 30+ features, 51KB
+        os.path.join(repo_root, "COPILOT_README.md"),
+        os.path.join(repo_root, "Backend", "AI_AGENTS_DOCUMENTATION.md"),
+        # copilot_chatbot.md removed — it's a PRD, not user-facing docs
     ]
 
     print(">>> Starting product documentation indexing...")
