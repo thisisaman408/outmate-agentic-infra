@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { Suspense } from "react"
 import { LoginForm } from "@/components/auth/login-form"
 import { BarChart2, Users, Zap, Target } from "lucide-react"
 
@@ -99,7 +100,9 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <LoginForm />
+        <Suspense fallback={<div className="w-full max-w-[400px] space-y-6"><div className="text-center">Loading...</div></div>}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   )
