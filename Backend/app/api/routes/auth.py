@@ -193,7 +193,8 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
 async def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.email == body.email).first()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Database error during login for {body.email}: {e}")
         # Development fallback: allow login with a dummy user if the database is not reachable.
         # This is intended only for local testing to unblock the UI when infra is misconfigured.
         if settings.ENVIRONMENT.lower() == "development":
@@ -207,13 +208,18 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
             )
             token = create_access_token(dummy)
             return {"token": token, "user": user_response(dummy)}
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable")
 
     if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user.last_login_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        logger.error(f"Database error updating last_login_at for {body.email}: {e}")
+        # Don't fail the login if we can't update the timestamp
+
     token = create_access_token(user)
 
     return {"token": token, "user": user_response(user)}
@@ -443,96 +449,110 @@ async def google_oauth_callback(
     client_id = settings.GOOGLE_CLIENT_ID
     client_secret = settings.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:
-        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+        logger.error("Google OAuth not configured - missing client_id or client_secret")
+        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+        return RedirectResponse(url=f"{frontend_base}/auth/login?error=google_not_configured")
 
     redirect_uri = os.getenv(
         "GOOGLE_REDIRECT_URI",
         "http://localhost:8000/api/v1/auth/google/callback",
     )
 
-    # Exchange code for tokens
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(GOOGLE_TOKEN_URL, data={
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        })
-
-    if resp.status_code != 200:
-        logger.error("Google token exchange failed: %s", resp.text[:300])
-        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-        return RedirectResponse(url=f"{frontend_base}/auth/login?error=google_token_exchange_failed")
-
-    tokens = resp.json()
-    access_token = tokens["access_token"]
-    refresh_token = tokens.get("refresh_token")
-    id_token_raw = tokens.get("id_token")
-
-    # Decode id_token to get user info (unverified decode is fine here —
-    # we just exchanged the code directly with Google over HTTPS).
     try:
-        claims = jwt.decode(id_token_raw, options={"verify_signature": False})
-    except Exception:
-        claims = {}
+        # Exchange code for tokens
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(GOOGLE_TOKEN_URL, data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            })
 
-    google_id = claims.get("sub")
-    email = claims.get("email", "").lower()
-    name = claims.get("name") or claims.get("given_name", "")
-    email_verified_by_google = claims.get("email_verified", False)
-
-    if not email or not google_id:
-        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-        return RedirectResponse(url=f"{frontend_base}/auth/login?error=incomplete_google_profile")
-
-    # Parse terms_accepted from state
-    terms_accepted = "terms=True" in state or "terms=true" in state
-
-    # Find or create user
-    user = db.query(User).filter(User.google_id == google_id).first()
-    if not user:
-        user = db.query(User).filter(User.email == email).first()
-
-    if user:
-        if not user.google_id:
-            user.google_id = google_id
-        if email_verified_by_google and not user.is_email_verified:
-            user.is_email_verified = True
-        if not user.terms_accepted_at and terms_accepted:
-            user.terms_accepted_at = datetime.utcnow()
-        user.gmail_access_token = access_token
-        if refresh_token:
-            user.gmail_refresh_token = refresh_token
-        user.last_login_at = datetime.utcnow()
-        db.commit()
-    else:
-        if not terms_accepted:
+        if resp.status_code != 200:
+            logger.error("Google token exchange failed: %s", resp.text[:300])
             frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-            return RedirectResponse(url=f"{frontend_base}/auth/signup?error=terms_required")
-        user = User(
-            email=email,
-            full_name=name,
-            google_id=google_id,
-            hashed_password=None,
-            is_email_verified=bool(email_verified_by_google),
-            terms_accepted_at=datetime.utcnow(),
-            last_login_at=datetime.utcnow(),
-            gmail_access_token=access_token,
-            gmail_refresh_token=refresh_token,
+            return RedirectResponse(url=f"{frontend_base}/auth/login?error=google_token_exchange_failed")
+
+        tokens = resp.json()
+        access_token = tokens["access_token"]
+        refresh_token = tokens.get("refresh_token")
+        id_token_raw = tokens.get("id_token")
+
+        # Decode id_token to get user info (unverified decode is fine here —
+        # we just exchanged the code directly with Google over HTTPS).
+        try:
+            claims = jwt.decode(id_token_raw, options={"verify_signature": False})
+        except Exception as e:
+            logger.error(f"Failed to decode Google ID token: {e}")
+            claims = {}
+
+        google_id = claims.get("sub")
+        email = claims.get("email", "").lower()
+        name = claims.get("name") or claims.get("given_name", "")
+        email_verified_by_google = claims.get("email_verified", False)
+
+        if not email or not google_id:
+            logger.error(f"Incomplete Google profile: email={email}, google_id={google_id}")
+            frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+            return RedirectResponse(url=f"{frontend_base}/auth/login?error=incomplete_google_profile")
+
+        # Parse terms_accepted from state
+        terms_accepted = "terms=True" in state or "terms=true" in state
+
+        # Find or create user
+        try:
+            user = db.query(User).filter(User.google_id == google_id).first()
+            if not user:
+                user = db.query(User).filter(User.email == email).first()
+
+            if user:
+                if not user.google_id:
+                    user.google_id = google_id
+                if email_verified_by_google and not user.is_email_verified:
+                    user.is_email_verified = True
+                if not user.terms_accepted_at and terms_accepted:
+                    user.terms_accepted_at = datetime.utcnow()
+                user.gmail_access_token = access_token
+                if refresh_token:
+                    user.gmail_refresh_token = refresh_token
+                user.last_login_at = datetime.utcnow()
+                db.commit()
+            else:
+                if not terms_accepted:
+                    frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+                    return RedirectResponse(url=f"{frontend_base}/auth/signup?error=terms_required")
+                user = User(
+                    email=email,
+                    full_name=name,
+                    google_id=google_id,
+                    hashed_password=None,
+                    is_email_verified=bool(email_verified_by_google),
+                    terms_accepted_at=datetime.utcnow(),
+                    last_login_at=datetime.utcnow(),
+                    gmail_access_token=access_token,
+                    gmail_refresh_token=refresh_token,
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+        except Exception as e:
+            logger.error(f"Database error during Google OAuth user creation/update: {e}")
+            frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+            return RedirectResponse(url=f"{frontend_base}/auth/login?error=database_error")
+
+        jwt_token = create_access_token(user)
+        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+
+        import base64
+        user_json = base64.b64encode(
+            __import__("json").dumps(user_response(user)).encode()
+        ).decode()
+
+        return RedirectResponse(
+            url=f"{frontend_base}/auth/callback?token={jwt_token}&user={quote_plus(user_json)}"
         )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    jwt_token = create_access_token(user)
-    frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-
-    import base64
-    user_json = base64.b64encode(
-        __import__("json").dumps(user_response(user)).encode()
-    ).decode()
-
-    return RedirectResponse(
-        url=f"{frontend_base}/auth/callback?token={jwt_token}&user={quote_plus(user_json)}"
-    )
+    except Exception as e:
+        logger.error(f"Unexpected error in Google OAuth callback: {e}")
+        frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+        return RedirectResponse(url=f"{frontend_base}/auth/login?error=unexpected_error")

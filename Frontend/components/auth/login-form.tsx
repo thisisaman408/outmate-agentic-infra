@@ -1,8 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,12 +15,47 @@ import { GoogleButton } from "@/components/auth/google-button"
 
 export function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const setUser = useStore((state) => state.setUser)
 
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [formData, setFormData] = useState({ email: "", password: "" })
+
+  useEffect(() => {
+    const error = searchParams.get("error")
+    if (error) {
+      let errorMessage = "An error occurred during authentication."
+      switch (error) {
+        case "google_not_configured":
+          errorMessage = "Google sign-in is not configured on the server."
+          break
+        case "google_token_exchange_failed":
+          errorMessage = "Failed to authenticate with Google. Please try again."
+          break
+        case "incomplete_google_profile":
+          errorMessage = "Google didn't provide complete profile information."
+          break
+        case "terms_required":
+          errorMessage = "You must accept the terms to create an account."
+          break
+        case "database_error":
+          errorMessage = "Database temporarily unavailable. Please try again later."
+          break
+        case "unexpected_error":
+          errorMessage = "An unexpected error occurred. Please try again."
+          break
+        default:
+          errorMessage = "Authentication failed. Please try again."
+      }
+      toast({
+        title: "Authentication Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    }
+  }, [searchParams, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

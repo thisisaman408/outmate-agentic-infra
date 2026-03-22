@@ -15,6 +15,13 @@ function AuthCallbackContent() {
   useEffect(() => {
     const token = searchParams.get("token")
     const userParam = searchParams.get("user")
+    const error = searchParams.get("error")
+
+    if (error) {
+      // Handle OAuth errors by redirecting to login with error
+      router.replace(`/auth/login?error=${error}`)
+      return
+    }
 
     if (!token || !userParam) {
       router.replace("/auth/login")
