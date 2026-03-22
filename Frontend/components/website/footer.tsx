@@ -27,7 +27,7 @@ const LINKS = {
     { label: "Security", href: "#" },
   ],
   Legal: [
-    { label: "Privacy Policy", href: "#" },
+    { label: "Privacy Policy", href: "/privacy-policy" },
     { label: "Terms of Service", href: "#" },
     { label: "Cookie Policy", href: "#" },
     { label: "GDPR", href: "#" },
