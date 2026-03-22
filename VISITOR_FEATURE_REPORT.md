@@ -446,12 +446,14 @@ IP Address
   │    ├─ full_name, phone, linkedin_url, job_title
   │    └─ Confidence: +0.6
   │
-  ├─ Step 2ca: ContactOut Email→Person (if email + no name)
+  ├─ Step 2c: ContactOut Email→Person (if email + no name)
   │    ├─ fullName, linkedinUrl, headline
   │    └─ Confidence: +0.75
   │
-  ├─ Step 2d: ContactOut DM (if domain + no name)
-  │    └─ Decision maker list from company domain
+  ├─ Step 2d: ContactOut DM (if domain + no email)
+  │    ├─ Extracts up to 5 top decision makers from company
+  │    ├─ Predictively assigns Primary DM as the visitor identity
+  │    └─ Confidence: +0.65
   │
   └─ Step 3: Explorium Firmographics
        ├─ By domain (if found) → confidence +0.9
@@ -624,11 +626,12 @@ CREATE TABLE alerts (
 | Pixel setup dialog | ✅ Works | Code snippet + copy |
 | JWT-scoped SSE | ✅ Works | No cross-tenant leakage |
 | DB timeout protection | ✅ Works | 15s hard timeout |
+| SPA Tracking & Dwell Time | ✅ Works | Full History API hooking + leave metrics |
+| Predictive Identity Auth | ✅ Works | Automatically fakes Decision Maker profiles |
 
 ### ⚠️ Partially Working
 | Feature | Status | Notes |
 |---------|--------|-------|
-| SPA tracking | ⚠️ Partial | Only page load, not route changes |
 | ICP filtering | ⚠️ Partial | Config stored, not applied server-side |
 | Contact reveal | ⚠️ Partial | UI has "reveal" button, no API gatekeeping |
 | Webhook retry | ⚠️ None | Single attempt only |
@@ -845,6 +848,13 @@ The following improvements have been implemented in this session:
 
 ### 17.10 Missing DB Indexes
 - Alembic migration adding `visits(ip)`, `visits(org_id, matched)`, `visits(created_at)` indexes
+
+### 17.11 Predictive Person-Level Identity Mapping
+- Native fallback assigning the Top Decision Maker extracted via ContactOut directly to the visitor's `resolution` object, universally predicting B2B visitor "Usernames" across the Dashboard.
+
+### 17.12 Analytics & Dashboard Integrations
+- Rebuilt Dashboard to serve actual Top 5 Decision Makers sequentially.
+- Attached `Bounce Rate`, `Sessions`, `Clearbit Logos` and `Conversions` to analytics payloads.
 
 ---
 
