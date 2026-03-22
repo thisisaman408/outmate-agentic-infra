@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, Boolean
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -19,6 +19,8 @@ class User(Base):
     google_id = Column(String(255), nullable=True, unique=True, index=True)
     is_email_verified = Column(Boolean, default=False)
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    gmail_access_token = Column(Text, nullable=True)
+    gmail_refresh_token = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True))

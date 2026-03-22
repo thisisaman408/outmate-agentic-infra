@@ -1,0 +1,84 @@
+OUTMATE INTELLIGENCE FEATURES - EXAMPLES
+Lead: Alex Rivera, VP of Growth at TechStack
+
+---
+
+1. CROSSFIRE INTELLIGENCE
+Purpose: Competitive analysis and "how to win" battle cards.
+Output:
+#### ACME vs TECHSTACK BATTLE CARD
+- Competitive Edge: TechStack lacks our native CRM integration for multi-user workflows.
+- Handling "Too Expensive": Remind them that TechStack charges per seat, while we charge per execution, making us 40% cheaper for high-volume teams.
+- Talking Point: Ask Alex how they are handling the recent 15% price hike TechStack announced last week.
+
+---
+
+2. COMPLIANCE ORACLE
+Purpose: Audits your email draft for legal risks (GDPR/CAN-SPAM).
+Output:
+- Risk Assessment: Low
+- Jurisdiction: EU (GDPR)
+- Required Changes: You must add a clear "Opt-Out" link in the footer.
+- Compliant Rewrite: "Hi Alex... [rest of email] ... P.S. If you'd rather not hear from me, just click here to unsubscribe."
+
+---
+
+3. BOMBORA INTENT
+Purpose: Shows what topics the prospect's company is researching online.
+Output:
+INTENT ANALYSIS: HIGH LEVEL
+- Cloud Security: [████████░░] 82% score
+- B2B Growth Automation: [█████████░] 91% score
+- Lead Generation Services: [████░░░░░░] 45% score
+
+---
+
+4. TALENT RADAR
+Purpose: Monitors leadership churn and hiring at the account.
+Output:
+- Churn Risk: Medium
+- Signal: 3 Senior Growth Leads left TechStack in the last 60 days.
+- Opportunity: This suggests a team restructuring. Alex is likely looking for automation to fill the gap left by reduced headcount.
+
+---
+
+5. VIRALITY ENGINE
+Purpose: Designs growth loops to get Alex to refer others.
+Output:
+- Referral Hook: "Alex, since you're heading Growth, you'll appreciate this: if you invite 2 colleagues, I'll unlock our 'Virality Playbook' for your whole team."
+- Cascade Sequence: Send Alex a 'Champion' invite link -> Automate a thank-you note if his team signs up.
+
+---
+
+6. REGIME SHIFTER
+Purpose: Adapts your pitch to macro market changes.
+Output:
+- Impact Analysis: Tech sector valuations are cooling; efficiency is now a higher priority than "growth-at-all-costs."
+- Messaging Pivot: Stop pitching "More Leads" and start pitching "Decreased Customer Acquisition Cost (CAC)."
+
+---
+
+7. WEBSITE TRAFFIC ANALYSIS
+Purpose: Real-time growth/decline signals from their domain.
+Output:
+SIGNAL: TRAFFIC GROWTH SIGNAL (HIGH URGENCY)
+- Description: TechStack.com saw a 35% surge in unique visitors last month.
+- Suggested Action: Reference their expansion—they likely need more infrastructure to handle this surge.
+
+---
+
+8. BUSINESS EVENTS
+Purpose: Real-time alerts for Funding, M&A, or Launches.
+Output:
+SIGNAL: PRODUCT LAUNCH (MEDIUM URGENCY)
+- Description: TechStack just launched 'TS-Analytics' on Product Hunt.
+- Suggested Action: Congratulate Alex on the launch and ask how they're planning to scale the support for the new module.
+
+---
+
+9. LINKEDIN POST ANALYSIS
+Purpose: Summarizes and uses their recent activity.
+Output:
+SIGNAL: RECENT ACTIVITY (LOW URGENCY)
+- Description: Alex posted 2 days ago about "The death of the cold email."
+- Suggested Action: Your opener should be: "Saw your post about the death of cold email—I agree, which is why we built a signal-first approach instead..."

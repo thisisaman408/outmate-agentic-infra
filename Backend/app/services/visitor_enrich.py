@@ -2,12 +2,14 @@
 Visitor Enrichment Pipeline — IP-first, no email shortcuts.
 
 Enrichment layers (in order of execution):
-  0. ip-api.com      — primary geo (accurate city/region, ISP, mobile/proxy flags)
-  1. IPinfo          — secondary geo + company data (paid plan features)
-  2. Enrich.so       — IP → Company lookup
-  3. ContactOut DMs  — company domain → decision maker contacts
-  4. Explorium       — company firmographics by domain
-  5. [Email only]    — Enrich.so + BetterContact + ContactOut person (form-captured email ONLY)
+  -1. Identity graph  — check PostgreSQL identity_nodes for prior matches
+  0. ip-api.com       — primary geo (accurate city/region, ISP, mobile/proxy flags)
+  1. IPinfo           — secondary geo + company data (paid plan features)
+  2. Enrich.so        — IP → Company lookup
+  3. [Email only]     — Enrich.so + BetterContact + ContactOut person
+  4. ContactOut DMs   — company domain → decision maker contacts
+  5. Explorium        — company firmographics by domain
+  6. Identity graph   — store results back for future lookups
 
 Design principle: the email argument is ONLY from pixel form-capture or manual identify().
 Login emails are NEVER passed into this pipeline.
@@ -15,14 +17,17 @@ Login emails are NEVER passed into this pipeline.
 
 import httpx
 import ipinfo
+import json
 import logging
 import asyncio
 from functools import partial
 from typing import Dict, Any, Optional
 from app.core.config import settings
+from app.core.redis import RedisManager
 from app.services.explorium_service import ExploriumService
 from app.services.bettercontact_service import BetterContactService
 from app.services.contactout_service import ContactOutService
+from app.services.fullcontact_service import FullContactService
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +119,7 @@ class VisitorEnricher:
         url: str,
         intent_score: float,
         email: Optional[str] = None,
+        visitor_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Enrich a visitor from their IP address.
@@ -161,6 +167,21 @@ class VisitorEnricher:
             return resolution
 
         try:
+            # ── STEP -1: Identity graph lookup (visitor_id / IP / email) ──────
+            graph_hit = await self._step_identity_graph_lookup(ip, visitor_id, email)
+            if graph_hit:
+                # Merge person-level fields from graph
+                for key in ("full_name", "phone", "linkedin_url", "job_title", "email"):
+                    if graph_hit.get(key) and not resolution.get(key):
+                        resolution[key] = graph_hit[key]
+                if graph_hit.get("company_name") and not resolution.get("company"):
+                    resolution["company"] = graph_hit["company_name"]
+                if graph_hit.get("company_domain") and not resolution.get("domain"):
+                    resolution["domain"] = graph_hit["company_domain"]
+                resolution["_sources"].append("identity_graph")
+                resolution["confidence"] = max(resolution["confidence"], 0.85)
+                logger.info("[Enrichment] Identity graph HIT for visitor_id=%s ip=%s", visitor_id, ip)
+
             # ── STEP 0: ip-api.com (accurate geo — primary source) ────────────
             await self._step_ipapi(ip, resolution)
 
@@ -170,23 +191,51 @@ class VisitorEnricher:
             # ── STEP 2: Enrich.so IP → Company ───────────────────────────────
             await self._step_enrich_so_ip(ip, resolution)
 
-            # ── STEP 3 (Email path): Enrich person from form-captured email ───
-            if resolution["email"]:
-                await self._step_enrich_so_email(resolution)
-                await self._step_bettercontact(resolution)
-                await self._step_contactout_email(resolution)
+            # ── Redis cache: reuse domain-level enrichment if available ───────
+            domain_after_ip = resolution.get("domain")
+            cached = None
+            if domain_after_ip:
+                cached = await self._get_cached_domain_enrichment(domain_after_ip)
+            if cached:
+                # Merge cached domain-level data (don't overwrite visitor-specific fields)
+                if cached.get("company") and not resolution.get("company"):
+                    resolution["company"] = cached["company"]
+                if cached.get("explorium"):
+                    resolution["explorium"] = cached["explorium"]
+                if cached.get("visitor_contacts"):
+                    resolution["visitor_contacts"] = cached["visitor_contacts"]
+                if cached.get("enrich_company"):
+                    resolution["enrich_company"] = cached["enrich_company"]
+                if cached.get("logo_url") and not resolution.get("logo_url"):
+                    resolution["logo_url"] = cached["logo_url"]
+                resolution["_sources"].append("cache")
+                resolution["confidence"] = max(resolution["confidence"], 0.65)
+            else:
+                # No cache — run full enrichment pipeline
 
-            # ── STEP 4: ContactOut DM from company domain (IP path) ───────────
-            # Run this even without email if we found a company domain from IP
-            if resolution.get("domain") and not resolution.get("full_name"):
-                await self._step_contactout_dm(resolution)
+                # ── STEP 3 (Email path): Enrich person from form-captured email ───
+                if resolution["email"]:
+                    await self._step_enrich_so_email(resolution)
+                    await self._step_bettercontact(resolution)
+                    await self._step_contactout_email(resolution)
+                # ── STEP 4: ContactOut DM from company domain (supplementary data) ──
+                if resolution.get("domain"):
+                    await self._step_contactout_dm(resolution)
 
-            # ── STEP 5: Explorium firmographics ──────────────────────────────
-            await self._step_explorium(resolution)
+                # ── STEP 5: Explorium firmographics ──────────────────────────────
+                await self._step_explorium(resolution)
+
+                # Cache domain-level results for future visitors from same company
+                final_domain = resolution.get("domain")
+                if final_domain:
+                    await self._cache_domain_enrichment(final_domain, resolution)
 
             # ── Append default Logo ──────────────────────────────────────────
             if resolution.get("domain") and not resolution.get("logo_url"):
                 resolution["logo_url"] = f"https://logo.clearbit.com/{resolution['domain']}"
+
+            # ── STEP 6: Store/update identity graph ───────────────────────────
+            await self._step_identity_graph_store(ip, visitor_id, resolution)
 
         except Exception as e:
             logger.error("[Enrichment] Unhandled fatal error: %s", e, exc_info=True)
@@ -513,8 +562,9 @@ class VisitorEnricher:
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 4: ContactOut DM lookup (company domain → decision makers)
-    # This runs for BOTH email-path AND IP-path when a domain is available.
-    # It finds the top decision maker at the identified company.
+    # Stores DMs as supplementary company data only — NEVER overwrites
+    # primary person fields (full_name, email, etc.) because those must
+    # represent the actual visitor, not a random employee.
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _step_contactout_dm(self, resolution: Dict[str, Any]) -> None:
@@ -529,7 +579,7 @@ class VisitorEnricher:
                 logger.info("[Enrichment] Step 4: No DMs found for %s", domain)
                 return
 
-            # Extract up to 5 top decision makers
+            # Store as supplementary company contacts — NOT as the visitor's identity
             top_dms = []
             for profile_id, dm_data in list(profiles.items())[:5]:
                 top_dms.append({
@@ -538,20 +588,12 @@ class VisitorEnricher:
                     "linkedin_url": dm_data.get("linkedin_url") or dm_data.get("linkedin"),
                     "email": dm_data.get("work_email") or dm_data.get("personal_email"),
                 })
-            
-            resolution["decision_makers"] = top_dms
 
-            # Still pick the highest-seniority for the primary person fields (if missing)
-            if top_dms:
-                primary = top_dms[0]
-                resolution["full_name"] = resolution.get("full_name") or primary.get("full_name")
-                resolution["job_title"] = resolution.get("job_title") or primary.get("job_title")
-                resolution["linkedin_url"] = resolution.get("linkedin_url") or primary.get("linkedin_url")
-                resolution["email"] = resolution.get("email") or primary.get("email")
+            resolution["decision_makers"] = top_dms
+            # DO NOT fill primary person fields — those belong to the actual visitor
 
             resolution["_sources"].append("contactout_dm")
-            resolution["confidence"] = max(resolution["confidence"], 0.65)
-            logger.info("[Enrichment] Step 4 success: %d DMs found (Primary: %s)", len(top_dms), resolution["full_name"])
+            logger.info("[Enrichment] Step 4 success: %d DMs stored as company contacts for %s", len(top_dms), domain)
         except Exception as e:
             logger.warning("[Enrichment] Step 4: ContactOut DM failed: %s", e)
 
@@ -590,3 +632,140 @@ class VisitorEnricher:
 
         except Exception as e:
             logger.warning("[Enrichment] Step 5: Explorium failed: %s", e)
+
+    # ── Identity graph lookup ────────────────────────────────────────────────
+
+    async def _step_identity_graph_lookup(
+        self, ip: str, visitor_id: Optional[str], email: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Query identity_nodes by visitor_id, then IP, then email."""
+        try:
+            from app.db.session import SessionLocal
+            from app.db.models.identity_graph import IdentityNode
+            db = SessionLocal()
+            try:
+                node = None
+                if visitor_id:
+                    node = db.query(IdentityNode).filter(IdentityNode.visitor_id == visitor_id).first()
+                if not node and ip:
+                    node = db.query(IdentityNode).filter(IdentityNode.ip == ip).first()
+                if not node and email:
+                    node = db.query(IdentityNode).filter(IdentityNode.email == email).first()
+                if not node:
+                    return None
+                return {
+                    "full_name": node.full_name,
+                    "email": node.email,
+                    "phone": node.phone,
+                    "linkedin_url": node.linkedin_url,
+                    "job_title": node.job_title,
+                    "company_name": node.company_name,
+                    "company_domain": node.company_domain,
+                }
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("[Enrichment] Identity graph lookup failed: %s", e)
+            return None
+
+    # ── Identity graph store/update ──────────────────────────────────────────
+
+    async def _step_identity_graph_store(
+        self, ip: str, visitor_id: Optional[str], resolution: Dict[str, Any]
+    ) -> None:
+        """Upsert enrichment results into identity_nodes."""
+        if not visitor_id:
+            return
+        # Only store if we have meaningful person or company data
+        has_data = any(resolution.get(k) for k in ("full_name", "email", "company", "domain"))
+        if not has_data:
+            return
+        try:
+            from app.db.session import SessionLocal
+            from app.db.models.identity_graph import IdentityNode
+            db = SessionLocal()
+            try:
+                node = db.query(IdentityNode).filter(IdentityNode.visitor_id == visitor_id).first()
+                if node:
+                    # Update existing — fill empty fields, and always update
+                    # email if visitor explicitly identified via form capture
+                    if ip:
+                        node.ip = ip
+                    # Email from form capture always wins (explicit identification)
+                    form_email = resolution.get("email")
+                    if form_email and form_email != node.email:
+                        node.email = form_email
+                    for attr, res_key in [
+                        ("full_name", "full_name"),
+                        ("phone", "phone"), ("linkedin_url", "linkedin_url"),
+                        ("job_title", "job_title"), ("company_name", "company"),
+                        ("company_domain", "domain"),
+                    ]:
+                        val = resolution.get(res_key)
+                        if val and not getattr(node, attr):
+                            setattr(node, attr, val)
+                    # Always update sources
+                    existing_sources = node.sources or []
+                    new_sources = resolution.get("_sources", [])
+                    merged = list(set(existing_sources + new_sources))
+                    node.sources = merged
+                else:
+                    node = IdentityNode(
+                        visitor_id=visitor_id,
+                        ip=ip,
+                        email=resolution.get("email"),
+                        full_name=resolution.get("full_name"),
+                        phone=resolution.get("phone"),
+                        linkedin_url=resolution.get("linkedin_url"),
+                        job_title=resolution.get("job_title"),
+                        company_name=resolution.get("company"),
+                        company_domain=resolution.get("domain"),
+                        sources=resolution.get("_sources", []),
+                    )
+                    db.add(node)
+                db.commit()
+                logger.info("[Enrichment] Identity graph STORED for visitor_id=%s", visitor_id)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("[Enrichment] Identity graph store failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Redis domain cache — avoid redundant API calls for same company
+    # ─────────────────────────────────────────────────────────────────────────
+
+    CACHE_TTL = 72 * 3600  # 72 hours
+
+    async def _get_cached_domain_enrichment(self, domain: str) -> Optional[Dict[str, Any]]:
+        """Return cached enrichment for a domain, or None."""
+        try:
+            redis = RedisManager.get_client()
+            raw = await redis.get(f"enrich:domain:{domain}")
+            if raw:
+                logger.info("[Enrichment] Cache HIT for domain %s", domain)
+                return json.loads(raw)
+        except Exception as e:
+            logger.debug("[Enrichment] Cache read error: %s", e)
+        return None
+
+    async def _cache_domain_enrichment(self, domain: str, resolution: Dict[str, Any]) -> None:
+        """Cache enrichment result for a domain."""
+        try:
+            # Only cache fields that are domain-level (not visitor-specific like IP/geo)
+            cacheable = {
+                "company": resolution.get("company"),
+                "domain": resolution.get("domain"),
+                "explorium": resolution.get("explorium"),
+                "visitor_contacts": resolution.get("visitor_contacts"),
+                "enrich_company": resolution.get("enrich_company"),
+                "logo_url": resolution.get("logo_url"),
+            }
+            redis = RedisManager.get_client()
+            await redis.set(
+                f"enrich:domain:{domain}",
+                json.dumps(cacheable, default=str),
+                ex=self.CACHE_TTL,
+            )
+            logger.info("[Enrichment] Cached domain enrichment for %s (TTL=%dh)", domain, self.CACHE_TTL // 3600)
+        except Exception as e:
+            logger.debug("[Enrichment] Cache write error: %s", e)

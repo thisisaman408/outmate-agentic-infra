@@ -33,25 +33,25 @@ export function CopilotCommandInput({ onSubmit, isLoading, placeholder }: Copilo
   )
 
   return (
-    <div className="flex items-center gap-2 p-3 border-t bg-background">
+    <div className="flex items-center gap-2 px-4 py-3 border-t border-border/50 bg-background/80 backdrop-blur-sm">
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value.slice(0, 1000))}
         onKeyDown={handleKeyDown}
         placeholder={placeholder || "Ask copilot anything..."}
         disabled={isLoading}
-        className="flex-1"
+        className="flex-1 h-9 bg-muted/30 border-border/40 text-[13px] placeholder:text-muted-foreground/40 focus-visible:ring-primary/30"
       />
       <Button
         size="icon"
         onClick={handleSubmit}
         disabled={!value.trim() || isLoading}
-        className="shrink-0"
+        className="shrink-0 h-9 w-9 rounded-lg"
       >
         {isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
-          <Send className="h-4 w-4" />
+          <Send className="h-3.5 w-3.5" />
         )}
       </Button>
     </div>

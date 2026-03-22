@@ -15,6 +15,7 @@ import httpx
 import sqlalchemy
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi_pagination import add_pagination
@@ -457,6 +458,7 @@ def create_app():
         allow_headers=settings.cors_allow_headers,
     )
     app.add_middleware(JavaScriptMIMETypeMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     @app.middleware("http")
     async def check_boundary(request: Request, call_next):
@@ -587,6 +589,19 @@ def setup_static_files(app: FastAPI, static_files_dir: Path) -> None:
         app (FastAPI): FastAPI app.
         static_files_dir (str): Path to the static files directory.
     """
+
+    @app.middleware("http")
+    async def static_cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/assets/"):
+            # Hashed filenames — cache for 1 year
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path == "/" or path.endswith(".html"):
+            # HTML — always revalidate to pick up new deploys
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
     app.mount(
         "/",
         StaticFiles(directory=static_files_dir, html=True),

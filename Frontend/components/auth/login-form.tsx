@@ -1,8 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,13 +15,47 @@ import { GoogleButton } from "@/components/auth/google-button"
 
 export function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const setUser = useStore((state) => state.setUser)
 
   const [isLoading, setIsLoading] = useState(false)
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [formData, setFormData] = useState({ email: "", password: "" })
+
+  useEffect(() => {
+    const error = searchParams.get("error")
+    if (error) {
+      let errorMessage = "An error occurred during authentication."
+      switch (error) {
+        case "google_not_configured":
+          errorMessage = "Google sign-in is not configured on the server."
+          break
+        case "google_token_exchange_failed":
+          errorMessage = "Failed to authenticate with Google. Please try again."
+          break
+        case "incomplete_google_profile":
+          errorMessage = "Google didn't provide complete profile information."
+          break
+        case "terms_required":
+          errorMessage = "You must accept the terms to create an account."
+          break
+        case "database_error":
+          errorMessage = "Database temporarily unavailable. Please try again later."
+          break
+        case "unexpected_error":
+          errorMessage = "An unexpected error occurred. Please try again."
+          break
+        default:
+          errorMessage = "Authentication failed. Please try again."
+      }
+      toast({
+        title: "Authentication Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    }
+  }, [searchParams, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,27 +76,6 @@ export function LoginForm() {
     }
   }
 
-  const handleGoogleCredential = async (credential: string) => {
-    console.debug("[Google] credential length:", credential?.length ?? 0)
-    setIsGoogleLoading(true)
-    try {
-      const user = await authService.googleLogin(credential)
-      setUser(user)
-      toast({ title: "Welcome back!", description: "Signed in with Google." })
-      router.push("/dashboard")
-    } catch (error: any) {
-      toast({
-        title: "Google sign-in failed",
-        description: error?.message || "Could not sign in with Google.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsGoogleLoading(false)
-    }
-  }
-
-  const isAnyLoading = isLoading || isGoogleLoading
-
   return (
     <div className="w-full max-w-[400px] space-y-6">
       {/* Header */}
@@ -73,14 +86,7 @@ export function LoginForm() {
 
       {/* Google Sign-In */}
       <div className="space-y-3">
-        {isGoogleLoading ? (
-          <div className="flex items-center justify-center h-11 w-full rounded-md border border-border bg-background text-sm text-muted-foreground gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Signing in with Google…
-          </div>
-        ) : (
-          <GoogleButton onCredential={handleGoogleCredential} text="signin_with" disabled={isAnyLoading} />
-        )}
+        <GoogleButton text="signin_with" disabled={isLoading} />
       </div>
 
       {/* Divider */}
@@ -109,7 +115,7 @@ export function LoginForm() {
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               autoComplete="email"
             />
           </div>
@@ -136,7 +142,7 @@ export function LoginForm() {
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              disabled={isAnyLoading}
+              disabled={isLoading}
               autoComplete="current-password"
             />
             <button
@@ -150,7 +156,7 @@ export function LoginForm() {
           </div>
         </div>
 
-        <Button type="submit" className="w-full h-11 font-semibold" disabled={isAnyLoading}>
+        <Button type="submit" className="w-full h-11 font-semibold" disabled={isLoading}>
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

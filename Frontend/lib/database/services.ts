@@ -4,14 +4,28 @@ import { initializeDatabase } from './schema'
 
 // Company database service
 export class CompanyService {
-  private pool = getDatabasePool()
-  private redis = getRedisClient()
+  private pool: ReturnType<typeof getDatabasePool> | null = null
+  private redis: ReturnType<typeof getRedisClient> | null = null
   private companyColumns: Set<string> | null = null
   private hasRawJson: boolean = false
 
+  private getPool() {
+    if (!this.pool) {
+      this.pool = getDatabasePool()
+    }
+    return this.pool
+  }
+
+  private getRedis() {
+    if (!this.redis) {
+      this.redis = getRedisClient()
+    }
+    return this.redis
+  }
+
   // Initialize database schema
   async initialize(): Promise<boolean> {
-    return await initializeDatabase(this.pool)
+    return await initializeDatabase(this.getPool())
   }
 
   private async ensureCompanyColumns(): Promise<void> {
@@ -21,7 +35,7 @@ export class CompanyService {
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'companies'
     `
-    const res = await this.pool.query(sql)
+    const res = await this.getPool().query(sql)
     const cols = new Set<string>()
     let hasRaw = false
     for (const row of res.rows) {
@@ -91,11 +105,11 @@ export class CompanyService {
         RETURNING *
       `
 
-      const result = await this.pool.query(query, values)
+      const result = await this.getPool().query(query, values)
 
       // Cache in Redis for quick access (if Redis is available)
       try {
-        await this.redis.setex(`company:${companyData.domain}`, 3600, JSON.stringify(result.rows[0]))
+        await this.getRedis().setex(`company:${companyData.domain}`, 3600, JSON.stringify(result.rows[0]))
       } catch (redisError) {
         console.warn('Redis caching failed, continuing without cache:', redisError)
       }
@@ -112,18 +126,18 @@ export class CompanyService {
   async getCompanyByDomain(domain: string): Promise<any> {
     try {
       // Check Redis cache first
-      const cached = await this.redis.get(`company:${domain}`)
+      const cached = await this.getRedis().get(`company:${domain}`)
       if (cached) {
         return JSON.parse(cached)
       }
 
       // Query database
       const query = 'SELECT * FROM companies WHERE domain = $1'
-      const result = await this.pool.query(query, [domain])
+      const result = await this.getPool().query(query, [domain])
       
       if (result.rows.length > 0) {
         // Cache in Redis
-        await this.redis.setex(`company:${domain}`, 3600, JSON.stringify(result.rows[0]))
+        await this.getRedis().setex(`company:${domain}`, 3600, JSON.stringify(result.rows[0]))
         return result.rows[0]
       }
       
@@ -166,7 +180,7 @@ export class CompanyService {
         enrichmentData ? JSON.stringify(enrichmentData) : null
       ]
 
-      await this.pool.query(query, values)
+      await this.getPool().query(query, values)
     } catch (error) {
       console.error('Error recording enrichment history:', error)
     }
@@ -175,8 +189,22 @@ export class CompanyService {
 
 // Prospect database service
 export class ProspectService {
-  private pool = getDatabasePool()
-  private redis = getRedisClient()
+  private pool: ReturnType<typeof getDatabasePool> | null = null
+  private redis: ReturnType<typeof getRedisClient> | null = null
+
+  private getPool() {
+    if (!this.pool) {
+      this.pool = getDatabasePool()
+    }
+    return this.pool
+  }
+
+  private getRedis() {
+    if (!this.redis) {
+      this.redis = getRedisClient()
+    }
+    return this.redis
+  }
 
   // Store or update prospect data
   async upsertProspect(prospectData: any): Promise<any> {
@@ -271,11 +299,11 @@ export class ProspectService {
         new Date()
       ]
 
-      const result = await this.pool.query(query, values)
+      const result = await this.getPool().query(query, values)
       
       // Cache in Redis for quick access
       if (prospectData.email) {
-        await this.redis.setex(`prospect:${prospectData.email}`, 3600, JSON.stringify(result.rows[0]))
+        await this.getRedis().setex(`prospect:${prospectData.email}`, 3600, JSON.stringify(result.rows[0]))
       }
       
       console.log(`Prospect ${prospectData.email} stored/updated in database`)
@@ -290,18 +318,18 @@ export class ProspectService {
   async getProspectByEmail(email: string): Promise<any> {
     try {
       // Check Redis cache first
-      const cached = await this.redis.get(`prospect:${email}`)
+      const cached = await this.getRedis().get(`prospect:${email}`)
       if (cached) {
         return JSON.parse(cached)
       }
 
       // Query database
       const query = 'SELECT * FROM prospects WHERE email = $1'
-      const result = await this.pool.query(query, [email])
+      const result = await this.getPool().query(query, [email])
       
       if (result.rows.length > 0) {
         // Cache in Redis
-        await this.redis.setex(`prospect:${email}`, 3600, JSON.stringify(result.rows[0]))
+        await this.getRedis().setex(`prospect:${email}`, 3600, JSON.stringify(result.rows[0]))
         return result.rows[0]
       }
       

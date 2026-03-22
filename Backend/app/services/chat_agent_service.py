@@ -243,11 +243,15 @@ Return object with exact keys:
 }}
 
 Rules for Intent:
-- If the query mentions finding PEOPLE, ROLES, TITLES, PROFESSIONALS, or "DECISION MAKERS", use intent="prospect".
+- If the query mentions finding PEOPLE, ROLES, TITLES, PROFESSIONALS, "DECISION MAKERS", or "DECISIONS" (short for decision makers), use intent="prospect".
 - If the query focuses on finding COMPANIES, AGENCIES, FIRMS, or businesses, BUT NOT specific roles or people, use intent="company".
+- Users often have typos or use shorthand. Interpret the MEANING, not exact spelling:
+  - "marketting" = "marketing", "enginneering" = "engineering", "decisions" = "decision makers", "descision makers" = "decision makers"
+  - "company of 100" = company with ~100 employees, "company size 100" = same thing
 - Example: "Find Marketing decision makers at digital agencies" MUST BE intent="prospect".
 - Example: "Find digital agencies in Texas" MUST BE intent="company".
 - Example: "Find data decision makers" MUST BE intent="prospect" with current_title=["Data Analyst", "Data Engineer", "Data Scientist", "Head of Data", "VP of Data", "Chief Data Officer"].
+- Example: "Find me the marketing decisions for a company of 100 in GTM" MUST BE intent="prospect" with current_title=["VP of Marketing", "CMO", "Head of Marketing", "Marketing Director", "Head of GTM", "VP of GTM", "GTM Manager", "Director of Growth Marketing"], company_size=["51-200"].
 
 Rules for Filters:
 - Remove command phrases from titles (e.g., "find me", "show me", "get me").
@@ -268,9 +272,25 @@ Rules for Filters:
   - "real estate" -> ["Real Estate"]
   - NEVER use made-up industry names like "Financial Technology" or "Fintech" — always use the LinkedIn standard name.
 - Map location terms to country/state names.
-- For company_size: if "100 to 1000 employees" -> ["101-200", "201-500", "501-1000"]. Always use CrustData-compatible ranges.
+- For company_size: ONLY use these exact CrustData-compatible ranges: "1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+".
+  - "100 employees" or "company size 100" -> ["51-200"] (pick the range that contains that number)
+  - "100 to 1000 employees" -> ["51-200", "201-500", "501-1000"]
+  - "50 employees" -> ["11-50"]
+  - "500 employees" -> ["201-500"]
+  - NEVER invent ranges like "101-200" or "51-100" — only use the exact ranges listed above.
 - Extract technology/tool names (like "Snowflake", "Salesforce", "HubSpot") into keywords.
 - Do NOT put qualifiers like "verified emails", "contact information", "with emails" into keywords — these are not searchable terms.
+- Understand common B2B abbreviations and map them correctly:
+  - "GTM" (Go-to-Market) -> for prospect searches, add to current_title: ["GTM Manager", "Head of GTM", "VP of GTM", "GTM Lead", "GTM Strategist", "Go-to-Market Manager", "Director of GTM"]. Also add to keywords: ["GTM", "go-to-market"].
+  - "RevOps" -> current_title: ["Revenue Operations Manager", "Head of RevOps", "VP Revenue Operations", "RevOps Director"]
+  - "SDR" -> current_title: ["Sales Development Representative", "SDR Manager", "SDR Lead"]
+  - "BDR" -> current_title: ["Business Development Representative", "BDR Manager"]
+  - "AE" -> current_title: ["Account Executive", "Senior Account Executive"]
+  - "CS" (Customer Success) -> current_title: ["Customer Success Manager", "Head of Customer Success", "VP Customer Success"]
+  - "PLG" (Product-Led Growth) -> keywords: ["product-led growth", "PLG"]
+  - "ABM" (Account-Based Marketing) -> keywords: ["account-based marketing", "ABM"]
+- When a query combines a domain like "GTM" with "decision makers" or "leaders", expand to senior titles in that domain:
+  - "Marketing Decision Makers in GTM" -> current_title: ["VP of Marketing", "CMO", "Head of Marketing", "Marketing Director", "Head of GTM", "VP of GTM", "GTM Manager", "Director of Growth Marketing"]
 - Keep only the five allowed filter keys above.
 - If unknown, return empty arrays for that filter key.
 - IMPORTANT: Be very specific and restrictive to avoid broad results like Google, Amazon, etc."""
@@ -286,7 +306,7 @@ Rules for Filters:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 600,
+            "max_tokens": 1000,
             "response_format": {"type": "json_object"}
         }
 

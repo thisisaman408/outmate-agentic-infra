@@ -554,33 +554,103 @@ class ProspectFilterBuilder:
             "value": company
         }
     
+    # Valid CrustData headcount ranges with their numeric boundaries
+    CRUSTDATA_RANGES = [
+        (1, 10, "1-10"),
+        (11, 50, "11-50"),
+        (51, 200, "51-200"),
+        (201, 500, "201-500"),
+        (501, 1000, "501-1,000"),
+        (1001, 5000, "1,001-5,000"),
+        (5001, 10000, "5,001-10,000"),
+        (10001, float('inf'), "10,001+"),
+    ]
+
+    # Direct string mappings for known tokens
+    EMPLOYEE_RANGE_MAP = {
+        "1-10": "1-10",
+        "11-50": "11-50",
+        "51-200": "51-200",
+        "201-500": "201-500",
+        "501-1000": "501-1,000",
+        "501-1,000": "501-1,000",
+        "1001-5000": "1,001-5,000",
+        "1,001-5,000": "1,001-5,000",
+        "5001-10000": "5,001-10,000",
+        "5,001-10,000": "5,001-10,000",
+        "10001+": "10,001+",
+        "10,001+": "10,001+",
+        "1000_plus": "1,001-5,000",
+        "5000_plus": "5,001-10,000",
+        "10000_plus": "10,001+",
+    }
+
+    def _normalize_employee_range(self, val: str) -> List[str]:
+        """
+        Normalize any employee range string to valid CrustData range(s).
+        Handles formats like: "51-200", "101-200", "100", "1000+", "1000_plus", etc.
+        """
+        val = val.strip().replace(",", "").replace(" ", "")
+
+        # Direct lookup (with commas stripped for matching)
+        for key, mapped in self.EMPLOYEE_RANGE_MAP.items():
+            if val == key.replace(",", ""):
+                return [mapped]
+
+        # Handle "X+" format
+        plus_match = None
+        if val.endswith("+"):
+            try:
+                plus_match = int(val[:-1])
+            except ValueError:
+                pass
+        if plus_match is not None:
+            return [r[2] for r in self.CRUSTDATA_RANGES if r[1] >= plus_match or r[0] >= plus_match]
+
+        # Handle range "X-Y" format
+        import re
+        range_match = re.match(r"^(\d+)\s*[-–to]+\s*(\d+)$", val)
+        if range_match:
+            low, high = int(range_match.group(1)), int(range_match.group(2))
+            # Return all CrustData ranges that overlap with [low, high]
+            return [r[2] for r in self.CRUSTDATA_RANGES if r[1] >= low and r[0] <= high]
+
+        # Handle single number — find the range containing it
+        try:
+            num = int(val)
+            for r in self.CRUSTDATA_RANGES:
+                if r[0] <= num <= r[1]:
+                    return [r[2]]
+        except ValueError:
+            pass
+
+        # Fallback: return as-is (let API handle it)
+        logger.warning(f"Could not normalize employee range: {val}")
+        return [val]
+
     def _build_employees_filter(self, employees: List[str]) -> Dict[str, Any]:
         """
         Builds the employees/headcount filter.
-        Handles mapping of frontend range tokens to backend API values.
+        Normalizes any range format to valid CrustData API values.
         """
         if not employees:
             return {}
-            
+
         mapped_values = []
-        # Mapping logic for values that don't match API exactly
-        mapping = {
-            "501-1000": ["501-1,000"], # Add comma
-            "1000_plus": ["1,001-5,000", "5,001-10,000", "10,001+"] # Expand to large ranges
-        }
-        
         for val in employees:
-            if val in mapping:
-                mapped_values.extend(mapping[val])
-            else:
-                mapped_values.append(val)
-        
-        # Deduplicate values
-        unique_values = list(set(mapped_values))
-        
+            mapped_values.extend(self._normalize_employee_range(val))
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_values = []
+        for v in mapped_values:
+            if v not in seen:
+                seen.add(v)
+                unique_values.append(v)
+
         if not unique_values:
             return {}
-            
+
         return {
             "column": "current_employers.company_headcount_range",
             "type": "in",

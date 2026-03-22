@@ -5,7 +5,7 @@ Campaign Draft Generation & Send API Routes
 import httpx
 import os
 from urllib.parse import quote_plus
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Literal, List, Dict, Any
@@ -18,6 +18,10 @@ from app.services.gmail_service import GmailService
 from app.services.unipile_service import UnipileService
 from app.services.campaign_dashboard_service import CampaignDashboardService
 from app.services.openrouter_service import OpenRouterService
+from app.api.deps.auth import get_current_user
+from app.db.models.user import User
+from sqlalchemy.orm import Session
+from app.db.deps import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +29,6 @@ router = APIRouter(tags=["campaigns"])
 public_router = APIRouter(tags=["campaigns"])
 dashboard_service = CampaignDashboardService()
 
-
-def _normalize_return_path(path: Optional[str]) -> str:
-    default_path = "/ai-powered-search"
-    if not path:
-        return default_path
-    cleaned = path.strip()
-    if not cleaned:
-        return default_path
-    # Disallow absolute URLs for safety.
-    if "://" in cleaned:
-        return default_path
-    if not cleaned.startswith("/"):
-        cleaned = f"/{cleaned}"
-    return cleaned
 
 
 # --- Draft Generation ---
@@ -103,46 +93,6 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
         raise HTTPException(status_code=500, detail="An error occurred generating the campaign draft")
 
 
-# --- Gmail OAuth2 ---
-
-@public_router.get("/gmail/auth-url")
-async def gmail_auth_url(return_to: str = Query("/ai-powered-search")):
-    """Get the Google OAuth2 authorization URL for Gmail."""
-    try:
-        service = GmailService()
-        safe_path = _normalize_return_path(return_to)
-        url = service.get_auth_url(state=safe_path)
-        return {"auth_url": url}
-    except Exception as e:
-        logger.error(f"Gmail auth URL error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate auth URL")
-
-
-@public_router.get("/gmail/callback")
-async def gmail_callback(code: str = Query(...), state: str = Query("")):
-    """Handle Google OAuth2 callback - exchange code for tokens."""
-    safe_path = _normalize_return_path(state)
-    frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-    redirect_prefix = f"{frontend_base}{safe_path}"
-    try:
-        service = GmailService()
-        result = await service.exchange_code(code)
-        # Redirect back to the frontend with success
-        redirect_url = f"{redirect_prefix}?gmail_connected=true&gmail_email={quote_plus(result['email'])}"
-        return RedirectResponse(url=redirect_url)
-    except Exception as e:
-        logger.error(f"Gmail callback error: {e}")
-        redirect_url = f"{redirect_prefix}?gmail_connected=false&gmail_error={quote_plus(str(e))}"
-        return RedirectResponse(url=redirect_url)
-
-
-@router.get("/gmail/status")
-async def gmail_status():
-    """Check if Gmail is connected."""
-    service = GmailService()
-    return service.is_connected()
-
-
 # --- Send Email ---
 
 class SendEmailRequest(BaseModel):
@@ -153,15 +103,16 @@ class SendEmailRequest(BaseModel):
 
 
 @router.post("/send-email")
-async def send_email(request: SendEmailRequest):
-    """Send an email via connected Gmail account."""
+async def send_email(request: SendEmailRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Send an email via the logged-in user's Gmail tokens."""
     try:
         service = GmailService()
         result = await service.send_email(
+            user=user,
             to_email=request.to_email,
             subject=request.subject,
             body=request.body,
-            from_email=request.from_email,
+            db=db,
         )
         return result
     except ValueError as e:
@@ -169,6 +120,13 @@ async def send_email(request: SendEmailRequest):
     except Exception as e:
         logger.error(f"Send email error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+
+@router.get("/gmail/status")
+async def gmail_status(user: User = Depends(get_current_user)):
+    """Check if the current user has Gmail connected."""
+    service = GmailService()
+    return service.is_connected(user)
 
 
 # --- LinkedIn via Unipile ---

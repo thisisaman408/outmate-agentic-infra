@@ -12,6 +12,9 @@ from app.db.models.api_log import ApiUsageLog
 # Keep both lines below
 from app.db.models.chat_session import NLPChatSession
 from app.db.models.visitor import SiteConfig, Visit, Alert
+# Events enrollment + cache
+from app.db.models.event_enrollment import EventEnrollment
+from app.db.models.event_cache import EventCache
 # Copilot models
 from app.db.models.copilot_brief import CopilotBrief
 from app.db.models.copilot_meeting_prep import CopilotMeetingPrep
@@ -19,6 +22,9 @@ from app.db.models.copilot_campaign_analysis import CopilotCampaignAnalysis
 from app.db.models.copilot_pipeline_alert import CopilotPipelineAlert
 from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.db.models.watcher import Watcher
+from app.db.models.identity_graph import IdentityNode
+from app.db.models.product_knowledge import ProductKnowledge
+from app.db.models.copilot_chat_session import CopilotChatSession
 
 __all__ = [
     "User",
@@ -38,10 +44,16 @@ __all__ = [
     "SiteConfig",
     "Visit",
     "Alert",
+    # Events
+    "EventEnrollment",
+    "EventCache",
     # Copilot models
     "CopilotBrief",
     "CopilotMeetingPrep",
     "CopilotCampaignAnalysis",
     "CopilotPipelineAlert",
     "CopilotUserPreferences",
+    "IdentityNode",
+    "ProductKnowledge",
+    "CopilotChatSession",
 ]
