@@ -26,7 +26,7 @@ celery>=5.3.0
 # External service clients
 ipinfo>=5.0.0
 crewai==1.9.3
-crewai-tools==0.6.3
+crewai-tools>=1.0.0
 openai>=1.0.0
 pyjwt>=2.6.0
 passlib[bcrypt]>=1.7.4
