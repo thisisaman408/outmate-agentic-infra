@@ -11,6 +11,7 @@ from app.db.models.visitor import Visit, SiteConfig, Alert
 from app.db.repositories.company_repository import CompanyRepository
 from app.db.repositories.prospect_repository import ProspectRepository
 from app.services.visitor_enrich import VisitorEnricher, is_isp_or_cloud
+from app.services.behavioral_scoring import predict_persona, select_best_decision_maker
 import asyncio
 import json
 
@@ -131,7 +132,16 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
 
         logger.info("Starting enrichment for IP: %s (email=%s, visitor_id=%s, org=%s)", ip, email, visitor_id, org_id)
         enricher = VisitorEnricher()
-        resolution = await enricher.enrich_ip(ip, url, intent_score, email=email, visitor_id=visitor_id)
+        fp = data.get("fp")
+        user_agent = data.get("user_agent") or ""
+        viewport_w = data.get("viewport_w") or 0
+        viewport_h = data.get("viewport_h") or 0
+        resolution = await enricher.enrich_ip(
+            ip, url, intent_score,
+            email=email, visitor_id=visitor_id,
+            fp=fp, user_agent=user_agent,
+            viewport_w=viewport_w, viewport_h=viewport_h,
+        )
 
         # Tag every visit with the pixel owner's domain so the dashboard can
         # show which customer site the visitor came from even when IP enrichment
@@ -161,6 +171,88 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
 
         if visitor_id:
             resolution["visitor_id"] = visitor_id
+
+        # ── BEHAVIORAL ROLE PREDICTION ────────────────────────────────────────
+        # Query the last 30 visits for this visitor_id to build a behavioral
+        # profile, then predict their job role and buying stage.
+        behavioral = None
+        if visitor_id:
+            try:
+                from sqlalchemy import text as sa_text
+                hist_rows = db.execute(
+                    sa_text("""
+                        SELECT url,
+                               resolution->>'dwell_time'  AS dwell_time,
+                               resolution->>'email'       AS email,
+                               referrer,
+                               created_at
+                        FROM visits
+                        WHERE org_id = :org_id
+                          AND resolution->>'visitor_id' = :vid
+                        ORDER BY created_at DESC
+                        LIMIT 30
+                    """),
+                    {"org_id": org_id, "vid": visitor_id},
+                ).fetchall()
+
+                # Build visit history list
+                visit_history = []
+                for row in hist_rows:
+                    visit_history.append({
+                        "url": row.url or "",
+                        "dwell_time": int(float(row.dwell_time)) if row.dwell_time else 0,
+                        "email": row.email,
+                        "referrer": row.referrer or "",
+                        "has_form_fill": bool(row.email),
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    })
+
+                # Add current visit to the history
+                visit_history.insert(0, {
+                    "url": url or "",
+                    "dwell_time": dwell_time or 0,
+                    "email": email,
+                    "referrer": data.get("referrer") or "",
+                    "has_form_fill": bool(email),
+                    "created_at": None,
+                })
+
+                behavioral = predict_persona(visit_history, referrer=data.get("referrer", ""))
+
+                resolution["behavioral"] = {
+                    "predicted_persona": behavioral["predicted_persona"],
+                    "persona_confidence": behavioral["persona_confidence"],
+                    "engagement_score": behavioral["engagement_score"],
+                    "buying_stage": behavioral["buying_stage"],
+                    "persona_scores": behavioral["persona_scores"],
+                    "signals": behavioral["signals_breakdown"],
+                }
+
+                # Smart DM selection: pick the decision maker whose role matches
+                # the predicted persona of the visitor
+                dms = resolution.get("decision_makers") or []
+                if dms and behavioral["predicted_persona"] != "unknown":
+                    best_dm = select_best_decision_maker(dms, behavioral["predicted_persona"])
+                    if best_dm:
+                        # Override the heuristic top-DM with the persona-matched DM
+                        for key in ("full_name", "email", "linkedin_url", "job_title"):
+                            if best_dm.get(key) and not resolution.get(key):
+                                resolution[key] = best_dm[key]
+                        resolution["_persona_matched_dm"] = True
+                        logger.info(
+                            "[Behavioral] Matched DM '%s' (%s) to predicted persona '%s'",
+                            best_dm.get("full_name"), best_dm.get("job_title"),
+                            behavioral["predicted_persona"],
+                        )
+
+                logger.info(
+                    "[Behavioral] visitor_id=%s persona=%s confidence=%.2f engagement=%d stage=%s",
+                    visitor_id, behavioral["predicted_persona"],
+                    behavioral["persona_confidence"], behavioral["engagement_score"],
+                    behavioral["buying_stage"],
+                )
+            except Exception as e:
+                logger.warning("Behavioral scoring failed: %s", e)
 
         is_matched = (
             bool(resolution.get("matched_entity"))

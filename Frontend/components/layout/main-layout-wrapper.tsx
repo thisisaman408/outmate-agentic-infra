@@ -8,7 +8,10 @@ const GlobalCopilotPanel = dynamic(
     () => import("@/components/copilot/global-copilot-panel").then(mod => mod.GlobalCopilotPanel),
     { ssr: false }
 )
-import { LeadCopilotPanel } from "@/components/copilot/lead-copilot-panel"
+const LeadCopilotPanel = dynamic(
+    () => import("@/components/copilot/lead-copilot-panel").then(mod => mod.LeadCopilotPanel),
+    { ssr: false }
+)
 
 export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
     const { sidebarCollapsed } = useStore()
