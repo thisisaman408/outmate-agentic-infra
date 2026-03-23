@@ -207,9 +207,24 @@ function extractVisitData(visit: Visit) {
     const sourceSite = visit.source_site || visit.resolution?.source_site || ""
     const logoUrl = visit.resolution?.logo_url || visit.resolution?.explorium?.logo_url || null
     const decisionMakers = visit.resolution?.decision_makers || []
+    
+    // RB2B Identity Resolution Fields
+    const tier = visit.resolution?.tier || "unknown"
+    const botScore = visit.resolution?.bot_score || 0
+    const fingerprint = visit.resolution?.fingerprint || null
+
+    // Behavioral Role Prediction Fields
+    const behavioral = visit.resolution?.behavioral || null
+    const predictedPersona = behavioral?.predicted_persona || "unknown"
+    const personaConfidence = behavioral?.persona_confidence || 0
+    const engagementScore = behavioral?.engagement_score || 0
+    const buyingStage = behavioral?.buying_stage || "awareness"
+    const personaScores = behavioral?.persona_scores || {}
+    const signals = behavioral?.signals || {}
+
     let pagePath = visit.url
     try { pagePath = new URL(visit.url).pathname } catch { }
-    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath, sourceSite, logoUrl, decisionMakers }
+    return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, companyLinkedin, website, industry, employeeRange, revenueRange, technologies, fundingStage, pagePath, sourceSite, logoUrl, decisionMakers, tier, botScore, fingerprint, predictedPersona, personaConfidence, engagementScore, buyingStage, personaScores, signals }
 }
 
 // Group visits by company for Companies tab
@@ -220,6 +235,8 @@ function groupByCompany(visits: Visit[]): Array<{
     totalIntent: number
     lastSeen: string
     icpScore: number
+    tier: string
+    botScore: number
     contacts: Array<{ name: string | null; email: string | null; title: string | null }>
 }> {
     const map = new Map<string, Visit[]>()
@@ -254,6 +271,8 @@ function groupByCompany(visits: Visit[]): Array<{
             totalIntent: Math.max(...groupVisits.map(v => v.intent_score)),
             lastSeen: sorted[0]?.created_at || "",
             icpScore: Math.max(...groupVisits.map(getIcpScore)),
+            tier: extractVisitData(sorted[0]).tier,
+            botScore: Math.max(...groupVisits.map(v => extractVisitData(v).botScore)),
             contacts: Array.from(contacts.values()),
         }
     }).sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime())
@@ -569,7 +588,7 @@ export default function VisitorsPage() {
                     <CardContent className="flex items-center gap-3 py-3">
                         <AlertTriangle className="h-5 w-5 text-yellow-600" />
                         <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200 flex-1">{error}</p>
-                        <Button size="sm" variant="outline" onClick={fetchData}>Retry</Button>
+                        <Button size="sm" variant="outline" onClick={() => fetchData()}>Retry</Button>
                     </CardContent>
                 </Card>
             )}
@@ -740,7 +759,12 @@ export default function VisitorsPage() {
                                                             {(group.company || "?").charAt(0).toUpperCase()}
                                                         </div>
                                                         <div>
-                                                            <div className="font-medium text-sm">{group.company || "Anonymous"}</div>
+                                                            <div className="font-medium text-sm flex items-center gap-2">
+                                                                {group.company || "Anonymous"}
+                                                                {group.tier === "person" && <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-600">Person</Badge>}
+                                                                {group.tier === "company" && <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50">Company</Badge>}
+                                                                {group.tier === "noise" && <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-slate-100 text-slate-500">Noise</Badge>}
+                                                            </div>
                                                             <div className="text-xs text-muted-foreground">
                                                                 {[d.industry, d.employeeRange && `${d.employeeRange} emp`].filter(Boolean).join(" · ") || group.domain || "—"}
                                                             </div>
@@ -854,7 +878,12 @@ export default function VisitorsPage() {
                                                             {d.fullName ? d.fullName.charAt(0).toUpperCase() : <User className="h-3.5 w-3.5" />}
                                                         </div>
                                                         <div>
-                                                            <div className="font-medium text-sm">{d.fullName || d.email || "Anonymous"}</div>
+                                                            <div className="font-medium text-sm flex items-center gap-2">
+                                                                {d.fullName || d.email || "Anonymous"}
+                                                                {d.tier === "person" && <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-600">Person</Badge>}
+                                                                {d.tier === "company" && <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50">Company</Badge>}
+                                                                {d.tier === "noise" && <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-slate-100 text-slate-500">Noise</Badge>}
+                                                            </div>
                                                             <div className="text-xs text-muted-foreground">{d.fullName ? (d.jobTitle || d.email || visit.ip) : (d.jobTitle || visit.ip)}</div>
                                                         </div>
                                                     </div>
@@ -1216,6 +1245,64 @@ export default function VisitorsPage() {
                                     <Progress value={icp} className="h-3" />
                                 </div>
 
+                                {/* Behavioral Intelligence */}
+                                {d.predictedPersona !== "unknown" && (
+                                    <div className="space-y-3 mb-4 p-3 rounded-lg bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 border border-indigo-100 dark:border-indigo-900/40">
+                                        <h3 className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">Behavioral Intelligence</h3>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Persona</div>
+                                                <Badge variant="default" className="text-[10px] bg-indigo-500 hover:bg-indigo-600 capitalize">
+                                                    {d.predictedPersona}
+                                                </Badge>
+                                                {d.personaConfidence > 0 && (
+                                                    <div className="text-[10px] text-muted-foreground mt-0.5">{Math.round(d.personaConfidence * 100)}% conf</div>
+                                                )}
+                                            </div>
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Engagement</div>
+                                                <div className="text-lg font-bold text-indigo-700 dark:text-indigo-300">{d.engagementScore}</div>
+                                                <div className="text-[10px] text-muted-foreground">/ 100</div>
+                                            </div>
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Buying Stage</div>
+                                                <Badge variant={d.buyingStage === "decision" ? "destructive" : d.buyingStage === "consideration" ? "default" : "secondary"} className="text-[10px] capitalize">
+                                                    {d.buyingStage}
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        {/* Persona score breakdown */}
+                                        {Object.keys(d.personaScores).length > 0 && (
+                                            <div className="space-y-1 pt-2 border-t border-indigo-100 dark:border-indigo-900/40">
+                                                <div className="text-[10px] font-medium text-muted-foreground">Role Signals</div>
+                                                {Object.entries(d.personaScores).slice(0, 4).map(([persona, score]) => (
+                                                    <div key={persona} className="flex items-center gap-2">
+                                                        <span className="text-[10px] w-16 capitalize text-muted-foreground">{persona}</span>
+                                                        <div className="flex-1 bg-muted rounded-full h-1.5">
+                                                            <div
+                                                                className="bg-indigo-400 rounded-full h-1.5 transition-all"
+                                                                style={{ width: `${Math.min(Number(score) * 20, 100)}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground w-6 text-right">{Number(score).toFixed(1)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {/* Behavioral signals summary */}
+                                        {d.signals && (
+                                            <div className="flex flex-wrap gap-1 pt-1">
+                                                {d.signals.visited_pricing && <Badge variant="outline" className="text-[9px] h-4 border-orange-200 text-orange-700 bg-orange-50">Viewed Pricing</Badge>}
+                                                {d.signals.visited_demo && <Badge variant="outline" className="text-[9px] h-4 border-red-200 text-red-700 bg-red-50">Viewed Demo</Badge>}
+                                                {d.signals.has_form_fill && <Badge variant="outline" className="text-[9px] h-4 border-green-200 text-green-700 bg-green-50">Form Filled</Badge>}
+                                                {d.signals.has_email && <Badge variant="outline" className="text-[9px] h-4 border-blue-200 text-blue-700 bg-blue-50">Email Captured</Badge>}
+                                                {d.signals.referrer_professional && <Badge variant="outline" className="text-[9px] h-4 border-purple-200 text-purple-700 bg-purple-50">Professional Referrer</Badge>}
+                                                {d.signals.total_visits > 3 && <Badge variant="outline" className="text-[9px] h-4 border-indigo-200 text-indigo-700 bg-indigo-50">{d.signals.total_visits} visits</Badge>}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* Quick Stats */}
                                 <div className="grid grid-cols-2 gap-3 mb-4">
                                     {[
@@ -1224,6 +1311,7 @@ export default function VisitorsPage() {
                                         { label: "Last Seen", value: new Date(selectedVisit.created_at).toLocaleDateString([], { month: "short", day: "numeric" }), icon: <Clock className="h-3.5 w-3.5" /> },
                                         { label: "Location", value: d.geo ? [d.geo.city, (d.geo as any).country].filter(Boolean).join(", ") : "Unknown", icon: <MapPin className="h-3.5 w-3.5" /> },
                                         ...(d.sourceSite ? [{ label: "Tracked On", value: d.sourceSite, icon: <Globe className="h-3.5 w-3.5" /> }] : []),
+                                        ...(d.engagementScore > 0 ? [{ label: "Engagement", value: `${d.engagementScore}/100`, icon: <Activity className="h-3.5 w-3.5" /> }] : []),
                                     ].map(s => (
                                         <div key={s.label} className="bg-muted/50 rounded-lg p-3">
                                             <div className="flex items-center gap-1.5 text-muted-foreground mb-1">{s.icon}<span className="text-xs">{s.label}</span></div>

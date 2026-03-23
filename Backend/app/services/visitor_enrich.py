@@ -60,6 +60,22 @@ ISP_CLOUD_KEYWORDS = {
     "vps", "isp", "network foundation", "broadband",
 }
 
+NOISE_ASN_ORGS = {
+    "MICROSOFT-CORP", "AMAZON-AES", "GOOGLE", "TENCENT",
+    "ALIBABA", "DIGITALOCEAN", "LINODE", "OVHCLOUD",
+    "HETZNER", "VULTR", "CLOUDFLARE", "FASTLY",
+}
+
+NOISE_INDICATORS = {
+    "ua_missing": 15,          # no user agent
+    "ua_is_bot": 50,           # "Googlebot", "crawler" in UA
+    "headless_webdriver": 50,  # navigator.webdriver signal
+    "zero_viewport": 30,       # 0x0 screen from pixel
+    "no_cookie_support": 10,   # cookies disabled
+    "cloud_asn": 40,           # ASN matches NOISE_ASN_ORGS
+    "datacenter_ip": 35,       # IPinfo.io type = "datacenter"
+}
+
 # These AS names typically indicate residential/mobile connections in India
 MOBILE_ASN_PATTERNS = {"jio", "reliance jio", "airtel", "vodafone idea", "vi "}
 
@@ -120,6 +136,10 @@ class VisitorEnricher:
         intent_score: float,
         email: Optional[str] = None,
         visitor_id: Optional[str] = None,
+        fp: Optional[str] = None,
+        user_agent: str = "",
+        viewport_w: int = 0,
+        viewport_h: int = 0,
     ) -> Dict[str, Any]:
         """
         Enrich a visitor from their IP address.
@@ -133,6 +153,30 @@ class VisitorEnricher:
             "172.31.", "::1", "localhost",
         ))
 
+        # Calculate base bot score
+        def compute_bot_score() -> int:
+            score = 0
+            if not user_agent:
+                score += NOISE_INDICATORS["ua_missing"]
+            else:
+                tl = user_agent.lower()
+                if any(bot in tl for bot in ("bot", "crawler", "spider", "headless")):
+                    score += NOISE_INDICATORS["ua_is_bot"]
+            if viewport_w == 0 or viewport_h == 0:
+                score += NOISE_INDICATORS["zero_viewport"]
+            return score
+
+        base_bot_score = compute_bot_score()
+
+        # Reject obvious bots immediately
+        if base_bot_score >= 50:
+            logger.info("[Enrichment] IP %s blocked by UserAgent pre-filter (score=%s)", ip, base_bot_score)
+            return {
+                "ip": ip, "is_private_ip": False, "fingerprint": fp,
+                "tier": "noise", "bot_score": base_bot_score, "_sources": ["bot_filter"],
+                "confidence": 0, "intent_score": intent_score
+            }
+
         resolution: Dict[str, Any] = {
             "ip": ip,
             "is_private_ip": is_private,
@@ -142,6 +186,9 @@ class VisitorEnricher:
             "confidence": 0.0,
             "person": None,
             "intent_score": intent_score,
+            "fingerprint": fp,
+            "tier": "unknown",
+            "bot_score": base_bot_score,
             # Person contact fields
             "email": email if email and email not in ("", "null", "undefined") else None,
             "phone": None,
@@ -181,6 +228,11 @@ class VisitorEnricher:
                 resolution["_sources"].append("identity_graph")
                 resolution["confidence"] = max(resolution["confidence"], 0.85)
                 logger.info("[Enrichment] Identity graph HIT for visitor_id=%s ip=%s", visitor_id, ip)
+                
+            # ── STEP -0.5: PDL (People Data Labs) / LiveRamp Stub ─────────────
+            # TODO: Integrate external Data Cooperative graph API here.
+            # Example: result = await self._step_pdl_graph_lookup(fp, ip, email)
+            # if result: merge into resolution...
 
             # ── STEP 0: ip-api.com (accurate geo — primary source) ────────────
             await self._step_ipapi(ip, resolution)
@@ -239,6 +291,16 @@ class VisitorEnricher:
 
         except Exception as e:
             logger.error("[Enrichment] Unhandled fatal error: %s", e, exc_info=True)
+
+        # Apply exact Tiering logic at end of pipeline
+        if resolution["bot_score"] >= 40 or (resolution.get("company") and is_isp_or_cloud(resolution["company"])):
+            resolution["tier"] = "noise"
+        elif resolution.get("confidence", 0) >= 0.65 and (resolution.get("email") or resolution.get("person")):
+            resolution["tier"] = "person"
+        elif resolution.get("company") or resolution.get("domain"):
+            resolution["tier"] = "company"
+        else:
+            resolution["tier"] = "noise"
 
         return resolution
 
@@ -315,6 +377,16 @@ class VisitorEnricher:
                     resolution["company"] = org_name
                     resolution["confidence"] = max(resolution["confidence"], 0.35)
                     logger.info("[Enrichment] Step 0: org from ip-api = %s", org_name)
+
+            # Check for Cloud/Bot ASNs
+            if org_name and any(noise in org_name.upper() for noise in NOISE_ASN_ORGS):
+                resolution["bot_score"] += NOISE_INDICATORS["cloud_asn"]
+            if is_hosting or data.get("type", "") == "datacenter":
+                resolution["bot_score"] += NOISE_INDICATORS["datacenter_ip"]
+                
+            # Post-geo bot block
+            if resolution["bot_score"] >= 40:
+                logger.info("[Enrichment] IP %s flagged as Noise/Datacenter (score=%s)", ip, resolution["bot_score"])
 
             logger.info(
                 "[Enrichment] Step 0 done: %s, %s %s (mobile=%s, proxy=%s, hosting=%s)",

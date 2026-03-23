@@ -4,11 +4,13 @@ import { Header } from "@/components/layout/header"
 import { AuthProvider } from "@/components/providers/auth-provider"
 
 import { MainLayoutWrapper } from "@/components/layout/main-layout-wrapper"
+import { RouteProgress } from "@/components/ui/route-progress"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <div className="flex h-screen overflow-hidden">
+        <RouteProgress />
         <Sidebar />
         <MainLayoutWrapper>
           <Header />
@@ -18,3 +20,4 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </AuthProvider>
   )
 }
+

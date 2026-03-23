@@ -60,10 +60,72 @@
     }
 
     // ─── Track ───────────────────────────────────────────────────────────────
+    // ─── Browser Fingerprinting & Bot Filtering ──────────────────────────────
+    const cyrb53 = (str, seed = 0) => {
+        let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+        for (let i = 0, ch; i < str.length; i++) {
+            ch = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+    };
+
+    function getCanvasFingerprint() {
+        try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillText('Outmate fp', 2, 2);
+            return canvas.toDataURL().slice(-50);
+        } catch (_) { return null; }
+    }
+
+    function getWebGLFingerprint() {
+        try {
+            const gl = document.createElement('canvas').getContext('webgl');
+            if (!gl) return null;
+            const ext = gl.getExtension('WEBGL_debug_renderer_info');
+            return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
+        } catch (_) { return null; }
+    }
+
+    let _fpHashCache = null;
+    function getFingerprintHash() {
+        if (_fpHashCache) return _fpHashCache;
+        const signals = {
+            canvas: getCanvasFingerprint(),
+            webgl: getWebGLFingerprint(),
+            dpr: globalThis.devicePixelRatio,
+            screen: `${screen.width}x${screen.height}x${screen.colorDepth}`,
+            tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            lang: navigator.language,
+            ua: navigator.userAgent,
+            platform: navigator.platform,
+            cookieEnabled: navigator.cookieEnabled,
+        };
+        _fpHashCache = cyrb53(JSON.stringify(signals)).toString(16);
+        return _fpHashCache;
+    }
+
     let _lastTrackedUrl = null;
     let _pageEntryTime = Date.now();
 
     function track(email, forcedUrl, action = 'pageview') {
+        // Trivial Bot Filter check
+        const isHuman = (
+            typeof window !== 'undefined' &&
+            navigator.webdriver !== true &&
+            !window._phantom &&
+            !window.callPhantom &&
+            window.outerWidth > 0 &&
+            window.outerHeight > 0
+        );
+        if (!isHuman) return;
+
         const url = forcedUrl ?? globalThis.location.href;
 
         // Avoid double-tracking the exact same URL in the same session (unless email or leave action)
@@ -79,6 +141,9 @@
             pixel_key: PIXEL_KEY,
             email: email ?? storageGet(EMAIL_KEY),
             visitor_id: getVisitorId(),
+            fp: getFingerprintHash(),
+            viewport_w: window.innerWidth,
+            viewport_h: window.innerHeight,
             dwell_time: action === 'leave' ? (Date.now() - _pageEntryTime) : undefined
         });
 

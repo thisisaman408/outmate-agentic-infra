@@ -319,6 +319,9 @@ async def track_visitor(request: Request):
             "intent_score": intent_score,
             "email": email,
             "visitor_id": visitor_id,
+            "fp": data.get("fp"),
+            "viewport_w": data.get("viewport_w"),
+            "viewport_h": data.get("viewport_h"),
             # Pixel owner's domain — used to label visit source when company
             # cannot be identified from IP enrichment alone.
             "source_site": site_config.domain or "",
