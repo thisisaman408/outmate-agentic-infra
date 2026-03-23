@@ -82,6 +82,14 @@ async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db
     return [watcher_to_dict(w) for w in query.order_by(WatcherModel.created_at.desc()).all()]
 
 
+@router.get("/{id}")
+async def get_watcher(id: str, db: Session = Depends(get_db)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+    if not db_w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+    return watcher_to_dict(db_w)
+
+
 @router.post("/event")
 async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depends(get_db)):
     wid = f"w-{uuid4().hex[:8]}"
@@ -568,6 +576,8 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
 # ─────────────────────────────────────────
 legacy_router.get("/api/watchers")(list_watchers)
 legacy_router.get("/api/watchers/")(list_watchers)
+legacy_router.get("/api/watchers/{id}")(get_watcher)
+legacy_router.get("/api/watchers/{id}/")(get_watcher)
 legacy_router.post("/api/watchers/event")(create_event_watcher)
 legacy_router.post("/api/watchers/account")(create_account_watcher)
 legacy_router.post("/api/watchers/lead")(create_lead_watcher)
