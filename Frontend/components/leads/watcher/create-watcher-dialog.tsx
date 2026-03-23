@@ -64,6 +64,12 @@ export function CreateWatcherDialog({
     })
 
     const handleSubmit = () => {
+        // Validate event watchers have at least one event type
+        if (watcherType === "event" && (!formData.eventTypes || formData.eventTypes.length === 0)) {
+            alert("Please select at least one event type for the event watcher");
+            return
+        }
+
         // Build watcher object based on type
         let watcher: any = {
             name: formData.name,
@@ -273,7 +279,13 @@ export function CreateWatcherDialog({
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                         Cancel
                     </Button>
-                    <Button onClick={handleSubmit} disabled={!formData.name}>
+                    <Button 
+                        onClick={handleSubmit} 
+                        disabled={
+                            !formData.name || 
+                            (watcherType === "event" && (!formData.eventTypes || formData.eventTypes.length === 0))
+                        }
+                    >
                         <Plus className="h-4 w-4 mr-2" />
                         Create Watcher
                     </Button>
@@ -300,35 +312,70 @@ function EventWatcherForm({ formData, setFormData, addItem, removeItem }: any) {
     const jobLevels = ["C-Level", "VP", "Director", "Manager", "Individual Contributor"]
     const departments = ["Sales", "Marketing", "Engineering", "Product", "Customer Success", "HR", "Finance"]
 
+    // Quick preset buttons
+    const applyPreset = (preset: string[]) => {
+        setFormData({ ...formData, eventTypes: preset })
+    }
+
     return (
         <div className="space-y-4">
             <div className="space-y-2">
-                <Label>Event Types</Label>
-                <div className="flex gap-2">
-                    <Select value={selectedEventType} onValueChange={setSelectedEventType}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Select event type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {eventTypes.map(type => (
-                                <SelectItem key={type} value={type}>{type}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() => {
-                            if (selectedEventType) {
-                                addItem("eventTypes", selectedEventType)
-                                setSelectedEventType("")
-                            }
-                        }}
-                    >
-                        <Plus className="h-4 w-4" />
-                    </Button>
+                <div className="flex items-center justify-between">
+                    <Label>Event Types <span className="text-destructive">*</span> Required</Label>
+                    <p className="text-xs text-muted-foreground">Min. 1 event type needed</p>
                 </div>
+                
+                <div className="space-y-2">
+                    <div className="flex gap-2">
+                        <Select value={selectedEventType} onValueChange={setSelectedEventType}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select event type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {eventTypes.map(type => (
+                                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => {
+                                if (selectedEventType) {
+                                    addItem("eventTypes", selectedEventType)
+                                    setSelectedEventType("")
+                                }
+                            }}
+                        >
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                    </div>
+                    
+                    {/* Quick presets */}
+                    <div className="flex flex-wrap gap-1.5 items-center text-xs">
+                        <span className="text-muted-foreground">Quick start:</span>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => applyPreset(["New Funding Round", "Merger & Acquisitions"])}
+                        >
+                            Funding & M&A
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => applyPreset(["Team Expansion", "Team Reduction", "Product Launch"])}
+                        >
+                            Company Growth
+                        </Button>
+                    </div>
+                </div>
+
                 <div className="flex flex-wrap gap-1.5 mt-2">
                     {formData.eventTypes.map((type: string) => (
                         <Badge key={type} variant="secondary" className="gap-1">
@@ -340,6 +387,12 @@ function EventWatcherForm({ formData, setFormData, addItem, removeItem }: any) {
                         </Badge>
                     ))}
                 </div>
+                
+                {formData.eventTypes.length === 0 && (
+                    <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                        ⚠️ Select at least one event type to discover companies. This defines what types of business activities you want to monitor (e.g., funding rounds, mergers, team growth).
+                    </div>
+                )}
             </div>
 
             <div className="space-y-2">

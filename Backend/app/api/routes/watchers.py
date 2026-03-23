@@ -102,6 +102,7 @@ async def get_watcher_with_slash(id: str, db: Session = Depends(get_db)):
 @router.post("/event")
 async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depends(get_db)):
     wid = f"w-{uuid4().hex[:8]}"
+    logger.info(f">>> [Create Event Watcher] ID: {wid}, Name: {request.name}, Criteria: {request.criteria}")
     db_w = WatcherModel(
         id=wid,
         name=request.name,
@@ -115,6 +116,7 @@ async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depe
         recent_updates=[],
     )
     db.add(db_w); db.commit(); db.refresh(db_w)
+    logger.info(f">>> [Create Event Watcher] Stored in DB - ID: {db_w.id}, Criteria: {db_w.criteria}")
     return watcher_to_dict(db_w)
 
 # Handle trailing slash variant
@@ -524,8 +526,24 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
             if "last_occurrence" not in criteria:
                 criteria["last_occurrence"] = 90
 
-            res = await svc.fetch_businesses(criteria, size=5, mode="full")
+            # Clean up empty arrays and None values from criteria before sending to Explorium
+            clean_criteria = {}
+            for key, value in criteria.items():
+                if isinstance(value, list):
+                    # Only include lists that have items
+                    if value:
+                        clean_criteria[key] = value
+                elif value is not None:
+                    # Include non-list, non-None values
+                    clean_criteria[key] = value
+
+            logger.info(f">>> [Event Sync] Raw criteria from DB: {criteria}")
+            logger.info(f">>> [Event Sync] Clean criteria being sent to Explorium: {clean_criteria}")
+            logger.info(f">>> [Event Sync] User selected event types: {user_event_types}")
+            
+            res = await svc.fetch_businesses(clean_criteria, size=5, mode="full")
             data = res.get("data", [])
+            logger.info(f">>> [Event Sync] Explorium returned {len(data)} results for criteria: {clean_criteria}")
 
             matches = []
             for item in data:
@@ -547,6 +565,8 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                     "matchedAt": datetime.now(timezone.utc).isoformat()
                 })
 
+            logger.info(f">>> [Event Sync] Created {len(matches)} match objects")
+
             db_w.matches = matches
             db_w.match_count = str(len(matches))
 
@@ -564,6 +584,12 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Sync failed for watcher {id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Handle trailing slash variant for sync
+@router.post("/{id}/sync/")
+async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+    # Delegate to sync_watcher - same implementation
+    return await sync_watcher(id, db)
 
 
 async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
