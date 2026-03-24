@@ -52,11 +52,16 @@ def _get_or_create_site_config(db, user_id: _uuid.UUID) -> SiteConfig:
     cfg = db.query(SiteConfig).filter(SiteConfig.org_id == user_id).first()
     if not cfg:
         pixel_key = "pk_" + secrets.token_hex(16)
-        cfg = SiteConfig(org_id=user_id, pixel_key=pixel_key, domain="")
+        webhook_secret = secrets.token_hex(32)  # 64-char hex HMAC secret
+        cfg = SiteConfig(org_id=user_id, pixel_key=pixel_key, domain="", webhook_secret=webhook_secret)
         db.add(cfg)
         db.commit()
         db.refresh(cfg)
         logger.info("Created SiteConfig for user %s (pixel_key=%s)", user_id, pixel_key)
+    elif not cfg.webhook_secret:
+        # Backfill missing secret for existing configs
+        cfg.webhook_secret = secrets.token_hex(32)
+        db.commit()
     return cfg
 
 
@@ -157,6 +162,7 @@ def _visit_to_dict(v: Visit) -> dict:
         "description": exp.get("description"),
         # Which customer site this visit came from (set at track time from SiteConfig.domain)
         "source_site": res.get("source_site") or "",
+        "enrichment_status": v.enrichment_status,
     }
 
 
@@ -282,6 +288,16 @@ async def track_visitor(request: Request):
             or (request.client.host if request.client else "127.0.0.1")
         )
 
+        # GDPR opt-out check
+        visitor_id_for_optout = data.get("visitor_id")
+        if visitor_id_for_optout:
+            try:
+                rc = RedisManager.get_client()
+                if rc and await rc.get(f"optout:{visitor_id_for_optout}"):
+                    return {"status": "opted_out"}
+            except Exception:
+                pass
+
         # Rate limiting (after pixel key validated, before enrichment)
         if not await _check_track_rate_limit(ip, pixel_key):
             return JSONResponse(
@@ -300,10 +316,20 @@ async def track_visitor(request: Request):
                     redis_client = RedisManager.get_client()
                     if redis_client is not None:
                         domain = urlparse(url).netloc
-                        dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-                        if await redis_client.get(dedupe_key):
-                            return {"status": "deduplicated"}
-                        await redis_client.setex(dedupe_key, dedupe_seconds, "1")
+                        fp = data.get("fp")
+                        # Use fingerprint when available (handles shared NAT/VPN).
+                        # Fingerprint dedup window is longer (4h) since fp is more
+                        # precise than IP — same person, different pages = dedup.
+                        if fp:
+                            fp_key = f"visits:{site_config.org_id}:fp:{fp}"
+                            if await redis_client.get(fp_key):
+                                return {"status": "deduplicated"}
+                            await redis_client.setex(fp_key, dedupe_seconds * 4, "1")
+                        else:
+                            dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
+                            if await redis_client.get(dedupe_key):
+                                return {"status": "deduplicated"}
+                            await redis_client.setex(dedupe_key, dedupe_seconds, "1")
             except Exception as e:
                 logger.warning("Redis deduplication failed: %s", e)
 
@@ -322,6 +348,8 @@ async def track_visitor(request: Request):
             "fp": data.get("fp"),
             "viewport_w": data.get("viewport_w"),
             "viewport_h": data.get("viewport_h"),
+            "scroll_depth": data.get("scroll_depth"),
+            "cta_clicks": data.get("cta_clicks"),
             # Pixel owner's domain — used to label visit source when company
             # cannot be identified from IP enrichment alone.
             "source_site": site_config.domain or "",
@@ -347,24 +375,77 @@ async def track_visitor(request: Request):
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
+@router.post("/sse-token")
+async def issue_sse_token(current_user: User = Depends(get_current_user)):
+    """
+    Issue a short-lived SSE exchange token (60s TTL).
+
+    The SSE stream endpoint must NOT receive the main JWT in a URL query param
+    because URLs are logged by proxies, load balancers, and browser history.
+    Instead the frontend calls this endpoint (Bearer header = safe), receives a
+    short opaque token, and passes that in ?token= to the stream URL.
+
+    Token lifecycle:
+      1. POST /sse-token  → returns {"sse_token": "<32-byte hex>", "expires_in": 60}
+      2. Frontend opens   EventSource("/stream?token=<sse_token>") immediately
+      3. Backend checks   Redis key  sse_token:{token}  → org_id (TTL=60s)
+      4. Token is consumed on first successful stream connection (single-use)
+    """
+    token = secrets.token_hex(32)  # 64-char opaque hex
+    org_id = str(current_user.id)
+    try:
+        redis_client = RedisManager.get_client()
+        await redis_client.setex(f"sse_token:{token}", 60, org_id)
+    except Exception as exc:
+        logger.error("Cannot issue SSE token — Redis unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Realtime stream temporarily unavailable")
+    logger.info("SSE exchange token issued for org=%s (60s TTL)", org_id)
+    return {"sse_token": token, "expires_in": 60}
+
+
 @public_router.get("/stream")
 async def stream_visitors(request: Request, org_id: str = "all", token: Optional[str] = Query(None)):
     """
     Server-Sent Events stream for real-time visitor updates.
-    JWT via ?token= query param (EventSource cannot send custom headers).
+
+    Authentication (two accepted paths):
+      1. Short-lived SSE exchange token via ?token=  (preferred — obtained from POST /sse-token)
+         Stored in Redis as sse_token:{token} → org_id.  Single-use, 60s TTL.
+      2. Main JWT via ?token= (legacy fallback — still supported for now)
+
+    EventSource cannot send custom headers so query param is unavoidable here.
+    The exchange token limits exposure: it is opaque, single-use, and expires in 60s.
     """
     raw_token = token or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not raw_token:
         return JSONResponse(status_code=401, content={"error": "Authentication required"})
-    try:
-        payload_data = pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
-        user_id_from_token = payload_data.get("sub")
-    except pyjwt.ExpiredSignatureError:
-        return JSONResponse(status_code=401, content={"error": "Token expired"})
-    except pyjwt.PyJWTError:
-        return JSONResponse(status_code=401, content={"error": "Invalid token"})
 
-    scoped_org_id = user_id_from_token or org_id
+    scoped_org_id: Optional[str] = None
+
+    # Path 1: Try SSE exchange token first (preferred — short-lived, opaque)
+    try:
+        redis_client = RedisManager.get_client()
+        sse_org = await redis_client.get(f"sse_token:{raw_token}")
+        if sse_org:
+            # Single-use: delete immediately after first connection
+            await redis_client.delete(f"sse_token:{raw_token}")
+            scoped_org_id = sse_org if isinstance(sse_org, str) else sse_org.decode()
+            logger.info("SSE exchange token accepted for org=%s", scoped_org_id)
+    except Exception:
+        pass  # Redis unavailable — fall through to JWT path
+
+    # Path 2: Fallback to main JWT validation
+    if not scoped_org_id:
+        try:
+            payload_data = pyjwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+            scoped_org_id = payload_data.get("sub")
+        except pyjwt.ExpiredSignatureError:
+            return JSONResponse(status_code=401, content={"error": "Token expired"})
+        except pyjwt.PyJWTError:
+            return JSONResponse(status_code=401, content={"error": "Invalid token"})
+
+    if not scoped_org_id:
+        return JSONResponse(status_code=401, content={"error": "Could not resolve org from token"})
 
     try:
         redis_client = RedisManager.get_client()
@@ -445,7 +526,11 @@ async def get_site_config(current_user: User = Depends(get_current_user)):
                 "pixel_key": cfg.pixel_key,
                 "domain": cfg.domain or "",
                 "webhook_urls": cfg.webhook_urls or [],
+                "webhook_secret": cfg.webhook_secret or "",
                 "icp_filters": cfg.icp_filters or {},
+                "isp_allowlist": cfg.isp_allowlist or [],
+                "anonymize_ips": cfg.anonymize_ips or False,
+                "gdpr_mode": cfg.gdpr_mode or False,
                 "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
             }
         finally:
@@ -724,6 +809,142 @@ async def export_visitors(
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
+# ── SSE short-lived token exchange — see @router.post("/sse-token") above ─────
+
+
+# ── GDPR / Privacy endpoints ──────────────────────────────────────────────────
+
+@router.delete("/data/{visitor_id}")
+async def gdpr_delete_visitor(
+    visitor_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    GDPR right-to-erasure: delete all data for a specific visitor_id.
+    Removes matching visits, sessions, identity graph nodes, and Redis caches.
+    """
+    org_id = current_user.id
+
+    def _delete():
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text
+            from app.db.models.identity_graph import IdentityNode
+            from app.db.models.visitor import VisitorSession
+
+            # Delete visits for this visitor
+            deleted_visits = db.execute(
+                text("""
+                    DELETE FROM visits
+                    WHERE org_id = :org_id
+                      AND resolution->>'visitor_id' = :vid
+                """),
+                {"org_id": str(org_id), "vid": visitor_id},
+            ).rowcount
+
+            # Delete sessions
+            db.query(VisitorSession).filter(
+                VisitorSession.org_id == org_id,
+                VisitorSession.visitor_id == visitor_id,
+            ).delete(synchronize_session=False)
+
+            # Delete identity graph node
+            db.query(IdentityNode).filter(
+                IdentityNode.visitor_id == visitor_id
+            ).delete(synchronize_session=False)
+
+            db.commit()
+            return deleted_visits
+        finally:
+            db.close()
+
+    try:
+        deleted = await _run_db(_delete)
+
+        # Clear Redis caches for this visitor
+        try:
+            rc = RedisManager.get_client()
+            if rc:
+                await rc.delete(f"visits:{org_id}:fp:{visitor_id}")
+        except Exception:
+            pass
+
+        logger.info("[GDPR] Deleted %d visits for visitor_id=%s org=%s", deleted, visitor_id, org_id)
+        return {"status": "deleted", "visitor_id": visitor_id, "deleted_visits": deleted}
+
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+    except Exception as e:
+        logger.error("GDPR delete error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@router.post("/gdpr-config")
+async def update_gdpr_config(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update GDPR settings for the org:
+      - anonymize_ips: bool  — mask last IP octet before storage
+      - gdpr_mode: bool      — enforce visitor opt-out tokens
+    """
+    body = await request.json()
+
+    def _update():
+        db = SessionLocal()
+        try:
+            cfg = _get_or_create_site_config(db, current_user.id)
+            if "anonymize_ips" in body:
+                cfg.anonymize_ips = bool(body["anonymize_ips"])
+            if "gdpr_mode" in body:
+                cfg.gdpr_mode = bool(body["gdpr_mode"])
+            if "isp_allowlist" in body and isinstance(body["isp_allowlist"], list):
+                cfg.isp_allowlist = [str(k)[:64] for k in body["isp_allowlist"][:20]]
+            db.commit()
+            return {
+                "status": "updated",
+                "anonymize_ips": cfg.anonymize_ips,
+                "gdpr_mode": cfg.gdpr_mode,
+                "isp_allowlist": cfg.isp_allowlist or [],
+            }
+        finally:
+            db.close()
+
+    try:
+        return await _run_db(_update)
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+
+
+@public_router.post("/optout")
+async def visitor_optout(request: Request):
+    """
+    GDPR opt-out endpoint called by pixel.js outmate.optOut().
+    Stores the visitor_id in Redis with a long TTL so future track
+    calls are silently discarded.
+    """
+    try:
+        data: dict = {}
+        try:
+            data = await request.json()
+        except Exception:
+            pass
+        visitor_id = data.get("visitor_id") or ""
+        if not visitor_id:
+            return JSONResponse(status_code=400, content={"error": "Missing visitor_id"})
+
+        rc = RedisManager.get_client()
+        if rc:
+            # 2 years TTL — long enough to honour the opt-out durably
+            await rc.setex(f"optout:{visitor_id}", 365 * 2 * 24 * 3600, "1")
+
+        return {"status": "opted_out"}
+    except Exception as e:
+        logger.error("Optout error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
 @router.get("/analytics")
 async def get_visitor_analytics(
     hours: int = 24,
@@ -897,3 +1118,172 @@ async def get_visitor_analytics(
         return await _run_db(_query)
     except (OperationalError, asyncio.TimeoutError):
         return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+
+
+# ── Account-level intent scores ───────────────────────────────────────────────
+
+@router.get("/accounts")
+async def get_account_intent(
+    hours: int = Query(default=168, ge=1, le=720),
+    min_score: int = Query(default=0, ge=0, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Account-Based Marketing view: aggregate intent across ALL visitors from
+    the same company domain, giving a single account-level buying signal.
+
+    This is the B2B equivalent of 6sense / Demandbase account scoring:
+    a single employee visiting is a weak signal; 5 employees from the same
+    company visiting pricing + demo pages is a very strong signal.
+
+    Returns accounts sorted by account_intent_score descending.
+    Each account object contains:
+      - domain / company name / firmographics
+      - total_visits, unique_visitor_count (distinct visitor_ids)
+      - peak_engagement_score, avg_icp_score
+      - buying_stage_distribution  {"decision": N, "consideration": N, "awareness": N}
+      - hot_pages  [list of most-visited pages from this account]
+      - last_seen_at
+      - account_intent_score  (0–100, composite)
+    """
+    org_id = current_user.id
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    def _query():
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text as _t
+            rows = db.execute(
+                _t("""
+                    SELECT
+                        resolution->>'domain'                         AS domain,
+                        resolution->>'company'                        AS company,
+                        resolution->>'logo_url'                       AS logo_url,
+                        MAX(resolution->'explorium'->'industry')      AS industry,
+                        MAX(resolution->'explorium'->'employee_count_range') AS emp_range,
+                        COUNT(*)                                      AS total_visits,
+                        COUNT(DISTINCT resolution->>'visitor_id')     AS unique_visitors,
+                        MAX((resolution->'behavioral'->>'engagement_score')::numeric) AS peak_engagement,
+                        AVG((resolution->>'icp_score')::numeric)       AS avg_icp_score,
+                        COUNT(CASE WHEN resolution->'behavioral'->>'buying_stage' = 'decision'      THEN 1 END) AS stage_decision,
+                        COUNT(CASE WHEN resolution->'behavioral'->>'buying_stage' = 'consideration' THEN 1 END) AS stage_consideration,
+                        COUNT(CASE WHEN resolution->'behavioral'->>'buying_stage' = 'awareness'     THEN 1 END) AS stage_awareness,
+                        MAX(created_at)                               AS last_seen_at,
+                        ARRAY_AGG(DISTINCT url ORDER BY url)          AS urls
+                    FROM visits
+                    WHERE org_id = :org_id
+                      AND created_at >= :since
+                      AND matched = true
+                      AND resolution->>'domain' IS NOT NULL
+                    GROUP BY
+                        resolution->>'domain',
+                        resolution->>'company',
+                        resolution->>'logo_url'
+                    HAVING COUNT(*) >= 1
+                    ORDER BY peak_engagement DESC NULLS LAST
+                    LIMIT :limit
+                """),
+                {"org_id": str(org_id), "since": since, "limit": limit * 2},
+            ).fetchall()
+
+            accounts = []
+            for row in rows:
+                domain = row.domain or ""
+                if not domain:
+                    continue
+
+                total_visits = int(row.total_visits or 0)
+                unique_visitors = int(row.unique_visitors or 0)
+                peak_eng = float(row.peak_engagement or 0)
+                avg_icp = float(row.avg_icp_score or 0)
+                stage_d = int(row.stage_decision or 0)
+                stage_c = int(row.stage_consideration or 0)
+                stage_a = int(row.stage_awareness or 0)
+
+                # Account intent score formula:
+                #   Base = peak engagement (0-100) × 0.40
+                #   + multi-visitor bonus (up to 25 pts)
+                #   + buying stage weight (decision=25, consideration=15, awareness=5)
+                #   + ICP score weight × 0.15
+                multi_visitor_pts = min(unique_visitors * 5, 25)
+                buying_stage_pts = (
+                    25 if stage_d > 0 else (15 if stage_c > 0 else 5)
+                )
+                account_score = min(int(
+                    peak_eng * 0.40
+                    + multi_visitor_pts
+                    + buying_stage_pts
+                    + avg_icp * 0.15
+                ), 100)
+
+                if account_score < min_score:
+                    continue
+
+                # Top 5 most-visited URLs from this account
+                all_urls = row.urls or []
+                url_counter: dict = {}
+                for u in all_urls:
+                    url_counter[u] = url_counter.get(u, 0) + 1
+                hot_pages = sorted(url_counter, key=url_counter.get, reverse=True)[:5]
+
+                accounts.append({
+                    "domain": domain,
+                    "company": row.company or domain,
+                    "logo_url": row.logo_url,
+                    "industry": row.industry,
+                    "employee_count_range": row.emp_range,
+                    "total_visits": total_visits,
+                    "unique_visitor_count": unique_visitors,
+                    "peak_engagement_score": int(peak_eng),
+                    "avg_icp_score": round(avg_icp, 1),
+                    "buying_stage_distribution": {
+                        "decision": stage_d,
+                        "consideration": stage_c,
+                        "awareness": stage_a,
+                    },
+                    "hot_pages": hot_pages,
+                    "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+                    "account_intent_score": account_score,
+                })
+
+            # Sort by account_intent_score and enforce limit
+            accounts.sort(key=lambda a: a["account_intent_score"], reverse=True)
+            return accounts[:limit]
+        finally:
+            db.close()
+
+    try:
+        result = await _run_db(_query)
+        return {"accounts": result, "total": len(result), "hours": hours}
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+    except Exception as e:
+        logger.error("get_account_intent error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+# ── Consent opt-in (revoke opt-out) ─────────────────────────────────────────
+
+@public_router.delete("/optout")
+async def visitor_optin(request: Request):
+    """
+    Revoke a previous opt-out — called by pixel.js outmateTracker.optIn().
+    Removes the opt-out flag from Redis so tracking resumes.
+    """
+    try:
+        data: dict = {}
+        try:
+            data = await request.json()
+        except Exception:
+            pass
+        visitor_id = data.get("visitor_id") or ""
+        if not visitor_id:
+            return JSONResponse(status_code=400, content={"error": "Missing visitor_id"})
+        rc = RedisManager.get_client()
+        if rc:
+            await rc.delete(f"optout:{visitor_id}")
+        return {"status": "opted_in"}
+    except Exception as e:
+        logger.error("Opt-in error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})

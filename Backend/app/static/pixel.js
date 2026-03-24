@@ -1,6 +1,10 @@
 (function () {
-    // Outmate.ai Visitor Tracking Pixel v2.0
-    // Features: SPA route tracking, dwell time, cookie fallback, email auto-capture
+    // Outmate.ai Visitor Tracking Pixel v2.2
+    // Features: SPA route tracking, dwell time, scroll depth, click tracking,
+    //           cookie fallback (Safari ITP), email auto-capture, bot filtering,
+    //           browser fingerprinting, full consent/opt-out support.
+    //           Consent: DoNotTrack, GPC, Cookiebot, OneTrust, TCF 2.0 (IAB)
+
     const scriptTag = document.currentScript;
     const PIXEL_KEY = scriptTag?.dataset?.pixelKey ?? scriptTag?.getAttribute('data-pixel-key');
     if (!PIXEL_KEY) {
@@ -8,20 +12,111 @@
         return;
     }
 
-    // Auto-detect the tracking URL from the script's own src domain.
-    // This allows the pixel to work on ANY customer site — it always posts
-    // back to whatever domain served pixel.js (e.g. app.outmate.ai).
+    // ─── Consent & GDPR Gate ──────────────────────────────────────────────────
+    // OPT_OUT_KEY is declared first so it is available inside _isConsentDenied().
+    const OPT_OUT_KEY = 'outmate_optout';
+
+    /**
+     * Returns true when tracking is clearly denied by any synchronous signal.
+     * Called at startup AND inside track() to catch consent revocation mid-session.
+     */
+    function _isConsentDenied() {
+        // 1. Hard localStorage opt-out set by outmate.optOut()
+        try { if (localStorage.getItem(OPT_OUT_KEY) === '1') return true; } catch (_) {}
+
+        // 2. W3C Do Not Track browser signal
+        if (navigator.doNotTrack === '1' || navigator.doNotTrack === 'yes' ||
+            window.doNotTrack === '1') return true;
+
+        // 3. Global Privacy Control (GPC) — Chrome 94+, Firefox
+        if (navigator.globalPrivacyControl === true) return true;
+
+        // 4. Cookiebot CMP — check analytics / marketing consent categories
+        try {
+            const cb = window.Cookiebot;
+            if (cb) {
+                if (cb.declined) return true;
+                // User has consented but declined analytics + marketing categories
+                if (cb.consented && !cb.consent?.statistics && !cb.consent?.marketing) return true;
+            }
+        } catch (_) {}
+
+        // 5. OneTrust — C0002 = Performance/Analytics must be in active groups
+        try {
+            if (typeof window.OnetrustActiveGroups === 'string') {
+                const active = window.OnetrustActiveGroups.split(',');
+                if (!active.includes('C0002')) return true;
+            }
+        } catch (_) {}
+
+        return false;
+    }
+
+    // Hard-block: bail out immediately on any clear synchronous denial
+    if (_isConsentDenied()) return;
+
+    // ─── TCF 2.0 Async Consent ────────────────────────────────────────────────
+    // When a CMP implementing IAB Transparency and Consent Framework v2.0 is
+    // present, defer all tracking until Purpose 1 (storage) AND Purpose 7
+    // (measurement/analytics) are consented.  Without TCF, default to granted.
+    let _consentGranted = (typeof window.__tcfapi !== 'function');
+    let _pendingInitialTrack = false;
+
+    if (typeof window.__tcfapi === 'function') {
+        window.__tcfapi('addEventListener', 2, function (tcData, success) {
+            if (!success) {
+                // CMP error — fail open so tracking is not permanently blocked
+                _consentGranted = true;
+                if (_pendingInitialTrack) { _pendingInitialTrack = false; _doInitialTrack(); }
+                return;
+            }
+            const purposes = tcData.purpose?.consents;
+            const hasConsent = !!(purposes?.[1] && purposes?.[7]);
+
+            if (hasConsent && !_consentGranted) {
+                _consentGranted = true;
+                if (_pendingInitialTrack) { _pendingInitialTrack = false; _doInitialTrack(); }
+            } else if (!hasConsent && tcData.eventStatus === 'useractioncomplete') {
+                _consentGranted = false;
+                // Remove the listener — user made an explicit choice
+                try {
+                    window.__tcfapi('removeEventListener', 2, function () {}, tcData.listenerId);
+                } catch (_) {}
+            }
+        });
+    }
+
+    // Listen for Cookiebot banner decision
+    window.addEventListener('CookiebotOnAccept', function () {
+        if (!_isConsentDenied()) {
+            _consentGranted = true;
+            if (_pendingInitialTrack) { _pendingInitialTrack = false; _doInitialTrack(); }
+        }
+    });
+    window.addEventListener('CookiebotOnDecline', function () { _consentGranted = false; });
+
+    // Listen for OneTrust banner close (consent choice made)
+    window.addEventListener('OptanonAlertBoxClosed', function () {
+        if (!_isConsentDenied()) {
+            _consentGranted = true;
+            if (_pendingInitialTrack) { _pendingInitialTrack = false; _doInitialTrack(); }
+        } else {
+            _consentGranted = false;
+        }
+    });
+
+    // ─── Configuration ────────────────────────────────────────────────────────
     let TRACK_URL = 'https://app.outmate.ai/api/v1/visitors/track';
     if (scriptTag?.src) {
         try {
             const u = new URL(scriptTag.src);
             TRACK_URL = `${u.protocol}//${u.host}/api/v1/visitors/track`;
-        } catch (_) { /* fallback to default above */ }
+        } catch (_) {}
     }
 
     const EMAIL_KEY = 'outmate_visitor_email';
     const VISITOR_ID_KEY = 'outmate_visitor_id';
-    const MIN_DWELL_MS = 500; // Minimum ms on page before tracking (filters instant bounces)
+    const MIN_DWELL_MS = 500;
 
     // ─── Persistence: localStorage with cookie fallback (Safari ITP) ─────────
     function storageSet(key, value) {
@@ -33,13 +128,10 @@
     }
 
     function storageGet(key) {
+        try { const v = localStorage.getItem(key); if (v) return v; } catch (_) {}
         try {
-            const val = localStorage.getItem(key);
-            if (val) return val;
-        } catch (_) {}
-        try {
-            const match = document.cookie.match(`(?:^|; )${key}=([^;]*)`);
-            return match ? decodeURIComponent(match[1]) : null;
+            const m = document.cookie.match(`(?:^|; )${key}=([^;]*)`);
+            return m ? decodeURIComponent(m[1]) : null;
         } catch (_) {}
         return null;
     }
@@ -59,8 +151,7 @@
         return id;
     }
 
-    // ─── Track ───────────────────────────────────────────────────────────────
-    // ─── Browser Fingerprinting & Bot Filtering ──────────────────────────────
+    // ─── Browser Fingerprinting ───────────────────────────────────────────────
     const cyrb53 = (str, seed = 0) => {
         let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
         for (let i = 0, ch; i < str.length; i++) {
@@ -106,16 +197,49 @@
             ua: navigator.userAgent,
             platform: navigator.platform,
             cookieEnabled: navigator.cookieEnabled,
+            plugins: navigator.plugins ? navigator.plugins.length : 0,
+            hardwareConcurrency: navigator.hardwareConcurrency || 0,
+            deviceMemory: navigator.deviceMemory || 0,
         };
         _fpHashCache = cyrb53(JSON.stringify(signals)).toString(16);
         return _fpHashCache;
     }
 
+    // ─── Scroll Depth Tracking ────────────────────────────────────────────────
+    let _maxScrollPct = 0;
+    function updateScrollDepth() {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const docHeight = Math.max(
+            document.body.scrollHeight, document.documentElement.scrollHeight,
+            document.body.offsetHeight, document.documentElement.offsetHeight
+        ) - window.innerHeight;
+        if (docHeight > 0) {
+            const pct = Math.round((scrollTop / docHeight) * 100);
+            if (pct > _maxScrollPct) _maxScrollPct = Math.min(pct, 100);
+        }
+    }
+    window.addEventListener('scroll', updateScrollDepth, { passive: true });
+
+    // ─── CTA Click Tracking ───────────────────────────────────────────────────
+    const CTA_PATTERNS = /pricing|demo|signup|sign.up|get.started|trial|contact|book|schedule|buy|upgrade|checkout/i;
+    let _ctaClicks = 0;
+    document.addEventListener('click', (e) => {
+        const el = e.target?.closest?.('a, button, [role="button"]');
+        if (!el) return;
+        const text = (el.textContent || '').trim();
+        const href = el.getAttribute('href') || '';
+        if (CTA_PATTERNS.test(text) || CTA_PATTERNS.test(href)) _ctaClicks++;
+    }, true);
+
+    // ─── Page State ──────────────────────────────────────────────────────────
     let _lastTrackedUrl = null;
     let _pageEntryTime = Date.now();
 
     function track(email, forcedUrl, action = 'pageview') {
-        // Trivial Bot Filter check
+        // Consent gate — re-checked on every call to catch mid-session revocation
+        if (!_consentGranted || _isConsentDenied()) return;
+
+        // Bot filter
         const isHuman = (
             typeof window !== 'undefined' &&
             navigator.webdriver !== true &&
@@ -127,15 +251,23 @@
         if (!isHuman) return;
 
         const url = forcedUrl ?? globalThis.location.href;
-
-        // Avoid double-tracking the exact same URL in the same session (unless email or leave action)
         if (!email && action === 'pageview' && url === _lastTrackedUrl) return;
         if (action === 'pageview') {
             _lastTrackedUrl = url;
+            _maxScrollPct = 0;
+            _ctaClicks = 0;
         }
 
+        const dwellMs = action === 'leave' ? (Date.now() - _pageEntryTime) : undefined;
+
+        // Page meta — richer than URL slug alone for persona classification
+        const _pageTitle = (document.title || '').trim().slice(0, 120);
+        const _h1El = document.querySelector('h1');
+        const _pageH1 = _h1El ? (_h1El.textContent || '').trim().slice(0, 80) : '';
+        const _conn = (navigator.connection || navigator.mozConnection || navigator.webkitConnection);
+
         const payload = JSON.stringify({
-            action: action,
+            action,
             url,
             referrer: document.referrer || '',
             pixel_key: PIXEL_KEY,
@@ -144,10 +276,14 @@
             fp: getFingerprintHash(),
             viewport_w: window.innerWidth,
             viewport_h: window.innerHeight,
-            dwell_time: action === 'leave' ? (Date.now() - _pageEntryTime) : undefined
+            dwell_time: dwellMs,
+            scroll_depth: _maxScrollPct,
+            cta_clicks: _ctaClicks,
+            page_title: _pageTitle || undefined,
+            page_h1: _pageH1 || undefined,
+            connection_type: _conn ? (_conn.effectiveType || _conn.type || undefined) : undefined,
         });
 
-        // Prefer sendBeacon (reliable on page-unload), fallback to fetch
         let sent = false;
         if (typeof navigator.sendBeacon === 'function') {
             try {
@@ -166,7 +302,6 @@
     }
 
     // ─── SPA Route Change Tracking ───────────────────────────────────────────
-    // Patches history.pushState / replaceState to detect client-side navigation
     function patchHistoryMethod(method) {
         const original = history[method];
         history[method] = function (...args) {
@@ -175,9 +310,7 @@
             const newUrl = globalThis.location.href;
             if (newUrl !== prevUrl) {
                 const dwell = Date.now() - _pageEntryTime;
-                if (dwell >= MIN_DWELL_MS) {
-                    track(null, prevUrl, 'leave'); // finalize previous page
-                }
+                if (dwell >= MIN_DWELL_MS) track(null, prevUrl, 'leave');
                 _pageEntryTime = Date.now();
                 setTimeout(() => track(null, newUrl, 'pageview'), 100);
             }
@@ -190,21 +323,16 @@
         patchHistoryMethod('replaceState');
         globalThis.addEventListener('popstate', () => {
             const dwell = Date.now() - _pageEntryTime;
-            if (dwell >= MIN_DWELL_MS) {
-                track(null, _lastTrackedUrl || globalThis.location.href, 'leave');
-            }
+            if (dwell >= MIN_DWELL_MS) track(null, _lastTrackedUrl || globalThis.location.href, 'leave');
             _pageEntryTime = Date.now();
             setTimeout(() => track(null, globalThis.location.href, 'pageview'), 100);
         });
-
         globalThis.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') {
                 const dwell = Date.now() - _pageEntryTime;
-                if (dwell >= MIN_DWELL_MS) {
-                    track(null, globalThis.location.href, 'leave');
-                }
+                if (dwell >= MIN_DWELL_MS) track(null, globalThis.location.href, 'leave');
             } else {
-                _pageEntryTime = Date.now(); // reset clock on re-entry
+                _pageEntryTime = Date.now();
             }
         });
     }
@@ -218,7 +346,6 @@
             const val = input.value?.trim();
             if (val && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return val;
         }
-        // Fallback: scan all text inputs for email pattern
         for (const input of form.querySelectorAll('input[type="text"], input:not([type])')) {
             const v = input.value?.trim();
             if (v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return v;
@@ -228,18 +355,13 @@
 
     function handleFormEmail(form) {
         const email = findEmailInForm(form);
-        if (email) {
-            storageSet(EMAIL_KEY, email);
-            track(email);
-        }
+        if (email) { storageSet(EMAIL_KEY, email); track(email); }
     }
 
-    // Native form submit
     document.addEventListener('submit', (e) => {
         if (e.target?.tagName === 'FORM') handleFormEmail(e.target);
     }, true);
 
-    // SPA-style button clicks (JS-driven form submission)
     document.addEventListener('click', (e) => {
         const btn = e.target?.closest?.('button[type="submit"], input[type="submit"]');
         const form = btn?.closest?.('form');
@@ -248,38 +370,47 @@
 
     // ─── Public API ───────────────────────────────────────────────────────────
     globalThis.outmate = {
-        /**
-         * Manually identify the current visitor by email.
-         * Call this after your own login / signup events.
-         * @param {string} email
-         */
         identify(email) {
             if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                 storageSet(EMAIL_KEY, email);
                 track(email);
             }
         },
-        /**
-         * Clear tracking data (e.g. on logout).
-         */
         reset() {
             storageRemove(EMAIL_KEY);
             storageRemove(VISITOR_ID_KEY);
             _lastTrackedUrl = null;
         },
-        /**
-         * Force-track the current page (useful for non-standard SPAs).
-         */
         trackPage() {
             _lastTrackedUrl = null;
             track(null);
         },
+        optOut() {
+            storageSet(OPT_OUT_KEY, '1');
+            storageRemove(EMAIL_KEY);
+            storageRemove(VISITOR_ID_KEY);
+            _consentGranted = false;
+        },
+        optIn() {
+            storageRemove(OPT_OUT_KEY);
+            // Re-evaluate — only grant if no other framework is denying
+            _consentGranted = !_isConsentDenied() && (typeof window.__tcfapi !== 'function');
+        },
     };
 
-    // ─── Initial page load tracking ──────────────────────────────────────────
-    function initialTrack() {
+    // ─── Initial page load ────────────────────────────────────────────────────
+    function _doInitialTrack() {
         _pageEntryTime = Date.now();
         setTimeout(() => track(null), MIN_DWELL_MS);
+    }
+
+    function initialTrack() {
+        if (!_consentGranted) {
+            // CMP banner not yet dismissed — defer tracking until consent fires
+            _pendingInitialTrack = true;
+            return;
+        }
+        _doInitialTrack();
     }
 
     if (document.readyState === 'complete') {

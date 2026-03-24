@@ -29,7 +29,7 @@ from sqlalchemy import inspect, text
 from app.db.deps import get_db
 from app.db.models.user import User
 from app.db.models.watcher import Watcher as WatcherModel  # ensures table is created
-from app.core.redis import RedisManager
+from app.core.redis import RedisManager, start_keepalive
 
 from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
@@ -291,6 +291,77 @@ async def startup_event():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"))
             logger.info("Added missing watchers.matches column")
+
+        # ── Visitor tracker v2 schema migrations (idempotent) ─────────────────
+        # site_configs new columns
+        site_config_cols = (
+            {col["name"] for col in inspector.get_columns("site_configs")}
+            if inspector.has_table("site_configs") else set()
+        )
+        visitor_v2_site_config_ddl = [
+            ("webhook_secret", "ALTER TABLE site_configs ADD COLUMN IF NOT EXISTS webhook_secret VARCHAR(64);"),
+            ("isp_allowlist",  "ALTER TABLE site_configs ADD COLUMN IF NOT EXISTS isp_allowlist JSONB DEFAULT '[]';"),
+            ("anonymize_ips",  "ALTER TABLE site_configs ADD COLUMN IF NOT EXISTS anonymize_ips BOOLEAN DEFAULT false;"),
+            ("gdpr_mode",      "ALTER TABLE site_configs ADD COLUMN IF NOT EXISTS gdpr_mode BOOLEAN DEFAULT false;"),
+        ]
+        with engine.begin() as conn:
+            for col_name, ddl in visitor_v2_site_config_ddl:
+                if col_name not in site_config_cols:
+                    conn.execute(text(ddl))
+                    logger.info(f"Added missing site_configs.{col_name} column")
+            # Backfill webhook_secret for any existing rows that have it NULL
+            if inspector.has_table("site_configs"):
+                conn.execute(text(
+                    "UPDATE site_configs SET webhook_secret = encode(gen_random_bytes(32), 'hex') "
+                    "WHERE webhook_secret IS NULL"
+                ))
+
+        # visits.enrichment_status column
+        visits_cols = (
+            {col["name"] for col in inspector.get_columns("visits")}
+            if inspector.has_table("visits") else set()
+        )
+        if "enrichment_status" not in visits_cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE visits ADD COLUMN IF NOT EXISTS "
+                    "enrichment_status VARCHAR(20) NOT NULL DEFAULT 'done';"
+                ))
+            logger.info("Added missing visits.enrichment_status column")
+
+        # visitor_sessions table + indexes (create_all handles the table,
+        # but add the partial/expression indexes here since create_all can't)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_visits_org_matched_partial "
+                "ON visits (org_id, created_at DESC) WHERE matched = true"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_visits_fingerprint_expr "
+                "ON visits ((resolution->>'fingerprint')) "
+                "WHERE resolution->>'fingerprint' IS NOT NULL"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_visits_visitor_id_expr "
+                "ON visits ((resolution->>'visitor_id')) "
+                "WHERE resolution->>'visitor_id' IS NOT NULL"
+            ))
+        logger.info("✓ Visitor tracker v2 schema migrations applied")
+
+        # ── Identity graph v2 indexes (idempotent) ─────────────────────────────
+        # Expression index on raw_data->>'fingerprint' for O(log n) cross-org
+        # fingerprint lookups. Subnet scan index on ip column for /24 NAT clustering.
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_identity_nodes_fingerprint_expr "
+                "ON identity_nodes ((raw_data->>'fingerprint')) "
+                "WHERE raw_data->>'fingerprint' IS NOT NULL"
+            ))
+        logger.info("✓ Identity graph v2 indexes applied")
+        # ── end identity graph v2 ──────────────────────────────────────────────
+
+        # ── end visitor tracker v2 ─────────────────────────────────────────────
+
         # Ensure pgvector extension exists before create_all (needed for Vector columns)
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -314,13 +385,15 @@ async def startup_event():
         app.state.redis_ready = bool(connected)
         if connected:
             logger.info("✓ Redis connection established")
+            # Ping every 45 s to prevent Upstash / managed-Redis idle disconnects
+            app.state.redis_keepalive_task = start_keepalive(interval=45)
         else:
             logger.warning("⚠ Redis unavailable (continuing without Redis)")
     except Exception as e:
         logger.error(f"✗ Redis init failed (app will start without Redis): {e}")
     app.state.db_ready = True
     app.state.redis_ready = True
-    
+
     logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")
 
@@ -329,6 +402,10 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event handler"""
     logger.info("Shutting down application")
+    # Cancel background keepalive ping task if running
+    task = getattr(app.state, "redis_keepalive_task", None)
+    if task and not task.done():
+        task.cancel()
     try:
         await RedisManager.close()
         logger.info("Redis connection closed")

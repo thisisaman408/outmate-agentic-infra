@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 import logging
 
@@ -27,6 +28,22 @@ celery_app.conf.update(
     # SSL/TLS for Upstash
     broker_use_ssl=True,
     redis_backend_use_ssl=True,
+    # ── Celery Beat periodic schedule ─────────────────────────────────────────
+    beat_schedule={
+        # GDPR auto-deletion: runs every day at 02:00 UTC
+        # Deletes visits older than 30 days for all orgs with gdpr_mode=True
+        "gdpr-auto-delete-daily": {
+            "task": "app.tasks.visitors.gdpr_auto_delete_task",
+            "schedule": crontab(hour=2, minute=0),
+        },
+        # Account intent aggregation: runs every hour
+        # Pre-computes account-level intent scores and caches in Redis
+        # so the /accounts endpoint returns instantly without heavy SQL
+        "account-intent-aggregate-hourly": {
+            "task": "app.tasks.visitors.aggregate_account_intent_task",
+            "schedule": crontab(minute=15),  # :15 every hour
+        },
+    },
 )
 
 logger.info("Celery configured with broker: %s (using TLS)", settings.REDIS_URL.split('@')[1] if '@' in settings.REDIS_URL else 'redacted')
