@@ -82,9 +82,27 @@ async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db
     return [watcher_to_dict(w) for w in query.order_by(WatcherModel.created_at.desc()).all()]
 
 
+@router.get("/{id}")
+async def get_watcher(id: str, db: Session = Depends(get_db)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+    if not db_w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+    return watcher_to_dict(db_w)
+
+
+# Handle trailing slash variant
+@router.get("/{id}/")
+async def get_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+    if not db_w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+    return watcher_to_dict(db_w)
+
+
 @router.post("/event")
 async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depends(get_db)):
     wid = f"w-{uuid4().hex[:8]}"
+    logger.info(f">>> [Create Event Watcher] ID: {wid}, Name: {request.name}, Criteria: {request.criteria}")
     db_w = WatcherModel(
         id=wid,
         name=request.name,
@@ -98,7 +116,13 @@ async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depe
         recent_updates=[],
     )
     db.add(db_w); db.commit(); db.refresh(db_w)
+    logger.info(f">>> [Create Event Watcher] Stored in DB - ID: {db_w.id}, Criteria: {db_w.criteria}")
     return watcher_to_dict(db_w)
+
+# Handle trailing slash variant
+@router.post("/event/")
+async def create_event_watcher_with_slash(request: CreateWatcherRequest, db: Session = Depends(get_db)):
+    return await create_event_watcher(request, db)
 
 
 @router.post("/account")
@@ -119,6 +143,11 @@ async def create_account_watcher(request: Dict[str, Any], db: Session = Depends(
     )
     db.add(db_w); db.commit(); db.refresh(db_w)
     return watcher_to_dict(db_w)
+
+# Handle trailing slash variant
+@router.post("/account/")
+async def create_account_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db)):
+    return await create_account_watcher(request, db)
 
 
 @router.post("/lead")
@@ -142,6 +171,11 @@ async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get
     db.add(db_w); db.commit(); db.refresh(db_w)
     return watcher_to_dict(db_w)
 
+# Handle trailing slash variant
+@router.post("/lead/")
+async def create_lead_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db)):
+    return await create_lead_watcher(request, db)
+
 
 @router.post("/{id}/toggle")
 async def toggle_watcher(id: str, db: Session = Depends(get_db)):
@@ -152,9 +186,28 @@ async def toggle_watcher(id: str, db: Session = Depends(get_db)):
     db.commit(); db.refresh(db_w)
     return watcher_to_dict(db_w)
 
+# Handle trailing slash variant for toggle
+@router.post("/{id}/toggle/")
+async def toggle_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+    if not db_w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+    db_w.status = "paused" if db_w.status == "active" else "active"
+    db.commit(); db.refresh(db_w)
+    return watcher_to_dict(db_w)
+
 
 @router.delete("/{id}")
 async def delete_watcher(id: str, db: Session = Depends(get_db)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+    if not db_w:
+        raise HTTPException(status_code=404, detail="Watcher not found")
+    db.delete(db_w); db.commit()
+    return {"status": "success"}
+
+# Handle trailing slash variant for delete
+@router.delete("/{id}/")
+async def delete_watcher_with_slash(id: str, db: Session = Depends(get_db)):
     db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
@@ -473,8 +526,24 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
             if "last_occurrence" not in criteria:
                 criteria["last_occurrence"] = 90
 
-            res = await svc.fetch_businesses(criteria, size=5, mode="full")
+            # Clean up empty arrays and None values from criteria before sending to Explorium
+            clean_criteria = {}
+            for key, value in criteria.items():
+                if isinstance(value, list):
+                    # Only include lists that have items
+                    if value:
+                        clean_criteria[key] = value
+                elif value is not None:
+                    # Include non-list, non-None values
+                    clean_criteria[key] = value
+
+            logger.info(f">>> [Event Sync] Raw criteria from DB: {criteria}")
+            logger.info(f">>> [Event Sync] Clean criteria being sent to Explorium: {clean_criteria}")
+            logger.info(f">>> [Event Sync] User selected event types: {user_event_types}")
+            
+            res = await svc.fetch_businesses(clean_criteria, size=5, mode="full")
             data = res.get("data", [])
+            logger.info(f">>> [Event Sync] Explorium returned {len(data)} results for criteria: {clean_criteria}")
 
             matches = []
             for item in data:
@@ -496,6 +565,8 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
                     "matchedAt": datetime.now(timezone.utc).isoformat()
                 })
 
+            logger.info(f">>> [Event Sync] Created {len(matches)} match objects")
+
             db_w.matches = matches
             db_w.match_count = str(len(matches))
 
@@ -513,6 +584,12 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Sync failed for watcher {id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Handle trailing slash variant for sync
+@router.post("/{id}/sync/")
+async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+    # Delegate to sync_watcher - same implementation
+    return await sync_watcher(id, db)
 
 
 async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
@@ -559,6 +636,12 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
                 logger.error(f"Slack notification failed: {e}")
 
 
+# Handle trailing slash variant for sync
+@router.post("/{id}/sync/")
+async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+    # Delegate to the main sync_watcher function
+    return await sync_watcher(id, db)
+
 
 # ─────────────────────────────────────────
 # Legacy /api/watchers routes (no /v1/)
@@ -568,6 +651,8 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
 # ─────────────────────────────────────────
 legacy_router.get("/api/watchers")(list_watchers)
 legacy_router.get("/api/watchers/")(list_watchers)
+legacy_router.get("/api/watchers/{id}")(get_watcher)
+legacy_router.get("/api/watchers/{id}/")(get_watcher_with_slash)
 legacy_router.post("/api/watchers/event")(create_event_watcher)
 legacy_router.post("/api/watchers/account")(create_account_watcher)
 legacy_router.post("/api/watchers/lead")(create_lead_watcher)
