@@ -162,7 +162,7 @@ async def dashboard_recent_leads(
         .all()
     )
 
-    watchers = db.query(Watcher).all()
+    watchers = db.query(Watcher).limit(200).all()
     watcher_counts = _watcher_counts(watchers)
 
     merged: List[Dict[str, Any]] = []

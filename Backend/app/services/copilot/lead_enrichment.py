@@ -222,20 +222,31 @@ class LeadEnrichmentService:
                 return []
             return await _fetch_company_news(company)
 
-        (
-            google_mentions,
-            youtube_appearances,
-            linkedin_posts,
-            company_data,
-            recent_news,
-        ) = await asyncio.gather(
-            _fetch_google_mentions(name, company, role),
-            _fetch_youtube_appearances(name, company),
-            _fetch_linkedin_posts(name, company),
-            _maybe_company_data(),
-            _maybe_company_news(),
-            return_exceptions=True,
-        )
+        try:
+            (
+                google_mentions,
+                youtube_appearances,
+                linkedin_posts,
+                company_data,
+                recent_news,
+            ) = await asyncio.wait_for(
+                asyncio.gather(
+                    _fetch_google_mentions(name, company, role),
+                    _fetch_youtube_appearances(name, company),
+                    _fetch_linkedin_posts(name, company),
+                    _maybe_company_data(),
+                    _maybe_company_news(),
+                    return_exceptions=True,
+                ),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Lead enrichment pipeline timed out after 15s — returning partial context")
+            google_mentions = []
+            youtube_appearances = []
+            linkedin_posts = []
+            company_data = {}
+            recent_news = []
 
         # Convert any exceptions to safe defaults
         if isinstance(google_mentions, BaseException):

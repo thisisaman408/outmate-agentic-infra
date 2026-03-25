@@ -582,7 +582,7 @@ class LeadCopilotService:
         if isinstance(techs, str):
             techs = [t.strip() for t in techs.split(",") if t.strip()]
 
-        print(f">>> [FindSimilar] source={source_name}|{source_domain} industry={industry} emp={emp} techs={techs}", flush=True)
+        logger.debug(f"[FindSimilar] source={source_name}|{source_domain} industry={industry} emp={emp} techs={techs}")
 
         # Step 1: Look up source company via domain to get Explorium's own category
         if source_domain:
@@ -597,9 +597,9 @@ class LeadCopilotService:
                         emp = src.get("employee_count_range") or src.get("employee_count_exact") or ""
                     if not techs:
                         techs = src.get("technologies") or []
-                    print(f">>> [FindSimilar] Derived ICP from domain lookup: industry={industry} emp={emp}", flush=True)
+                    logger.debug(f"[FindSimilar] Derived ICP from domain lookup: industry={industry} emp={emp}")
             except Exception as e:
-                print(f">>> [FindSimilar] Source lookup failed: {e}", flush=True)
+                logger.debug(f"[FindSimilar] Source lookup failed: {e}")
 
         # Build cascading search attempts (most specific → broadest)
         attempts: list = []
@@ -642,31 +642,66 @@ class LeadCopilotService:
         if source_domain:
             seen_domains.add(source_domain.lower().replace("www.", ""))
 
-        for label, filt in attempts:
+        def _collect_batch(batch, label, filt):
+            """Deduplicate and collect companies from a search batch."""
+            for c in batch:
+                if len(companies) >= LIMIT:
+                    break
+                cd = str(c.get("domain", "")).lower().replace("www.", "")
+                if cd and cd in seen_domains:
+                    continue
+                # Drop placeholder or empty results
+                cname = str(c.get("name", "") or "").strip()
+                if not cname or cname.lower() == "lookalike":
+                    continue
+                companies.append(c)
+                if cd:
+                    seen_domains.add(cd)
+
+        # Run first 3 strategies in parallel with a 10s overall cap
+        parallel_attempts = attempts[:3]
+        sequential_fallback = attempts[3:]
+
+        if parallel_attempts:
+            try:
+                parallel_results = await asyncio.wait_for(
+                    asyncio.gather(
+                        *[explorium.search_companies(filt, limit=LIMIT + 3) for _, filt in parallel_attempts],
+                        return_exceptions=True,
+                    ),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                logger.debug("[FindSimilar] Parallel phase timed out after 10s")
+                parallel_results = [Exception("timeout")] * len(parallel_attempts)
+
+            for i, (label, filt) in enumerate(parallel_attempts):
+                if len(companies) >= LIMIT:
+                    break
+                result = parallel_results[i]
+                if isinstance(result, Exception):
+                    logger.debug(f"[FindSimilar] '{label}' failed: {result}")
+                    continue
+                batch = result.get("companies", [])
+                logger.debug(f"[FindSimilar] '{label}' returned {len(batch)}")
+                if not used_filters and batch:
+                    used_filters = filt
+                _collect_batch(batch, label, filt)
+
+        # Sequential fallback for remaining strategies if still need more
+        for label, filt in sequential_fallback:
             if len(companies) >= LIMIT:
                 break
             try:
-                print(f">>> [FindSimilar] Trying '{label}': {filt}", flush=True)
+                logger.debug(f"[FindSimilar] Trying '{label}': {filt}")
                 result = await explorium.search_companies(filt, limit=LIMIT + 3)
                 batch = result.get("companies", [])
-                print(f">>> [FindSimilar] '{label}' returned {len(batch)}", flush=True)
+                logger.debug(f"[FindSimilar] '{label}' returned {len(batch)}")
                 if not used_filters and batch:
                     used_filters = filt
-                for c in batch:
-                    if len(companies) >= LIMIT:
-                        break
-                    cd = str(c.get("domain", "")).lower().replace("www.", "")
-                    if cd and cd in seen_domains:
-                        continue
-                    # Drop placeholder or empty results
-                    cname = str(c.get("name", "") or "").strip()
-                    if not cname or cname.lower() == "lookalike":
-                        continue
-                    companies.append(c)
-                    if cd:
-                        seen_domains.add(cd)
+                _collect_batch(batch, label, filt)
             except Exception as e:
-                print(f">>> [FindSimilar] '{label}' failed: {e}", flush=True)
+                logger.debug(f"[FindSimilar] '{label}' failed: {e}")
 
         return {
             "similar_companies": companies[:LIMIT],

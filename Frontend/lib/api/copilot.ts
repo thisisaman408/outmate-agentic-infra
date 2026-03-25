@@ -350,6 +350,19 @@ export const copilotApi = {
     const decoder = new TextDecoder()
     let buffer = ""
 
+    // Token batching: accumulate token content and flush every 50ms
+    // instead of firing a state update on every single token (~700 renders → ~15)
+    let tokenBuffer = ""
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+    const flushTokens = () => {
+      if (tokenBuffer) {
+        onEvent({ stage: "token", content: tokenBuffer })
+        tokenBuffer = ""
+      }
+      flushTimer = null
+    }
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -363,12 +376,27 @@ export const copilotApi = {
         if (!trimmed.startsWith("data: ")) continue
         try {
           const event: StreamEvent = JSON.parse(trimmed.slice(6))
-          onEvent(event)
+          if (event.stage === "token" && event.content) {
+            // Buffer tokens — flush on timer
+            tokenBuffer += event.content
+            if (!flushTimer) {
+              flushTimer = setTimeout(flushTokens, 50)
+            }
+          } else {
+            // Non-token event: flush pending tokens first, then pass through immediately
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+            if (tokenBuffer) { onEvent({ stage: "token", content: tokenBuffer }); tokenBuffer = "" }
+            onEvent(event)
+          }
         } catch {
           // skip unparseable lines
         }
       }
     }
+
+    // Flush any remaining tokens at end of stream
+    if (flushTimer) clearTimeout(flushTimer)
+    if (tokenBuffer) onEvent({ stage: "token", content: tokenBuffer })
 
     // Process any remaining buffer
     if (buffer.trim().startsWith("data: ")) {

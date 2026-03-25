@@ -128,7 +128,9 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <TimeSeriesChart data={timeSeriesData} isLoading={isLoading} />
         <AIAgentActivityCard activities={activities} isLoading={isLoading} />
-        <DailyBriefWidget />
+        {/* DailyBriefWidget deferred — only mounts after main dashboard data loads
+            so it doesn't compete for DB connections on initial page render */}
+        {!isLoading && <DailyBriefWidget />}
       </div>
 
       {/* Data Cards Row */}

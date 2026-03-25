@@ -394,6 +394,14 @@ async def startup_event():
     app.state.db_ready = True
     app.state.redis_ready = True
 
+    # Preload embedding model so first chatbot request doesn't pay the load cost
+    try:
+        from app.core.embeddings import get_embedding_model
+        get_embedding_model()
+        logger.info("✓ Embedding model preloaded")
+    except Exception as e:
+        logger.warning(f"⚠ Embedding model preload failed (will load on first request): {e}")
+
     logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")
 

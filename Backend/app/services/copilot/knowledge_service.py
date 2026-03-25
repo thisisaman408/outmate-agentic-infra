@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 from typing import List, Dict, Any
@@ -74,11 +75,13 @@ class KnowledgeService:
         self.db.commit()
         logger.info(f"Successfully indexed {len(final_chunks)} chunks from {file_path}")
 
-    def retrieve_relevant_context(self, query: str, limit: int = 4) -> List[str]:
+    async def retrieve_relevant_context(self, query: str, limit: int = 4) -> List[str]:
         """
         Hybrid search: Semantic (Vector) + Keyword (Full-Text).
+        Embedding encode runs in a thread pool to avoid blocking the event loop.
         """
-        query_embedding = self.model.encode(query).tolist()
+        loop = asyncio.get_event_loop()
+        query_embedding = await loop.run_in_executor(None, lambda: self.model.encode(query).tolist())
         
         # 1. Vector Search (Top N)
         vector_results = (
