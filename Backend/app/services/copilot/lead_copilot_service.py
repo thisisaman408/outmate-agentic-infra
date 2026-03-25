@@ -310,8 +310,10 @@ class LeadCopilotService:
         cache_key = f"copilot:action:{action_type}:{prospect_id}{prompt_suffix}"
         redis = RedisManager.get_client()
         
-        # Check cache if not explicitly refreshing
-        if redis and RedisManager.ready and not (context_overrides or {}).get("refresh"):
+        # Check cache if not explicitly refreshing (skip for find_similar to avoid stale zero results)
+        refresh_requested = (context_overrides or {}).get("refresh")
+        bypass_cache = action_type == "find_similar"
+        if redis and RedisManager.ready and not refresh_requested and not bypass_cache:
             try:
                 cached_data = await redis.get(cache_key)
                 if cached_data:

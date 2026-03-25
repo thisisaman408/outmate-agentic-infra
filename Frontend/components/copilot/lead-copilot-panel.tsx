@@ -272,10 +272,14 @@ export function LeadCopilotPanel() {
         setTimeout(() => inputRef.current?.focus(), 50)
         return
       }
+      const overrides = buildContextOverrides(selectedProspect) || {}
+      if (actionType === "find_similar") {
+        overrides.refresh = true
+      }
       executeAction({
         prospect_id: prospectId,
         action_type: actionType,
-        context_overrides: buildContextOverrides(selectedProspect),
+        context_overrides: overrides,
       })
     },
     [prospectId, executeAction, selectedProspect]
