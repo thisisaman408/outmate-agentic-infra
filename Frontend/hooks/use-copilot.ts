@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { copilotApi, type CopilotPreferences, InsufficientCreditsError } from "@/lib/api/copilot"
 import { useToast } from "@/hooks/use-toast"
 
@@ -23,12 +23,16 @@ function useCopilotError() {
 export function useCopilotCredits() {
   const [credits, setCredits] = useState<{ credits_remaining: number; costs: Record<string, number> } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const lastFetchRef = useRef<number>(0)
 
   const fetchCredits = useCallback(async () => {
+    // Skip fetch if called within the last 30s — avoids a network hit on every page visit
+    if (Date.now() - lastFetchRef.current < 30_000) return
     setIsLoading(true)
     try {
       const data = await copilotApi.getCredits()
       setCredits(data)
+      lastFetchRef.current = Date.now()
       return data
     } catch {
       // silent - credits display is non-critical

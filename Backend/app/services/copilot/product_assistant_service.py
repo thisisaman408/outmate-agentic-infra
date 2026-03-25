@@ -81,8 +81,10 @@ class ProductAssistantService:
                 "feature_tags": ["general"]
             }
 
-        # 1. Retrieve relevant documentation snippets (Hybrid) — increased from 4 to 6
-        context_snippets = self.knowledge.retrieve_relevant_context(question, limit=6)
+        # 1. Retrieve relevant documentation snippets (Hybrid)
+        # Use fewer snippets for short/simple queries to reduce DB + embedding work
+        snippet_limit = 3 if len(question) < 30 else 6
+        context_snippets = await self.knowledge.retrieve_relevant_context(question, limit=snippet_limit)
         context_text = "\n\n".join(context_snippets) if context_snippets else "No specific documentation found."
 
         # 2. Build the user prompt with feature registry injected
@@ -121,8 +123,9 @@ class ProductAssistantService:
             }}
             return
 
-        # 1. Retrieve relevant documentation snippets (Hybrid) — increased from 4 to 6
-        context_snippets = self.knowledge.retrieve_relevant_context(question, limit=6)
+        # 1. Retrieve relevant documentation snippets (Hybrid)
+        snippet_limit = 3 if len(question) < 30 else 6
+        context_snippets = await self.knowledge.retrieve_relevant_context(question, limit=snippet_limit)
         context_text = "\n\n".join(context_snippets) if context_snippets else "No specific documentation found."
 
         # 2. Build the user prompt with feature registry injected

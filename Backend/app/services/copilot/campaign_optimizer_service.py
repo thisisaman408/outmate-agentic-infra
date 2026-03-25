@@ -7,6 +7,7 @@ Email Optimizer pipeline: lead enrichment → personalized rewrite → follow-up
 sequence → reply probability scoring.
 """
 
+import asyncio
 import os
 import uuid
 import logging
@@ -211,10 +212,13 @@ class CampaignOptimizerService:
         news_block = ""
         if target_audience:
             try:
-                news = await fetch_recent_news(f"{target_audience} industry trends", max_results=3)
+                news = await asyncio.wait_for(
+                    fetch_recent_news(f"{target_audience} industry trends", max_results=3),
+                    timeout=5.0,
+                )
                 news_block = format_news_context(news)
-            except Exception as exc:
-                logger.debug("Campaign optimizer news fetch failed: %s", exc)
+            except (asyncio.TimeoutError, Exception) as exc:
+                logger.debug("Campaign optimizer news fetch skipped: %s", exc)
 
         metrics_text = ""
         if metrics:

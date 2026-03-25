@@ -2,6 +2,7 @@
 Co-Pilot API Routes — Daily Brief, Meeting Prep, Campaign Optimizer, Pipeline Risk Alert.
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 import json
@@ -223,20 +224,25 @@ async def optimize_email(
     _check_credits(db, current_user.id, cost)
     try:
         service = CopilotService(db)
-        result = await service.campaign_optimizer.analyze(
-            user_id=str(current_user.id),
-            subject_line=request.subject_line,
-            email_body=request.email_body,
-            target_audience=request.target_audience,
-            campaign_id=request.campaign_id,
-            metrics=request.metrics,
-            lead_name=request.lead_name,
-            lead_company=request.lead_company,
-            lead_role=request.lead_role,
-            lead_domain=request.lead_domain,
+        result = await asyncio.wait_for(
+            service.campaign_optimizer.analyze(
+                user_id=str(current_user.id),
+                subject_line=request.subject_line,
+                email_body=request.email_body,
+                target_audience=request.target_audience,
+                campaign_id=request.campaign_id,
+                metrics=request.metrics,
+                lead_name=request.lead_name,
+                lead_company=request.lead_company,
+                lead_role=request.lead_role,
+                lead_domain=request.lead_domain,
+            ),
+            timeout=90.0,
         )
         _deduct(db, current_user.id, cost, "Copilot: Email optimization with enrichment")
         return result
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Email optimization timed out. Please try again.")
     except HTTPException:
         raise
     except ValueError as e:
