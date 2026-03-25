@@ -582,43 +582,54 @@ class LeadCopilotService:
 
         print(f">>> [FindSimilar] source={source_name}|{source_domain} industry={industry} emp={emp} techs={techs}", flush=True)
 
-        # If we have no industry, look up the source company first to derive ICP
-        if not industry and (source_domain or source_name):
+        # Step 0: Look up source company via domain to get Explorium's own category
+        if source_domain:
             try:
-                lookup: Dict[str, Any] = {}
-                if source_domain:
-                    lookup["domain"] = source_domain
-                if source_name:
-                    lookup["name"] = source_name
-                src_result = await explorium.search_companies(lookup, limit=1)
+                src_result = await explorium.search_companies({"domain": source_domain}, limit=1)
                 src_list = src_result.get("companies", [])
                 if src_list:
                     src = src_list[0]
-                    industry = industry or src.get("industry") or src.get("linkedin_industry_category") or ""
+                    # Use Explorium's own category — guaranteed valid
+                    industry = src.get("linkedin_industry_category") or src.get("industry") or industry
                     if not emp:
                         emp = src.get("employee_count_range") or src.get("employee_count_exact") or ""
-                    print(f">>> [FindSimilar] Derived ICP: industry={industry} emp={emp}", flush=True)
+                    if not techs:
+                        techs = src.get("technologies") or []
+                    print(f">>> [FindSimilar] Derived ICP from domain lookup: industry={industry} emp={emp}", flush=True)
             except Exception as e:
                 print(f">>> [FindSimilar] Source lookup failed: {e}", flush=True)
 
         # Build cascading search attempts (most specific → broadest)
         attempts: list = []
-        full: Dict[str, Any] = {}
-        if industry:
-            full["linkedin_category"] = industry
+        size_filter = {}
         if emp:
-            full["company_size"] = str(emp) if not isinstance(emp, str) else emp
+            size_filter["company_size"] = str(emp) if not isinstance(emp, str) else emp
+        tech_filter = {}
         if techs and isinstance(techs, list):
-            full["company_tech_stack_tech"] = techs[:5]
-        if full:
-            attempts.append(("full", dict(full)))
-        no_tech = {k: v for k, v in full.items() if k != "company_tech_stack_tech"}
-        if no_tech and no_tech != full:
-            attempts.append(("no_tech", no_tech))
+            tech_filter["company_tech_stack_tech"] = techs[:5]
+        cat_filter = {}
         if industry:
-            attempts.append(("industry_only", {"linkedin_category": industry}))
-        if source_name:
-            attempts.append(("keyword", {"keywords": source_name}))
+            cat_filter["linkedin_category"] = industry
+
+        # 1: industry + size + tech
+        combo = {**cat_filter, **size_filter, **tech_filter}
+        if combo:
+            attempts.append(("full", dict(combo)))
+        # 2: industry + size
+        if cat_filter and size_filter:
+            attempts.append(("industry+size", {**cat_filter, **size_filter}))
+        # 3: size + tech (skip industry — it may be invalid in Explorium)
+        if size_filter and tech_filter:
+            attempts.append(("size+tech", {**size_filter, **tech_filter}))
+        # 4: size only
+        if size_filter:
+            attempts.append(("size_only", dict(size_filter)))
+        # 5: industry only
+        if cat_filter:
+            attempts.append(("industry_only", dict(cat_filter)))
+        # 6: tech only
+        if tech_filter:
+            attempts.append(("tech_only", dict(tech_filter)))
 
         companies: list = []
         used_filters: Dict[str, Any] = {}
