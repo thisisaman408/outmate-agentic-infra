@@ -204,7 +204,7 @@ function ContactCell({
     const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact
     const attemptRecord = waterfallAttempts?.[companyId] || {}
     const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
-    const attemptMessage = isEmailCol ? "Email not available via ContactOut" : "Phone not available via ContactOut"
+    const attemptMessage = isEmailCol ? "Email not available" : "Phone not available"
     const iconColorClass = waterfallValue
         ? "text-emerald-500 hover:text-emerald-600"
         : attemptedWaterfall
@@ -222,7 +222,7 @@ function ContactCell({
             {contactValue && !waterfallValue && (
                 <div className="flex items-center gap-2">
                     <span className="text-xs break-all">{contactValue}</span>
-                    <div className="text-xs text-green-600 font-medium">✓ ContactOut</div>
+                    <div className="text-xs text-green-600 font-medium">✓ Verified</div>
                 </div>
             )}
             {typeof waterfallValue !== 'undefined' && (
@@ -230,7 +230,7 @@ function ContactCell({
                     <span className={`text-xs ${!waterfallValue ? 'text-muted-foreground italic' : ''}`}>
                         {waterfallValue || 'Not available'}
                     </span>
-                    <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                    <div className="text-xs text-green-600 font-medium">✓ Enriched</div>
                 </div>
             )}
             {isLoadingContact && (
@@ -251,7 +251,7 @@ function ContactCell({
                         </Button>
                         <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                             onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
-                            title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
+                            title={`Advanced enrichment: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry" : ""}`}
                         >
                             <Zap className="h-3 w-3" />
                         </Button>
@@ -267,7 +267,7 @@ function ContactCell({
                         </Button>
                         <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                             onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
-                            title={`Waterfall zap: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry waterfall" : ""}`}
+                            title={`Advanced enrichment: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry" : ""}`}
                         >
                             <Zap className="h-3 w-3" />
                         </Button>
@@ -277,7 +277,7 @@ function ContactCell({
             {contactValue && !waterfallValue && (
                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
                     onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
-                    title="Enrich with waterfall (BetterContact)"
+                    title="Advanced enrichment"
                 >
                     <Zap className="h-3 w-3" />
                 </Button>
@@ -443,18 +443,19 @@ export function CompaniesResultsTable({
                     ? Math.max(0, Math.min(100, Math.round(company.data_quality_score))) : undefined
                 return (
                     <div className="flex items-center gap-3">
-                        {company.logo_url ? (
-                            <div className="h-8 w-8 rounded border bg-white flex-shrink-0 overflow-hidden relative">
-                                <img src={company.logo_url} alt="" className="object-contain w-full h-full"
-                                    onError={(e) => { (e.target as any).style.display = 'none' }} />
-                            </div>
-                        ) : (
-                            <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0">
-                                <span className="font-semibold text-base text-foreground">
-                                    {(company.name || company.domain || "C").charAt(0).toUpperCase()}
-                                </span>
-                            </div>
-                        )}
+                        <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden relative">
+                            {company.logo_url ? (
+                                <img 
+                                    src={company.logo_url} 
+                                    alt="" 
+                                    className="object-contain w-full h-full absolute inset-0 z-10 bg-white"
+                                    onError={(e) => { (e.target as any).style.display = 'none' }} 
+                                />
+                            ) : null}
+                            <span className="font-semibold text-xs text-muted-foreground">
+                                {(company.name || company.domain || "C").charAt(0).toUpperCase()}
+                            </span>
+                        </div>
                         <div className="flex flex-col">
                             <span className="font-medium truncate max-w-[150px]">{company.name}</span>
                             <span className="text-[10px] text-muted-foreground truncate max-w-[150px]">{company.domain}</span>
@@ -721,7 +722,13 @@ export function CompaniesResultsTable({
                             <Sparkles className="h-4 w-4" /><span className="sr-only">AI Copilot</span>
                         </Button>
                         <Button variant="outline" size="sm" className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50"
-                            onClick={() => router.push(`/leads/companies/${company.domain}`)}>
+                            onClick={() => {
+                                // Dynamic import of searchCache to avoid circular dependencies if any
+                                import("@/lib/cache/search-cache").then(({ searchCache }) => {
+                                    searchCache.set([company]);
+                                    router.push(`/leads/companies/${company.domain}`);
+                                });
+                            }}>
                             <Building2 className="h-4 w-4 mr-2" /> Profile
                         </Button>
                     </div>

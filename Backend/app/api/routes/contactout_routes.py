@@ -40,80 +40,63 @@ async def get_company_profile(
     db: Session = Depends(get_db)
 ):
     """
-    Get full company profile (LinkedIn-style) with decision makers.
-    Uses ContactOut to fill missing data from Crustdata.
+    Get full company profile with decision makers.
+    Decision makers use a waterfall: ContactOut → CrustData → BetterContact.
     """
+    from app.services.decision_makers_service import get_decision_makers as get_dm_waterfall
+
     try:
         contactout = ContactOutService()
         print(f">>> [Company Profile] Fetching for domain: {domain}", flush=True)
+
         # 1) Get company details from ContactOut
+        company = {}
         try:
             enrichment_data = await contactout.enrich_companies_by_domain([domain])
-        except httpx.HTTPStatusError as he:
-            # Propagate ContactOut HTTP errors to the client with original status and body
-            detail = he.response.text if he.response is not None else str(he)
-            logger.error(f"ContactOut HTTP error for {domain}: {detail}")
-            raise HTTPException(status_code=he.response.status_code if he.response is not None else 502, detail=detail)
-        companies_data = enrichment_data.get("companies", {})
+            companies_data = enrichment_data.get("companies", {})
+            company_raw = None
+            if isinstance(companies_data, dict):
+                company_raw = companies_data.get(domain, {})
+            elif isinstance(companies_data, list):
+                for item in companies_data:
+                    if isinstance(item, dict) and domain in item:
+                        company_raw = item[domain]
+                        break
+            if company_raw:
+                company = ContactOutService.normalize_company_enrichment({domain: company_raw})
+        except Exception as e:
+            logger.warning(f"ContactOut company enrichment failed for {domain}: {e}")
 
-        company_raw = None
-        if isinstance(companies_data, dict):
-            company_raw = companies_data.get(domain, {})
-        # Fallback: old list format
-        elif isinstance(companies_data, list):
-            for item in companies_data:
-                if isinstance(item, dict) and domain in item:
-                    company_raw = item[domain]
-                    break
+        if not company:
+            company = {"domain": domain}
 
-        if not company_raw:
-            print(f">>> No company data found for {domain}", flush=True)
-            return {"success": False, "error": f"No data found for domain '{domain}'"}
+        # 2) Get decision makers via waterfall (ContactOut → CrustData → BetterContact)
+        dm_result = await get_dm_waterfall(domain, max_results=10)
+        decision_makers = dm_result.get("decision_makers", [])
+        dm_source = dm_result.get("source", "none")
 
-        # companies is a list with one dict: [{domain: {company_data}}]
-        company = ContactOutService.normalize_company_enrichment({domain: company_raw})
-
-        # 2) Get decision makers (blurred by default)
-        try:
-            dm_data = await contactout.get_decision_makers(
-            domain=domain,
-            reveal_info=False,  # blurred
-            page=1
-        )
-        except httpx.HTTPStatusError as he:
-            detail = he.response.text if he.response is not None else str(he)
-            logger.error(f"ContactOut DM HTTP error for {domain}: {detail}")
-            raise HTTPException(status_code=he.response.status_code if he.response is not None else 502, detail=detail)
-
-        profiles = dm_data.get("profiles", {})
-        decision_makers = [
-            ContactOutService.normalize_decision_maker(dm)
-            for dm in profiles.values()
-        ]
-
-        print(f">>> [Company Profile] Got {len(decision_makers)} decision makers for {domain}", flush=True)
+        print(f">>> [Company Profile] {len(decision_makers)} decision makers (source={dm_source}) for {domain}", flush=True)
 
         return {
             "success": True,
             "data": {
-                "company": company,
+                **company,
                 "decision_makers": decision_makers,
-                "metadata": dm_data.get("metadata", {})
+                "decision_makers_source": dm_source,
+                "metadata": {"total_decision_makers": len(decision_makers)},
             }
         }
 
-    except HTTPException as he:
-        # Propagate HTTPExceptions so FastAPI can return the original status
-        raise he
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc(file=sys.stdout)
-        print(f">>> [Company Profile] ERROR for {domain}: {str(e)}", flush=True)
-        # Return JSON error without 500 to avoid browser red errors
         return {
             "success": False,
             "error": f"Company profile failed: {str(e)}"
         }
+
 
 @router.post("/reveal-contact")
 async def reveal_contact(
@@ -158,42 +141,32 @@ async def reveal_company_contact(
     Returns emails/phones from the first decision maker.
     """
     try:
-        contactout = ContactOutService()
-        print(f">>> [Reveal Company Contact] domain={request.domain}, include_phone={request.include_phone}", flush=True)
-
-        dm_data = await contactout.get_decision_makers(
-            domain=request.domain,
-            reveal_info=True,
-            page=1
-        )
-
-        profiles = dm_data.get("profiles", {})
-        if not profiles:
+        # Use waterfall service instead of direct ContactOut fetch
+        from app.services.decision_makers_service import get_decision_makers as get_dm_waterfall
+        dm_result = await get_dm_waterfall(request.domain, max_results=5)
+        decision_makers = dm_result.get("decision_makers", [])
+        
+        if not decision_makers:
             return {
                 "success": False,
                 "error": f"No decision makers found for domain '{request.domain}'"
             }
 
         # Take the first decision maker's contact info
-        first_profile = next(iter(profiles.values()))
-        contact_info = first_profile.get("contact_info", {})
+        first_dm = decision_makers[0]
+        # Map our normalized DM structure back to response format
+        emails = first_dm.get("emails") or []
+        phones = first_dm.get("phones") or [] if request.include_phone else []
 
-        emails = contact_info.get("email", []) or []
-        work_emails = contact_info.get("work_email", []) or []
-        personal_emails = contact_info.get("personal_email", []) or []
-        phones = (contact_info.get("phone", []) or []) if request.include_phone else []
-
-        # Combine all emails if the specific lists are empty
-        all_emails = emails if emails else (work_emails + personal_emails)
 
         return {
             "success": True,
             "data": {
-                "domain": request.domain,
-                "emails": all_emails,
-                "work_emails": work_emails,
-                "personal_emails": personal_emails,
+                "emails": emails,
+                "work_emails": first_dm.get("work_emails", []),
+                "personal_emails": first_dm.get("personal_emails", []),
                 "phones": phones,
+                "source": dm_result.get("source")
             }
         }
     except Exception as e:
@@ -216,26 +189,18 @@ async def get_decision_makers(
     Returns blurred profiles by default.
     """
     try:
-        contactout = ContactOutService()
-        print(f">>> [Decision Makers] Fetching for domain: {domain}, page={page}", flush=True)
+        from app.services.decision_makers_service import get_decision_makers as get_dm_waterfall
+        print(f">>> [Decision Makers] Fetching for domain: {domain} using waterfall", flush=True)
         
-        dm_data = await contactout.get_decision_makers(
-            domain=domain,
-            reveal_info=False,  # blurred by default
-            page=page
-        )
+        dm_result = await get_dm_waterfall(domain, max_results=15)
+        decision_makers = dm_result.get("decision_makers", [])
         
-        profiles = dm_data.get("profiles", {})
-        decision_makers = [
-            ContactOutService.normalize_decision_maker(dm)
-            for dm in profiles.values()
-        ]
-        
-        print(f">>> [Decision Makers] Got {len(decision_makers)} decision makers for {domain}", flush=True)
+        print(f">>> [Decision Makers] Got {len(decision_makers)} decision makers for {domain} (source={dm_result.get('source')})", flush=True)
         
         return {
             "success": True,
-            "data": decision_makers
+            "data": decision_makers,
+            "source": dm_result.get("source")
         }
     except Exception as e:
         import traceback

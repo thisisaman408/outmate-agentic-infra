@@ -2,10 +2,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useRouter } from "next/navigation"
 import { Workflow, Play, Pause, Settings, Clock, Zap, Database, Bot, Send, Plus, MoreVertical } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export default function WorkflowsPage() {
+  const router = useRouter()
   const workflows = [
     {
       id: 1,
@@ -46,7 +48,7 @@ export default function WorkflowsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Workflows</h1>
           <p className="text-muted-foreground">Automate your GTM motions with AI-powered workflows</p>
         </div>
-        <Button>
+        <Button onClick={() => router.push('/flow-builder')}>
           <Plus className="mr-2 h-4 w-4" />
           Create Workflow
         </Button>

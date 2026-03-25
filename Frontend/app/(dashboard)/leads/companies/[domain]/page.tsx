@@ -118,22 +118,15 @@ export default function CompanyProfilePage() {
             
             if (companyResponse.ok) {
               const companyResult = await companyResponse.json();
-              console.log('Company response:', companyResult);
-              
               if (companyResult.success && companyResult.data) {
-                console.log('Company data keys:', Object.keys(companyResult.data));
-                console.log('Decision makers in data:', companyResult.data.decision_makers);
-                
+                // New flat shape: data.decision_makers (waterfall result)
                 decisionMakersData = companyResult.data.decision_makers || [];
-                console.log('Decision makers fetched successfully:', decisionMakersData.length);
-                console.log('Decision makers data:', decisionMakersData);
+                console.log(`Decision makers fetched (source=${companyResult.data.decision_makers_source}): ${decisionMakersData.length}`);
               } else {
-                console.log('Company API returned success=false:', companyResult);
+                console.log('Company API returned success=false:', companyResult?.error);
               }
             } else {
               console.log('Company API error:', companyResponse.status);
-              const errorText = await companyResponse.text();
-              console.log('Error response:', errorText);
             }
           } catch (error) {
             console.log('Failed to fetch decision makers:', error);
@@ -405,7 +398,39 @@ export default function CompanyProfilePage() {
     }
   }, [domain]);
 
-  const [revealing, setRevealing] = useState<'phone' | 'email' | null>(null);
+  const [revealing, setRevealing] = useState<string | null>(null); // key = `${type}:${linkedin_url}`
+
+  // Defined here so it's available in the DM cards
+  const revealContact = async (person: any) => {
+    if (!person?.linkedin_url) {
+      toast({ title: 'Error', description: 'No LinkedIn profile available for this contact', variant: 'destructive' });
+      return;
+    }
+    const key = `email:${person.linkedin_url}`;
+    setRevealing(key);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null;
+      const res = await fetch('/api/contactout/reveal-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ linkedin_url: person.linkedin_url, include_phone: true }),
+      });
+      if (!res.ok) throw new Error('Reveal failed');
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Reveal failed');
+      const email = data.data?.emails?.[0] || data.data?.work_emails?.[0] || data.data?.personal_emails?.[0] || '';
+      const phone = data.data?.phones?.[0] || '';
+      setRevealedPersonContacts(prev => ({
+        ...prev,
+        [person.linkedin_url]: { email: email || prev[person.linkedin_url]?.email, phone: phone || prev[person.linkedin_url]?.phone },
+      }));
+      toast({ title: 'Contact Revealed', description: email || phone || 'No contact found' });
+    } catch (err: any) {
+      toast({ title: 'Reveal Failed', description: err.message || 'Could not reveal contact', variant: 'destructive' });
+    } finally {
+      setRevealing(null);
+    }
+  };
   const [revealedPersonContacts, setRevealedPersonContacts] = useState<Record<string, { phone?: string; email?: string }>>({})
 
   const enrichLinkedInProfile = async (person: any) => {
@@ -847,13 +872,35 @@ export default function CompanyProfilePage() {
         {/* Hero Header */}
         <Card className="overflow-hidden border-border/50 shadow-xl">
           <div className="h-32 bg-gradient-to-r from-primary/10 via-primary/5 to-background relative">
-            {company.logo_url && (
-              <div className="absolute -bottom-12 left-8">
-                <div className="h-28 w-28 rounded-xl overflow-hidden border-4 border-background shadow-lg bg-white">
-                  <Image src={company.logo_url} alt={company.name || domain} width={112} height={112} className="object-contain p-2" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                </div>
+            <div className="absolute -bottom-12 left-8">
+              <div className="h-28 w-28 rounded-xl overflow-hidden border-4 border-background shadow-lg bg-white flex items-center justify-center">
+                {company.logo_url ? (
+                  <Image 
+                    src={company.logo_url} 
+                    alt={company.name || domain} 
+                    width={112} 
+                    height={112} 
+                    className="object-contain p-2" 
+                    onError={(e) => {
+                      // Fallback to initial on error
+                      const target = e.currentTarget;
+                      const parent = target.parentElement;
+                      if (parent) {
+                        target.style.display = 'none';
+                        const initial = document.createElement('div');
+                        initial.className = "text-4xl font-bold text-primary";
+                        initial.innerText = (company.name || domain || 'C').charAt(0).toUpperCase();
+                        parent.appendChild(initial);
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="text-4xl font-bold text-primary">
+                    {(company.name || domain || 'C').charAt(0).toUpperCase()}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
           <div className="p-8 pt-20">
@@ -1283,7 +1330,7 @@ export default function CompanyProfilePage() {
             <CardContent>
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Topics this company is actively researching online (Bombora data):
+                  Topics this company is actively researching online (Business intent intelligence):
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {businessIntent.topics.slice(0, 9).map((topic: any, i: number) => (
@@ -1563,319 +1610,118 @@ export default function CompanyProfilePage() {
           </Card>
         ) : null}
 
-        {/* Company ID & Data Source */}
-        {company.id || company.provider_source ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Data Source Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {company.id && (
-                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                  <p className="text-sm font-medium">Company ID</p>
-                  <code className="font-mono text-xs px-3 py-1.5 bg-background rounded border border-border truncate max-w-[50%]" title={company.id}>{company.id}</code>
-                </div>
-              )}
-              {company.provider_source && (
-                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                  <p className="text-sm font-medium">Data Provider</p>
-                  <Badge variant="outline" className="capitalize">{company.provider_source}</Badge>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ) : null}
+         {/* Company ID removed as requested */}
 
-        {/* Enhanced Decision Makers */}
-        <Card className="border-border/50 shadow-2xl hover:shadow-3xl transition-shadow duration-300">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
-            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
-              <Users className="h-6 w-6" />
-              Key Decision Makers
-              <Badge variant="secondary" className="ml-auto bg-blue-100 text-blue-800">
-                {decisionMakers.length} Contacts
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            {decisionMakers.length === 0 ? (
-              <div className="text-center py-16 text-muted-foreground">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-blue-50/20 rounded-full animate-pulse"></div>
-                  <Users className="h-16 w-16 mx-auto mb-4 text-blue-300" />
+
+        {/* Decision Makers */}
+        {decisionMakers.length > 0 && (
+          <Card className="border-border/50 shadow-lg">
+            <CardHeader className="border-b border-border/50">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <Users className="h-5 w-5 text-primary" />
+                  Key Decision Makers
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">{decisionMakers.length} found</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => window.location.reload()}>
+                    <RefreshCw className="h-3 w-3" /> Refresh
+                  </Button>
                 </div>
-                <h3 className="text-xl font-semibold mb-2">No Decision Makers Found</h3>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  We couldn't find key decision makers for this company. Try enriching the profile or check back later.
-                </p>
-                <Button 
-                  onClick={() => window.location.reload()} 
-                  className="mt-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh Data
-                </Button>
               </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Enhanced Summary Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                  <div className="p-6 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl text-center hover:shadow-md transition-shadow">
-                    <Users className="h-10 w-10 mx-auto mb-3 text-blue-600" />
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Total Contacts</p>
-                    <p className="text-3xl font-bold text-blue-600">{decisionMakers.length}</p>
-                  </div>
-                  <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl text-center hover:shadow-md transition-shadow">
-                    <Award className="h-10 w-10 mx-auto mb-3 text-green-600" />
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Enriched</p>
-                    <p className="text-3xl font-bold text-green-600">{Object.keys(enrichedProfiles).length}</p>
-                  </div>
-                  <div className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl text-center hover:shadow-md transition-shadow">
-                    <Eye className="h-10 w-10 mx-auto mb-3 text-purple-600" />
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Revealed</p>
-                    <p className="text-3xl font-bold text-purple-600">{Object.keys(revealedContacts).length}</p>
-                  </div>
-                  <div className="p-6 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-xl text-center hover:shadow-md transition-shadow">
-                    <Zap className="h-10 w-10 mx-auto mb-3 text-orange-600" />
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Credits Used</p>
-                    <p className="text-3xl font-bold text-orange-600">{Object.keys(enrichedProfiles).length * 2}</p>
-                  </div>
-                </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-border/50">
+                {decisionMakers.map((person: any, index: number) => {
+                  const revealed = revealedPersonContacts[person.linkedin_url] || {};
+                  const revealKey = `email:${person.linkedin_url}`;
+                  const isRevealing = revealing === revealKey;
+                  const hasEmail = revealed.email && !revealed.email.includes('***');
+                  const hasPhone = revealed.phone && !revealed.phone.includes('***');
+                  const initials = (person.full_name || 'U').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 
-                {/* Enhanced Decision Makers Grid */}
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                  {decisionMakers.map((person: any, index: number) => {
-                    const enrichedProfile = enrichedProfiles[person.linkedin_url] || person;
-                    const isRevealed = revealedContacts[person.linkedin_url];
-                    
-                    return (
-                    <Card key={index} className="group overflow-hidden hover:shadow-2xl transition-all duration-300 hover:scale-105 border-gradient-to-br from-gray-50 to-white">
-                      <CardContent className="p-6 relative">
-                        {/* Reveal Overlay */}
-                        {!isRevealed && (
-                          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
-                            <Lock className="h-8 w-8 text-white mb-2" />
-                            <p className="text-white text-sm font-medium">Contact Details Locked</p>
-                            <Button
-                              onClick={() => revealContact(person)}
-                              className="mt-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white"
-                            >
-                              <Unlock className="h-4 w-4 mr-2" />
-                              Reveal Contact
-                            </Button>
+                  return (
+                    <div key={index} className="flex items-start gap-4 p-5 hover:bg-muted/20 transition-colors">
+                      {/* Avatar */}
+                      <div className="shrink-0">
+                        {person.profile_picture_url ? (
+                          <div className="h-12 w-12 rounded-full overflow-hidden border-2 border-border/50 shadow-sm">
+                            <Image src={person.profile_picture_url} alt={person.full_name || ''} width={48} height={48} className="object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                          </div>
+                        ) : (
+                          <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 border-2 border-primary/20 flex items-center justify-center text-primary font-semibold text-sm">
+                            {initials}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 flex-wrap">
+                          <div>
+                            <p className="font-semibold text-sm truncate">{person.full_name || 'Unknown'}</p>
+                            <p className="text-xs text-muted-foreground truncate">{person.title || person.headline || 'N/A'}</p>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {person.linkedin_url && (
+                              <a href={person.linkedin_url.startsWith('http') ? person.linkedin_url : `https://${person.linkedin_url}`} target="_blank" rel="noopener noreferrer"
+                                className="p-1 rounded hover:bg-blue-100 text-blue-600 transition-colors">
+                                <Linkedin className="h-4 w-4" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Location + seniority */}
+                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                          {person.location && <span className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" />{person.location}</span>}
+                          {person.seniority && <Badge variant="outline" className="text-[10px] py-0 h-4">{person.seniority}</Badge>}
+                          {person.job_function && <Badge variant="outline" className="text-[10px] py-0 h-4">{person.job_function}</Badge>}
+                        </div>
+
+                        {/* Revealed contacts */}
+                        {(hasEmail || hasPhone) && (
+                          <div className="flex gap-3 mt-2 flex-wrap">
+                            {hasEmail && (
+                              <span className="flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                                <Mail className="h-3 w-3" />{revealed.email}
+                              </span>
+                            )}
+                            {hasPhone && (
+                              <span className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                <Phone className="h-3 w-3" />{revealed.phone}
+                              </span>
+                            )}
                           </div>
                         )}
 
-                        <div className="flex items-start gap-4">
-                          {person.profile_picture_url ? (
-                            <div className="relative group">
-                              <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
-                              <div className="h-20 w-20 rounded-full overflow-hidden border-4 border-white shadow-lg flex-shrink-0">
-                                <Image 
-                                  src={person.profile_picture_url} 
-                                  alt={person.full_name || 'Profile'} 
-                                  width={80} 
-                                  height={80} 
-                                  className="object-cover group-hover:scale-110 transition-transform duration-300" 
-                                />
-                              </div>
-                              {enrichedProfiles[person.linkedin_url] && (
-                                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
-                                  <Check className="h-3 w-3 text-white" />
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center flex-shrink-0">
-                              <Users className="h-10 w-10 text-gray-500" />
-                            </div>
-                          )}
+                        {/* Direct email on profile */}
+                        {person.email && !hasEmail && (
+                          <span className="flex items-center gap-1 text-xs text-green-700 mt-1.5">
+                            <Mail className="h-3 w-3" />{person.email}
+                          </span>
+                        )}
 
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-xl truncate bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                                  {person.full_name || 'Unknown'}
-                                </h3>
-                                <p className="text-sm text-muted-foreground mt-1 font-medium truncate">{person.title || 'N/A'}</p>
-                                {person.headline && (
-                                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2 italic">{person.headline}</p>
-                                )}
-                              </div>
-                              <div className="flex gap-2">
-                                {person.linkedin_url && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    asChild
-                                    className="hover:bg-blue-50 hover:border-blue-300"
-                                  >
-                                    <a href={person.linkedin_url.startsWith('http') ? person.linkedin_url : `https://${person.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
-                                      <Linkedin className="h-4 w-4" />
-                                      LinkedIn
-                                    </a>
-                                  </Button>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => enrichLinkedInProfile(person)}
-                                  className="hover:bg-purple-50"
-                                  disabled={!person.linkedin_url || enrichedProfiles[person.linkedin_url]}
-                                >
-                                  {enrichedProfiles[person.linkedin_url] ? (
-                                    <Eye className="h-4 w-4 text-green-600" />
-                                  ) : (
-                                    <Zap className="h-4 w-4 text-blue-600" />
-                                  )}
-                                </Button>
-                              </div>
-                            </div>
-
-                            {/* Contact Information */}
-                            {(isRevealed || enrichedProfiles[person.linkedin_url]) && (
-                              <div className="mt-4 space-y-3 border-t border-gray-200 pt-4">
-                                {person.email && (
-                                  <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
-                                    <Mail className="h-4 w-4 text-green-600" />
-                                    <div>
-                                      <p className="text-xs font-medium text-green-800">Email</p>
-                                      <p className="text-sm text-green-700">{person.email}</p>
-                                    </div>
-                                  </div>
-                                )}
-                                {person.phone && (
-                                  <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                                    <Phone className="h-4 w-4 text-blue-600" />
-                                    <div>
-                                      <p className="text-xs font-medium text-blue-800">Phone</p>
-                                      <p className="text-sm text-blue-700">{person.phone}</p>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Enhanced LinkedIn Insights */}
-                            {enrichedProfiles[person.linkedin_url] && (
-                              <div className="mt-4 space-y-3">
-                                {enrichedProfile.experience && enrichedProfile.experience.length > 0 && (
-                                  <div className="text-xs">
-                                    <p className="font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                                      <Briefcase className="h-3 w-3" />
-                                      Experience
-                                    </p>
-                                    <div className="space-y-2">
-                                      {enrichedProfile.experience.slice(0, 2).map((exp: any, i: number) => (
-                                        <div key={i} className="flex items-center gap-2">
-                                          <span className="font-medium">{exp.title}</span>
-                                          <span className="text-muted-foreground">@ {exp.company?.name}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                
-                                {enrichedProfile.education && enrichedProfile.education.length > 0 && (
-                                  <div className="text-xs">
-                                    <p className="font-medium text-muted-foreground mb-1">Education:</p>
-                                    <div className="space-y-1">
-                                      {enrichedProfile.education.slice(0, 2).map((edu: any, i: number) => (
-                                        <div key={i} className="flex items-center gap-2">
-                                          <span className="font-medium">{edu.degree}</span>
-                                          <span className="text-muted-foreground">@ {edu.school}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {enrichedProfile.skills && enrichedProfile.skills.length > 0 && (
-                                  <div className="text-xs">
-                                    <p className="font-medium text-muted-foreground mb-1">Skills:</p>
-                                    <div className="flex flex-wrap gap-1">
-                                      {enrichedProfile.skills.slice(0, 6).map((skill: string, i: number) => (
-                                        <Badge key={i} variant="secondary" className="text-xs">
-                                          {skill}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {person.contact_availability?.personal_email && (
-                                <Badge variant="outline" className="text-xs gap-1 text-green-600">
-                                  <Mail className="h-3 w-3" />
-                                  Email Available
-                                </Badge>
-                              )}
-                              {person.contact_availability?.work_email && (
-                                <Badge variant="outline" className="text-xs gap-1 text-green-600">
-                                  <Mail className="h-3 w-3" />
-                                  Work Email Available
-                                </Badge>
-                              )}
-                              {person.contact_availability?.phone && (
-                                <Badge variant="outline" className="text-xs gap-1 text-orange-600">
-                                  <Phone className="h-3 w-3" />
-                                  Phone Available
-                                </Badge>
-                              )}
-                            </div>
-
-                            {/* Contact Reveal Actions */}
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => revealCompanyContact('email', person)}
-                                disabled={!person.linkedin_url || revealing === 'email'}
-                                className="text-xs"
-                              >
-                                {revealing === 'email' ? 'Revealing...' : 'Reveal Email'}
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => revealCompanyContact('phone', person)}
-                                disabled={!person.linkedin_url || revealing === 'phone'}
-                                className="text-xs"
-                              >
-                                {revealing === 'phone' ? 'Revealing...' : 'Reveal Phone'}
-                              </Button>
-                              {person.linkedin_url && (
-                                <Button variant="ghost" size="sm" asChild className="text-xs">
-                                  <a href={person.linkedin_url.startsWith('http') ? person.linkedin_url : `https://${person.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="gap-1">
-                                    <Linkedin className="h-3 w-3" />
-                                    Profile
-                                  </a>
-                                </Button>
-                              )}
-                              {revealedPersonContacts[person.linkedin_url]?.email && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {revealedPersonContacts[person.linkedin_url]?.email}
-                                </Badge>
-                              )}
-                              {revealedPersonContacts[person.linkedin_url]?.phone && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {revealedPersonContacts[person.linkedin_url]?.phone}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-})}
-                </div>
+                        {/* Actions */}
+                        {!hasEmail && !hasPhone && person.linkedin_url && (
+                          <Button
+                            variant="outline" size="sm"
+                            className="mt-2 h-7 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/5"
+                            onClick={() => revealContact(person)}
+                            disabled={isRevealing}
+                          >
+                            {isRevealing ? <><Zap className="h-3 w-3 animate-pulse" /> Revealing...</> : <><Unlock className="h-3 w-3" /> Reveal Contact</>}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Enhanced LinkedIn Posts */}
         {Array.isArray(linkedinPosts) && linkedinPosts.length > 0 && (

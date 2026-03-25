@@ -90,7 +90,7 @@ const QUICK_ACTIONS: { type: LeadActionType; label: string; icon: typeof Mail; c
   { type: "objection_handler", label: "Objection Handler", icon: Shield, cost: 1 },
   { type: "crossfire", label: "Crossfire Intelligence", icon: Swords, cost: 2 },
   { type: "compliance", label: "Compliance Oracle", icon: FileCheck, cost: 1 },
-  { type: "bombora_intent", label: "Bombora Intent", icon: Zap, cost: 2 },
+  { type: "bombora_intent", label: "Business Intent", icon: Zap, cost: 2 },
   { type: "talent_radar", label: "Talent Radar", icon: UserX, cost: 2 },
   { type: "virality", label: "Virality Engine", icon: TrendingUp, cost: 1 },
   { type: "regime_shift", label: "Regime Shifter", icon: ArrowRightLeft, cost: 2 },
@@ -126,7 +126,7 @@ const ACTION_DISPLAY: Partial<Record<string, { emoji: string; label: string }>> 
   objection_handler:{ emoji: "🛡",  label: "Objection Handler" },
   crossfire:        { emoji: "⚔️",  label: "Crossfire" },
   compliance:       { emoji: "⚖️",  label: "Compliance Oracle" },
-  bombora_intent:   { emoji: "🎯",  label: "Bombora Intent" },
+  bombora_intent:   { emoji: "🎯",  label: "Business Intent" },
   talent_radar:     { emoji: "📡",  label: "Talent Radar" },
   virality:         { emoji: "🚀",  label: "Virality Engine" },
   regime_shift:     { emoji: "🌐",  label: "Regime Shift" },
@@ -248,7 +248,10 @@ export function LeadCopilotPanel() {
   const [awaitingInput, setAwaitingInput] = useState<LeadActionType | null>(null)
   const [inputValue, setInputValue] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
+  const [decisionMakers, setDecisionMakers] = useState<any[]>([])
+  const [isDMLoading, setIsDMLoading] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+
 
   // Auto-scroll the ScrollArea viewport to bottom when messages change
   useEffect(() => {
@@ -257,11 +260,38 @@ export function LeadCopilotPanel() {
   }, [messages.length, actionLoading])
 
   useEffect(() => {
-    if (isPanelOpen && prospectId && !isCompanyEntity) {
-      fetchContext()
-      fetchSuggestions()
+    if (isPanelOpen && prospectId) {
+      if (!isCompanyEntity) {
+        fetchContext()
+        fetchSuggestions()
+      } else {
+        // For companies, fetch decision makers
+        const fetchDMs = async () => {
+          setIsDMLoading(true)
+          try {
+            const domain = selectedProspect.domain || selectedProspect.website || ""
+            if (domain) {
+              const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}`, {
+                headers: { "Authorization": `Bearer ${localStorage.getItem("outmate_auth_token")}` }
+              })
+              if (res.ok) {
+                const data = await res.json()
+                setDecisionMakers(data.data || [])
+              }
+            }
+          } catch (err) {
+            console.error("Failed to fetch decision makers:", err)
+          } finally {
+            setIsDMLoading(false)
+          }
+        }
+        fetchDMs()
+      }
+    } else if (!isPanelOpen) {
+      setDecisionMakers([])
+      setAwaitingInput(null)
     }
-  }, [isPanelOpen, prospectId, fetchContext, fetchSuggestions, isCompanyEntity])
+  }, [isPanelOpen, prospectId, fetchContext, fetchSuggestions, isCompanyEntity, selectedProspect])
 
   const handleQuickAction = useCallback(
     (actionType: LeadActionType) => {
@@ -357,17 +387,46 @@ export function LeadCopilotPanel() {
             {/* Company Card */}
             {companyContext && <CompanyCard company={companyContext} />}
 
-            {/* AI Suggestions (Phase 2) */}
-            {(suggestionsLoading || (suggestions?.suggestions?.length ?? 0) > 0) && (
+            {/* Decision Makers (Companies only) */}
+            {/* Decision Makers (Companies only) */}
+            {isCompanyEntity && (isDMLoading || decisionMakers.length > 0) && (
               <>
                 <Separator />
-                <SuggestionsSection
-                  suggestions={suggestions?.suggestions || []}
-                  isLoading={suggestionsLoading}
-                  onSuggestionClick={handleQuickAction}
-                />
+                <div className="space-y-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                    <Users className="h-3 w-3 text-primary/60" /> Top Decision Makers
+                  </p>
+                  {isDMLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2">
+                      {decisionMakers.slice(0, 5).map((dm, idx) => (
+                        <div key={idx} className="flex items-center gap-3 p-2 rounded-lg border border-border/40 bg-muted/20 hover:bg-muted/40 transition-colors">
+                          <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">
+                            {dm.name?.split(' ').map((n: any) => n[0]).join('').slice(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[12px] font-medium truncate">{dm.name}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{dm.title}</p>
+                          </div>
+                          {dm.linkedin_url ? (
+                            <a href={dm.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md hover:bg-blue-500/10 text-blue-400">
+                              <Linkedin className="h-3.5 w-3.5" />
+                            </a>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 opacity-50">Locked</Badge>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
+
 
             <Separator />
 
@@ -1043,7 +1102,7 @@ function GTMActionResult({ result }: { result: Record<string, any> }) {
   )
 }
 
-// ── Bombora Intent ───────────────────────────────────────────
+// ── Business Intent ───────────────────────────────────────────
 
 function BomboraIntentResult({ result }: { result: Record<string, any> }) {
   const topics = (result.intent_topics || []).slice(0, 3)

@@ -19,6 +19,7 @@ export interface FilterConfig {
     category: typeof FILTER_CATEGORIES[number]
     icon?: LucideIcon
     description?: string
+    requiresPro?: boolean
 }
 
 export const FILTER_CATEGORIES = [
@@ -145,7 +146,7 @@ export const ALL_FILTERS: FilterConfig[] = [
     },
     {
         id: "topics",
-        label: "Intent Topics (Bombora)",
+        label: "Intent Topics",
         type: "text",
         category: "Signals and Intent",
         icon: Activity,

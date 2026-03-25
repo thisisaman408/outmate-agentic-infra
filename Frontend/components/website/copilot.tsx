@@ -23,7 +23,7 @@ const CHAT = [
 
 **3. Nexus AI** — Intent score 81/100
    • CTO just changed jobs — new CTO onboarding
-   • Evaluating 3 competitors per Bombora data
+   • Evaluating 3 competitors per market data
    • Recommended action: Strike while evaluating`,
   },
   {

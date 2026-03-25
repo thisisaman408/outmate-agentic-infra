@@ -23,7 +23,10 @@ import {
   CheckCircle2,
   Mic,
   MicOff,
+  Activity,
 } from "lucide-react"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
@@ -2413,8 +2416,8 @@ export default function DatabaseFinderPage() {
         </CardHeader>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-        <div className="lg:col-span-1">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 pb-20">
+        <div className="lg:col-span-3">
           <Card className="lg:sticky lg:top-6 max-h-[calc(100vh-6rem)] overflow-hidden">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Workspace</CardTitle>
@@ -2518,8 +2521,13 @@ export default function DatabaseFinderPage() {
           </Card>
         </div>
 
-        <div className="space-y-6 lg:col-span-3">
-          <Card className="border-border/60 shadow-sm">
+        <div className={cn(
+          "space-y-6",
+          (detectedSignals.length > 0 || isDetectingSignals || workflowSteps.length > 0 || totalCreditsUsed > 0) 
+            ? "lg:col-span-6" 
+            : "lg:col-span-9"
+        )}>
+          <Card className="border-border/60 shadow-xl min-h-[400px] flex flex-col justify-between">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 {hasSearched && results.length > 0 ? (
@@ -2534,8 +2542,8 @@ export default function DatabaseFinderPage() {
                   : "Tell us what you're looking for in plain English"}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <Textarea
+             <CardContent className="space-y-6 p-10 flex-1 flex flex-col justify-center">
+               <Textarea
                 ref={queryInputRef}
                 placeholder={hasSearched && results.length > 0
                   ? "Ask about your results, refine your search, or request an action..."
@@ -2548,8 +2556,8 @@ export default function DatabaseFinderPage() {
                     handleNaturalSearch()
                   }
                 }}
-                rows={2}
-                className="resize-none"
+                rows={6}
+                className="resize-none text-xl p-6 border-none shadow-none focus-visible:ring-0 bg-transparent placeholder:text-muted-foreground/40 leading-relaxed font-medium"
               />
               <div className="flex flex-wrap gap-2 items-center text-xs text-muted-foreground">
                 <Badge variant="outline" className="gap-1 text-xs">
@@ -3123,7 +3131,7 @@ export default function DatabaseFinderPage() {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
-                        tableId="ai-powered-companies"
+                        tableId="ai-powered-companies-v2"
                         onEnrichReveal={async (companyId, field) => {
                           if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
                           const company = results.find((c: any) => (c.domain || c.id) === companyId)
@@ -3179,17 +3187,14 @@ export default function DatabaseFinderPage() {
 
           {/* Suggested Prompts */}
           {suggestedPrompts.length > 0 && (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-purple-500" />
+            <Card className="border-border/60 shadow-sm bg-card/50 backdrop-blur-sm mt-8">
+              <CardHeader className="pb-3 px-4">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <Sparkles className="h-4 w-4 text-purple-500" />
                   Suggested Next Steps
                 </CardTitle>
-                <CardDescription>
-                  Try these related prompts based on your search
-                </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4">
                 <div className="flex flex-wrap gap-2">
                   {suggestedPrompts.map((prompt, idx) => (
                     <Button
@@ -3197,9 +3202,8 @@ export default function DatabaseFinderPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleSuggestedPrompt(prompt)}
-                      className="text-left justify-start h-auto py-2 px-3 whitespace-normal"
+                      className="text-[11px] h-auto py-1.5 px-3 bg-background/50 hover:bg-background border-border/40"
                     >
-                      <Sparkles className="h-3 w-3 mr-2 shrink-0 text-purple-500" />
                       {prompt}
                     </Button>
                   ))}
@@ -3208,156 +3212,114 @@ export default function DatabaseFinderPage() {
             </Card>
           )}
 
-          {detectedSignals.length > 0 && (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-yellow-500" />
-                  Detected Signals
-                </CardTitle>
-                <CardDescription>
-                  {intent === "prospect"
-                    ? "Person-level insights for personalized outreach"
-                    : "Company-level insights for personalized outreach"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {detectedSignals.map((signal: any, idx: number) => (
-                  <div key={idx} className="rounded-lg border bg-card/80 p-4">
-                    {intent === "prospect" ? (
-                      // Display person info for prospects
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold">{signal.person_name || signal.name}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            {signal.job_title} at {signal.company}
-                          </p>
-                          {signal.linkedin_url && (
-                            <a
-                              href={signal.linkedin_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-blue-500 hover:underline"
-                            >
-                              View LinkedIn Profile
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      // Display company info for companies
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-semibold">{signal.company_name}</h3>
-                        <span className="text-sm text-muted-foreground">{signal.domain}</span>
-                      </div>
-                    )}
-                    <div className="mt-3 space-y-2">
-                      {signal.signals?.map((s: any, sIdx: number) => (
-                        <div key={sIdx} className="flex items-start gap-2">
-                          <Badge
-                            variant={s.urgency === 'high' ? 'destructive' : s.urgency === 'medium' ? 'default' : 'secondary'}
-                            className="mt-0.5"
-                          >
-                            {s.urgency}
-                          </Badge>
-                          <div>
-                            <p className="text-sm font-medium">{s.type.replace(/_/g, ' ')}</p>
-                            <p className="text-xs text-muted-foreground">{s.description}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    {signal.personalization_tips && (
-                      <div className="mt-3 rounded bg-yellow-50 p-2 text-xs text-yellow-800 dark:bg-yellow-900/20">
-                        <strong>Tip:</strong> {signal.personalization_tips}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {creditUsageEntries.length > 0 && (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Credit usage</CardTitle>
-                <CardDescription className="text-xs text-muted-foreground">
-                  Credits consumed for the latest search run
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-sm font-medium">
-                  Total: {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {workflowSteps.length > 0 && (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-sm">Workflow Steps</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {workflowSteps.map((step, idx) => (
-                  <div key={idx} className="rounded border bg-muted/30 p-2">
-                    <div className="font-medium text-sm">{step.title}</div>
-                    <div className="text-xs text-muted-foreground">{step.tool}</div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {agentMessages.length > 0 && (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <MessageSquare className="h-4 w-4" />
-                  Conversation
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 max-h-96 overflow-y-auto">
-                {agentMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`rounded-lg p-3 text-sm ${msg.role === "user"
-                        ? "bg-primary/10 ml-8"
-                        : "bg-muted mr-8"
-                      }`}
-                  >
-                    <div className="font-medium text-xs text-muted-foreground mb-1">
-                      {msg.role === "user" ? "You" : "Assistant"}
-                    </div>
-                    <div className="whitespace-pre-line">{msg.content}</div>
-                  </div>
-                ))}
-                {isAgentResponding && (
-                  <div className="bg-muted mr-8 rounded-lg p-3 text-sm">
-                    <div className="font-medium text-xs text-muted-foreground mb-1">Assistant</div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Thinking...
-                    </div>
-                  </div>
-                )}
-                <div ref={agentMessagesEndRef} />
-              </CardContent>
-            </Card>
-          )}
-
-          {hasSearched && !isSearching && results.length === 0 && queryRelevant && (
-            <Card>
-              <CardContent className="py-8 text-center">
-                <p className="text-muted-foreground">
-                  No results found for this query. Try a more specific title, industry, or location.
-                </p>
-              </CardContent>
-            </Card>
+          {/* Fallback for no results */}
+          {hasSearched && !isSearching && results.length === 0 && (
+             <div className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
+                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+                  <Search className="h-6 w-6 text-muted-foreground/40" />
+                </div>
+                <div>
+                   <h3 className="text-lg font-semibold">No results found</h3>
+                   <p className="text-sm text-muted-foreground max-w-xs mx-auto">Try refining your search terms or using a different prompt.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setNaturalLanguageQuery("")}>Clear Search</Button>
+             </div>
           )}
         </div>
+
+        {(detectedSignals.length > 0 || isDetectingSignals || workflowSteps.length > 0 || totalCreditsUsed > 0) && (
+          <div className="lg:col-span-3">
+            <div className="lg:sticky lg:top-6 space-y-6">
+                  {/* Signals Section */}
+                  {detectedSignals.length > 0 && (
+                    <Card className="border-border/60 bg-card/40 backdrop-blur-md shadow-lg overflow-hidden ring-1 ring-white/10">
+                      <CardHeader className="pb-3 border-b border-white/5 bg-yellow-500/[0.03]">
+                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-yellow-500" />
+                          Live Signals
+                        </CardTitle>
+                        <CardDescription className="text-[10px] uppercase tracking-wider font-semibold opacity-60">Intelligence Pack</CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        <ScrollArea className="max-h-[400px]">
+                          <div className="divide-y divide-border/20">
+                            {detectedSignals.map((signal, idx) => (
+                              <div key={idx} className="p-4 hover:bg-white/5 transition-colors group">
+                                  <div className="space-y-2">
+                                    <div className="flex justify-between items-start gap-2">
+                                      <h4 className="text-[13px] font-bold leading-tight group-hover:text-primary transition-colors">
+                                        {signal.company_name || signal.person_name || signal.name}
+                                      </h4>
+                                      <Badge className="text-[9px] h-4 px-1 bg-yellow-500/10 text-yellow-600 border-none shrink-0">Signal</Badge>
+                                    </div>
+                                    <div className="space-y-1.5 pl-1.5 border-l-2 border-yellow-500/20">
+                                      {(signal.signals || [signal]).map((s: any, si: number) => (
+                                        <div key={si} className="text-[11px] leading-relaxed">
+                                          <p className="font-medium">{s.title || s.type?.replace(/_/g, ' ') || "Alert"}</p>
+                                          <p className="opacity-70 line-clamp-2">{s.description}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Workflow Section */}
+                  {workflowSteps.length > 0 && (
+                    <Card className="border-border/60 bg-card/40 backdrop-blur-md shadow-md overflow-hidden ring-1 ring-white/10">
+                      <CardHeader className="pb-3 border-b border-white/5 bg-violet-500/[0.03]">
+                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                          <Activity className="h-4 w-4 text-violet-500" />
+                          Analysis Path
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="space-y-4">
+                          {workflowSteps.map((step, idx) => (
+                            <div key={idx} className="flex gap-3">
+                              <div className="flex flex-col items-center">
+                                <div className="h-5 w-5 rounded-full border border-violet-500/40 bg-violet-500/10 flex items-center justify-center text-[10px] text-violet-600 font-bold">
+                                  {idx + 1}
+                                </div>
+                                {idx !== workflowSteps.length - 1 && <div className="w-px h-full bg-border/40 mt-1" />}
+                              </div>
+                              <div className="pb-2">
+                                <p className="text-[12px] font-semibold leading-tight">{step.title}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">{step.tool}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Resource Check */}
+                  {totalCreditsUsed > 0 && (
+                    <Card className="border-border/60 bg-card/40 backdrop-blur-md ring-1 ring-white/10">
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-[10px] font-bold opacity-40 uppercase tracking-tighter">Credits Consumed</span>
+                          <span className="text-lg font-bold font-mono tracking-tighter text-primary">{totalCreditsUsed}</span>
+                        </div>
+                        <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-primary/80" style={{ width: `${Math.min(100, (totalCreditsUsed/20)*100)}%` }} />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] opacity-60 text-center">Resources enriched for this search</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
-}  
+}

@@ -616,13 +616,13 @@ export function ProspectsResultsTable({
                                         </Button>
                                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
                                             onClick={async () => { setRevealedEmail((prev) => ({ ...prev, [rowKey]: true })); onEnrichReveal?.(prospect, "email") }}
-                                            title={`Waterfall zap: ${formatCreditsLabel(waterfallEmail?.credits_consumed)}`}>
+                                            title={`Advanced enrichment: ${formatCreditsLabel(waterfallEmail?.credits_consumed)}`}>
                                             <Zap className="h-3 w-3" />
                                         </Button>
                                     </div>
                                     <div className="text-[10px] text-muted-foreground mt-1 space-x-3">
                                         <span>Reveal cost: {formatCreditsLabel(CONTACTOUT_EMAIL_COST)}</span>
-                                        <span>Waterfall zap: {formatCreditsLabel(waterfallEmail?.credits_consumed)}</span>
+                                        <span>Advanced enrichment: {formatCreditsLabel(waterfallEmail?.credits_consumed)}</span>
                                     </div>
                                 </>
                             ) : cache?.loading ? (
@@ -633,7 +633,7 @@ export function ProspectsResultsTable({
                                         <span className={`text-xs break-all ${!waterfallEmail?.email ? "text-muted-foreground italic" : ""}`}>
                                             {waterfallEmail?.email || "Not available"}
                                         </span>
-                                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                        <div className="text-xs text-green-600 font-medium">✓ Enriched</div>
                                     </div>
                                     <span className="text-[10px] text-muted-foreground">Cost: {formatCreditsLabel(waterfallEmail?.credits_consumed, "~1 credit")}</span>
                                 </div>
@@ -670,13 +670,13 @@ export function ProspectsResultsTable({
                                         </Button>
                                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-500 hover:text-blue-600"
                                             onClick={async () => { setRevealedPhone((prev) => ({ ...prev, [rowKey]: true })); onEnrichReveal?.(prospect, "phone") }}
-                                            title={`Waterfall zap: ${formatCreditsLabel(waterfallPhone?.credits_consumed)}`}>
+                                            title={`Advanced enrichment: ${formatCreditsLabel(waterfallPhone?.credits_consumed)}`}>
                                             <Zap className="h-3 w-3" />
                                         </Button>
                                     </div>
                                     <div className="text-[10px] text-muted-foreground mt-1 space-x-3">
                                         <span>Reveal cost: {formatCreditsLabel(CONTACTOUT_PHONE_COST)}</span>
-                                        <span>Waterfall zap: {formatCreditsLabel(waterfallPhone?.credits_consumed)}</span>
+                                        <span>Advanced enrichment: {formatCreditsLabel(waterfallPhone?.credits_consumed)}</span>
                                     </div>
                                 </>
                             ) : waterfallPhone ? (
@@ -685,7 +685,7 @@ export function ProspectsResultsTable({
                                         <span className={`text-xs ${!waterfallPhone?.phone ? "text-muted-foreground italic" : ""}`}>
                                             {waterfallPhone?.phone || "Not available"}
                                         </span>
-                                        <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                        <div className="text-xs text-green-600 font-medium">✓ Enriched</div>
                                     </div>
                                     <span className="text-[10px] text-muted-foreground">Cost: {formatCreditsLabel(waterfallPhone?.credits_consumed, "~1 credit")}</span>
                                 </div>
@@ -697,14 +697,14 @@ export function ProspectsResultsTable({
                             ) : phones.length > 0 ? (
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs">{phones[0]}</span>
-                                    <div className="text-xs text-green-600 font-medium">✓ Waterfall</div>
+                                    <div className="text-xs text-green-600 font-medium">✓ Enriched</div>
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-muted-foreground">Not found</span>
                                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-orange-500 hover:text-orange-600"
                                         onClick={async () => { setRevealedPhone((prev) => ({ ...prev, [rowKey]: true })); await revealContact(rowKey, prospect, "phone") }}
-                                        title="Retry waterfall enrichment">
+                                        title="Retry enrichment">
                                         <Zap className="h-3 w-3" />
                                     </Button>
                                 </div>
