@@ -584,59 +584,6 @@ class LeadCopilotService:
 
         print(f">>> [FindSimilar] source={source_name}|{source_domain} industry={industry} emp={emp} techs={techs}", flush=True)
 
-        def normalize_lookalike(entry: Dict[str, Any]) -> Dict[str, Any]:
-            lname = (
-                entry.get("lookalike_business_name")
-                or entry.get("name")
-                or entry.get("business_name")
-                or entry.get("companyName")
-                or "Lookalike"
-            )
-            ldomain = (
-                entry.get("lookalike_website")
-                or entry.get("lookalike_domain")
-                or entry.get("website")
-                or entry.get("domain")
-            )
-            lindustry = (
-                entry.get("lookalike_naics_description")
-                or entry.get("industry")
-                or entry.get("primary_industry")
-            )
-            lemployees = (
-                entry.get("lookalike_number_of_employees_range")
-                or entry.get("employee_count_range")
-                or entry.get("company_size")
-                or entry.get("employees")
-            )
-            return {
-                "name": lname,
-                "domain": ldomain,
-                "industry": lindustry,
-                "employee_count_range": lemployees,
-            }
-
-        # Step 0: Try Explorium lookalikes (best signal if we can resolve a business_id)
-        try:
-            seed_result = await explorium.search_companies(
-                {"domain": source_domain, "name": source_name}, limit=1
-            )
-            seed_list = seed_result.get("companies", []) if isinstance(seed_result, dict) else []
-            seed = seed_list[0] if seed_list else None
-            seed_bid = seed.get("business_id") or seed.get("id") if seed else None
-            if seed_bid:
-                lookalikes = await explorium.enrich_lookalikes(seed_bid)
-                data = lookalikes.get("data") or []
-                if isinstance(data, list) and data:
-                    normalized = [normalize_lookalike(x) for x in data][:LIMIT]
-                    return {
-                        "similar_companies": normalized,
-                        "filters_used": {"lookalikes": True},
-                        "total_found": len(normalized),
-                    }
-        except Exception as e:
-            print(f">>> [FindSimilar] Lookalikes failed: {e}", flush=True)
-
         # Step 1: Look up source company via domain to get Explorium's own category
         if source_domain:
             try:
@@ -710,6 +657,10 @@ class LeadCopilotService:
                         break
                     cd = str(c.get("domain", "")).lower().replace("www.", "")
                     if cd and cd in seen_domains:
+                        continue
+                    # Drop placeholder or empty results
+                    cname = str(c.get("name", "") or "").strip()
+                    if not cname or cname.lower() == "lookalike":
                         continue
                     companies.append(c)
                     if cd:
