@@ -309,6 +309,9 @@ class Settings(BaseSettings):
         3600,
         description="Visitor deduplication window in seconds"
     )
+    # Enhanced enrichment APIs (optional — system degrades gracefully if absent)
+    HUNTER_API_KEY: str = Field("", description="Hunter.io API key for domain → email lookup")
+    CLEARBIT_API_KEY: str = Field("", description="Clearbit API key for company data fallback")
 
     # ========================================================================
     # VALIDATORS - Ensure configuration is valid

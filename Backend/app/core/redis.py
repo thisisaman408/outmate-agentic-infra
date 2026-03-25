@@ -1,4 +1,6 @@
+import asyncio
 import redis.asyncio as redis
+import redis.exceptions as redis_exc
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
 from typing import Optional
@@ -47,7 +49,13 @@ class RedisManager:
                 cls.client = redis.from_url(
                     settings.REDIS_URL,
                     retry=retry,
-                    retry_on_error=[ConnectionError, TimeoutError],
+                    # Include redis-specific connection errors alongside built-ins
+                    retry_on_error=[
+                        ConnectionError,
+                        TimeoutError,
+                        redis_exc.ConnectionError,
+                        redis_exc.TimeoutError,
+                    ],
                     health_check_interval=30,
                     socket_connect_timeout=10,
                     socket_timeout=10,
@@ -85,10 +93,12 @@ class RedisManager:
 
     @classmethod
     def reset(cls) -> None:
-        """Discard the current client so the next get_client() call
-        creates a fresh connection. Call this after a connection error."""
+        """Discard the current client and immediately create a new one.
+        Call this after a connection error so the NEXT request succeeds
+        instead of also hitting a dead socket."""
         cls.client = None
         cls.ready = False
+        cls.connect()  # reconnect immediately — avoids a second failure
 
     @classmethod
     async def health_check(cls) -> bool:
@@ -107,3 +117,28 @@ async def get_redis() -> redis.Redis:
     if RedisManager.client is None:
         RedisManager.connect()
     return RedisManager.client
+
+
+async def _keepalive_loop(interval: int = 45) -> None:
+    """Background task that pings Redis every `interval` seconds.
+
+    Upstash (and many managed Redis providers) forcibly close TCP connections
+    that are idle for 60-90 seconds.  A periodic PING issued by this task
+    keeps the connection alive so requests never hit a dead socket.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            client = RedisManager.get_client()
+            if client is not None:
+                await client.ping()
+                logger.debug("Redis keepalive ping OK")
+        except Exception as exc:
+            logger.warning("Redis keepalive ping failed — resetting client: %s", exc)
+            RedisManager.reset()
+
+
+def start_keepalive(interval: int = 45) -> asyncio.Task:
+    """Schedule the keepalive loop as an asyncio background task.
+    Call this inside a FastAPI lifespan startup block."""
+    return asyncio.create_task(_keepalive_loop(interval))

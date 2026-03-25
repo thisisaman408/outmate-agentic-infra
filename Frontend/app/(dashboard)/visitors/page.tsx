@@ -130,6 +130,7 @@ interface Visit {
     headquarters_country: string | null
     description: string | null
     source_site: string | null  // pixel owner's domain (set at track time)
+    enrichment_status: "pending" | "processing" | "done" | "failed" | null
 }
 
 interface VisitorAnalytics {
@@ -229,7 +230,8 @@ function extractVisitData(visit: Visit) {
 
 // Group visits by company for Companies tab
 function groupByCompany(visits: Visit[]): Array<{
-    company: string
+    company: string       // raw group key (may be IP if unresolved)
+    displayName: string   // human-readable: company name, person name, or IP
     domain: string | null
     visits: Visit[]
     totalIntent: number
@@ -241,7 +243,9 @@ function groupByCompany(visits: Visit[]): Array<{
 }> {
     const map = new Map<string, Visit[]>()
     for (const v of visits) {
-        const key = v.company || v.resolution?.company || v.domain || v.ip
+        const d = extractVisitData(v)
+        // Group key priority: company name > person full name > domain > IP
+        const key = v.company || v.resolution?.company || d.fullName || v.domain || v.ip
         if (!map.has(key)) map.set(key, [])
         map.get(key)!.push(v)
     }
@@ -264,14 +268,18 @@ function groupByCompany(visits: Visit[]): Array<{
             }
         }
         const sorted = [...groupVisits].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        const firstD = extractVisitData(sorted[0])
+        // Human-readable display name: company > full name > domain > IP
+        const displayName = firstD.company || firstD.fullName || sorted[0]?.domain || company
         return {
             company,
+            displayName,
             domain: groupVisits[0]?.domain || null,
             visits: sorted,
             totalIntent: Math.max(...groupVisits.map(v => v.intent_score)),
             lastSeen: sorted[0]?.created_at || "",
             icpScore: Math.max(...groupVisits.map(getIcpScore)),
-            tier: extractVisitData(sorted[0]).tier,
+            tier: firstD.tier,
             botScore: Math.max(...groupVisits.map(v => extractVisitData(v).botScore)),
             contacts: Array.from(contacts.values()),
         }
@@ -458,20 +466,35 @@ export default function VisitorsPage() {
         const interval = setInterval(fetchData, 30000)
         const analyticsInterval = setInterval(() => fetchAnalytics(period), 60000)
 
-        const streamToken = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
-        // Use the backend URL directly for SSE (EventSource can't add headers,
-        // and Next.js rewrites don't stream properly in all deploy configs).
-        const streamBase = API_BASE
-        const streamUrl = streamToken
-            ? `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(streamToken)}`
-            : `${streamBase}/api/v1/visitors/stream`
-
         let es: EventSource | null = null
         let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
         let reconnectDelay = 1000
+        // Use the backend URL directly for SSE (EventSource can't add headers,
+        // and Next.js rewrites don't stream properly in all deploy configs).
+        const streamBase = API_BASE
 
-        const connectSSE = () => {
+        const connectSSE = async () => {
             if (es) { try { es.close() } catch { } }
+            // Exchange the main JWT for a short-lived (90s) SSE token so the
+            // long-lived credential never appears in server access logs.
+            let streamUrl = `${streamBase}/api/v1/visitors/stream`
+            try {
+                const sseRes = await fetch(`${API}/sse-token`, {
+                    method: "POST",
+                    headers: { ...getAuthHeaders() },
+                })
+                if (sseRes.ok) {
+                    const { sse_token } = await sseRes.json()
+                    streamUrl = `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(sse_token)}`
+                } else {
+                    // Fallback: use main token if exchange fails
+                    const main = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
+                    if (main) streamUrl = `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(main)}`
+                }
+            } catch {
+                const main = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null
+                if (main) streamUrl = `${streamBase}/api/v1/visitors/stream?token=${encodeURIComponent(main)}`
+            }
             es = new EventSource(streamUrl)
             es.onmessage = (evt) => {
                 try {
@@ -505,7 +528,7 @@ export default function VisitorsPage() {
                 }, reconnectDelay)
             }
         }
-        connectSSE()
+        void connectSSE()
 
         return () => {
             clearInterval(interval)
@@ -749,24 +772,29 @@ export default function VisitorsPage() {
                                         </TableCell></TableRow>
                                     ) : companyGroups.map((group) => {
                                         const intent = getIntent(group.totalIntent)
-                                        const firstVisit = group.visits[0]
+                                        // Prefer the most-enriched visit (has name/company) over just the most-recent
+                                        const firstVisit = group.visits.find(v => v.full_name || v.company || v.resolution?.person?.full_name || v.resolution?.company) ?? group.visits[0]
                                         const d = extractVisitData(firstVisit)
                                         return (
                                             <TableRow key={group.company} className="cursor-pointer hover:bg-muted/50" onClick={() => openSidebar(firstVisit, group)}>
                                                 <TableCell>
                                                     <div className="flex items-center gap-3">
                                                         <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center text-sm font-semibold text-muted-foreground">
-                                                            {(group.company || "?").charAt(0).toUpperCase()}
+                                                            {(group.displayName || "?").charAt(0).toUpperCase()}
                                                         </div>
                                                         <div>
                                                             <div className="font-medium text-sm flex items-center gap-2">
-                                                                {group.company || "Anonymous"}
+                                                                {group.displayName || "Anonymous"}
                                                                 {group.tier === "person" && <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-600">Person</Badge>}
                                                                 {group.tier === "company" && <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50">Company</Badge>}
                                                                 {group.tier === "noise" && <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-slate-100 text-slate-500">Noise</Badge>}
                                                             </div>
                                                             <div className="text-xs text-muted-foreground">
-                                                                {[d.industry, d.employeeRange && `${d.employeeRange} emp`].filter(Boolean).join(" · ") || group.domain || "—"}
+                                                                {[d.industry, d.employeeRange && `${d.employeeRange} emp`].filter(Boolean).join(" · ")
+                                                                    || (d.jobTitle && group.tier === "person" ? d.jobTitle : null)
+                                                                    || group.domain
+                                                                    || (d.fullName && d.company ? d.company : null)
+                                                                    || "—"}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -883,6 +911,12 @@ export default function VisitorsPage() {
                                                                 {d.tier === "person" && <Badge variant="default" className="h-4 px-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-600">Person</Badge>}
                                                                 {d.tier === "company" && <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50">Company</Badge>}
                                                                 {d.tier === "noise" && <Badge variant="secondary" className="h-4 px-1.5 text-[10px] bg-slate-100 text-slate-500">Noise</Badge>}
+                                                                {(visit.enrichment_status === "processing" || visit.enrichment_status === "pending") && (
+                                                                    <RefreshCw className="h-3 w-3 text-muted-foreground animate-spin" />
+                                                                )}
+                                                                {visit.enrichment_status === "failed" && (
+                                                                    <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">Failed</Badge>
+                                                                )}
                                                             </div>
                                                             <div className="text-xs text-muted-foreground">{d.fullName ? (d.jobTitle || d.email || visit.ip) : (d.jobTitle || visit.ip)}</div>
                                                         </div>
