@@ -567,58 +567,92 @@ class LeadCopilotService:
         return result
 
     async def _handle_find_similar(self, name: str, company_name: str, role: str, domain: Optional[str], prospect: dict, company: dict, **kwargs) -> dict:
-        """Extract ICP attributes from prospect and search for similar companies."""
+        """Find 3 similar companies using cascading Explorium searches."""
         from app.services.explorium_service import ExploriumService
 
-        # Build filters using Explorium-native filter keys
-        filters: Dict[str, Any] = {}
-        if company.get("industry"):
-            # Use linkedin_category which _map_filters normalizes properly
-            filters["linkedin_category"] = company["industry"]
-        # Use company_size with Explorium bucket format
-        emp = company.get("employee_count") or company.get("employee_count_range")
+        LIMIT = 3
+        explorium = ExploriumService()
+        source_domain = (domain or company.get("domain") or "").strip()
+        source_name = (company_name or company.get("name") or "").strip()
+        industry = company.get("industry") or ""
+        emp = company.get("employee_count") or company.get("employee_count_range") or ""
+        techs = company.get("technologies") or []
+        if isinstance(techs, str):
+            techs = [t.strip() for t in techs.split(",") if t.strip()]
+
+        print(f">>> [FindSimilar] source={source_name}|{source_domain} industry={industry} emp={emp} techs={techs}", flush=True)
+
+        # If we have no industry, look up the source company first to derive ICP
+        if not industry and (source_domain or source_name):
+            try:
+                lookup: Dict[str, Any] = {}
+                if source_domain:
+                    lookup["domain"] = source_domain
+                if source_name:
+                    lookup["name"] = source_name
+                src_result = await explorium.search_companies(lookup, limit=1)
+                src_list = src_result.get("companies", [])
+                if src_list:
+                    src = src_list[0]
+                    industry = industry or src.get("industry") or src.get("linkedin_industry_category") or ""
+                    if not emp:
+                        emp = src.get("employee_count_range") or src.get("employee_count_exact") or ""
+                    print(f">>> [FindSimilar] Derived ICP: industry={industry} emp={emp}", flush=True)
+            except Exception as e:
+                print(f">>> [FindSimilar] Source lookup failed: {e}", flush=True)
+
+        # Build cascading search attempts (most specific → broadest)
+        attempts: list = []
+        full: Dict[str, Any] = {}
+        if industry:
+            full["linkedin_category"] = industry
         if emp:
-            if isinstance(emp, str):
-                filters["company_size"] = emp
-            elif isinstance(emp, (int, float)):
-                filters["company_size"] = str(int(emp))
-        if company.get("technologies"):
-            techs = company["technologies"]
-            if isinstance(techs, list) and techs:
-                # Use Explorium's tech stack filter for precise matching
-                filters["company_tech_stack_tech"] = techs[:5]
+            full["company_size"] = str(emp) if not isinstance(emp, str) else emp
+        if techs and isinstance(techs, list):
+            full["company_tech_stack_tech"] = techs[:5]
+        if full:
+            attempts.append(("full", dict(full)))
+        no_tech = {k: v for k, v in full.items() if k != "company_tech_stack_tech"}
+        if no_tech and no_tech != full:
+            attempts.append(("no_tech", no_tech))
+        if industry:
+            attempts.append(("industry_only", {"linkedin_category": industry}))
+        if source_name:
+            attempts.append(("keyword", {"keywords": source_name}))
 
-        print(f">>> [FindSimilar] filters={filters}", flush=True)
+        companies: list = []
+        used_filters: Dict[str, Any] = {}
+        seen_domains: set = set()
+        if source_domain:
+            seen_domains.add(source_domain.lower().replace("www.", ""))
 
-        try:
-            explorium = ExploriumService()
-            result = await explorium.search_companies(filters, limit=3)
-            companies = result.get("companies", [])
-            print(f">>> [FindSimilar] got {len(companies)} companies", flush=True)
+        for label, filt in attempts:
+            if len(companies) >= LIMIT:
+                break
+            try:
+                print(f">>> [FindSimilar] Trying '{label}': {filt}", flush=True)
+                result = await explorium.search_companies(filt, limit=LIMIT + 3)
+                batch = result.get("companies", [])
+                print(f">>> [FindSimilar] '{label}' returned {len(batch)}", flush=True)
+                if not used_filters and batch:
+                    used_filters = filt
+                for c in batch:
+                    if len(companies) >= LIMIT:
+                        break
+                    cd = str(c.get("domain", "")).lower().replace("www.", "")
+                    if cd and cd in seen_domains:
+                        continue
+                    companies.append(c)
+                    if cd:
+                        seen_domains.add(cd)
+            except Exception as e:
+                print(f">>> [FindSimilar] '{label}' failed: {e}", flush=True)
 
-            # If no results with all filters, retry with just industry + size
-            if not companies and filters.get("company_tech_stack_tech"):
-                fallback_filters = {k: v for k, v in filters.items() if k != "company_tech_stack_tech"}
-                if fallback_filters:
-                    print(f">>> [FindSimilar] retrying without tech filter: {fallback_filters}", flush=True)
-                    result = await explorium.search_companies(fallback_filters, limit=5)
-                    companies = result.get("companies", [])
-                    print(f">>> [FindSimilar] fallback got {len(companies)} companies", flush=True)
-
-            return {
-                "similar_companies": companies,
-                "filters_used": filters,
-                "total_found": len(companies),
-            }
-        except Exception as e:
-            logger.warning("Find similar failed: %s", e)
-            print(f">>> [FindSimilar] error: {e}", flush=True)
-            return {
-                "similar_companies": [],
-                "filters_used": filters,
-                "total_found": 0,
-                "error": "Search service unavailable",
-            }
+        return {
+            "similar_companies": companies[:LIMIT],
+            "filters_used": used_filters,
+            "total_found": len(companies),
+        }
 
     async def _handle_objection(self, name: str, company_name: str, role: str, domain: Optional[str], prospect: dict, company: dict, prompt: Optional[str], **kwargs) -> dict:
         """Generate tailored objection rebuttals."""
