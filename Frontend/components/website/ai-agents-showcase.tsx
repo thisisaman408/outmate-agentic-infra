@@ -1,10 +1,11 @@
 "use client"
 
 import { motion } from "framer-motion"
+import { Search, PenTool, BarChart3 } from "lucide-react"
 
 const AGENTS = [
   {
-    icon: "🔍",
+    icon: Search,
     name: "Research Agent",
     color: "#4B3FE4",
     tagline: "Deep Account Intelligence",
@@ -12,7 +13,7 @@ const AGENTS = [
     capabilities: ["Org chart mapping", "Stakeholder discovery", "Buying trigger identification", "Competitive intelligence"],
   },
   {
-    icon: "✍️",
+    icon: PenTool,
     name: "Outreach Agent",
     color: "#CAFF00",
     tagline: "Hyper-Personalized Messaging",
@@ -20,7 +21,7 @@ const AGENTS = [
     capabilities: ["Email sequence writing", "LinkedIn personalization", "A/B variant generation", "Tone & style adaptation"],
   },
   {
-    icon: "📊",
+    icon: BarChart3,
     name: "Analysis Agent",
     color: "#7B5CFF",
     tagline: "Self-Optimizing GTM",
@@ -65,10 +66,10 @@ export function AIAgentsShowcase() {
             >
               {/* Icon */}
               <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-6 border transition-all duration-300 group-hover:scale-110"
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6 border transition-all duration-300 group-hover:scale-110"
                 style={{ background: `${agent.color}12`, borderColor: `${agent.color}25` }}
               >
-                {agent.icon}
+                <agent.icon className="h-7 w-7" style={{ color: agent.color }} />
               </div>
 
               {/* Badge */}

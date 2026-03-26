@@ -43,11 +43,9 @@ export function Footer() {
           {/* Logo block */}
           <div className="col-span-2 md:col-span-1 space-y-4">
             <Link href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-[#4B3FE4] flex items-center justify-center">
-                <span className="text-white font-black text-sm">O</span>
-              </div>
+              <img src="/image.png" alt="Outmate" className="h-8 w-8 rounded-lg object-cover" />
               <span
-                className="text-white font-black text-lg tracking-tight"
+                className="text-white font-black text-lg tracking-tight uppercase"
                 style={{ fontFamily: "var(--font-jakarta, sans-serif)" }}
               >
                 outmate

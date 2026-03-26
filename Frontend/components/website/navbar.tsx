@@ -34,11 +34,9 @@ export function Navbar() {
       <nav className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[#4B3FE4] flex items-center justify-center">
-            <span className="text-white font-black text-sm tracking-tight">O</span>
-          </div>
+          <img src="/image.png" alt="Outmate" className="h-8 w-8 rounded-lg object-cover" />
           <span
-            className="text-white font-black text-lg tracking-tight"
+            className="text-white font-black text-lg tracking-tight uppercase"
             style={{ fontFamily: "var(--font-jakarta, sans-serif)" }}
           >
             outmate

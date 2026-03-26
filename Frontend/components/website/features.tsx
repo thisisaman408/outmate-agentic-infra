@@ -1,40 +1,41 @@
 "use client"
 
 import { motion } from "framer-motion"
+import { Zap, Search, Megaphone, Bot, RefreshCw, Brain } from "lucide-react"
 
 const FEATURES = [
   {
-    icon: "⚡",
+    icon: Zap,
     title: "Signal Engine",
     desc: "4,000+ real-time buying signals including intent data, job changes, funding events, tech installs, news triggers, and social activity.",
     accent: "#CAFF00",
   },
   {
-    icon: "🔬",
+    icon: Search,
     title: "Deep Enrichment",
     desc: "Enrich businesses and prospects with 100+ data fields from 50+ providers including Explorium, Crustdata, Airscale, BetterContact, and Unipile.",
     accent: "#4B3FE4",
   },
   {
-    icon: "📣",
+    icon: Megaphone,
     title: "AI Campaigns",
     desc: "Generate hyper-personalized multi-channel campaigns and outreach sequences automatically based on enriched signals.",
     accent: "#7B5CFF",
   },
   {
-    icon: "🤖",
+    icon: Bot,
     title: "Outmate Copilot",
     desc: "Your AI GTM assistant. Ask any question, get instant analysis, recommendations, and actionable next steps.",
     accent: "#CAFF00",
   },
   {
-    icon: "🔄",
+    icon: RefreshCw,
     title: "Workflows & Automation",
     desc: "Build powerful no-code GTM automations with a visual workflow builder. Connect signals to actions seamlessly.",
     accent: "#4B3FE4",
   },
   {
-    icon: "🧠",
+    icon: Brain,
     title: "AI Agents",
     desc: "Deploy autonomous AI agents that research accounts, personalize at scale, and execute outbound end-to-end.",
     accent: "#7B5CFF",
@@ -83,10 +84,10 @@ export function Features() {
 
               <div className="relative">
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl mb-5 border"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center mb-5 border"
                   style={{ background: `${feat.accent}12`, borderColor: `${feat.accent}25` }}
                 >
-                  {feat.icon}
+                  <feat.icon className="h-6 w-6" style={{ color: feat.accent }} />
                 </div>
                 <h3
                   className="text-lg font-black text-white mb-3"

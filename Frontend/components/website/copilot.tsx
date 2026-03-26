@@ -89,9 +89,7 @@ export function Copilot() {
         >
           {/* Chat header */}
           <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
-            <div className="w-8 h-8 rounded-lg bg-[#4B3FE4] flex items-center justify-center">
-              <span className="text-white text-xs font-black">O</span>
-            </div>
+            <img src="/image.png" alt="Outmate" className="h-8 w-8 rounded-lg object-cover" />
             <span className="text-sm font-semibold text-white">Outmate Copilot</span>
             <div className="ml-auto flex items-center gap-1.5">
               <div className="h-1.5 w-1.5 rounded-full bg-[#CAFF00] animate-pulse" />

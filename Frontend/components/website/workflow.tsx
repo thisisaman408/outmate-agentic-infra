@@ -1,13 +1,14 @@
 "use client"
 
 import { motion } from "framer-motion"
+import { Zap, Search, BarChart3, PenTool, Rocket } from "lucide-react"
 
 const NODES = [
-  { label: "Trigger", sub: "Job change signal detected", icon: "⚡", color: "#CAFF00" },
-  { label: "Enrich", sub: "Pull 50+ data fields", icon: "🔬", color: "#7B5CFF" },
-  { label: "Score Lead", sub: "AI propensity model", icon: "📊", color: "#4B3FE4" },
-  { label: "Generate Email", sub: "Hyper-personalized copy", icon: "✍️", color: "#7B5CFF" },
-  { label: "Send Campaign", sub: "Launch via Instantly", icon: "🚀", color: "#CAFF00" },
+  { label: "Trigger", sub: "Job change signal detected", icon: Zap, color: "#CAFF00" },
+  { label: "Enrich", sub: "Pull 50+ data fields", icon: Search, color: "#7B5CFF" },
+  { label: "Score Lead", sub: "AI propensity model", icon: BarChart3, color: "#4B3FE4" },
+  { label: "Generate Email", sub: "Hyper-personalized copy", icon: PenTool, color: "#7B5CFF" },
+  { label: "Send Campaign", sub: "Launch via Instantly", icon: Rocket, color: "#CAFF00" },
 ]
 
 export function Workflow() {
@@ -61,7 +62,7 @@ export function Workflow() {
                   >
                     {i + 1}
                   </div>
-                  <span className="text-2xl mb-2">{node.icon}</span>
+                  <node.icon className="h-6 w-6 mb-2" style={{ color: node.color }} />
                   <p className="text-xs font-black text-white text-center" style={{ fontFamily: "var(--font-jakarta, sans-serif)" }}>
                     {node.label}
                   </p>

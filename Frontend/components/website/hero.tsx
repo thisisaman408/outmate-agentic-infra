@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { Zap, ArrowRight, Sparkles } from "lucide-react"
+import { Zap, ArrowRight, Sparkles, Flame, CheckCircle2, Mail } from "lucide-react"
 
 const PLACEHOLDERS = [
   "Find SaaS companies using Salesforce that recently raised Series B...",
@@ -14,9 +14,9 @@ const PLACEHOLDERS = [
 ]
 
 const FLOATING_CARDS = [
-  { icon: "🔥", text: "Intent signal detected", sub: "Acme Corp just visited your pricing page", delay: 0 },
-  { icon: "✅", text: "47 contacts enriched", sub: "LinkedIn + verified email data added", delay: 1.2 },
-  { icon: "📧", text: "Campaign launched", sub: "150 personalized sequences sent", delay: 2.4 },
+  { icon: Flame, color: "#FF4D4D", text: "Intent signal detected", sub: "Acme Corp just visited your pricing page", delay: 0 },
+  { icon: CheckCircle2, color: "#CAFF00", text: "47 contacts enriched", sub: "LinkedIn + verified email data added", delay: 1.2 },
+  { icon: Mail, color: "#7B5CFF", text: "Campaign launched", sub: "150 personalized sequences sent", delay: 2.4 },
 ]
 
 const COMPANY_LOGOS = ["Stripe", "Figma", "Linear", "Notion", "Rippling", "Brex"]
@@ -113,7 +113,9 @@ function FloatingDashboard() {
           style={{ top: `${i * 112}px` }}
         >
           <div className="flex items-start gap-3">
-            <span className="text-2xl">{card.icon}</span>
+            <div className="flex-shrink-0 h-10 w-10 flex items-center justify-center rounded-xl bg-white/5 border border-white/10">
+              <card.icon className="h-5 w-5" style={{ color: card.color }} />
+            </div>
             <div>
               <p className="text-sm font-semibold text-white">{card.text}</p>
               <p className="text-xs text-[#A0A0C0] mt-0.5">{card.sub}</p>
