@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, use, useEffect, Suspense } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -1589,7 +1589,8 @@ const MultiSelect = ({ label, options, source, value, onChange }: {
 };
 
 function SignalWizardPageContent({ params }: SignalWizardPageProps) {
-    const { signalId } = use(params)
+    const routeParams = useParams()
+    const signalId = (routeParams?.signalId as string) || (params as any)?.signalId || ""
     const router = useRouter()
     const searchParams = useSearchParams()
     const category = searchParams.get("category") || "overview"
