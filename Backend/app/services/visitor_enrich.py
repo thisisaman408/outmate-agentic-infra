@@ -278,6 +278,7 @@ _CDN_INFRA_DOMAINS = {
     "fastly.net", "fastlylb.net",                                    # Fastly
     "edgecastcdn.net", "azureedge.net", "trafficmanager.net",       # Azure CDN
     "cdn.apple.com", "icloud-content.com", "apple-dns.net",        # Apple
+    "aaplimg.com", "brkgls.com", "3banana.com", "appstore.com",   # Apple infra
     "nflxvideo.net", "netflix.com",                                  # Netflix
     "twimg.com", "twitchcdn.net",                                    # Twitter/Twitch
     "yahoodns.net", "yimg.com",                                      # Yahoo
@@ -309,7 +310,13 @@ _CDN_DOMAIN_TO_COMPANY = {
     "nflxvideo.net": ("Netflix", "netflix.com"),
     "apple-dns.net": ("Apple", "apple.com"),
     "icloud-content.com": ("Apple", "apple.com"),
+    "aaplimg.com": ("Apple", "apple.com"),
+    "brkgls.com": ("Apple", "apple.com"),
+    "3banana.com": ("Apple", "apple.com"),
+    "appstore.com": ("Apple", "apple.com"),
     "twimg.com": ("X", "x.com"),
+    "twitchcdn.net": ("Twitch", "twitch.tv"),
+    "nflxvideo.net": ("Netflix", "netflix.com"),
 }
 
 _PTR_CORPORATE_RE = _re.compile(
