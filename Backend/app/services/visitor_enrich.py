@@ -229,13 +229,28 @@ _LEGAL_SUFFIX_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+# Names that are ONLY a legal suffix — not a real company name.
+# Catches cases where Explorium/RDAP return "Inc." or "LLC" as the entire name.
+_JUNK_COMPANY_NAMES = {
+    "inc", "inc.", "llc", "ltd", "ltd.", "corp", "corp.", "co", "co.",
+    "corporation", "incorporated", "company", "limited", "gmbh", "ag",
+    "plc", "llp", "platforms", "holdings", "group", "services",
+    "technologies", "solutions", "enterprises", "international",
+    "the", "n/a", "na", "none", "unknown", "null", "undefined", "",
+}
+
 def _normalize_company_name(name: str | None) -> str | None:
-    """Strip legal suffixes, collapse whitespace, return title-cased canonical name."""
+    """Strip legal suffixes, collapse whitespace, reject junk names."""
     if not name:
         return None
     cleaned = _LEGAL_SUFFIX_RE.sub("", name).strip().strip(".,()-")
     cleaned = " ".join(cleaned.split())  # collapse all whitespace
-    return cleaned if len(cleaned) >= 2 else None
+    # Reject if result is too short or is itself just a legal/junk word
+    if len(cleaned) < 2:
+        return None
+    if cleaned.lower().strip(".") in _JUNK_COMPANY_NAMES:
+        return None
+    return cleaned
 
 
 # ── PTR hostname classification ────────────────────────────────────────────────
@@ -250,6 +265,53 @@ _PTR_RESIDENTIAL_RE = _re.compile(
     r")",
     _re.IGNORECASE,
 )
+# CDN / infrastructure domains that resolve via PTR but are NOT the company's
+# primary domain.  e.g. a-msedge.net → Microsoft, 1e100.net → Google.
+# We don't want to set these as the company domain or derive company names from them.
+_CDN_INFRA_DOMAINS = {
+    "a-msedge.net", "msedge.net", "e-msedge.net", "l-msedge.net",  # Microsoft CDN
+    "1e100.net", "google.com", "googleapis.com", "googlevideo.com",  # Google infra
+    "fbcdn.net", "facebook.net", "tfbnw.net", "fna.fbcdn.net",      # Meta CDN
+    "cloudfront.net", "amazonaws.com", "aws.amazon.com",             # AWS
+    "akamaiedge.net", "akamai.net", "akamaitechnologies.com",       # Akamai
+    "cloudflare.com", "cloudflare.net", "cloudflarestorage.com",    # Cloudflare
+    "fastly.net", "fastlylb.net",                                    # Fastly
+    "edgecastcdn.net", "azureedge.net", "trafficmanager.net",       # Azure CDN
+    "cdn.apple.com", "icloud-content.com", "apple-dns.net",        # Apple
+    "nflxvideo.net", "netflix.com",                                  # Netflix
+    "twimg.com", "twitchcdn.net",                                    # Twitter/Twitch
+    "yahoodns.net", "yimg.com",                                      # Yahoo
+    "deploy.static.akamaitechnologies.com",
+    "in-addr.arpa",                                                  # Reverse DNS infra
+}
+
+# Map CDN/infra domains back to the real parent company.
+# When PTR gives us a CDN domain, we skip it as domain but still know the company.
+_CDN_DOMAIN_TO_COMPANY = {
+    "a-msedge.net": ("Microsoft", "microsoft.com"),
+    "msedge.net": ("Microsoft", "microsoft.com"),
+    "e-msedge.net": ("Microsoft", "microsoft.com"),
+    "l-msedge.net": ("Microsoft", "microsoft.com"),
+    "azureedge.net": ("Microsoft", "microsoft.com"),
+    "trafficmanager.net": ("Microsoft", "microsoft.com"),
+    "1e100.net": ("Google", "google.com"),
+    "googleapis.com": ("Google", "google.com"),
+    "googlevideo.com": ("Google", "google.com"),
+    "fbcdn.net": ("Meta", "meta.com"),
+    "facebook.net": ("Meta", "meta.com"),
+    "tfbnw.net": ("Meta", "meta.com"),
+    "cloudfront.net": ("Amazon", "amazon.com"),
+    "amazonaws.com": ("Amazon", "amazon.com"),
+    "akamaiedge.net": ("Akamai", "akamai.com"),
+    "akamai.net": ("Akamai", "akamai.com"),
+    "cloudflare.net": ("Cloudflare", "cloudflare.com"),
+    "fastly.net": ("Fastly", "fastly.com"),
+    "nflxvideo.net": ("Netflix", "netflix.com"),
+    "apple-dns.net": ("Apple", "apple.com"),
+    "icloud-content.com": ("Apple", "apple.com"),
+    "twimg.com": ("X", "x.com"),
+}
+
 _PTR_CORPORATE_RE = _re.compile(
     r"(^|\.)("
     r"vpn|proxy|gateway|corp|fw|firewall|egress|nat|outbound|"
@@ -685,6 +747,25 @@ class VisitorEnricher:
                 return
 
             ptr_domain = ".".join(parts[-2:])
+
+            # CDN/infra domains: map to the real parent company instead of using
+            # the CDN hostname as domain.  e.g. a-msedge.net → Microsoft / microsoft.com
+            cdn_key = ptr_domain.lower()
+            if cdn_key in _CDN_INFRA_DOMAINS:
+                mapping = _CDN_DOMAIN_TO_COMPANY.get(cdn_key)
+                if mapping:
+                    company_name, real_domain = mapping
+                    if not resolution.get("company"):
+                        resolution["company"] = company_name
+                    if not resolution.get("domain"):
+                        resolution["domain"] = real_domain
+                    resolution["_sources"].append("ptr_cdn_map")
+                    resolution["confidence"] = max(resolution.get("confidence", 0), 0.7)
+                    logger.info("[Enrichment] PTR: CDN %s → %s (%s)", ptr_domain, company_name, real_domain)
+                else:
+                    logger.info("[Enrichment] PTR: %s is CDN/infra — skipped", ptr_domain)
+                return
+
             resolution["ptr_hostname"] = hostname
             resolution["_sources"].append("ptr")
 
