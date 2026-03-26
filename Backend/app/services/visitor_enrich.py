@@ -34,6 +34,7 @@ from app.services.explorium_service import ExploriumService
 from app.services.bettercontact_service import BetterContactService
 from app.services.contactout_service import ContactOutService
 from app.services.fullcontact_service import FullContactService
+from app.services.employee_discovery import EmployeeDiscoveryService
 
 logger = logging.getLogger(__name__)
 
@@ -41,35 +42,125 @@ logger = logging.getLogger(__name__)
 # If the IP org resolves to any of these → it's a residential/consumer/cloud IP
 # and cannot be de-anonymised to a company.
 ISP_CLOUD_KEYWORDS = {
-    # India residential ISPs
-    "airtel", "bharti", "reliance jio", "jio", "vodafone", "bsnl", "mtnl",
+    # ── India — residential / mobile / broadband ──────────────────────────
+    "airtel", "bharti", "bharti airtel", "reliance jio", "jio", "jio infocomm",
+    "vodafone", "vodafone idea", "vi ", "idea cellular",
+    "bsnl", "bharat sanchar", "mtnl", "mahanagar telephone",
     "hathway", "act fibernet", "tikona", "spectranet", "excitel", "gtpl",
-    "asianet", "you broadband", "den networks",
-    # Global consumer ISPs
-    "comcast", "verizon", "at&t", "spectrum", "charter", "cox", "optimum",
-    "suddenlink", "frontier", "windstream", "centurylink", "lumen",
-    "t-mobile", "sprint", "nexmo", "twilio",
-    "proxad", "wanadoo", "orange", "telefonica",
-    "sky broadband", "bt group", "talktalk", "virgin media",
-    "telstra", "optus", "tpg", "shaw", "rogers", "telus",
-    "google fiber", "starlink", "hughesnet", "viasat", "earthlink",
-    # Cloud / hosting providers
-    "amazon", "aws", "google inc", "microsoft corp", "azure",
-    "digitalocean", "linode", "vultr", "hetzner", "leaseweb", "choopa",
-    "scaleway", "upcloud", "ovh", "rackspace", "softlayer",
-    "akamai", "cloudflare", "fastly", "level 3", "cogent",
-    "tata communications", "bluehost", "hostgator", "dreamhost",
-    "siteground", "godaddy", "namecheap", "wix", "squarespace",
-    "alibaba", "oracle cloud", "ibm cloud",
-    # Generic
+    "asianet", "you broadband", "den networks", "railtel", "powergrid",
+    "tata teleservices", "tata communications", "tata play", "aircel",
+    "sify technologies", "beam telecom", "alliance broadband",
+    "syscon infoway", "wishnet", "gigatel", "netplus", "fastway",
+    "joister broadband", "siti networks", "in2cable", "meghbela",
+    "worldphone", "ani network", "country online", "five net",
+    "micronova", "swifton", "nextra teleservices", "ishan netsol",
+
+    # ── US — major ISPs / telcos / cable / wireless ───────────────────────
+    "comcast", "xfinity", "verizon", "verizon fios", "verizon wireless",
+    "at&t", "att ", "at&t u-verse", "at&t fiber", "at&t wireless",
+    "spectrum", "charter", "charter communications",
+    "cox", "cox communications",
+    "optimum", "altice", "altice usa", "suddenlink",
+    "frontier", "frontier communications",
+    "windstream", "windstream holdings",
+    "centurylink", "lumen", "lumen technologies",
+    "t-mobile", "t-mobile usa", "sprint", "sprint corporation",
+    "us cellular", "uscellular", "united states cellular",
+    "dish network", "dish wireless", "boost mobile", "cricket wireless",
+    "metro by t-mobile", "metropcs", "mint mobile", "visible",
+    "google fi", "google fiber",
+    "mediacom", "mediacom communications",
+    "wow!", "wideOpenwest", "wide open west",
+    "consolidated communications", "hawaiian telcom", "cincinnati bell",
+    "atlantic broadband", "breezeline", "midco", "midcontinent",
+    "cable one", "sparklight", "astound broadband", "rcn",
+    "grande communications", "wave broadband", "ziply fiber",
+    "tds telecom", "surewest", "sonic", "toast.net",
+    "earthlink", "hughesnet", "viasat", "starlink",
+    "rise broadband", "punto gao", "xtream", "buckeye broadband",
+
+    # ── UK / Europe ───────────────────────────────────────────────────────
+    "bt group", "bt ", "british telecom", "openreach",
+    "sky broadband", "sky uk", "sky telecom",
+    "virgin media", "virgin media o2", "o2 uk",
+    "talktalk", "plusnet", "ee ", "ee limited",
+    "three uk", "three ", "vodafone uk", "hyperoptic", "community fibre",
+    "proxad", "free ", "wanadoo", "orange", "sfr", "bouygues",
+    "iliad", "numericable",
+    "telefonica", "movistar", "o2 ", "o2 germany",
+    "deutsche telekom", "t-online", "1&1", "unitymedia",
+    "kpn", "ziggo", "proximus", "telenet",
+    "swisscom", "sunrise", "salt mobile",
+    "telia", "telenor", "tele2", "ice.net", "bahnhof",
+    "elisa", "dna finland",
+
+    # ── Canada / Australia / NZ ───────────────────────────────────────────
+    "rogers", "bell canada", "bell ", "telus", "shaw", "shaw communications",
+    "videotron", "sasktel", "eastlink", "cogeco", "tbaytel",
+    "telstra", "optus", "tpg telecom", "vodafone au", "iinet",
+    "internode", "aussie broadband", "dodo",
+    "spark nz", "vodafone nz", "2degrees",
+
+    # ── LATAM / Middle East / Africa ──────────────────────────────────────
+    "claro", "telmex", "izzi", "megacable", "totalplay",
+    "entel", "movistar latam", "oi ", "vivo telecom",
+    "etisalat", "du ", "stc ", "mobily", "zain",
+    "mtn", "safaricom", "airtel africa", "glo ", "rain",
+
+    # ── Cloud / hosting providers ─────────────────────────────────────────
+    "amazon", "aws", "amazon web services", "amazon.com",
+    "google inc", "google cloud", "google llc",
+    "microsoft corp", "microsoft azure", "azure",
+    "digitalocean", "linode", "akamai connected", "akamai technologies",
+    "vultr", "hetzner", "leaseweb", "choopa",
+    "scaleway", "upcloud", "ovh", "ovhcloud", "rackspace", "softlayer",
+    "cloudflare", "fastly", "level 3", "level3", "cogent",
+    "bluehost", "hostgator", "dreamhost", "siteground",
+    "godaddy", "namecheap", "wix", "squarespace",
+    "alibaba", "alibaba cloud", "oracle cloud", "ibm cloud",
+    "kamatera", "contabo", "ionos", "hostinger",
+    "netlify", "vercel", "render", "railway", "fly.io",
+    "heroku", "pythonanywhere",
+
+    # ── VPN / proxy / tor / anonymizer ────────────────────────────────────
+    "nordvpn", "expressvpn", "surfshark", "private internet access",
+    "mullvad", "protonvpn", "cyberghost", "ipvanish", "tunnelbear",
+    "tor exit", "tor project",
+
+    # ── Generic patterns (catches RDAP / PTR telecom hallucinations) ──────
     "internet service", "hosting", "cloud", "server", "data center",
-    "vps", "isp", "network foundation", "broadband",
+    "datacenter", "colocation", "colo ",
+    "vps", "isp", "network foundation", "broadband", "telecom",
+    "telecommunications", "telephone", "infocomm", "mobile operator",
+    "wireless", "cellular", "fibre", "fiber optic", "cable operator",
+    "network operator", "internet exchange", "nsp", "connectivity",
+    "mobile network", "mobile virtual", "mvno",
+    "cable tv", "catv", "dsl ", "adsl",
+    "fixed line", "fixed wireless", "wimax",
+    "communications inc", "communications llc", "communications ltd",
+    "telco", "telephone company",
 }
 
 NOISE_ASN_ORGS = {
-    "MICROSOFT-CORP", "AMAZON-AES", "GOOGLE", "TENCENT",
-    "ALIBABA", "DIGITALOCEAN", "LINODE", "OVHCLOUD",
-    "HETZNER", "VULTR", "CLOUDFLARE", "FASTLY",
+    # Cloud
+    "MICROSOFT-CORP", "AMAZON-AES", "AMAZON-02", "GOOGLE", "GOOGLE-CLOUD",
+    "TENCENT", "ALIBABA", "ALIBABA-CN", "DIGITALOCEAN", "LINODE", "OVHCLOUD",
+    "HETZNER", "VULTR", "CLOUDFLARE", "FASTLY", "AKAMAI", "ORACLE-BMC",
+    "SOFTLAYER", "RACKSPACE", "IBM-CLOUD",
+    # US ISPs (ASN short names)
+    "COMCAST", "COMCAST-7922", "AS7922", "CHARTER-NET", "CHARTER-20115",
+    "ATT-INTERNET4", "ATT-MOBILITY", "AS7018", "VERIZON-GNI", "VZW",
+    "COX-COMM", "T-MOBILE-AS21928", "SPRINT-NETWORK",
+    "CENTURYLINK", "LUMEN", "WINDSTREAM", "FRONTIER",
+    "DISH-NETWORK", "USCC",
+    # India
+    "RELIANCEJIO", "JIO", "AIRTEL", "BHARTI", "BSNL", "MTNL",
+    "VODAFONEIDEA", "VI-AS",
+    # EU / UK
+    "BT-UK", "SKYBROADBAND", "VIRGINM", "TALKTALK", "DTAG",
+    "TELEFONICA", "ORANGE", "PROXAD", "SFR",
+    # Canada / Aus
+    "ROGERS", "BELL-CANADA", "TELUS", "SHAW", "TELSTRA", "OPTUS", "TPG",
 }
 
 NOISE_INDICATORS = {
@@ -82,8 +173,18 @@ NOISE_INDICATORS = {
     "datacenter_ip": 35,       # IPinfo.io type = "datacenter"
 }
 
-# These AS names typically indicate residential/mobile connections in India
-MOBILE_ASN_PATTERNS = {"jio", "reliance jio", "airtel", "vodafone idea", "vi "}
+# These AS names typically indicate residential/mobile connections
+MOBILE_ASN_PATTERNS = {
+    # India
+    "jio", "reliance jio", "airtel", "vodafone idea", "vi ", "bsnl", "mtnl",
+    # US
+    "t-mobile", "sprint", "verizon wireless", "at&t mobility", "cricket",
+    "boost mobile", "metro by t-mobile", "dish wireless", "us cellular",
+    # UK / EU
+    "ee ", "three ", "o2 ", "vodafone uk", "orange mobile", "sfr mobile",
+    # Global
+    "mobile", "wireless", "cellular",
+}
 
 
 def is_isp_or_cloud(org_name: str, allowlist: list | None = None) -> bool:
@@ -128,13 +229,28 @@ _LEGAL_SUFFIX_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+# Names that are ONLY a legal suffix — not a real company name.
+# Catches cases where Explorium/RDAP return "Inc." or "LLC" as the entire name.
+_JUNK_COMPANY_NAMES = {
+    "inc", "inc.", "llc", "ltd", "ltd.", "corp", "corp.", "co", "co.",
+    "corporation", "incorporated", "company", "limited", "gmbh", "ag",
+    "plc", "llp", "platforms", "holdings", "group", "services",
+    "technologies", "solutions", "enterprises", "international",
+    "the", "n/a", "na", "none", "unknown", "null", "undefined", "",
+}
+
 def _normalize_company_name(name: str | None) -> str | None:
-    """Strip legal suffixes, collapse whitespace, return title-cased canonical name."""
+    """Strip legal suffixes, collapse whitespace, reject junk names."""
     if not name:
         return None
     cleaned = _LEGAL_SUFFIX_RE.sub("", name).strip().strip(".,()-")
     cleaned = " ".join(cleaned.split())  # collapse all whitespace
-    return cleaned if len(cleaned) >= 2 else None
+    # Reject if result is too short or is itself just a legal/junk word
+    if len(cleaned) < 2:
+        return None
+    if cleaned.lower().strip(".") in _JUNK_COMPANY_NAMES:
+        return None
+    return cleaned
 
 
 # ── PTR hostname classification ────────────────────────────────────────────────
@@ -149,6 +265,60 @@ _PTR_RESIDENTIAL_RE = _re.compile(
     r")",
     _re.IGNORECASE,
 )
+# CDN / infrastructure domains that resolve via PTR but are NOT the company's
+# primary domain.  e.g. a-msedge.net → Microsoft, 1e100.net → Google.
+# We don't want to set these as the company domain or derive company names from them.
+_CDN_INFRA_DOMAINS = {
+    "a-msedge.net", "msedge.net", "e-msedge.net", "l-msedge.net",  # Microsoft CDN
+    "1e100.net", "google.com", "googleapis.com", "googlevideo.com",  # Google infra
+    "fbcdn.net", "facebook.net", "tfbnw.net", "fna.fbcdn.net",      # Meta CDN
+    "cloudfront.net", "amazonaws.com", "aws.amazon.com",             # AWS
+    "akamaiedge.net", "akamai.net", "akamaitechnologies.com",       # Akamai
+    "cloudflare.com", "cloudflare.net", "cloudflarestorage.com",    # Cloudflare
+    "fastly.net", "fastlylb.net",                                    # Fastly
+    "edgecastcdn.net", "azureedge.net", "trafficmanager.net",       # Azure CDN
+    "cdn.apple.com", "icloud-content.com", "apple-dns.net",        # Apple
+    "aaplimg.com", "brkgls.com", "3banana.com", "appstore.com",   # Apple infra
+    "nflxvideo.net", "netflix.com",                                  # Netflix
+    "twimg.com", "twitchcdn.net",                                    # Twitter/Twitch
+    "yahoodns.net", "yimg.com",                                      # Yahoo
+    "deploy.static.akamaitechnologies.com",
+    "in-addr.arpa",                                                  # Reverse DNS infra
+}
+
+# Map CDN/infra domains back to the real parent company.
+# When PTR gives us a CDN domain, we skip it as domain but still know the company.
+_CDN_DOMAIN_TO_COMPANY = {
+    "a-msedge.net": ("Microsoft", "microsoft.com"),
+    "msedge.net": ("Microsoft", "microsoft.com"),
+    "e-msedge.net": ("Microsoft", "microsoft.com"),
+    "l-msedge.net": ("Microsoft", "microsoft.com"),
+    "azureedge.net": ("Microsoft", "microsoft.com"),
+    "trafficmanager.net": ("Microsoft", "microsoft.com"),
+    "1e100.net": ("Google", "google.com"),
+    "googleapis.com": ("Google", "google.com"),
+    "googlevideo.com": ("Google", "google.com"),
+    "fbcdn.net": ("Meta", "meta.com"),
+    "facebook.net": ("Meta", "meta.com"),
+    "tfbnw.net": ("Meta", "meta.com"),
+    "cloudfront.net": ("Amazon", "amazon.com"),
+    "amazonaws.com": ("Amazon", "amazon.com"),
+    "akamaiedge.net": ("Akamai", "akamai.com"),
+    "akamai.net": ("Akamai", "akamai.com"),
+    "cloudflare.net": ("Cloudflare", "cloudflare.com"),
+    "fastly.net": ("Fastly", "fastly.com"),
+    "nflxvideo.net": ("Netflix", "netflix.com"),
+    "apple-dns.net": ("Apple", "apple.com"),
+    "icloud-content.com": ("Apple", "apple.com"),
+    "aaplimg.com": ("Apple", "apple.com"),
+    "brkgls.com": ("Apple", "apple.com"),
+    "3banana.com": ("Apple", "apple.com"),
+    "appstore.com": ("Apple", "apple.com"),
+    "twimg.com": ("X", "x.com"),
+    "twitchcdn.net": ("Twitch", "twitch.tv"),
+    "nflxvideo.net": ("Netflix", "netflix.com"),
+}
+
 _PTR_CORPORATE_RE = _re.compile(
     r"(^|\.)("
     r"vpn|proxy|gateway|corp|fw|firewall|egress|nat|outbound|"
@@ -275,6 +445,7 @@ class VisitorEnricher:
             "linkedin_url": None,
             "job_title": None,
             "decision_makers": [],
+            "employees": [],
             "logo_url": None,
             # Enrichment source flags (for debugging)
             "_sources": [],
@@ -359,6 +530,10 @@ class VisitorEnricher:
                     resolution["enrich_company"] = cached["enrich_company"]
                 if cached.get("logo_url") and not resolution.get("logo_url"):
                     resolution["logo_url"] = cached["logo_url"]
+                if cached.get("decision_makers"):
+                    resolution["decision_makers"] = cached["decision_makers"]
+                if cached.get("employees"):
+                    resolution["employees"] = cached["employees"]
                 resolution["_sources"].append("cache")
                 resolution["confidence"] = max(resolution["confidence"], 0.65)
             else:
@@ -391,6 +566,9 @@ class VisitorEnricher:
                 final_domain_rdap = resolution.get("domain")
                 if final_domain_rdap and not resolution.get("_mx_unverified"):
                     await self._step_domain_rdap(final_domain_rdap, resolution)
+
+                # ── STEP 6.5: Employee Discovery — domain → employees ────────
+                await self._step_employee_discovery(resolution)
 
                 # Cache domain-level results for future visitors from same company
                 final_domain = resolution.get("domain")
@@ -576,6 +754,25 @@ class VisitorEnricher:
                 return
 
             ptr_domain = ".".join(parts[-2:])
+
+            # CDN/infra domains: map to the real parent company instead of using
+            # the CDN hostname as domain.  e.g. a-msedge.net → Microsoft / microsoft.com
+            cdn_key = ptr_domain.lower()
+            if cdn_key in _CDN_INFRA_DOMAINS:
+                mapping = _CDN_DOMAIN_TO_COMPANY.get(cdn_key)
+                if mapping:
+                    company_name, real_domain = mapping
+                    if not resolution.get("company"):
+                        resolution["company"] = company_name
+                    if not resolution.get("domain"):
+                        resolution["domain"] = real_domain
+                    resolution["_sources"].append("ptr_cdn_map")
+                    resolution["confidence"] = max(resolution.get("confidence", 0), 0.7)
+                    logger.info("[Enrichment] PTR: CDN %s → %s (%s)", ptr_domain, company_name, real_domain)
+                else:
+                    logger.info("[Enrichment] PTR: %s is CDN/infra — skipped", ptr_domain)
+                return
+
             resolution["ptr_hostname"] = hostname
             resolution["_sources"].append("ptr")
 
@@ -1271,6 +1468,70 @@ class VisitorEnricher:
         except Exception as e:
             logger.warning("[Enrichment] Step 5c: Clearbit company failed: %s", e)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 6.5: Employee Discovery — company domain → employees
+    #
+    # Merges employees already found by the pipeline (ContactOut step 4,
+    # Hunter step 5b → resolution["decision_makers"]) with NEW results
+    # from Apollo and PDL.  Does NOT re-call ContactOut or Hunter.
+    #
+    # Only runs when we've resolved a company domain (tier != noise).
+    # Results stored in resolution["employees"] as supplementary company data.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_employee_discovery(self, resolution: Dict[str, Any]) -> None:
+        domain = resolution.get("domain")
+        if not domain:
+            return
+        # Skip if we already have employees (e.g. from cache)
+        if resolution.get("employees"):
+            return
+        # Skip noise-tier visitors — no point discovering employees for ISP IPs
+        if resolution.get("bot_score", 0) >= 40:
+            return
+        if resolution.get("company") and is_isp_or_cloud(resolution["company"], self._isp_allowlist):
+            return
+
+        logger.info("[Enrichment] Step 6.5: Employee discovery for domain %s", domain)
+        try:
+            # Gather what steps 4 (ContactOut DM) and 5b (Hunter) already found
+            existing_dms = resolution.get("decision_makers") or []
+
+            # Query NEW providers only (Apollo, PDL, Apify) — skip if no keys configured
+            service = EmployeeDiscoveryService(http_client=self.http)
+            new_employees = []
+            if service.has_any_provider:
+                # Get company LinkedIn URL from Explorium or IPinfo if available
+                company_li = (
+                    (resolution.get("explorium") or {}).get("linkedin_url")
+                    or (resolution.get("ipinfo_company") or {}).get("linkedin_url")
+                    or ""
+                )
+                new_employees = await service.discover_new_sources(
+                    domain=domain,
+                    company_name=resolution.get("company") or "",
+                    company_linkedin_url=company_li,
+                    max_results=10,
+                )
+
+            # Merge existing pipeline results with new source results
+            employees = EmployeeDiscoveryService.merge_and_build(
+                existing_decision_makers=existing_dms,
+                new_source_employees=new_employees,
+                max_results=10,
+            )
+
+            resolution["employees"] = employees
+            if employees:
+                resolution["_sources"].append("employee_discovery")
+                logger.info(
+                    "[Enrichment] Step 6.5: %d employees for %s (existing=%d, new=%d)",
+                    len(employees), domain, len(existing_dms), len(new_employees),
+                )
+        except Exception as e:
+            logger.warning("[Enrichment] Step 6.5: Employee discovery failed: %s", e)
+            resolution["employees"] = []
+
     # ── Identity graph lookup ────────────────────────────────────────────────
 
     async def _step_identity_graph_lookup(
@@ -1507,6 +1768,8 @@ class VisitorEnricher:
                 "visitor_contacts": resolution.get("visitor_contacts"),
                 "enrich_company": resolution.get("enrich_company"),
                 "logo_url": resolution.get("logo_url"),
+                "decision_makers": resolution.get("decision_makers"),
+                "employees": resolution.get("employees"),
             }
             redis = RedisManager.get_client()
             await redis.set(

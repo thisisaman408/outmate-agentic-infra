@@ -312,6 +312,9 @@ class Settings(BaseSettings):
     # Enhanced enrichment APIs (optional — system degrades gracefully if absent)
     HUNTER_API_KEY: str = Field("", description="Hunter.io API key for domain → email lookup")
     CLEARBIT_API_KEY: str = Field("", description="Clearbit API key for company data fallback")
+    APOLLO_API_KEY: str = Field("", description="Apollo.io API key for people search by company domain")
+    PDL_API_KEY: str = Field("", description="People Data Labs API key for people search")
+    APIFY_API_KEY: str = Field("", description="Apify API key for LinkedIn company employee scraping")
 
     # ========================================================================
     # VALIDATORS - Ensure configuration is valid

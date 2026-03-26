@@ -359,11 +359,13 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                     "signals": behavioral["signals_breakdown"],
                 }
 
-                # Smart DM selection: pick the decision maker whose role matches
-                # the predicted persona of the visitor
-                dms = resolution.get("decision_makers") or []
-                if dms and behavioral["predicted_persona"] != "unknown":
-                    best_dm = select_best_decision_maker(dms, behavioral["predicted_persona"])
+                # Smart DM selection: pick the employee/DM whose role matches
+                # the predicted persona of the visitor.
+                # Prefer the enriched employees list (merged from Apollo/PDL/ContactOut/Hunter)
+                # and fall back to raw decision_makers if employees not available.
+                candidates = resolution.get("employees") or resolution.get("decision_makers") or []
+                if candidates and behavioral["predicted_persona"] != "unknown":
+                    best_dm = select_best_decision_maker(candidates, behavioral["predicted_persona"])
                     if best_dm:
                         # Override the heuristic top-DM with the persona-matched DM
                         for key in ("full_name", "email", "linkedin_url", "job_title"):

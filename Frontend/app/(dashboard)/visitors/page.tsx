@@ -185,6 +185,14 @@ function maskPhone(phone: string): string {
     return phone.slice(0, 3) + "****" + phone.slice(-2)
 }
 
+function ensureUrl(url: string | null | undefined): string | null {
+    if (!url) return null
+    const trimmed = url.trim()
+    if (!trimmed) return null
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
+    return `https://${trimmed}`
+}
+
 function extractVisitData(visit: Visit) {
     const geo = visit.geo || visit.resolution?.geo ||
         ((visit.headquarters_city || visit.headquarters_country)
@@ -195,11 +203,11 @@ function extractVisitData(visit: Visit) {
     const email = visit.email || person.email || person.work_email || person.personal_email || person.emails?.[0]
     const phone = visit.phone || person.phone || person.mobile_phone || person.work_phone || person.phones?.[0]
     const fullName = visit.full_name || person.full_name || person.name
-    const linkedinUrl = visit.linkedin_url || person.linkedin_url || person.linkedin
+    const linkedinUrl = ensureUrl(visit.linkedin_url || person.linkedin_url || person.linkedin)
     const jobTitle = visit.job_title || person.title || person.job_title
     const category = visit.category || visit.resolution?.category
-    const companyLinkedin = visit.company_linkedin_url || visit.resolution?.explorium?.linkedin_url
-    const website = visit.website || visit.resolution?.explorium?.website || (visit.domain ? `https://${visit.domain}` : null)
+    const companyLinkedin = ensureUrl(visit.company_linkedin_url || visit.resolution?.explorium?.linkedin_url)
+    const website = ensureUrl(visit.website || visit.resolution?.explorium?.website || visit.domain)
     const industry = visit.industry || visit.resolution?.explorium?.industry
     const employeeRange = visit.employee_count_range || visit.resolution?.explorium?.employee_count_range
     const revenueRange = visit.revenue_range || visit.resolution?.explorium?.revenue_range
