@@ -91,7 +91,6 @@ RUN ARCH=$(dpkg --print-architecture) \
                     | head -1) \
     && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1 \
-    && npm install -g npm@latest \
     && npm cache clean --force
 RUN useradd user -u 1000 -g 0 --no-create-home --home-dir /app/data
 
