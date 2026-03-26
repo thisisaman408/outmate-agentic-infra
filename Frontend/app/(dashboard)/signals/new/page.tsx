@@ -97,12 +97,15 @@ export default function NewSignalPage() {
     const router = useRouter()
     const [searchQuery, setSearchQuery] = useState("")
 
+    const searchTerms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+
     const filteredSections = sections.map(section => ({
         ...section,
-        items: section.items.filter(item => 
-            item.label.toLowerCase().includes(searchQuery.toLowerCase()) || 
-            section.title.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        items: section.items.filter(item => {
+            if (searchTerms.length === 0) return true;
+            const searchableText = `${section.title} ${item.label} ${item.category || ''}`.toLowerCase();
+            return searchTerms.every(term => searchableText.includes(term));
+        })
     })).filter(section => section.items.length > 0)
 
     return (
