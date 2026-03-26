@@ -1,8 +1,8 @@
 """
 Employee Discovery Service — Company Domain -> Employee List.
 
-Adds NEW data providers (Apollo, PDL) on top of what the visitor enrichment
-pipeline already collects from ContactOut (step 4) and Hunter (step 5b).
+Adds NEW data providers (Apollo, PDL, Apify) on top of what the visitor
+enrichment pipeline already collects from ContactOut (step 4) and Hunter (step 5b).
 
 This service does NOT call ContactOut or Hunter — those are already called
 earlier in the pipeline and their results arrive via `existing_employees`.
@@ -11,6 +11,7 @@ This service only calls providers that the pipeline doesn't already use.
 Provider list (only called if API key is set):
   1. Apollo.io    — People Search by company domain
   2. PDL          — People Data Labs company search
+  3. Apify        — LinkedIn company employees scraper (harvestapi actor)
 
 The `merge_and_build` method then combines these results with the existing
 decision_makers from ContactOut/Hunter into a unified, deduplicated,
@@ -23,6 +24,7 @@ Design: pure async, no DB access, no side-effects. The caller (visitor_enrich)
 decides where to store the results.
 """
 
+import asyncio
 import httpx
 import logging
 from typing import Dict, Any, List, Optional
@@ -157,7 +159,7 @@ _SENIORITY_ORDER = {
 
 class EmployeeDiscoveryService:
     """
-    Discovers employees at a company using NEW data providers (Apollo, PDL).
+    Discovers employees at a company using NEW data providers (Apollo, PDL, Apify).
 
     Does NOT call ContactOut or Hunter — those are already called in
     visitor_enrich.py steps 4 and 5b. This service only adds providers
@@ -170,21 +172,24 @@ class EmployeeDiscoveryService:
         )
         self._apollo_key = getattr(settings, "APOLLO_API_KEY", "") or ""
         self._pdl_key = getattr(settings, "PDL_API_KEY", "") or ""
+        self._apify_key = getattr(settings, "APIFY_API_KEY", "") or ""
 
     @property
     def has_any_provider(self) -> bool:
         """Return True if at least one new provider is configured."""
-        return bool(self._apollo_key or self._pdl_key)
+        return bool(self._apollo_key or self._pdl_key or self._apify_key)
 
     async def discover_new_sources(
         self,
         domain: str,
         company_name: str = "",
+        company_linkedin_url: str = "",
         max_results: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Find employees using Apollo and PDL only.
+        Find employees using Apollo, PDL, and Apify LinkedIn scraper.
         ContactOut/Hunter results should be passed to `merge_and_build` separately.
+        `company_linkedin_url` is needed for Apify (e.g. https://linkedin.com/company/microsoft).
         """
         if not domain:
             return []
@@ -215,6 +220,17 @@ class EmployeeDiscoveryService:
                     sources_succeeded.append("pdl")
             except Exception as e:
                 logger.warning("[EmployeeDiscovery] PDL failed: %s", e)
+
+        # 3. Apify LinkedIn scraper (only if we have a LinkedIn company URL)
+        if self._apify_key and company_linkedin_url:
+            sources_tried.append("apify")
+            try:
+                apify_results = await self._search_apify(company_linkedin_url, max_results)
+                all_employees.extend(apify_results)
+                if apify_results:
+                    sources_succeeded.append("apify")
+            except Exception as e:
+                logger.warning("[EmployeeDiscovery] Apify failed: %s", e)
 
         logger.info(
             "[EmployeeDiscovery] New sources for %s: tried=%s, succeeded=%s, found=%d",
@@ -345,4 +361,108 @@ class EmployeeDiscoveryService:
             }, source="pdl"))
 
         logger.info("[EmployeeDiscovery] PDL: %d people for %s", len(results), domain)
+        return results
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Apify — LinkedIn Company Employees Scraper
+    # Actor: harvestapi/linkedin-company-employees (no LinkedIn cookies needed)
+    # Docs: https://apify.com/harvestapi/linkedin-company-employees
+    #
+    # Flow: start actor run → poll for completion (max 90s) → fetch dataset
+    # Uses "Fast" scraper mode to minimize cost ($1.40 per 1k vs $12 for Full).
+    # Only fetches leadership seniority to keep results relevant and cheap.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    _APIFY_ACTOR = "harvestapi~linkedin-company-employees"
+    _APIFY_POLL_INTERVAL = 5   # seconds between status checks
+    _APIFY_MAX_WAIT = 90       # max seconds to wait for run completion
+
+    async def _search_apify(self, company_linkedin_url: str, limit: int) -> List[Dict[str, Any]]:
+        url = company_linkedin_url.strip().rstrip("/")
+        if not url.startswith("http"):
+            url = f"https://www.linkedin.com/company/{url}"
+
+        # Start the actor run
+        resp = await self.http.post(
+            f"https://api.apify.com/v2/acts/{self._APIFY_ACTOR}/runs",
+            params={"token": self._apify_key},
+            json={
+                "companies": [url],
+                "maxItems": min(limit, 25),
+                "profileScraperMode": "Fast ($1.40 per 1k)",
+                "companyBatchMode": "all_at_once",
+                # Only leadership — keeps results relevant and cost low
+                "seniorityLevelIds": ["310", "300", "220", "210", "320"],
+                # 310=CXO, 300=VP, 220=Director, 210=Manager, 320=Owner/Partner
+            },
+            timeout=httpx.Timeout(30.0),
+        )
+        if resp.status_code not in (200, 201):
+            logger.info("[EmployeeDiscovery] Apify start failed: HTTP %d", resp.status_code)
+            return []
+
+        run_data = resp.json().get("data", {})
+        run_id = run_data.get("id")
+        dataset_id = run_data.get("defaultDatasetId")
+        if not run_id:
+            logger.warning("[EmployeeDiscovery] Apify: no run ID returned")
+            return []
+
+        # Poll for completion
+        status = run_data.get("status", "RUNNING")
+        elapsed = 0
+        while status in ("RUNNING", "READY") and elapsed < self._APIFY_MAX_WAIT:
+            await asyncio.sleep(self._APIFY_POLL_INTERVAL)
+            elapsed += self._APIFY_POLL_INTERVAL
+            try:
+                check = await self.http.get(
+                    f"https://api.apify.com/v2/actor-runs/{run_id}",
+                    params={"token": self._apify_key},
+                    timeout=httpx.Timeout(10.0),
+                )
+                if check.status_code == 200:
+                    run_info = check.json().get("data", {})
+                    status = run_info.get("status", "RUNNING")
+                    dataset_id = run_info.get("defaultDatasetId", dataset_id)
+            except Exception:
+                pass
+
+        if status != "SUCCEEDED":
+            logger.info("[EmployeeDiscovery] Apify run status=%s after %ds for %s", status, elapsed, url)
+            return []
+
+        # Fetch results from dataset
+        if not dataset_id:
+            return []
+
+        items_resp = await self.http.get(
+            f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+            params={"token": self._apify_key, "format": "json", "limit": limit},
+            timeout=httpx.Timeout(15.0),
+        )
+        if items_resp.status_code != 200:
+            logger.info("[EmployeeDiscovery] Apify dataset fetch failed: HTTP %d", items_resp.status_code)
+            return []
+
+        items = items_resp.json()
+        if not isinstance(items, list):
+            return []
+
+        results = []
+        for emp in items:
+            name = (
+                emp.get("fullName")
+                or emp.get("name")
+                or f"{emp.get('firstName', '')} {emp.get('lastName', '')}".strip()
+            )
+            if not name:
+                continue
+            results.append(_normalize_employee({
+                "full_name": name,
+                "job_title": emp.get("title") or emp.get("headline") or emp.get("jobTitle") or emp.get("currentJobTitle"),
+                "email": emp.get("email") or emp.get("workEmail"),
+                "linkedin_url": emp.get("profileUrl") or emp.get("linkedInUrl") or emp.get("url") or emp.get("linkedinUrl"),
+            }, source="apify"))
+
+        logger.info("[EmployeeDiscovery] Apify: %d people for %s (took %ds)", len(results), url, elapsed)
         return results

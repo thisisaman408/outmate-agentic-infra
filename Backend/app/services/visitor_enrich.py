@@ -1490,13 +1490,20 @@ class VisitorEnricher:
             # Gather what steps 4 (ContactOut DM) and 5b (Hunter) already found
             existing_dms = resolution.get("decision_makers") or []
 
-            # Query NEW providers only (Apollo, PDL) — skip if no keys configured
+            # Query NEW providers only (Apollo, PDL, Apify) — skip if no keys configured
             service = EmployeeDiscoveryService(http_client=self.http)
             new_employees = []
             if service.has_any_provider:
+                # Get company LinkedIn URL from Explorium or IPinfo if available
+                company_li = (
+                    (resolution.get("explorium") or {}).get("linkedin_url")
+                    or (resolution.get("ipinfo_company") or {}).get("linkedin_url")
+                    or ""
+                )
                 new_employees = await service.discover_new_sources(
                     domain=domain,
                     company_name=resolution.get("company") or "",
+                    company_linkedin_url=company_li,
                     max_results=10,
                 )
 
