@@ -1,6 +1,6 @@
 "use client"
 
-import { Bell, Search, ChevronDown, Settings, Building2 } from "lucide-react"
+import { Bell, Search, ChevronDown, Settings, Building2, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -20,7 +20,7 @@ import { AuthModal } from "@/components/auth/auth-modal"
 import { useState, useEffect } from "react"
 
 export function Header() {
-  const { user, logout } = useStore()
+  const { user, logout, mobileSidebarOpen, setMobileSidebarOpen } = useStore()
   const router = useRouter()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authTab, setAuthTab] = useState<"login" | "signup">("login")
@@ -57,14 +57,24 @@ export function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center border-b border-border/50 bg-background/95 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60 px-6">
+      <header className="sticky top-0 z-30 flex h-16 items-center border-b border-border/50 bg-background/95 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60 px-4 sm:px-6 gap-2 sm:gap-4">
+        {/* Mobile Sidebar Toggle */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden h-9 w-9"
+          onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+
         {/* Search - Left aligned */}
         <div className="flex-1 max-w-md">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search leads, campaigns, signals..."
-              className="pl-10 h-10 bg-muted/50 border-border/50 focus:bg-background transition-colors"
+              placeholder="Search..."
+              className="pl-10 h-10 bg-muted/50 border-border/50 focus:bg-background transition-colors w-full"
             />
           </div>
         </div>

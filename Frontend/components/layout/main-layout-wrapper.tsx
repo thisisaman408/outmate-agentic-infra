@@ -20,7 +20,8 @@ export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
         <div
             className={cn(
                 "flex flex-1 flex-col overflow-hidden transition-all duration-300 ease-in-out",
-                sidebarCollapsed ? "pl-16" : "pl-64"
+                sidebarCollapsed ? "lg:pl-16" : "lg:pl-64",
+                "pl-0" // No padding on mobile
             )}
         >
             {children}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useBlocker, useParams } from "react-router-dom";
 import { FlowPageSlidingContainerContent } from "@/components/core/playgroundComponent/sliding-container/components/flow-page-sliding-container";
-import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/ui/sidebar";
 import {
   SimpleSidebar,
   SimpleSidebarProvider,
@@ -276,30 +276,24 @@ export default function FlowPage({ view }: { view?: boolean }): JSX.Element {
         <div className="flow-page-positioning">
           {currentFlow && (
             <div className="flex h-full overflow-hidden">
-              <SidebarProvider
-                width="17.5rem"
-                defaultOpen={!isMobile}
-                segmentedSidebar={ENABLE_NEW_SIDEBAR}
-              >
-                <FlowSearchProvider>
-                  {!view && <FlowSidebarComponent isLoading={isLoading} />}
-                  <main
-                    className={cn(
-                      "flex flex-1 min-w-0 overflow-hidden transition-all duration-300",
-                      isSlidingContainerOpen &&
-                        !isFullscreen &&
-                        "rounded-xl m-2 mr-0",
-                    )}
-                  >
-                    <div className="h-full w-full">
-                      <FlowPageMainContent
-                        flowId={id}
-                        setIsLoading={setIsLoading}
-                      />
-                    </div>
-                  </main>
-                </FlowSearchProvider>
-              </SidebarProvider>
+              <FlowSearchProvider>
+                {!view && <FlowSidebarComponent isLoading={isLoading} />}
+                <main
+                  className={cn(
+                    "flex flex-1 min-w-0 overflow-hidden transition-all duration-300",
+                    isSlidingContainerOpen &&
+                      !isFullscreen &&
+                      "rounded-xl m-2 mr-0",
+                  )}
+                >
+                  <div className="h-full w-full">
+                    <FlowPageMainContent
+                      flowId={id}
+                      setIsLoading={setIsLoading}
+                    />
+                  </div>
+                </main>
+              </FlowSearchProvider>
               <SimpleSidebar resizable={!isFullscreen} className="h-full">
                 <FlowPageSlidingContainerContent
                   isFullscreen={isFullscreen}

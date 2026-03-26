@@ -29,6 +29,14 @@
     --border: 228 24% 92%;
     --input: 229 31% 95%;
     --ring: 250 100% 68%;
+    --sidebar: 228 33% 97%;
+    --sidebar-foreground: 228 27% 7%;
+    --sidebar-primary: 250 100% 68%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 230 31% 95%;
+    --sidebar-accent-foreground: 221 39% 11%;
+    --sidebar-border: 228 24% 92%;
+    --sidebar-ring: 250 100% 68%;
     --radius: 0.75rem;
 
     --accent-amber: 45 93% 47%;
@@ -140,7 +148,7 @@
     --placeholder: 240 5% 64.9%;
     --hard-zinc: 240 5.2% 33.9%;
     --smooth-red: 0 93.3% 94.1%;
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     --datatype-pink: 333.3 71.4% 50.6%;
     --datatype-pink-foreground: 325.7 77.8% 94.7%;
@@ -405,13 +413,13 @@
     --chat-bot-icon: #235d70;
     --chat-user-icon: #4f3d6e;
 
-    --sidebar-background: 225 33% 97%;
-    --sidebar-foreground: 225 21% 8%;
+    --sidebar: 240 29% 5%;
+    --sidebar-foreground: 234 80% 95%;
     --sidebar-primary: 250 100% 68%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 230 31% 95%;
-    --sidebar-accent-foreground: 221 39% 11%;
-    --sidebar-border: 228 24% 92%;
+    --sidebar-accent: 231 25% 11%;
+    --sidebar-accent-foreground: 234 100% 98%;
+    --sidebar-border: 231 24% 14%;
     --sidebar-ring: 250 100% 68%;
     --placeholder: 240 5% 64.9%;
     --hard-zinc: 240 5.2% 33.9%;

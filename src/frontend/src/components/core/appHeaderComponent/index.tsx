@@ -12,6 +12,8 @@ import CustomOutmateCounts from "@/customization/components/custom-outmate-count
 import { outmate_AGENTIC_EXPERIENCE } from "@/customization/feature-flags";
 import { useCustomNavigate } from "@/customization/hooks/use-custom-navigate";
 import useTheme from "@/customization/hooks/use-custom-theme";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
 import useAlertStore from "@/stores/alertStore";
 import { useEffect, useRef, useState } from "react";
 import FlowMenu from "./components/FlowMenu";
@@ -22,6 +24,7 @@ export default function AppHeader(): JSX.Element {
   const [activeState, setActiveState] = useState<"notifications" | null>(null);
   const notificationRef = useRef<HTMLButtonElement | null>(null);
   const notificationContentRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
   useTheme();
 
   useEffect(() => {
@@ -56,22 +59,23 @@ export default function AppHeader(): JSX.Element {
     >
       {/* Left Section */}
       <div
-        className={`z-30 flex shrink-0 items-center gap-2`}
+        className={`z-30 flex shrink-0 items-center gap-1 md:gap-2`}
         data-testid="header_left_section_wrapper"
       >
+        <SidebarTrigger className="flex md:hidden mr-1" />
         <Button
           unstyled
           onClick={() => navigate("/")}
           className="mr-1 flex items-center px-2 hover:bg-accent rounded-md transition-colors"
           data-testid="icon-ChevronLeft"
         >
-          <span className="font-chivo font-black text-xl tracking-tighter text-foreground">Outmate</span>
+          <span className="font-chivo font-black text-xl tracking-tighter text-foreground">O<span className="hidden sm:inline">utmate</span></span>
         </Button>
-        <CustomOrgSelector />
+        {!isMobile && <CustomOrgSelector />}
       </div>
 
       {/* Middle Section */}
-      <div className="absolute left-1/2 -translate-x-1/2">
+      <div className={`${isMobile ? "relative max-w-[40%] px-2" : "absolute left-1/2 -translate-x-1/2"}`}>
         <FlowMenu />
       </div>
 

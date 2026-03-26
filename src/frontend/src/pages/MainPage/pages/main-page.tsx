@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import SideBarFoldersButtonsComponent from "@/components/core/folderSidebarComponent/components/sideBarFolderButtons";
-import { SidebarProvider } from "@/components/ui/sidebar";
 import { useDeleteFolders } from "@/controllers/API/queries/folders";
 import CustomEmptyPageCommunity from "@/customization/components/custom-empty-page";
 import CustomLoader from "@/customization/components/custom-loader";
@@ -55,7 +54,7 @@ export default function CollectionPage(): JSX.Element {
   };
 
   return (
-    <SidebarProvider width="280px">
+    <>
       {flows &&
         examples &&
         folders &&
@@ -99,6 +98,6 @@ export default function CollectionPage(): JSX.Element {
         setOpenDeleteFolderModal={setOpenDeleteFolderModal}
         handleDeleteFolder={handleDeleteFolder}
       />
-    </SidebarProvider>
+    </>
   );
 }

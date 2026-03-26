@@ -84,7 +84,7 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { sidebarCollapsed, setSidebarCollapsed } = useStore()
+  const { sidebarCollapsed, setSidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen } = useStore()
   const [expandedItems, setExpandedItems] = useState<string[]>(["Leads", "Signals"])
 
   // Auto-expand if child is active
@@ -99,6 +99,11 @@ export function Sidebar() {
     })
   }, [pathname])
 
+  // Close mobile sidebar on navigation
+  useEffect(() => {
+    setMobileSidebarOpen(false)
+  }, [pathname, setMobileSidebarOpen])
+
   const toggleExpand = (name: string, e: React.MouseEvent) => {
     e.preventDefault()
     setExpandedItems((prev) =>
@@ -107,12 +112,23 @@ export function Sidebar() {
   }
 
   return (
-    <aside
-      className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out",
-        sidebarCollapsed ? "w-16" : "w-64",
+    <>
+      {/* Backdrop for mobile */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm lg:hidden h-full w-full"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
       )}
-    >
+
+      <aside
+        className={cn(
+          "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out lg:translate-x-0",
+          sidebarCollapsed ? "lg:w-16" : "lg:w-64",
+          mobileSidebarOpen ? "translate-x-0 w-64 shadow-2xl" : "-translate-x-full",
+          "w-64", // Default width on mobile
+        )}
+      >
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
@@ -286,5 +302,6 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   )
 }

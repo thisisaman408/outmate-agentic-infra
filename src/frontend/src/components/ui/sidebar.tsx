@@ -262,7 +262,7 @@ const Sidebar = React.forwardRef<
     },
     ref,
   ) => {
-    const { state, setOpen, defaultOpen } = useSidebar();
+    const { state, setOpen, defaultOpen, toggleSidebar } = useSidebar();
     const isMobile = useIsMobile();
 
     React.useEffect(() => {
@@ -313,6 +313,12 @@ const Sidebar = React.forwardRef<
         data-variant={variant}
         data-side={side}
       >
+        {isMobile && state === "expanded" && (
+          <div
+            className="fixed inset-0 z-[45] bg-background/80 backdrop-blur-sm md:hidden"
+            onClick={toggleSidebar}
+          />
+        )}
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
@@ -324,8 +330,8 @@ const Sidebar = React.forwardRef<
               : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]",
             // Keep icon width on mobile when collapsed
             collapsible === "icon"
-              ? "max-sm:w-[--sidebar-width-icon]"
-              : "max-sm:w-0",
+              ? "max-md:w-[--sidebar-width-icon]"
+              : "max-md:w-0",
           )}
         />
         <div
@@ -333,7 +339,7 @@ const Sidebar = React.forwardRef<
             "absolute inset-y-0 z-50 flex h-full transition-[left,right,width] duration-300 ease-in-out",
             // Adjust width based on state and device
             "w-[--sidebar-width]",
-            "max-sm:group-data-[state=collapsed]:w-[--sidebar-width-icon]",
+            "max-md:group-data-[state=collapsed]:w-[--sidebar-width-icon]",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -342,7 +348,7 @@ const Sidebar = React.forwardRef<
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
               : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
             // Position absolute relative to parent container on mobile
-            "max-sm:absolute max-sm:h-[100%] max-sm:group-data-[state=expanded]:bg-background/80",
+            "max-md:absolute max-md:h-[100%] max-md:group-data-[state=expanded]:bg-background/80",
             className,
           )}
           {...props}
@@ -353,7 +359,7 @@ const Sidebar = React.forwardRef<
               "flex h-full w-full flex-col bg-background",
               "group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-border group-data-[variant=floating]:shadow",
               // Add shadow on mobile
-              "max-sm:shadow-lg",
+              "max-md:shadow-lg",
             )}
           >
             {children}
