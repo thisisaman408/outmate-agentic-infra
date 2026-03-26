@@ -107,9 +107,31 @@ def _seed_result_for_signal(signal_id: str, text: str) -> Dict[str, Any]:
     return _generate_result(signal_id, text, f"{text} detected in live feed")
 
 
-SIGNAL_STORE: List[Dict[str, Any]] = []
+import json
+import os
 
-SIGNAL_RESULTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
+SIGNAL_STORE_FILE = 'signals_store.json'
+SIGNAL_RESULTS_FILE = 'signals_results_store.json'
+
+def load_json_store(filepath: str, default_val: Any) -> Any:
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Error loading {filepath}: {e}")
+    return default_val
+
+def save_json_store(filepath: str, data: Any) -> None:
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.warning(f"Error saving {filepath}: {e}")
+
+SIGNAL_STORE: List[Dict[str, Any]] = load_json_store(SIGNAL_STORE_FILE, [])
+
+SIGNAL_RESULTS_STORE: Dict[str, List[Dict[str, Any]]] = load_json_store(SIGNAL_RESULTS_FILE, {})
 
 
 class ExploriumCreditError(Exception):
@@ -195,12 +217,16 @@ class CreateSignalRequest(BaseModel):
 @router.get("")
 @router.get("/")
 async def list_signals():
+    global SIGNAL_STORE
+    SIGNAL_STORE = load_json_store(SIGNAL_STORE_FILE, SIGNAL_STORE)
     return sorted(SIGNAL_STORE, key=lambda s: s.get("created_at", ""), reverse=True)
 
 
 @router.post("")
 @router.post("/")
 async def create_signal(request: CreateSignalRequest):
+    global SIGNAL_STORE
+    SIGNAL_STORE = load_json_store(SIGNAL_STORE_FILE, SIGNAL_STORE)
     new_signal = {
         "_id": f"signal-{uuid4().hex[:8]}",
         "name": request.name,
@@ -213,6 +239,7 @@ async def create_signal(request: CreateSignalRequest):
         "cursor_state": {},
     }
     SIGNAL_STORE.append(new_signal)
+    save_json_store(SIGNAL_STORE_FILE, SIGNAL_STORE)
     # Fire-and-forget background run
     asyncio.create_task(
         fetcher_run_signal(new_signal, SIGNAL_RESULTS_STORE, SIGNAL_STORE)
