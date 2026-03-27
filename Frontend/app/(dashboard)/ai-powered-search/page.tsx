@@ -3162,6 +3162,7 @@ export default function DatabaseFinderPage() {
                                 : {}
                           ])
                         )}
+                        enrichingRows={enrichingRows}
                         waterfallAttempts={waterfallAttempts}
                       />
                     ) : (

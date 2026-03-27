@@ -242,6 +242,8 @@ function AddEnrollDialog({ open, onClose, entityType, eventTypeOptions, onSave }
         try {
             await onSave(chosenId, selected, chosenName || chosenId)
             onClose()
+        } catch {
+            // onSave already surfaces the error via toast
         } finally {
             setSaving(false)
         }
@@ -383,6 +385,8 @@ function EditEnrollDialog({ open, onClose, enrollment, eventTypeOptions, onSave 
         try {
             await onSave(enrollment.entityId, selected)
             onClose()
+        } catch {
+            // onSave already surfaces the error via toast
         } finally {
             setSaving(false)
         }
@@ -605,8 +609,16 @@ export default function EventsPage() {
             toast.success("Enrollment added")
             await loadEnrollments()
         } catch (err: any) {
+            const status = err?.response?.status
+            if (status === 402) {
+                const detail = err?.response?.data?.detail
+                const msg = typeof detail === "string"
+                    ? detail
+                    : "Insufficient credits to enroll. Please add credits and try again."
+                toast.error(msg)
+                return
+            }
             toast.error(err?.response?.data?.detail || "Failed to add enrollment")
-            throw err
         }
     }
 
@@ -620,8 +632,16 @@ export default function EventsPage() {
             toast.success("Enrollment updated")
             await loadEnrollments()
         } catch (err: any) {
+            const status = err?.response?.status
+            if (status === 402) {
+                const detail = err?.response?.data?.detail
+                const msg = typeof detail === "string"
+                    ? detail
+                    : "Insufficient credits to update enrollment. Please add credits and try again."
+                toast.error(msg)
+                return
+            }
             toast.error(err?.response?.data?.detail || "Failed to update enrollment")
-            throw err
         }
     }
 
