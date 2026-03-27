@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   Building2, Globe, Users, DollarSign, Calendar, MapPin, Phone, Mail, 
-  Social, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
+  Share2, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
   Zap, Award, Code, Activity
 } from "lucide-react";
 import Image from "next/image";
@@ -166,10 +166,10 @@ export default function PublicCompanyPage() {
                     </a>
                   </Button>
                 )}
-                {company.Social_url && company.Social_url !== "N/A" && (
+                {company.linkedin_url && company.linkedin_url !== "N/A" && (
                   <Button variant="outline" size="sm" asChild>
-                    <a href={company.Social_url.startsWith('http') ? company.Social_url : `https://${company.Social_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
-                      <Social className="h-4 w-4" />
+                    <a href={company.linkedin_url.startsWith('http') ? company.linkedin_url : `https://${company.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
+                      <Share2 className="h-4 w-4" />
                       Social
                     </a>
                   </Button>
@@ -208,7 +208,7 @@ export default function PublicCompanyPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Social className="h-5 w-5" />
+                <Share2 className="h-5 w-5" />
                 Realtime Social Insights
               </CardTitle>
             </CardHeader>
