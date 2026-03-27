@@ -400,11 +400,11 @@ export default function DatabaseFinderPage() {
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/v1/campaigns/send-Social`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Social_url: SocialUrl, message }),
-      })
+    const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkedin_url: SocialUrl, message }),
+    })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
         throw new Error(err.detail || "Send failed")
@@ -562,9 +562,9 @@ export default function DatabaseFinderPage() {
 
     const normalizeEmployer = (src: any): EmployerItem => ({
       name: src?.name || src?.company_name || src?.company || "",
-      Social_id: src?.Social_id || src?.company_Social_id || "",
+      linkedin_id: src?.linkedin_id || src?.Social_id || "",
       company_id: Number(src?.company_id || 0),
-      company_Social_id: src?.company_Social_id || "",
+      company_linkedin_id: src?.company_linkedin_id || src?.company_Social_id || "",
       company_website_domain: src?.company_website_domain || src?.company_domain || "",
       position_id: Number(src?.position_id || 0),
       title: src?.title || "",
@@ -584,11 +584,11 @@ export default function DatabaseFinderPage() {
         : [],
       company_headcount_range: src?.company_headcount_range || src?.company_size || "",
       company_industries: Array.isArray(src?.company_industries) ? src.company_industries : [],
-      company_Social_industry: src?.company_Social_industry || src?.industry || "",
+      company_linkedin_industry: src?.company_linkedin_industry || src?.company_Social_industry || src?.industry || "",
       company_type: src?.company_type || "",
       company_headcount_latest: Number(src?.company_headcount_latest || src?.size || 0),
       company_website: src?.company_website || src?.website || "",
-      company_Social_profile_url: src?.company_Social_profile_url || src?.Social_url || "",
+      company_linkedin_profile_url: src?.company_linkedin_profile_url || src?.company_Social_profile_url || src?.linkedin_url || src?.Social_url || "",
       business_email_verified: Boolean(src?.business_email_verified),
     })
 
@@ -608,7 +608,7 @@ export default function DatabaseFinderPage() {
             {
               name: item?.companyName || item?.company || raw?.company_name,
               title: item?.title || raw?.title || item?.headline || raw?.headline || "",
-              company_Social_industry: item?.industry || raw?.industry || "",
+              company_linkedin_industry: item?.industry || raw?.industry || "",
             },
           ]
           : [])
@@ -641,6 +641,20 @@ export default function DatabaseFinderPage() {
         raw?.location ||
         ""
 
+      const profileUrl = normalizeSocialUrl(
+        item?.linkedin_profile_url ||
+        item?.flagship_profile_url ||
+        item?.linkedin_url ||
+        item?.Social_profile_url ||
+        item?.Social_url ||
+        item?.Social ||
+        raw?.linkedin_profile_url ||
+        raw?.flagship_profile_url ||
+        raw?.linkedin_url ||
+        raw?.Social_profile_url ||
+        raw?.Social_url
+      )
+
       return {
         person_id: Number(item?.person_id || item?.prospect_id || raw?.person_id || 0),
         name: item?.name || item?.full_name || item?.contactName || raw?.name || raw?.full_name || "Unknown",
@@ -654,8 +668,9 @@ export default function DatabaseFinderPage() {
         summary: item?.summary || raw?.summary || "",
         skills: Array.isArray(item?.skills) ? item.skills : (Array.isArray(raw?.skills) ? raw.skills : []),
         languages: Array.isArray(item?.languages) ? item.languages : (Array.isArray(raw?.languages) ? raw.languages : []),
-        Social_profile_url: normalizeSocialUrl(item?.Social_profile_url || item?.flagship_profile_url || item?.Social_url || item?.Social || raw?.Social_profile_url || raw?.flagship_profile_url || raw?.Social_url),
-        flagship_profile_url: normalizeSocialUrl(item?.flagship_profile_url || item?.Social_profile_url || item?.Social_url || item?.Social || raw?.flagship_profile_url || raw?.Social_profile_url || raw?.Social_url),
+        linkedin_profile_url: profileUrl,
+        Social_profile_url: profileUrl,
+        flagship_profile_url: profileUrl,
         emails: email ? [email] : [],
         profile_picture_url: item?.profile_picture_url || raw?.profile_picture_url || "",
         profile_picture_permalink: item?.profile_picture_permalink || raw?.profile_picture_permalink || "",
@@ -871,6 +886,11 @@ export default function DatabaseFinderPage() {
         ? item.raw_data
         : ((item?.rawData && typeof item.rawData === "object") ? item.rawData : {})
 
+      const normalizeDomain = (value?: string) => {
+        if (!value || typeof value !== "string") return ""
+        return value.replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim()
+      }
+
       const parseLocationParts = (value?: string) => {
         if (!value || typeof value !== "string") return { city: undefined, state: undefined, country: undefined }
         const parts = value.split(",").map((p) => p.trim()).filter(Boolean)
@@ -886,16 +906,29 @@ export default function DatabaseFinderPage() {
       const employeesExact = item.employee_count_exact ?? item.Social_headcount ?? item.size ?? raw.employee_count_exact ?? raw.size
       const employeesRange = item.employee_count_range ?? item.employee_range ?? item.number_of_employees_range ?? item.company_size ?? item.size_range ?? raw.employee_count_range ?? raw.number_of_employees_range
 
+      const normalizedDomain = normalizeDomain(item.domain ?? item.website ?? raw.domain ?? raw.website ?? "")
+      const linkedinUrl =
+        item.linkedin_url ??
+        item.company_linkedin_url ??
+        item.linkedin_profile_url ??
+        item.Social_url ??
+        item.Social_profile ??
+        item.company_Social_url ??
+        item.li_vanity ??
+        raw.linkedin_url ??
+        raw.company_linkedin_url ??
+        raw.li_vanity
+
       return {
         id: String(item.id ?? item.business_id ?? item.domain ?? ""),
         name: item.name ?? item.business_name ?? item.company_name ?? "",
-        domain: item.domain ?? item.website ?? "",
+        domain: normalizedDomain,
         website: item.website,
         logo_url: item.logo_url ?? item.Social_logo_url ?? item.business_logo ?? item.logo ?? (item.domain ? `https://logo.clearbit.com/${item.domain}` : undefined),
         description: item.description ?? item.company_description ?? item.business_description,
-        industry: item.industry ?? item.Social_industry_category ?? item.primary_industry,
+        industry: item.industry ?? item.linkedin_industry_category ?? item.Social_industry_category ?? item.primary_industry,
         sub_industry: item.sub_industry,
-        Social_industry_category: item.Social_industry_category,
+        linkedin_industry_category: item.linkedin_industry_category ?? item.Social_industry_category,
         company_type: item.company_type ?? item.business_type ?? item.type ?? raw.company_type ?? raw.type,
         founded_year: item.founded_year ?? item.year_founded ?? item.founded_at ?? raw.founded_year ?? raw.year_founded ?? raw.founded_at,
         employee_count_exact: employeesExact,
@@ -922,7 +955,8 @@ export default function DatabaseFinderPage() {
         email: Array.isArray(item.email) ? item.email.join(", ") : item.email,
         personal_email: item.personal_email,
         work_email: item.work_email,
-        Social_url: item.Social_url ?? item.Social_profile ?? item.company_Social_url ?? item.li_vanity ?? raw.Social_url ?? raw.li_vanity,
+        linkedin_url: linkedinUrl,
+        Social_url: linkedinUrl,
         twitter_url: item.twitter_url,
         facebook_url: item.facebook_url,
         instagram_url: item.instagram_url,
@@ -1453,9 +1487,9 @@ export default function DatabaseFinderPage() {
 
         const mapEmployer = (src: any): EmployerItem => ({
           name: src?.name || src?.company_name || "",
-          Social_id: src?.Social_id || src?.company_Social_id || "",
+          linkedin_id: src?.linkedin_id || src?.Social_id || "",
           company_id: src?.company_id || 0,
-          company_Social_id: src?.company_Social_id || "",
+          company_linkedin_id: src?.company_linkedin_id || src?.company_Social_id || "",
           company_website_domain: src?.company_website_domain || src?.company_domain || "",
           position_id: src?.position_id || 0,
           title: src?.title || "",
@@ -1475,11 +1509,11 @@ export default function DatabaseFinderPage() {
             : [],
           company_headcount_range: src?.company_headcount_range || src?.company_size || "",
           company_industries: Array.isArray(src?.company_industries) ? src.company_industries : [],
-          company_Social_industry: src?.company_Social_industry || src?.industry || "",
+          company_linkedin_industry: src?.company_linkedin_industry || src?.company_Social_industry || src?.industry || "",
           company_type: src?.company_type || "",
           company_headcount_latest: src?.company_headcount_latest || src?.size || 0,
           company_website: src?.company_website || src?.website || "",
-          company_Social_profile_url: src?.company_Social_profile_url || src?.Social_url || "",
+          company_linkedin_profile_url: src?.company_linkedin_profile_url || src?.company_Social_profile_url || src?.linkedin_url || src?.Social_url || "",
           business_email_verified: Boolean(src?.business_email_verified),
         })
 
@@ -1557,8 +1591,9 @@ export default function DatabaseFinderPage() {
             summary: item.summary || raw.summary || "",
             skills: Array.isArray(item.skills) ? item.skills : (Array.isArray(raw.skills) ? raw.skills : []),
             languages: Array.isArray(item.languages) ? item.languages : (Array.isArray(raw.languages) ? raw.languages : []),
-            Social_profile_url: item.Social_profile_url || item.flagship_profile_url || item.Social_url || raw.Social_profile_url || raw.flagship_profile_url || raw.Social_url || "",
-            flagship_profile_url: item.flagship_profile_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.Social_profile_url || raw.Social_url || "",
+            linkedin_profile_url: item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
+            Social_profile_url: item.Social_profile_url || item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.Social_profile_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
+            flagship_profile_url: item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
             emails: email ? [email] : [],
             profile_picture_url: item.profile_picture_url || raw.profile_picture_url || "",
             profile_picture_permalink: item.profile_picture_permalink || raw.profile_picture_permalink || "",
@@ -2046,13 +2081,13 @@ export default function DatabaseFinderPage() {
               full_name: prospect.name || prospect.full_name || "",
               first_name: prospect.first_name || "",
               last_name: prospect.last_name || "",
-              Social_url: prospect.Social_profile_url || prospect.flagship_profile_url || "",
+              linkedin_url: prospect.linkedin_profile_url || prospect.flagship_profile_url || "",
               email: prospect.emails?.[0] || prospect.email || "",
               job_title: currentEmployer.title || prospect.headline || "",
               // Company data (for context)
               company_name: currentEmployer.name || "",
               company_domain: currentEmployer.company_website_domain || currentEmployer.company_domain || "",
-              industry: currentEmployer.company_Social_industry || "",
+              industry: currentEmployer.company_linkedin_industry || "",
               employee_count_range: currentEmployer.company_headcount_range || "",
               employee_count_exact: currentEmployer.company_headcount_latest || 0,
               funding_stage: "",
@@ -2169,12 +2204,12 @@ export default function DatabaseFinderPage() {
                 full_name: prospect.name || prospect.full_name || "",
                 first_name: prospect.first_name || "",
                 last_name: prospect.last_name || "",
-                Social_url: prospect.Social_profile_url || prospect.flagship_profile_url || "",
+                linkedin_url: prospect.linkedin_profile_url || prospect.flagship_profile_url || "",
                 email: prospect.emails?.[0] || prospect.email || "",
                 job_title: currentEmployer.title || prospect.headline || "",
                 company_name: currentEmployer.name || "",
                 company_domain: currentEmployer.company_website_domain || currentEmployer.company_domain || "",
-                industry: currentEmployer.company_Social_industry || "",
+                industry: currentEmployer.company_linkedin_industry || "",
                 employee_count_range: currentEmployer.company_headcount_range || "",
                 employee_count_exact: currentEmployer.company_headcount_latest || 0,
                 funding_stage: "",
@@ -2248,7 +2283,17 @@ export default function DatabaseFinderPage() {
       }
 
       const data = await response.json()
-      setCampaignDraft(data)
+      const normalizedDraft = {
+        ...data,
+        Social_message: data.Social_message || data.linkedin_message || "",
+        recipients: Array.isArray(data.recipients)
+          ? data.recipients.map((r: any) => ({
+            ...r,
+            Social_url: r.Social_url || r.linkedin_url || r.linkedin_profile_url || "",
+          }))
+          : [],
+      }
+      setCampaignDraft(normalizedDraft)
       setClarification("Campaign draft generated! Review your personalized email and Social message below.")
     } catch (error) {
       console.error("Campaign draft error:", error)
@@ -2293,10 +2338,10 @@ export default function DatabaseFinderPage() {
           prospect.name || "",
           emails,
           phones,
-          prospect.flagship_profile_url || prospect.Social_profile_url || "",
+          prospect.linkedin_profile_url || prospect.flagship_profile_url || prospect.Social_profile_url || "",
           currentEmployer?.title || "",
           currentEmployer?.name || "",
-          currentEmployer?.company_Social_industry || "",
+          currentEmployer?.company_linkedin_industry || "",
           prospect.location_details?.country || prospect.region || "",
           String(prospect.num_of_connections || 0),
           prospect.years_of_experience || "",

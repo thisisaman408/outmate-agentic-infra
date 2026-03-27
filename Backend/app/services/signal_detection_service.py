@@ -388,6 +388,7 @@ class SignalDetectionService:
         signals = []
         business_ids = []
         business_to_company = {}
+        unmatched_companies: List[Dict[str, Any]] = []
         
         # First, match companies to get business_ids
         for company in companies[:10]:  # Limit to 10 companies
@@ -409,11 +410,16 @@ class SignalDetectionService:
                     if business_id:
                         business_ids.append(business_id)
                         business_to_company[business_id] = company
+                    else:
+                        unmatched_companies.append(company)
+                else:
+                    unmatched_companies.append(company)
             except Exception as e:
                 print(f">>> [Signals] Match error for {company_name}: {e}", flush=True)
+                unmatched_companies.append(company)
         
         if not business_ids:
-            return self._fallback_signal_detection(companies)
+            return self._fallback_signal_detection(companies, action=action)
         
         # Enrich each business individually using single-enrich APIs (reliable, known response shape)
         enrichment_data = {}
@@ -659,6 +665,9 @@ class SignalDetectionService:
                     "personalization_tips": "Leverage intent and enrichment data for targeted outreach"
                 })
         
+        if unmatched_companies:
+            signals.extend(self._fallback_signal_detection(unmatched_companies, action=action))
+
         return signals
     
     def _create_company_summary(self, company: Dict[str, Any]) -> str:

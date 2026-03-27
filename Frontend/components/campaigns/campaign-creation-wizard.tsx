@@ -308,10 +308,10 @@ export function CampaignCreationWizard() {
     })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/v1/campaigns/send-Social`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Social_url: SocialUrl, message }),
+        body: JSON.stringify({ linkedin_url: SocialUrl, message }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
