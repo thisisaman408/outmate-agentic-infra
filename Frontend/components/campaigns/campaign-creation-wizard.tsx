@@ -190,7 +190,7 @@ export function CampaignCreationWizard() {
     }
 
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    fetch(`${API}/api/v1/campaigns/Email/status`)
+    fetch(`${API}/api/v1/campaigns/gmail/status`)
       .then((res) => res.json())
       .then((data) => {
         if (data.connected) {
@@ -199,7 +199,7 @@ export function CampaignCreationWizard() {
         }
       })
       .catch(() => {})
-    fetch(`${API}/api/v1/campaigns/Social/status`)
+    fetch(`${API}/api/v1/campaigns/linkedin/status`)
       .then((res) => res.json())
       .then((data) => {
         if (data.connected) setSocialConnected(true)

@@ -72,7 +72,6 @@ const navItems: NavItem[] = [
       { name: "Form Complete", href: "/signals/formcomplete", icon: CheckSquare },
     ],
   },
-  { name: "Scoring", href: "/scoring", icon: Target },
   { name: "Campaigns", href: "/campaigns", icon: Send },
   { name: "Workflows", href: "/workflows", icon: Workflow },
   { name: "Co-Pilot", href: "/copilot", icon: Sparkles },

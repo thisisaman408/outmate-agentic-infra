@@ -130,14 +130,6 @@ const ROUTE_SUGGESTIONS: Record<string, { icon: React.ElementType; questions: st
       "How do I create a custom playbook?",
     ],
   },
-  "/scoring": {
-    icon: Target,
-    questions: [
-      "How does Lead Scoring work?",
-      "What factors affect a lead's score?",
-      "How do I prioritize leads by score?",
-    ],
-  },
   "/ai-powered-search": {
     icon: Search,
     questions: [

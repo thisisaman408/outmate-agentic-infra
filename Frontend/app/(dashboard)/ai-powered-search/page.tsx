@@ -326,7 +326,7 @@ export default function DatabaseFinderPage() {
   useEffect(() => {
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
     // Check Social (Messaging provider) status
-    fetch(`${API}/api/v1/campaigns/Social/status`).then(r => r.json()).then(data => {
+    fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setSocialConnected(true)
     }).catch(() => { })
   }, [])
