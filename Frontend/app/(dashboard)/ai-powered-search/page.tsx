@@ -3288,7 +3288,7 @@ export default function DatabaseFinderPage() {
                         <CardDescription className="text-[10px] uppercase tracking-wider font-semibold opacity-60">Intelligence Pack</CardDescription>
                       </CardHeader>
                       <CardContent className="p-0">
-                        <ScrollArea className="max-h-[400px]">
+                        <ScrollArea className="max-h-[600px] pr-3">
                           <div className="divide-y divide-border/20">
                             {detectedSignals.map((signal, idx) => (
                               <div key={idx} className="p-4 hover:bg-white/5 transition-colors group">
@@ -3303,7 +3303,7 @@ export default function DatabaseFinderPage() {
                                       {(signal.signals || [signal]).map((s: any, si: number) => (
                                         <div key={si} className="text-[11px] leading-relaxed">
                                           <p className="font-medium">{s.title || s.type?.replace(/_/g, ' ') || "Alert"}</p>
-                                          <p className="opacity-70 line-clamp-2">{s.description}</p>
+                                          <p className="opacity-70">{s.description}</p>
                                         </div>
                                       ))}
                                     </div>

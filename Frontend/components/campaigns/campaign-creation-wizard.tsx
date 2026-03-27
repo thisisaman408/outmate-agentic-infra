@@ -64,11 +64,39 @@ export function CampaignCreationWizard() {
         leads: formData.leads,
         signals,
       })
+      const fallbackText = (generated.raw || generated.email_body || "").trim()
+      let subject = generated.subject || formData.subject
+      let emailBody = generated.email_body || formData.message
+      let linkedinMessage = generated.linkedin_message || formData.SocialMessage
+
+      if (fallbackText && (!subject || !linkedinMessage)) {
+        const jsonMatch = fallbackText.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0])
+            subject = subject || parsed.subject || parsed.email_subject || ""
+            emailBody = emailBody || parsed.email_body || parsed.body || ""
+            linkedinMessage = linkedinMessage || parsed.linkedin_message || parsed.linkedin || ""
+          } catch {
+            // ignore JSON parse errors
+          }
+        }
+      }
+
+      if (fallbackText && (!subject || !linkedinMessage)) {
+        const subjectMatch = fallbackText.match(/subject\s*:\s*(.+)/i)
+        const linkedinMatch = fallbackText.match(/linkedin(?:_message)?\s*:\s*([\s\S]*)/i)
+        const bodyMatch = fallbackText.match(/email(?:_body)?\s*:\s*([\s\S]*?)(?:\n\s*linkedin|$)/i)
+        subject = subject || (subjectMatch ? subjectMatch[1].trim() : "")
+        emailBody = emailBody || (bodyMatch ? bodyMatch[1].trim() : emailBody)
+        linkedinMessage = linkedinMessage || (linkedinMatch ? linkedinMatch[1].trim() : "")
+      }
+
       setFormData({
         ...formData,
-        subject: generated.subject || formData.subject,
-        message: generated.email_body || formData.message,
-        SocialMessage: generated.Social_message || formData.SocialMessage,
+        subject,
+        message: emailBody,
+        SocialMessage: linkedinMessage,
       })
       toast({
         title: "Success",
