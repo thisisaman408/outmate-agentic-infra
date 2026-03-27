@@ -89,8 +89,8 @@ class BetterContactService:
 
                 print(f">>> [BetterContact] enrich_prospect submitted: {request_id} (contact: {first_name} {last_name}, company: {company_name}, domain: {company_domain}, linkedin: {linkedin_url}, is_fallback: {_is_fallback})", flush=True)
 
-                # Step 2: Poll for results (shorter window for Agents to prevent Gateway Timeouts)
-                for attempt in range(10):
+                # Step 2: Poll for results (60s window to let BetterContact search all sources)
+                for attempt in range(24):
                     await asyncio.sleep(2.5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/async/{request_id}",
@@ -141,7 +141,7 @@ class BetterContactService:
                         return {"success": False, "error": f"Enrichment failed: {status}"}
 
                 # Timeout
-                return {"success": False, "error": "Enrichment timed out after 90s"}
+                return {"success": False, "error": "Enrichment timed out after 60s"}
 
         except httpx.TimeoutException:
             logger.error("BetterContact request timed out")
@@ -197,8 +197,8 @@ class BetterContactService:
 
                 logger.info(f"BetterContact lead_finder submitted: {request_id}")
 
-                # Step 2: Poll for results (shorter window for Agents)
-                for attempt in range(10):
+                # Step 2: Poll for results (60s window to let BetterContact search all sources)
+                for attempt in range(24):
                     await asyncio.sleep(2.5)
                     poll_res = await client.get(
                         f"{BETTERCONTACT_BASE}/lead_finder/async/{request_id}",
@@ -272,8 +272,8 @@ class BetterContactService:
                         logger.error(f"BetterContact lead_finder failed: {status}")
                         return {"success": False, "error": f"Lead finder failed: {status}"}
 
-                logger.warning(f"BetterContact lead_finder timed out after 90s for request {request_id}")
-                return {"success": False, "error": "Lead finder timed out after 90s"}
+                logger.warning(f"BetterContact lead_finder timed out after 60s for request {request_id}")
+                return {"success": False, "error": "Lead finder timed out after 60s"}
 
         except httpx.TimeoutException:
             logger.error("BetterContact lead_finder timed out")

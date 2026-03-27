@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Path
+from pydantic import BaseModel
 
 from app.services.crustdata_service import CrustdataService
 
@@ -27,6 +28,23 @@ def _pick_best_identification_match(matches: Any) -> Optional[Dict[str, Any]]:
     # Otherwise, take the first match
     first = matches[0]
     return first if isinstance(first, dict) else None
+
+
+class PersonEnrichRequest(BaseModel):
+    linkedin_profile_url: str
+
+
+@router.post("/person/enrich")
+async def enrich_person_email(request: PersonEnrichRequest):
+    """Enrich a person's email via CrustData using LinkedIn URL."""
+    try:
+        from app.services.crustdata.enrichment_service import PersonEnrichmentService
+        svc = PersonEnrichmentService()
+        result = await svc.enrich_person_email(request.linkedin_profile_url)
+        return result
+    except Exception as e:
+        logger.error("CrustData person enrich error: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Person enrichment failed: {str(e)}")
 
 
 @router.post("/identify")

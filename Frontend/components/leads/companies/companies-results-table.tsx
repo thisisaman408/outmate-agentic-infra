@@ -201,7 +201,7 @@ function ContactCell({
         : undefined
     const waterfallCredits = typeof waterfallField === 'object' ? (waterfallField as any).credits_consumed : undefined
     const contactAttempted = isEmailCol ? cacheEntry.attemptedEmail : cacheEntry.attemptedPhone
-    const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact
+    const showRevealControls = !waterfallValue && !contactValue && !isLoadingContact && !enrichData?.loading
     const attemptRecord = waterfallAttempts?.[companyId] || {}
     const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
     const attemptMessage = isEmailCol ? "Email not available" : "Phone not available"
@@ -237,6 +237,12 @@ function ContactCell({
                 <div className="flex items-center gap-2">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     <span className="text-xs text-muted-foreground">Revealing...</span>
+                </div>
+            )}
+            {enrichData?.loading && !waterfallValue && !contactValue && (
+                <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                    <span className="text-xs text-muted-foreground">Enriching...</span>
                 </div>
             )}
             {showRevealControls && (
@@ -281,12 +287,6 @@ function ContactCell({
                 >
                     <Zap className="h-3 w-3" />
                 </Button>
-            )}
-            {enrichData?.loading && (
-                <div className="flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="text-xs text-muted-foreground">Enriching...</span>
-                </div>
             )}
         </div>
     )
@@ -378,7 +378,27 @@ export function CompaniesResultsTable({
             const values = field === 'email'
                 ? (Array.isArray(data?.emails) ? data.emails : [])
                 : (Array.isArray(data?.phones) ? data.phones : [])
-            const sanitized = field === 'email' ? sanitizeEmails(values) : sanitizePhones(values)
+            let sanitized = field === 'email' ? sanitizeEmails(values) : sanitizePhones(values)
+
+            // CrustData email fallback when ContactOut returned nothing
+            if (sanitized.length === 0 && field === 'email' && company.linkedin_url) {
+                try {
+                    const crustRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/crustdata/person/enrich`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ linkedin_profile_url: company.linkedin_url }),
+                    })
+                    if (crustRes.ok) {
+                        const crustData = await crustRes.json()
+                        const crustEmails = sanitizeEmails(
+                            Array.isArray(crustData?.business_email) ? crustData.business_email : []
+                        )
+                        if (crustEmails.length > 0) {
+                            sanitized = crustEmails
+                        }
+                    }
+                } catch { /* CrustData fallback failed silently */ }
+            }
 
             setContactCache(prev => ({
                 ...prev,

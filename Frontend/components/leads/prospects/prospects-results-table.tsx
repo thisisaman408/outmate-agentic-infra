@@ -36,6 +36,7 @@ interface ProspectsResultsTableProps {
     onEnrichReveal?: (profile: ProspectProfile, field: 'email' | 'phone') => void
     onWaterfallResult?: (linkedinUrl: string, field: 'email' | 'phone', result: any) => void
     enrichCache?: Record<string, { email?: any, phone?: any }>
+    enrichingRows?: Record<string, boolean>
     tableId?: string
 }
 
@@ -198,6 +199,7 @@ export function ProspectsResultsTable({
     onEnrichReveal,
     onWaterfallResult,
     enrichCache,
+    enrichingRows,
     tableId = "prospects",
 }: ProspectsResultsTableProps) {
     const actualProfiles = profiles || data || []
@@ -244,6 +246,41 @@ export function ProspectsResultsTable({
             }
         } catch { /* ContactOut reveal failed */ }
         if (fieldValues.length > 0) { setCacheField(rowId, field, fieldValues, false); return }
+        // CrustData fallback (email + phone when available)
+        if (fieldValues.length === 0) {
+            const linkedinUrl = profile.flagship_profile_url || profile.linkedin_profile_url
+            if (linkedinUrl) {
+                try {
+                    const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
+                    const crustRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/crustdata/person/enrich`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+                        body: JSON.stringify({ linkedin_profile_url: linkedinUrl }),
+                    })
+                    if (crustRes.ok) {
+                        const crustData = await crustRes.json()
+                        const crustEmails = sanitizeEmails(
+                            Array.isArray(crustData?.business_email) ? crustData.business_email : []
+                        )
+                        const crustPhones = sanitizePhones([
+                            ...(Array.isArray(crustData?.phone_numbers) ? crustData.phone_numbers : []),
+                            ...(Array.isArray(crustData?.phones) ? crustData.phones : []),
+                            crustData?.phone,
+                            crustData?.business_phone,
+                            crustData?.mobile_phone,
+                        ].filter(Boolean))
+                        if (field === "email" && crustEmails.length > 0) {
+                            setCacheField(rowId, field, crustEmails, false)
+                            return
+                        }
+                        if (field === "phone" && crustPhones.length > 0) {
+                            setCacheField(rowId, field, crustPhones, false)
+                            return
+                        }
+                    }
+                } catch { /* CrustData fallback failed */ }
+            }
+        }
         // BetterContact fallback
         try {
             const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
@@ -627,6 +664,11 @@ export function ProspectsResultsTable({
                                 </>
                             ) : cache?.loading ? (
                                 <span className="text-xs text-muted-foreground">Loading...</span>
+                            ) : enrichingRows?.[`${contactKey}-email`] ? (
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                    <span className="text-xs text-muted-foreground">Enriching...</span>
+                                </div>
                             ) : waterfallEmail ? (
                                 <div className="flex flex-col gap-1">
                                     <div className="flex items-center gap-2">
@@ -679,6 +721,11 @@ export function ProspectsResultsTable({
                                         <span>Advanced enrichment: {formatCreditsLabel(waterfallPhone?.credits_consumed)}</span>
                                     </div>
                                 </>
+                            ) : enrichingRows?.[`${contactKey}-phone`] ? (
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                    <span className="text-xs text-muted-foreground">Enriching...</span>
+                                </div>
                             ) : waterfallPhone ? (
                                 <div className="flex flex-col gap-1">
                                     <div className="flex items-center gap-2">
@@ -716,7 +763,7 @@ export function ProspectsResultsTable({
         }
 
         return cols
-    }, [enableContactReveal, revealedEmail, revealedPhone, contactCache, enrichCache]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [enableContactReveal, revealedEmail, revealedPhone, contactCache, enrichCache, enrichingRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const table = useTableState({
         tableId,

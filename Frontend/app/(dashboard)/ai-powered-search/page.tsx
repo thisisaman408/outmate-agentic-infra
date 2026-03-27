@@ -3123,6 +3123,7 @@ export default function DatabaseFinderPage() {
                     totalCount={tamPreview.count}
                     enableContactReveal={true}
                     tableId="ai-powered-prospects"
+                    enrichingRows={enrichingRows}
                   />
                 ) : (
                   <>

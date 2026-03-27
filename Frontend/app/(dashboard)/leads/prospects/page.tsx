@@ -781,6 +781,7 @@ function ProspectsPageContent() {
                             onEnrichReveal={onEnrichReveal}
                             onWaterfallResult={handleWaterfallResult}
                             enrichCache={enrichedData}
+                            enrichingRows={enrichingRows}
                             tableId="prospects_v2"
                         />
                     ) : hasSearched ? (
