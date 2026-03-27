@@ -485,6 +485,15 @@ class SignalDetectionService:
             except Exception as e:
                 print(f">>> [Signals] News mentions error for {company_name}: {e}", flush=True)
 
+            # 7. Company blog RSS (best-effort)
+            try:
+                blog_mentions = await self._fetch_blog_mentions(company_domain)
+                if blog_mentions:
+                    enrichment_data[bid]["blog_mentions"] = blog_mentions
+                    print(f">>> [Signals] Blog mentions OK for {company_name}: {len(blog_mentions)} items", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Blog mentions error for {company_name}: {e}", flush=True)
+
         # Process enrichment data into signals
         for business_id, data in enrichment_data.items():
             company = business_to_company.get(business_id, {})
@@ -648,6 +657,17 @@ class SignalDetectionService:
                         "confidence": 65
                     })
 
+            blog_mentions = data.get("blog_mentions", [])
+            if blog_mentions:
+                top = blog_mentions[0]
+                title = top.get("title") or "Recent blog post"
+                company_signals.append({
+                    "type": "blog_activity",
+                    "description": f"Recent blog activity: {title}",
+                    "urgency": "low",
+                    "confidence": 65
+                })
+
             # Also extract signals from the company data passed in from search results
             company_data = business_to_company.get(business_id, {})
             if company_data.get("funding_stage"):
@@ -727,6 +747,35 @@ class SignalDetectionService:
                 return items
         except Exception:
             return []
+
+    async def _fetch_blog_mentions(self, domain: str) -> List[Dict[str, Any]]:
+        """Fetch recent blog posts from common RSS endpoints (best-effort)."""
+        if not domain:
+            return []
+        candidates = [
+            f"https://{domain}/blog/rss.xml",
+            f"https://{domain}/blog/feed",
+            f"https://{domain}/feed",
+        ]
+        async with httpx.AsyncClient(timeout=8) as client:
+            for url in candidates:
+                try:
+                    response = await client.get(url)
+                    if response.status_code != 200:
+                        continue
+                    root = ET.fromstring(response.text)
+                    items = []
+                    for item in root.findall(".//item")[:3]:
+                        title = item.findtext("title") or ""
+                        link = item.findtext("link") or ""
+                        pub_date = item.findtext("pubDate") or ""
+                        if title:
+                            items.append({"title": title.strip(), "link": link.strip(), "published_at": pub_date.strip()})
+                    if items:
+                        return items
+                except Exception:
+                    continue
+        return []
     
     def _create_company_summary(self, company: Dict[str, Any]) -> str:
         """Create a brief summary of a company for analysis"""

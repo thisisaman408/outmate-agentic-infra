@@ -3306,6 +3306,12 @@ export default function DatabaseFinderPage() {
                                           <p className="opacity-70">{s.description}</p>
                                         </div>
                                       ))}
+                                      {signal.personalization_tips && (
+                                        <div className="text-[11px] leading-relaxed mt-1">
+                                          <p className="font-medium text-yellow-600">Personalization tip</p>
+                                          <p className="opacity-70">{signal.personalization_tips}</p>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                               </div>
