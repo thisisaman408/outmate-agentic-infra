@@ -18,6 +18,8 @@ import os
 import httpx
 from typing import Dict, Any, List, Optional
 import logging
+import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
 
 from app.core.config import settings
 from app.services.crustdata_service import CrustdataService
@@ -426,6 +428,7 @@ class SignalDetectionService:
         for bid in business_ids:
             enrichment_data[bid] = {}
             company_name = business_to_company.get(bid, {}).get("name", bid)
+            company_domain = business_to_company.get(bid, {}).get("domain", "")
 
             # 1. Firmographics
             try:
@@ -472,6 +475,15 @@ class SignalDetectionService:
                     print(f">>> [Signals] LinkedIn posts OK for {company_name}", flush=True)
             except Exception as e:
                 print(f">>> [Signals] LinkedIn posts error for {company_name}: {e}", flush=True)
+
+            # 6. Public news/blog mentions (Google News RSS fallback)
+            try:
+                mentions = await self._fetch_news_mentions(company_name, company_domain)
+                if mentions:
+                    enrichment_data[bid]["news_mentions"] = mentions
+                    print(f">>> [Signals] News mentions OK for {company_name}: {len(mentions)} items", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] News mentions error for {company_name}: {e}", flush=True)
 
         # Process enrichment data into signals
         for business_id, data in enrichment_data.items():
@@ -617,6 +629,25 @@ class SignalDetectionService:
                             company_signals.append({"type": "product_launch", "description": "Recently announced product/feature launch", "urgency": "high", "confidence": 75})
                             break
 
+            # Public news/blog mentions (if available)
+            news_mentions = data.get("news_mentions", [])
+            if news_mentions:
+                top = news_mentions[0]
+                title = top.get("title") or "Recent coverage"
+                company_signals.append({
+                    "type": "news_mention",
+                    "description": f"Featured in recent coverage: {title}",
+                    "urgency": "medium",
+                    "confidence": 70
+                })
+                if len(news_mentions) > 1:
+                    company_signals.append({
+                        "type": "blog_mention",
+                        "description": f"{len(news_mentions)} recent news/blog mentions found",
+                        "urgency": "low",
+                        "confidence": 65
+                    })
+
             # Also extract signals from the company data passed in from search results
             company_data = business_to_company.get(business_id, {})
             if company_data.get("funding_stage"):
@@ -669,6 +700,33 @@ class SignalDetectionService:
             signals.extend(self._fallback_signal_detection(unmatched_companies, action=action))
 
         return signals
+
+    async def _fetch_news_mentions(self, company_name: str, domain: str = "") -> List[Dict[str, Any]]:
+        """Fetch recent public mentions using Google News RSS as a lightweight fallback."""
+        query_parts = [company_name] if company_name else []
+        if domain:
+            query_parts.append(domain)
+        query = " ".join(p for p in query_parts if p)
+        if not query:
+            return []
+
+        url = f"https://news.google.com/rss/search?q={quote_plus(query)}"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(url)
+                if response.status_code != 200:
+                    return []
+                root = ET.fromstring(response.text)
+                items = []
+                for item in root.findall(".//item")[:3]:
+                    title = item.findtext("title") or ""
+                    link = item.findtext("link") or ""
+                    pub_date = item.findtext("pubDate") or ""
+                    if title:
+                        items.append({"title": title.strip(), "link": link.strip(), "published_at": pub_date.strip()})
+                return items
+        except Exception:
+            return []
     
     def _create_company_summary(self, company: Dict[str, Any]) -> str:
         """Create a brief summary of a company for analysis"""
