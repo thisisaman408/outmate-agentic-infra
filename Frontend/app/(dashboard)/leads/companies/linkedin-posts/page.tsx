@@ -151,8 +151,8 @@ export default function LinkedInPostsPage() {
       <div className="flex items-center gap-3">
         <MessageSquare className="h-8 w-8 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Realtime LinkedIn Posts by Company</h1>
-          <p className="text-muted-foreground">Get recent LinkedIn posts and engagement metrics for a specific company</p>
+          <h1 className="text-3xl font-bold tracking-tight">Realtime Social Posts by Company</h1>
+          <p className="text-muted-foreground">Get recent social posts and engagement metrics for a specific company</p>
         </div>
       </div>
 
@@ -166,7 +166,7 @@ export default function LinkedInPostsPage() {
                 Search Parameters
               </CardTitle>
               <CardDescription>
-                Provide company identifier to fetch LinkedIn posts
+                Provide company identifier to fetch social posts
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -201,7 +201,7 @@ export default function LinkedInPostsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="linkedin-url">LinkedIn URL</Label>
+                <Label htmlFor="linkedin-url">Profile URL</Label>
                 <Input
                   id="linkedin-url"
                   placeholder="e.g., https://linkedin.com/company/salesforce"
@@ -331,7 +331,7 @@ export default function LinkedInPostsPage() {
                 ) : (
                   <>
                     <Search className="mr-2 h-4 w-4" />
-                    Fetch LinkedIn Posts
+                    Fetch Social Posts
                   </>
                 )}
               </Button>
@@ -352,14 +352,14 @@ export default function LinkedInPostsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CheckCircle className="h-5 w-5" />
-                LinkedIn Posts ({posts.length})
+                Social Posts ({posts.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
               {posts.length === 0 && !loading && (
                 <div className="text-center py-12 text-muted-foreground">
                   <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No LinkedIn posts found. Provide a company identifier and try again.</p>
+                  <p>No social posts found. Provide a company identifier and try again.</p>
                 </div>
               )}
 

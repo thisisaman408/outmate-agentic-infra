@@ -248,8 +248,8 @@ export function CreateWatcherDialog({
 
                             <div className="flex items-center justify-between">
                                 <div className="space-y-0.5">
-                                    <Label>Slack Notifications</Label>
-                                    <p className="text-sm text-muted-foreground">Post to Slack channel</p>
+                                    <Label>Messaging Notifications</Label>
+                                    <p className="text-sm text-muted-foreground">Post to a messaging channel</p>
                                 </div>
                                 <Switch
                                     checked={formData.slackNotifications}

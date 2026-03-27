@@ -481,12 +481,12 @@ export function ProspectsResultsTable({
                 },
             },
             {
-                key: 'company_linkedin', label: 'Company LinkedIn', defaultVisible: false, width: '130px', sortable: false, category: 'employer',
+                key: 'company_linkedin', label: 'Company Profile', defaultVisible: false, width: '130px', sortable: false, category: 'employer',
                 render: (_v, p) => {
                     const emp = p.current_employers?.[0]
                     const url = emp?.company_linkedin_profile_url
                     return url ? (
-                        <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">LinkedIn</a>
+                        <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">Profile</a>
                     ) : <>N/A</>
                 },
             },
@@ -604,11 +604,11 @@ export function ProspectsResultsTable({
 
             // ── Social & Links ──
             {
-                key: 'linkedin_profile_url', label: 'LinkedIn URL', defaultVisible: false, width: '130px', sortable: false, category: 'social',
+                key: 'linkedin_profile_url', label: 'Profile URL', defaultVisible: false, width: '130px', sortable: false, category: 'social',
                 render: (v, p) => {
                     const url = v || p.flagship_profile_url
                     return url ? (
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">LinkedIn</a>
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs font-medium">Profile</a>
                     ) : <>N/A</>
                 },
             },
@@ -776,7 +776,7 @@ export function ProspectsResultsTable({
     // Export handler
     const handleExport = useCallback((rows: ProspectProfile[]) => {
         if (rows.length === 0) return
-        const headers = ['Name', 'First Name', 'Last Name', 'Region', 'Headline', 'Skills', 'LinkedIn URL', 'Emails', 'Connections']
+        const headers = ['Name', 'First Name', 'Last Name', 'Region', 'Headline', 'Skills', 'Profile URL', 'Emails', 'Connections']
         const csvRows = rows.map((p) => [
             p.name || '', p.first_name || '', p.last_name || '', p.region || '',
             p.headline || '', (p.skills || []).join('; '), p.linkedin_profile_url || '',
@@ -865,7 +865,7 @@ export function ProspectsResultsTable({
                             {prospect.flagship_profile_url && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700" asChild>
                                     <a href={prospect.flagship_profile_url} target="_blank" rel="noopener noreferrer">
-                                        <Linkedin className="h-4 w-4" /><span className="sr-only">LinkedIn Profile</span>
+                                        <Linkedin className="h-4 w-4" /><span className="sr-only">Profile</span>
                                     </a>
                                 </Button>
                             )}

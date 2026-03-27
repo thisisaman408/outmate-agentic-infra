@@ -99,7 +99,7 @@ export function ComplianceOraclePanel() {
               onChange={(e) => setTemplate(e.target.value)}
               disabled={isRunning}
               rows={7}
-              placeholder="Paste your cold email, LinkedIn sequence, or multi-step outreach here..."
+              placeholder="Paste your cold email, social sequence, or multi-step outreach here..."
             />
             {inlineError && (
               <p className="text-xs text-red-500">{inlineError}</p>
@@ -145,4 +145,3 @@ export function ComplianceOraclePanel() {
     </div>
   )
 }
-

@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     
     if (!linkedin_url) {
       return NextResponse.json(
-        { success: false, error: { message: 'LinkedIn URL is required' } },
+        { success: false, error: { message: 'Profile URL is required' } },
         { status: 400 }
       )
     }

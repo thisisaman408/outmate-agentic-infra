@@ -96,7 +96,7 @@ const QUICK_ACTIONS: { type: LeadActionType; label: string; icon: typeof Mail; c
   { type: "regime_shift", label: "Regime Shifter", icon: ArrowRightLeft, cost: 2 },
   { type: "website_traffic", label: "Website Traffic", icon: BarChart3, cost: 1 },
   { type: "business_events", label: "Business Events", icon: Calendar, cost: 1 },
-  { type: "linkedin_posts", label: "LinkedIn Post Analysis", icon: Linkedin, cost: 1 },
+  { type: "linkedin_posts", label: "Social Post Analysis", icon: Linkedin, cost: 1 },
 ]
 
 // ── Smart Follow-up Suggestions ──────────────────────────────
@@ -132,7 +132,7 @@ const ACTION_DISPLAY: Partial<Record<string, { emoji: string; label: string }>> 
   regime_shift:     { emoji: "🌐",  label: "Regime Shift" },
   website_traffic:  { emoji: "📈",  label: "Website Traffic" },
   business_events:  { emoji: "💰",  label: "Business Events" },
-  linkedin_posts:   { emoji: "💼",  label: "LinkedIn Posts" },
+  linkedin_posts:   { emoji: "💼",  label: "Social Posts" },
   custom:           { emoji: "💬",  label: "Custom" },
 }
 
@@ -549,7 +549,7 @@ function ProfileHeader({
         {linkedin && (
           <a href={linkedin} target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/8 border border-blue-500/15 text-blue-400 hover:bg-blue-500/15 transition-colors">
-            <Linkedin className="h-2.5 w-2.5" />LinkedIn
+            <Linkedin className="h-2.5 w-2.5" />Social
           </a>
         )}
       </div>

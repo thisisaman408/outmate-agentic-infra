@@ -19,7 +19,7 @@ const sections = [
         items: [
             { label: "Monitor professional posts", icon: Linkedin, color: "text-blue-700", category: "linkedin_post" },
             { label: "Monitor interactions with professional posts", icon: MessageSquare, color: "text-blue-600", category: "linkedin_post" },
-            { label: "Monitor post audiences on LinkedIn", icon: Users, color: "text-blue-500", category: "linkedin_post" },
+            { label: "Monitor post audiences on social networks", icon: Users, color: "text-blue-500", category: "linkedin_post" },
             { label: "Monitor for ads with Adbeat", icon: Target, color: "text-red-500", category: "brand_mentions" },
             { label: "Monitor mentions on Reddit", icon: FileText, color: "text-orange-500", category: "brand_mentions" },
             { label: "Monitor Google News RSS Feed", icon: Rss, color: "text-orange-600", category: "news_funding" },

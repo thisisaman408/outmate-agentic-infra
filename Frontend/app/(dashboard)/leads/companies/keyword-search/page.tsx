@@ -259,8 +259,8 @@ export default function KeywordSearchPage() {
       <div className="flex items-center gap-3">
         <Hash className="h-8 w-8 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Realtime LinkedIn Posts Keyword Search</h1>
-          <p className="text-muted-foreground">Search LinkedIn posts containing specific keywords</p>
+          <h1 className="text-3xl font-bold tracking-tight">Realtime Social Posts Keyword Search</h1>
+          <p className="text-muted-foreground">Search social posts containing specific keywords</p>
         </div>
       </div>
 
@@ -274,7 +274,7 @@ export default function KeywordSearchPage() {
                 Search Parameters
               </CardTitle>
               <CardDescription>
-                Search for LinkedIn posts by keywords and filters
+                Search for social posts by keywords and filters
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
@@ -422,7 +422,7 @@ export default function KeywordSearchPage() {
                     rows={2}
                   />
                   <p className="text-xs text-muted-foreground">
-                    LinkedIn company URLs, one per line
+                    Company profile URLs, one per line
                   </p>
                 </div>
 
@@ -436,7 +436,7 @@ export default function KeywordSearchPage() {
                     rows={2}
                   />
                   <p className="text-xs text-muted-foreground">
-                    LinkedIn profile URLs, one per line
+                    Profile URLs, one per line
                   </p>
                 </div>
 

@@ -206,7 +206,7 @@ const PROMPT_LIBRARY: PromptLibraryItem[] = [
     useCase: "Recruiting",
     title: "Machine learning engineers in the Bay Area",
     description: "Source ML engineers at AI-focused companies in San Francisco and the Bay Area.",
-    prompt: "Find Machine Learning Engineers and AI Researchers at artificial intelligence companies in California with verified emails and LinkedIn profiles.",
+    prompt: "Find Machine Learning Engineers and AI Researchers at artificial intelligence companies in California with verified emails and Social profiles.",
   },
 ]
 
@@ -236,12 +236,12 @@ export default function DatabaseFinderPage() {
   const [campaignDraft, setCampaignDraft] = useState<{
     subject: string
     email_body: string
-    linkedin_message: string
+    Social_message: string
     recipients: Array<{
       name: string
       first_name?: string
       email?: string
-      linkedin_url?: string
+      Social_url?: string
       job_title?: string
       company?: string
       domain?: string
@@ -250,10 +250,10 @@ export default function DatabaseFinderPage() {
   const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false)
   const [campaignApproved, setCampaignApproved] = useState(false)
   const [selectedRecipients, setSelectedRecipients] = useState<Set<number>>(new Set())
-  const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "linkedin" | "both">>({})
-  const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "linkedin">>({})
+  const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "Social" | "both">>({})
+  const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "Social">>({})
   const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
-  const [linkedinConnected, setLinkedinConnected] = useState(false)
+  const [SocialConnected, setSocialConnected] = useState(false)
   const { toast } = useToast()
   const [isImportingFilters, setIsImportingFilters] = useState(false)
   const [isVoiceListening, setIsVoiceListening] = useState(false)
@@ -322,12 +322,12 @@ export default function DatabaseFinderPage() {
     }
   }, [])
 
-  // Check LinkedIn connection status on mount
+  // Check Social connection status on mount
   useEffect(() => {
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    // Check LinkedIn (Unipile) status
-    fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
-      if (data.connected) setLinkedinConnected(true)
+    // Check Social (Messaging provider) status
+    fetch(`${API}/api/v1/campaigns/Social/status`).then(r => r.json()).then(data => {
+      if (data.connected) setSocialConnected(true)
     }).catch(() => { })
   }, [])
 
@@ -386,7 +386,7 @@ export default function DatabaseFinderPage() {
       }
       setSentRecipients(prev => ({
         ...prev,
-        [recipientIdx]: prev[recipientIdx] === "linkedin" ? "both" : "email"
+        [recipientIdx]: prev[recipientIdx] === "Social" ? "both" : "email"
       }))
     } catch (e: any) {
       setSendErrors(prev => ({ ...prev, [recipientIdx]: e.message || "Email send failed" }))
@@ -395,15 +395,15 @@ export default function DatabaseFinderPage() {
     }
   }
 
-  const handleSendLinkedIn = async (recipientIdx: number, linkedinUrl: string, message: string) => {
-    setSendingRecipients(prev => ({ ...prev, [recipientIdx]: "linkedin" }))
+  const handleSendSocial = async (recipientIdx: number, SocialUrl: string, message: string) => {
+    setSendingRecipients(prev => ({ ...prev, [recipientIdx]: "Social" }))
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-Social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linkedin_url: linkedinUrl, message }),
+        body: JSON.stringify({ Social_url: SocialUrl, message }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
@@ -411,10 +411,10 @@ export default function DatabaseFinderPage() {
       }
       setSentRecipients(prev => ({
         ...prev,
-        [recipientIdx]: prev[recipientIdx] === "email" ? "both" : "linkedin"
+        [recipientIdx]: prev[recipientIdx] === "email" ? "both" : "Social"
       }))
     } catch (e: any) {
-      setSendErrors(prev => ({ ...prev, [recipientIdx]: e.message || "LinkedIn send failed" }))
+      setSendErrors(prev => ({ ...prev, [recipientIdx]: e.message || "Social send failed" }))
     } finally {
       setSendingRecipients(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     }
@@ -554,7 +554,7 @@ export default function DatabaseFinderPage() {
   }
 
   const applySessionToView = (session: ChatSession) => {
-    const normalizeLinkedinUrl = (value: any) => {
+    const normalizeSocialUrl = (value: any) => {
       if (typeof value !== "string" || !value.trim()) return ""
       const v = value.trim()
       return v.startsWith("http://") || v.startsWith("https://") ? v : `https://${v}`
@@ -562,9 +562,9 @@ export default function DatabaseFinderPage() {
 
     const normalizeEmployer = (src: any): EmployerItem => ({
       name: src?.name || src?.company_name || src?.company || "",
-      linkedin_id: src?.linkedin_id || src?.company_linkedin_id || "",
+      Social_id: src?.Social_id || src?.company_Social_id || "",
       company_id: Number(src?.company_id || 0),
-      company_linkedin_id: src?.company_linkedin_id || "",
+      company_Social_id: src?.company_Social_id || "",
       company_website_domain: src?.company_website_domain || src?.company_domain || "",
       position_id: Number(src?.position_id || 0),
       title: src?.title || "",
@@ -584,11 +584,11 @@ export default function DatabaseFinderPage() {
         : [],
       company_headcount_range: src?.company_headcount_range || src?.company_size || "",
       company_industries: Array.isArray(src?.company_industries) ? src.company_industries : [],
-      company_linkedin_industry: src?.company_linkedin_industry || src?.industry || "",
+      company_Social_industry: src?.company_Social_industry || src?.industry || "",
       company_type: src?.company_type || "",
       company_headcount_latest: Number(src?.company_headcount_latest || src?.size || 0),
       company_website: src?.company_website || src?.website || "",
-      company_linkedin_profile_url: src?.company_linkedin_profile_url || src?.linkedin_url || "",
+      company_Social_profile_url: src?.company_Social_profile_url || src?.Social_url || "",
       business_email_verified: Boolean(src?.business_email_verified),
     })
 
@@ -608,7 +608,7 @@ export default function DatabaseFinderPage() {
             {
               name: item?.companyName || item?.company || raw?.company_name,
               title: item?.title || raw?.title || item?.headline || raw?.headline || "",
-              company_linkedin_industry: item?.industry || raw?.industry || "",
+              company_Social_industry: item?.industry || raw?.industry || "",
             },
           ]
           : [])
@@ -654,8 +654,8 @@ export default function DatabaseFinderPage() {
         summary: item?.summary || raw?.summary || "",
         skills: Array.isArray(item?.skills) ? item.skills : (Array.isArray(raw?.skills) ? raw.skills : []),
         languages: Array.isArray(item?.languages) ? item.languages : (Array.isArray(raw?.languages) ? raw.languages : []),
-        linkedin_profile_url: normalizeLinkedinUrl(item?.linkedin_profile_url || item?.flagship_profile_url || item?.linkedin_url || item?.linkedin || raw?.linkedin_profile_url || raw?.flagship_profile_url || raw?.linkedin_url),
-        flagship_profile_url: normalizeLinkedinUrl(item?.flagship_profile_url || item?.linkedin_profile_url || item?.linkedin_url || item?.linkedin || raw?.flagship_profile_url || raw?.linkedin_profile_url || raw?.linkedin_url),
+        Social_profile_url: normalizeSocialUrl(item?.Social_profile_url || item?.flagship_profile_url || item?.Social_url || item?.Social || raw?.Social_profile_url || raw?.flagship_profile_url || raw?.Social_url),
+        flagship_profile_url: normalizeSocialUrl(item?.flagship_profile_url || item?.Social_profile_url || item?.Social_url || item?.Social || raw?.flagship_profile_url || raw?.Social_profile_url || raw?.Social_url),
         emails: email ? [email] : [],
         profile_picture_url: item?.profile_picture_url || raw?.profile_picture_url || "",
         profile_picture_permalink: item?.profile_picture_permalink || raw?.profile_picture_permalink || "",
@@ -664,11 +664,11 @@ export default function DatabaseFinderPage() {
           item?.num_of_connections,
           item?.connections,
           item?.connection_count,
-          item?.linkedin_connections,
+          item?.Social_connections,
           raw?.num_of_connections,
           raw?.connections,
           raw?.connection_count,
-          raw?.linkedin_connections
+          raw?.Social_connections
         ),
         education_background: Array.isArray(item?.education_background) ? item.education_background : [],
         honors: Array.isArray(item?.honors) ? item.honors : [],
@@ -812,7 +812,7 @@ export default function DatabaseFinderPage() {
         suggestions.push(`Get contact information for ${industry} leaders in ${location || "the US"}`)
       }
       suggestions.push(`Find prospects with AI expertise`)
-      suggestions.push(`Search for prospects who posted on LinkedIn recently`)
+      suggestions.push(`Search for prospects who posted on Social recently`)
     }
 
     // Always add some general suggestions
@@ -883,7 +883,7 @@ export default function DatabaseFinderPage() {
         item.location_display || item.location || item.headquarters_address || raw.location_display || raw.location || raw.headquarter
       )
 
-      const employeesExact = item.employee_count_exact ?? item.linkedin_headcount ?? item.size ?? raw.employee_count_exact ?? raw.size
+      const employeesExact = item.employee_count_exact ?? item.Social_headcount ?? item.size ?? raw.employee_count_exact ?? raw.size
       const employeesRange = item.employee_count_range ?? item.employee_range ?? item.number_of_employees_range ?? item.company_size ?? item.size_range ?? raw.employee_count_range ?? raw.number_of_employees_range
 
       return {
@@ -891,11 +891,11 @@ export default function DatabaseFinderPage() {
         name: item.name ?? item.business_name ?? item.company_name ?? "",
         domain: item.domain ?? item.website ?? "",
         website: item.website,
-        logo_url: item.logo_url ?? item.linkedin_logo_url ?? item.business_logo ?? item.logo ?? (item.domain ? `https://logo.clearbit.com/${item.domain}` : undefined),
+        logo_url: item.logo_url ?? item.Social_logo_url ?? item.business_logo ?? item.logo ?? (item.domain ? `https://logo.clearbit.com/${item.domain}` : undefined),
         description: item.description ?? item.company_description ?? item.business_description,
-        industry: item.industry ?? item.linkedin_industry_category ?? item.primary_industry,
+        industry: item.industry ?? item.Social_industry_category ?? item.primary_industry,
         sub_industry: item.sub_industry,
-        linkedin_industry_category: item.linkedin_industry_category,
+        Social_industry_category: item.Social_industry_category,
         company_type: item.company_type ?? item.business_type ?? item.type ?? raw.company_type ?? raw.type,
         founded_year: item.founded_year ?? item.year_founded ?? item.founded_at ?? raw.founded_year ?? raw.year_founded ?? raw.founded_at,
         employee_count_exact: employeesExact,
@@ -922,11 +922,11 @@ export default function DatabaseFinderPage() {
         email: Array.isArray(item.email) ? item.email.join(", ") : item.email,
         personal_email: item.personal_email,
         work_email: item.work_email,
-        linkedin_url: item.linkedin_url ?? item.linkedin_profile ?? item.company_linkedin_url ?? item.li_vanity ?? raw.linkedin_url ?? raw.li_vanity,
+        Social_url: item.Social_url ?? item.Social_profile ?? item.company_Social_url ?? item.li_vanity ?? raw.Social_url ?? raw.li_vanity,
         twitter_url: item.twitter_url,
         facebook_url: item.facebook_url,
         instagram_url: item.instagram_url,
-        follower_count: item.follower_count ?? item.linkedin_followers,
+        follower_count: item.follower_count ?? item.Social_followers,
         technologies: (Array.isArray(item.technologies) && item.technologies.length > 0)
           ? item.technologies
           : ((Array.isArray(raw.technologies) && raw.technologies.length > 0) ? raw.technologies : (item.full_tech_stack ?? item.technologies_used)),
@@ -1049,7 +1049,7 @@ export default function DatabaseFinderPage() {
 
     // If ANY prospect keyword or signal is found, it's a prospect search
     const hasProspectKeyword = prospectKeywords.some(kw => queryLower.includes(kw))
-    const hasStrongContactSignal = /\b(email|phone|contact|profile|linkedin)\b/i.test(queryLower)
+    const hasStrongContactSignal = /\b(email|phone|contact|profile|Social)\b/i.test(queryLower)
 
     return (hasProspectKeyword || hasStrongContactSignal) ? "prospect" : "business"
   }
@@ -1453,9 +1453,9 @@ export default function DatabaseFinderPage() {
 
         const mapEmployer = (src: any): EmployerItem => ({
           name: src?.name || src?.company_name || "",
-          linkedin_id: src?.linkedin_id || src?.company_linkedin_id || "",
+          Social_id: src?.Social_id || src?.company_Social_id || "",
           company_id: src?.company_id || 0,
-          company_linkedin_id: src?.company_linkedin_id || "",
+          company_Social_id: src?.company_Social_id || "",
           company_website_domain: src?.company_website_domain || src?.company_domain || "",
           position_id: src?.position_id || 0,
           title: src?.title || "",
@@ -1475,11 +1475,11 @@ export default function DatabaseFinderPage() {
             : [],
           company_headcount_range: src?.company_headcount_range || src?.company_size || "",
           company_industries: Array.isArray(src?.company_industries) ? src.company_industries : [],
-          company_linkedin_industry: src?.company_linkedin_industry || src?.industry || "",
+          company_Social_industry: src?.company_Social_industry || src?.industry || "",
           company_type: src?.company_type || "",
           company_headcount_latest: src?.company_headcount_latest || src?.size || 0,
           company_website: src?.company_website || src?.website || "",
-          company_linkedin_profile_url: src?.company_linkedin_profile_url || src?.linkedin_url || "",
+          company_Social_profile_url: src?.company_Social_profile_url || src?.Social_url || "",
           business_email_verified: Boolean(src?.business_email_verified),
         })
 
@@ -1557,8 +1557,8 @@ export default function DatabaseFinderPage() {
             summary: item.summary || raw.summary || "",
             skills: Array.isArray(item.skills) ? item.skills : (Array.isArray(raw.skills) ? raw.skills : []),
             languages: Array.isArray(item.languages) ? item.languages : (Array.isArray(raw.languages) ? raw.languages : []),
-            linkedin_profile_url: item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
-            flagship_profile_url: item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || "",
+            Social_profile_url: item.Social_profile_url || item.flagship_profile_url || item.Social_url || raw.Social_profile_url || raw.flagship_profile_url || raw.Social_url || "",
+            flagship_profile_url: item.flagship_profile_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.Social_profile_url || raw.Social_url || "",
             emails: email ? [email] : [],
             profile_picture_url: item.profile_picture_url || raw.profile_picture_url || "",
             profile_picture_permalink: item.profile_picture_permalink || raw.profile_picture_permalink || "",
@@ -1567,11 +1567,11 @@ export default function DatabaseFinderPage() {
               item.num_of_connections,
               item.connections,
               item.connection_count,
-              item.linkedin_connections,
+              item.Social_connections,
               raw.num_of_connections,
               raw.connections,
               raw.connection_count,
-              raw.linkedin_connections
+              raw.Social_connections
             ),
             education_background: Array.isArray(item.education_background) ? item.education_background : [],
             honors: Array.isArray(item.honors) ? item.honors : [],
@@ -1658,7 +1658,7 @@ export default function DatabaseFinderPage() {
           suggestions.push(`Get contact information for these ${resultCount} ${industry} leaders`)
         }
         suggestions.push(`Find prospects with AI expertise in the same industry`)
-        suggestions.push(`Search for prospects who posted on LinkedIn recently`)
+        suggestions.push(`Search for prospects who posted on Social recently`)
       }
       suggestions.push(`Detect signals for personalized outreach`)
       suggestions.push(`Create an email campaign for these leads`)
@@ -1838,7 +1838,7 @@ export default function DatabaseFinderPage() {
         "company": "name", "company_name": "name", "company name": "name", "name": "name",
         "domain": "domain", "website": "domain", "company domain": "domain", "company_domain": "domain", "url": "domain",
         "company website": "domain", "company_website": "domain",
-        "industry": "industry", "sector": "industry", "linkedin industry": "industry",
+        "industry": "industry", "sector": "industry", "Social industry": "industry",
         "employees": "employee_count_exact", "employee count": "employee_count_exact",
         "emp. range": "employee_count_range", "employee range": "employee_count_range",
         "employee_count": "employee_count_exact", "company size": "employee_count_range",
@@ -1850,7 +1850,7 @@ export default function DatabaseFinderPage() {
         "total funding": "funding_total", "total_funding": "funding_total",
         "last funding": "last_funding_date",
         "revenue": "revenue_exact", "rev. range": "revenue_range", "revenue range": "revenue_range",
-        "linkedin": "linkedin_url", "linkedin url": "linkedin_url", "linkedin_url": "linkedin_url",
+        "Social": "Social_url", "Social url": "Social_url", "Social_url": "Social_url",
         "description": "description", "phone": "phone", "email": "email",
         "type": "company_type", "founded": "founded_year",
         "investors": "investors", "investors count": "investors_count",
@@ -2046,13 +2046,13 @@ export default function DatabaseFinderPage() {
               full_name: prospect.name || prospect.full_name || "",
               first_name: prospect.first_name || "",
               last_name: prospect.last_name || "",
-              linkedin_url: prospect.linkedin_profile_url || prospect.flagship_profile_url || "",
+              Social_url: prospect.Social_profile_url || prospect.flagship_profile_url || "",
               email: prospect.emails?.[0] || prospect.email || "",
               job_title: currentEmployer.title || prospect.headline || "",
               // Company data (for context)
               company_name: currentEmployer.name || "",
               company_domain: currentEmployer.company_website_domain || currentEmployer.company_domain || "",
-              industry: currentEmployer.company_linkedin_industry || "",
+              industry: currentEmployer.company_Social_industry || "",
               employee_count_range: currentEmployer.company_headcount_range || "",
               employee_count_exact: currentEmployer.company_headcount_latest || 0,
               funding_stage: "",
@@ -2169,12 +2169,12 @@ export default function DatabaseFinderPage() {
                 full_name: prospect.name || prospect.full_name || "",
                 first_name: prospect.first_name || "",
                 last_name: prospect.last_name || "",
-                linkedin_url: prospect.linkedin_profile_url || prospect.flagship_profile_url || "",
+                Social_url: prospect.Social_profile_url || prospect.flagship_profile_url || "",
                 email: prospect.emails?.[0] || prospect.email || "",
                 job_title: currentEmployer.title || prospect.headline || "",
                 company_name: currentEmployer.name || "",
                 company_domain: currentEmployer.company_website_domain || currentEmployer.company_domain || "",
-                industry: currentEmployer.company_linkedin_industry || "",
+                industry: currentEmployer.company_Social_industry || "",
                 employee_count_range: currentEmployer.company_headcount_range || "",
                 employee_count_exact: currentEmployer.company_headcount_latest || 0,
                 funding_stage: "",
@@ -2249,7 +2249,7 @@ export default function DatabaseFinderPage() {
 
       const data = await response.json()
       setCampaignDraft(data)
-      setClarification("Campaign draft generated! Review your personalized email and LinkedIn message below.")
+      setClarification("Campaign draft generated! Review your personalized email and Social message below.")
     } catch (error) {
       console.error("Campaign draft error:", error)
       setClarification(`Campaign draft generation failed: ${error instanceof Error ? error.message : String(error)}. Please try again.`)
@@ -2271,7 +2271,7 @@ export default function DatabaseFinderPage() {
         "Name",
         "Email",
         "Phone",
-        "LinkedIn URL",
+        "Social URL",
         "Current Title",
         "Current Company",
         "Company Industry",
@@ -2293,10 +2293,10 @@ export default function DatabaseFinderPage() {
           prospect.name || "",
           emails,
           phones,
-          prospect.flagship_profile_url || prospect.linkedin_profile_url || "",
+          prospect.flagship_profile_url || prospect.Social_profile_url || "",
           currentEmployer?.title || "",
           currentEmployer?.name || "",
-          currentEmployer?.company_linkedin_industry || "",
+          currentEmployer?.company_Social_industry || "",
           prospect.location_details?.country || prospect.region || "",
           String(prospect.num_of_connections || 0),
           prospect.years_of_experience || "",
@@ -2318,7 +2318,7 @@ export default function DatabaseFinderPage() {
         "Company Type",
         "Funding Stage",
         "Total Funding",
-        "LinkedIn URL",
+        "Social URL",
         "Technologies",
         "Description",
       ]
@@ -2349,7 +2349,7 @@ export default function DatabaseFinderPage() {
           company.company_type || "",
           company.funding_stage || "",
           String(company.funding_total || ""),
-          company.linkedin_url || "",
+          company.Social_url || "",
           technologies,
           (company.description || "").replace(/"/g, '""').substring(0, 200),
         ]
@@ -2695,8 +2695,8 @@ export default function DatabaseFinderPage() {
                     {totalCreditsUsed} credit{totalCreditsUsed === 1 ? "" : "s"} used
                   </Badge>
                 )}
-                {linkedinConnected && (
-                  <Badge variant="outline">LinkedIn connected</Badge>
+                {SocialConnected && (
+                  <Badge variant="outline">Social connected</Badge>
                 )}
               </CardContent>
             </Card>
@@ -2755,13 +2755,13 @@ export default function DatabaseFinderPage() {
                   </div>
                 </div>
 
-                {/* LinkedIn Message */}
+                {/* Social Message */}
                 <div>
                   <h4 className="text-sm font-medium mb-2 flex items-center gap-1">
-                    <MessageSquare className="h-3.5 w-3.5" /> LinkedIn Message
+                    <MessageSquare className="h-3.5 w-3.5" /> Social Message
                   </h4>
                   <div className="rounded-lg border bg-muted/30 p-4">
-                    <p className="text-sm whitespace-pre-line">{campaignDraft.linkedin_message}</p>
+                    <p className="text-sm whitespace-pre-line">{campaignDraft.Social_message}</p>
                   </div>
                 </div>
 
@@ -2770,12 +2770,12 @@ export default function DatabaseFinderPage() {
                   <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-4 space-y-4">
                     <p className="text-sm font-medium">Connect your accounts, then approve to send directly</p>
 
-                    {/* Gmail — uses signed-in account */}
+                    {/* Email — uses signed-in account */}
                     <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <Mail className="h-4 w-4" />
                         <div>
-                          <p className="text-sm font-medium">Gmail</p>
+                          <p className="text-sm font-medium">Email</p>
                           <p className="text-xs text-green-600">Uses your signed-in Google account</p>
                         </div>
                       </div>
@@ -2784,20 +2784,20 @@ export default function DatabaseFinderPage() {
                       </Badge>
                     </div>
 
-                    {/* LinkedIn Connection */}
+                    {/* Social Connection */}
                     <div className="flex items-center justify-between gap-3 p-3 rounded border bg-background">
                       <div className="flex items-center gap-2">
                         <ExternalLink className="h-4 w-4" />
                         <div>
-                          <p className="text-sm font-medium">LinkedIn (Unipile)</p>
-                          {linkedinConnected ? (
-                            <p className="text-xs text-green-600">Connected via Unipile</p>
+                          <p className="text-sm font-medium">Social (Messaging provider)</p>
+                          {SocialConnected ? (
+                            <p className="text-xs text-green-600">Connected via Messaging provider</p>
                           ) : (
-                            <p className="text-xs text-muted-foreground">Send LinkedIn messages directly</p>
+                            <p className="text-xs text-muted-foreground">Send Social messages directly</p>
                           )}
                         </div>
                       </div>
-                      {linkedinConnected ? (
+                      {SocialConnected ? (
                         <Badge variant="outline" className="text-green-600 border-green-300">
                           <CheckCircle2 className="h-3 w-3 mr-1" /> Connected
                         </Badge>
@@ -2878,7 +2878,7 @@ export default function DatabaseFinderPage() {
                           const personalizedSubject = campaignDraft.subject
                             .replace(/\{\{firstName\}\}/g, firstName)
                             .replace(/\{\{companyName\}\}/g, companyName)
-                          const personalizedLinkedIn = campaignDraft.linkedin_message
+                          const personalizedSocial = campaignDraft.Social_message
                             .replace(/\{\{firstName\}\}/g, firstName)
                             .replace(/\{\{companyName\}\}/g, companyName)
 
@@ -2937,12 +2937,12 @@ export default function DatabaseFinderPage() {
                                           Send Email
                                         </Button>
                                       )}
-                                      {/* LinkedIn send */}
-                                      {sent === "linkedin" || sent === "both" ? (
+                                      {/* Social send */}
+                                      {sent === "Social" || sent === "both" ? (
                                         <Badge variant="outline" className="text-green-600 border-green-300 text-xs">
-                                          <Check className="h-3 w-3 mr-1" /> LinkedIn sent
+                                          <Check className="h-3 w-3 mr-1" /> Social sent
                                         </Badge>
-                                      ) : sending === "linkedin" ? (
+                                      ) : sending === "Social" ? (
                                         <Badge variant="outline" className="text-xs">
                                           <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Sending...
                                         </Badge>
@@ -2951,12 +2951,12 @@ export default function DatabaseFinderPage() {
                                           variant="outline"
                                           size="sm"
                                           className="h-7 px-2 text-xs"
-                                          disabled={!r.linkedin_url || !linkedinConnected || !!sending}
-                                          title={!linkedinConnected ? "LinkedIn not connected" : !r.linkedin_url ? "No LinkedIn URL" : "Send via LinkedIn"}
-                                          onClick={() => handleSendLinkedIn(idx, r.linkedin_url, personalizedLinkedIn)}
+                                          disabled={!r.Social_url || !SocialConnected || !!sending}
+                                          title={!SocialConnected ? "Social not connected" : !r.Social_url ? "No Social URL" : "Send via Social"}
+                                          onClick={() => handleSendSocial(idx, r.Social_url, personalizedSocial)}
                                         >
                                           <ExternalLink className="h-3 w-3 mr-1" />
-                                          Send LinkedIn
+                                          Send Social
                                         </Button>
                                       )}
                                       {/* Copy fallback */}
@@ -2982,8 +2982,8 @@ export default function DatabaseFinderPage() {
                                 ) : (
                                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                     {r.email && <Badge variant="outline" className="text-xs">Email</Badge>}
-                                    {r.linkedin_url && <Badge variant="outline" className="text-xs">LinkedIn</Badge>}
-                                    {!r.email && !r.linkedin_url && <span>No contact info</span>}
+                                    {r.Social_url && <Badge variant="outline" className="text-xs">Social</Badge>}
+                                    {!r.email && !r.Social_url && <span>No contact info</span>}
                                   </div>
                                 )}
                               </td>
@@ -3013,7 +3013,7 @@ export default function DatabaseFinderPage() {
                           await handleSendEmail(idx, r.email, subj, body)
                           count++
                         }
-                        if (count > 0) setClarification(`Sent emails to ${count} recipient${count === 1 ? "" : "s"} via Gmail.`)
+                        if (count > 0) setClarification(`Sent emails to ${count} recipient${count === 1 ? "" : "s"} via Email.`)
                         else setClarification("No unsent recipients with email addresses selected.")
                       }}
                     >
@@ -3023,25 +3023,25 @@ export default function DatabaseFinderPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={!linkedinConnected}
+                      disabled={!SocialConnected}
                       onClick={async () => {
                         let count = 0
                         for (const idx of Array.from(selectedRecipients)) {
                           const r = campaignDraft.recipients[idx]
-                          if (!r?.linkedin_url || sentRecipients[idx] === "linkedin" || sentRecipients[idx] === "both") continue
+                          if (!r?.Social_url || sentRecipients[idx] === "Social" || sentRecipients[idx] === "both") continue
                           const isCompanyIntent3 = intent === "business"
                           const firstName = isCompanyIntent3 ? "" : (r.first_name || r.name?.split(" ")[0] || "there")
                           const companyName = r.company || r.name || r.domain || "your company"
-                          const msg = campaignDraft.linkedin_message.replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{companyName\}\}/g, companyName)
-                          await handleSendLinkedIn(idx, r.linkedin_url, msg)
+                          const msg = campaignDraft.Social_message.replace(/\{\{firstName\}\}/g, firstName).replace(/\{\{companyName\}\}/g, companyName)
+                          await handleSendSocial(idx, r.Social_url, msg)
                           count++
                         }
-                        if (count > 0) setClarification(`Sent LinkedIn messages to ${count} recipient${count === 1 ? "" : "s"} via Unipile.`)
-                        else setClarification("No unsent recipients with LinkedIn URLs selected.")
+                        if (count > 0) setClarification(`Sent Social messages to ${count} recipient${count === 1 ? "" : "s"} via Messaging provider.`)
+                        else setClarification("No unsent recipients with Social URLs selected.")
                       }}
                     >
                       <ExternalLink className="h-4 w-4 mr-2" />
-                      Send All LinkedIn ({selectedRecipients.size})
+                      Send All Social ({selectedRecipients.size})
                     </Button>
                   </div>
                 )}
@@ -3054,7 +3054,7 @@ export default function DatabaseFinderPage() {
                       All {campaignDraft.recipients.length} recipients reached!
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Emails sent via Gmail. LinkedIn messages sent via Unipile.
+                      Emails sent via Email. Social messages sent via Messaging provider.
                     </p>
                   </div>
                 )}
@@ -3065,7 +3065,7 @@ export default function DatabaseFinderPage() {
                   size="sm"
                   className="w-full"
                   onClick={() => {
-                    const fullText = `Subject: ${campaignDraft.subject}\n\n${campaignDraft.email_body}\n\n---\n\nLinkedIn Message:\n${campaignDraft.linkedin_message}`
+                    const fullText = `Subject: ${campaignDraft.subject}\n\n${campaignDraft.email_body}\n\n---\n\nSocial Message:\n${campaignDraft.Social_message}`
                     navigator.clipboard.writeText(fullText)
                     setClarification("Copied full campaign draft (with template variables) to clipboard.")
                   }}

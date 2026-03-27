@@ -70,7 +70,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 id: 'companies',
                 label: 'Companies',
                 type: 'multi-select',
-                source: 'LinkedIn company pages',
+                source: 'Company profile pages',
                 showWhen: {
                     field: 'postType',
                     isOneOf: ['Mentions companies', 'Posted by companies', 'Posted by companies\' employees']
@@ -119,7 +119,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 id: 'postUrls',
                 label: 'Post URLs',
                 type: 'textarea',
-                placeholder: 'Enter LinkedIn post URLs (one per line)...',
+                placeholder: 'Enter social post URLs (one per line)...',
                 description: 'Shares can only be found for activity posts (urn:li:activity), not UGC posts (urn:li:ugcPost).',
                 required: true
             },
@@ -154,7 +154,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
     },
     'monitor-post-audiences-on-linkedin': {
         title: 'Monitor post audiences',
-        description: 'Monitor people engaging with professional posts on LinkedIn.',
+        description: 'Monitor people engaging with professional posts on social platforms.',
         fields: [
             {
                 id: 'postSource',
@@ -217,7 +217,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 id: 'adPlatform',
                 label: 'Ad platform',
                 type: 'dropdown',
-                options: ['Facebook', 'Google', 'LinkedIn', 'Twitter']
+                options: ['Facebook', 'Google', 'Professional network', 'Twitter']
             },
             {
                 id: 'adStatus',
@@ -692,7 +692,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 id: 'platform',
                 label: 'Platform',
                 type: 'dropdown',
-                options: ['Instagram', 'TikTok', 'YouTube', 'LinkedIn', 'Twitter'],
+                options: ['Instagram', 'TikTok', 'YouTube', 'Professional network', 'Twitter'],
                 required: true
             },
             {
@@ -739,7 +739,7 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 id: 'platform',
                 label: 'Platform',
                 type: 'dropdown',
-                options: ['Instagram', 'TikTok', 'YouTube', 'LinkedIn', 'Twitter'],
+                options: ['Instagram', 'TikTok', 'YouTube', 'Professional network', 'Twitter'],
                 required: true
             },
             {

@@ -83,8 +83,8 @@ export function CompanySignalsFeatures() {
             <TabsTrigger value="enrichment">Enrichment</TabsTrigger>
             <TabsTrigger value="in-db-search">In-DB Search</TabsTrigger>
             <TabsTrigger value="realtime-search">Realtime Search</TabsTrigger>
-            <TabsTrigger value="realtime-linkedin-post">Realtime LinkedIn Post</TabsTrigger>
-            <TabsTrigger value="linkedin-post-keyword">LinkedIn Keyword Post</TabsTrigger>
+            <TabsTrigger value="realtime-linkedin-post">Realtime Social Post</TabsTrigger>
+            <TabsTrigger value="linkedin-post-keyword">Social Keyword Post</TabsTrigger>
           </TabsList>
 
           <TabsContent value="identification">

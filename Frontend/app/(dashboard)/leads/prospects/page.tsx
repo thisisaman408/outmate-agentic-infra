@@ -58,7 +58,7 @@ function ProspectsPageContent() {
             // Create CSV content with proper typing
             const headers = [
                 'Name', 'First Name', 'Last Name', 'Region', 'Headline', 
-                'Summary', 'Skills', 'LinkedIn URL', 'Emails', 'Connections'
+                'Summary', 'Skills', 'Profile URL', 'Emails', 'Connections'
             ]
             
             const csvRows = profiles.map((profile: ProspectProfile) => [

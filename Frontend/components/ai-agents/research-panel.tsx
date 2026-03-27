@@ -19,7 +19,7 @@ function SimulatedActivityFeed({ isActive }: { isActive: boolean }) {
   const allMessages = [
     "Initializing research vectors...",
     "Crawling web data for footprint...",
-    "Analyzing LinkedIn company insights...",
+    "Analyzing social company insights...",
     "Extracting competitive landscape...",
     "Synthesizing market position...",
     "Identifying primary growth levers...",
@@ -403,4 +403,3 @@ export function ResearchPanel() {
     </div>
   )
 }
-

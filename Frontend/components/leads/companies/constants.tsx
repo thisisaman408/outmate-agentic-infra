@@ -101,7 +101,7 @@ export const ALL_FILTERS: FilterConfig[] = [
     },
     {
         id: "company_size",
-        label: "LinkedIn Company Size",
+        label: "Company Size",
         type: "multi-select",
         category: "Headcount and growth matrix",
         icon: Users,
@@ -132,7 +132,7 @@ export const ALL_FILTERS: FilterConfig[] = [
     },
     {
         id: "linkedin_category",
-        label: "LinkedIn Category",
+        label: "Industry Category",
         type: "multi-select",
         category: "Firmographics",
         icon: Layers,
@@ -283,5 +283,4 @@ export const PINNED_FILTERS_DEFAULT = [
     "industry",
     "employee_count"
 ]
-
 

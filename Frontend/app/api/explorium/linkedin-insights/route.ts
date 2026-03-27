@@ -35,14 +35,14 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       console.error('Backend error:', responseData)
       return NextResponse.json(
-        { success: false, error: responseData?.error || { message: 'Failed to fetch LinkedIn insights' } },
+        { success: false, error: responseData?.error || { message: 'Failed to fetch social insights' } },
         { status: response.status }
       )
     }
 
     return NextResponse.json(responseData)
   } catch (error) {
-    console.error('Explorium LinkedIn insights proxy error:', error)
+    console.error('Explorium social insights proxy error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
       { success: false, error: { message } },

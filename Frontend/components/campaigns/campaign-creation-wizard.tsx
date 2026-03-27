@@ -32,15 +32,15 @@ export function CampaignCreationWizard() {
     leads: [] as string[],
     subject: "",
     message: "",
-    linkedinMessage: "",
+    SocialMessage: "",
     startDate: "",
     signals: "",
   })
-  const [gmailConnected, setGmailConnected] = useState(false)
-  const [gmailEmail, setGmailEmail] = useState("")
-  const [linkedinConnected, setLinkedinConnected] = useState(false)
-  const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "linkedin">>({})
-  const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "linkedin" | "both">>({})
+  const [EmailConnected, setEmailConnected] = useState(false)
+  const [EmailEmail, setEmailEmail] = useState("")
+  const [SocialConnected, setSocialConnected] = useState(false)
+  const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "Social">>({})
+  const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "Social" | "both">>({})
   const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
 
   const handleGenerateMessage = async () => {
@@ -68,7 +68,7 @@ export function CampaignCreationWizard() {
         ...formData,
         subject: generated.subject || formData.subject,
         message: generated.email_body || formData.message,
-        linkedinMessage: generated.linkedin_message || formData.linkedinMessage,
+        SocialMessage: generated.Social_message || formData.SocialMessage,
       })
       toast({
         title: "Success",
@@ -179,30 +179,30 @@ export function CampaignCreationWizard() {
     }
 
     const params = new URLSearchParams(window.location.search)
-    if (params.get("gmail_connected") === "true") {
-      setGmailConnected(true)
-      setGmailEmail(params.get("gmail_email") || "")
+    if (params.get("Email_connected") === "true") {
+      setEmailConnected(true)
+      setEmailEmail(params.get("Email_email") || "")
       toast({
-        title: "Gmail connected",
-        description: `Connected as ${params.get("gmail_email")}`,
+        title: "Email connected",
+        description: `Connected as ${params.get("Email_email")}`,
       })
       window.history.replaceState({}, "", window.location.pathname)
     }
 
     const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    fetch(`${API}/api/v1/campaigns/gmail/status`)
+    fetch(`${API}/api/v1/campaigns/Email/status`)
       .then((res) => res.json())
       .then((data) => {
         if (data.connected) {
-          setGmailConnected(true)
-          setGmailEmail(data.email || "")
+          setEmailConnected(true)
+          setEmailEmail(data.email || "")
         }
       })
       .catch(() => {})
-    fetch(`${API}/api/v1/campaigns/linkedin/status`)
+    fetch(`${API}/api/v1/campaigns/Social/status`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.connected) setLinkedinConnected(true)
+        if (data.connected) setSocialConnected(true)
       })
       .catch(() => {})
   }, [toast])
@@ -216,9 +216,9 @@ export function CampaignCreationWizard() {
 
   const selectedLeadDetails = leadPool.filter((lead) => formData.leads.includes(lead.id))
   const defaultEmailSubject = formData.subject || `${formData.name || "Campaign"} Outreach`
-  const defaultLinkedInMessage = formData.linkedinMessage || formData.message
+  const defaultSocialMessage = formData.SocialMessage || formData.message
 
-  const handleConnectGmail = async () => {
+  const handleConnectEmail = async () => {
     if (typeof window !== "undefined") {
       window.sessionStorage.setItem(
         WIZARD_STATE_KEY,
@@ -229,7 +229,7 @@ export function CampaignCreationWizard() {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const returnPath = "/campaigns/new"
       const res = await fetch(
-        `${API}/api/v1/campaigns/gmail/auth-url?return_to=${encodeURIComponent(returnPath)}`
+        `${API}/api/v1/campaigns/Email/auth-url?return_to=${encodeURIComponent(returnPath)}`
       )
       const data = await res.json()
       if (data.auth_url) {
@@ -237,8 +237,8 @@ export function CampaignCreationWizard() {
       }
     } catch (error) {
       toast({
-        title: "Gmail connection failed",
-        description: "Unable to start Gmail OAuth flow.",
+        title: "Email connection failed",
+        description: "Unable to start Email OAuth flow.",
         variant: "destructive",
       })
     }
@@ -282,11 +282,11 @@ export function CampaignCreationWizard() {
       }
       setSentRecipients((prev) => ({
         ...prev,
-        [recipientIdx]: prev[recipientIdx] === "linkedin" ? "both" : "email",
+        [recipientIdx]: prev[recipientIdx] === "Social" ? "both" : "email",
       }))
       toast({
         title: "Email sent",
-        description: "Message delivered via Gmail.",
+        description: "Message delivered via Email.",
       })
     } catch (error: any) {
       setSendErrors((prev) => ({ ...prev, [recipientIdx]: error.message || "Email send failed" }))
@@ -299,8 +299,8 @@ export function CampaignCreationWizard() {
     }
   }
 
-  const handleSendLinkedIn = async (recipientIdx: number, linkedinUrl: string, message: string) => {
-    setSendingRecipients((prev) => ({ ...prev, [recipientIdx]: "linkedin" }))
+  const handleSendSocial = async (recipientIdx: number, SocialUrl: string, message: string) => {
+    setSendingRecipients((prev) => ({ ...prev, [recipientIdx]: "Social" }))
     setSendErrors((prev) => {
       const next = { ...prev }
       delete next[recipientIdx]
@@ -308,10 +308,10 @@ export function CampaignCreationWizard() {
     })
     try {
       const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
+      const res = await fetch(`${API}/api/v1/campaigns/send-Social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linkedin_url: linkedinUrl, message }),
+        body: JSON.stringify({ Social_url: SocialUrl, message }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
@@ -319,14 +319,14 @@ export function CampaignCreationWizard() {
       }
       setSentRecipients((prev) => ({
         ...prev,
-        [recipientIdx]: prev[recipientIdx] === "email" ? "both" : "linkedin",
+        [recipientIdx]: prev[recipientIdx] === "email" ? "both" : "Social",
       }))
       toast({
-        title: "LinkedIn message sent",
-        description: "Message delivered via Unipile.",
+        title: "Social message sent",
+        description: "Message delivered via Messaging provider.",
       })
     } catch (error: any) {
-      setSendErrors((prev) => ({ ...prev, [recipientIdx]: error.message || "LinkedIn send failed" }))
+      setSendErrors((prev) => ({ ...prev, [recipientIdx]: error.message || "Social send failed" }))
     } finally {
       setSendingRecipients((prev) => {
         const next = { ...prev }
@@ -506,16 +506,16 @@ export function CampaignCreationWizard() {
                 rows={12}
               />
               <div className="space-y-2">
-                <Label htmlFor="linkedinMessage">LinkedIn Message</Label>
+                <Label htmlFor="SocialMessage">Social Message</Label>
                 <Textarea
-                  id="linkedinMessage"
-                  placeholder="LinkedIn touch copy..."
-                  value={formData.linkedinMessage}
-                  onChange={(e) => setFormData({ ...formData, linkedinMessage: e.target.value })}
+                  id="SocialMessage"
+                  placeholder="Social touch copy..."
+                  value={formData.SocialMessage}
+                  onChange={(e) => setFormData({ ...formData, SocialMessage: e.target.value })}
                   rows={6}
                 />
                 <p className="text-xs text-muted-foreground">
-                  If blank, the email body will be reused for LinkedIn outreach.
+                  If blank, the email body will be reused for Social outreach.
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -553,23 +553,23 @@ export function CampaignCreationWizard() {
               <div className="rounded-lg border p-4 bg-muted/30 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-semibold">Send via Gmail / LinkedIn</p>
+                    <p className="font-semibold">Send via Email / Social</p>
                     <p className="text-xs text-muted-foreground">
-                      Connect Gmail to send email and Unipile for LinkedIn outreach.
+                      Connect Email to send email and Messaging provider for Social outreach.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <Badge variant={gmailConnected ? "secondary" : "outline"}>
+                    <Badge variant={EmailConnected ? "secondary" : "outline"}>
                       <Mail className="mr-1 h-3 w-3" />
-                      {gmailConnected ? `Gmail ready (${gmailEmail || "connected"})` : "Gmail not connected"}
+                      {EmailConnected ? `Email ready (${EmailEmail || "connected"})` : "Email not connected"}
                     </Badge>
-                    <Badge variant={linkedinConnected ? "secondary" : "outline"}>
+                    <Badge variant={SocialConnected ? "secondary" : "outline"}>
                       <ExternalLink className="mr-1 h-3 w-3" />
-                      {linkedinConnected ? "LinkedIn ready" : "LinkedIn unavailable"}
+                      {SocialConnected ? "Social ready" : "Social unavailable"}
                     </Badge>
-                    {!gmailConnected && (
-                      <Button size="xs" variant="outline" onClick={handleConnectGmail}>
-                        Connect Gmail
+                    {!EmailConnected && (
+                      <Button size="xs" variant="outline" onClick={handleConnectEmail}>
+                        Connect Email
                       </Button>
                     )}
                   </div>
@@ -584,7 +584,7 @@ export function CampaignCreationWizard() {
                       {selectedLeadDetails.map((lead, idx) => {
                         const personalizedSubject = personalizetext(defaultEmailSubject, lead)
                         const personalizedBody = personalizetext(formData.message, lead)
-                        const personalizedLinkedIn = personalizetext(defaultLinkedInMessage, lead)
+                        const personalizedSocial = personalizetext(defaultSocialMessage, lead)
                         const sending = sendingRecipients[idx]
                         const sent = sentRecipients[idx]
                         const error = sendErrors[idx]
@@ -599,7 +599,7 @@ export function CampaignCreationWizard() {
                                 {sent && (
                                   <Badge variant="outline" className="text-xs">
                                     <Check className="mr-1 h-3 w-3" />
-                                    {sent === "both" ? "Email + LinkedIn sent" : `${sent} sent`}
+                                    {sent === "both" ? "Email + Social sent" : `${sent} sent`}
                                   </Badge>
                                 )}
                                 {sending && (
@@ -614,10 +614,10 @@ export function CampaignCreationWizard() {
                               <Button
                                 size="xs"
                                 variant="outline"
-                                disabled={!gmailConnected || !lead.email || !!sending}
+                                disabled={!EmailConnected || !lead.email || !!sending}
                                 onClick={() => handleSendEmail(idx, lead.email, personalizedSubject, personalizedBody)}
                                 title={
-                                  !gmailConnected ? "Connect Gmail first" : !lead.email ? "No email available" : "Send email"
+                                  !EmailConnected ? "Connect Email first" : !lead.email ? "No email available" : "Send email"
                                 }
                                 className="gap-1"
                               >
@@ -626,12 +626,12 @@ export function CampaignCreationWizard() {
                               <Button
                                 size="xs"
                                 variant="outline"
-                                disabled={!linkedinConnected || !lead.linkedin}
-                                onClick={() => handleSendLinkedIn(idx, lead.linkedin || "", personalizedLinkedIn)}
-                                title={!linkedinConnected ? "LinkedIn not connected" : !lead.linkedin ? "No LinkedIn URL" : "Send LinkedIn message"}
+                                disabled={!SocialConnected || !lead.Social}
+                                onClick={() => handleSendSocial(idx, lead.Social || "", personalizedSocial)}
+                                title={!SocialConnected ? "Social not connected" : !lead.Social ? "No Social URL" : "Send Social message"}
                                 className="gap-1"
                               >
-                                <ExternalLink className="h-3 w-3" /> LinkedIn
+                                <ExternalLink className="h-3 w-3" /> Social
                               </Button>
                               <Button
                                 size="xs"

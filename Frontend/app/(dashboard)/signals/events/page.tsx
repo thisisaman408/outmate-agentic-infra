@@ -263,12 +263,12 @@ function AddEnrollDialog({ open, onClose, entityType, eventTypeOptions, onSave }
                 <div className="space-y-4 py-2">
                     <div className="space-y-1.5">
                         <Label htmlFor="entity-query">
-                            {isProspect ? "Name, Email, or LinkedIn URL" : "Company Name or Domain"}
+                            {isProspect ? "Name, Email, or Profile URL" : "Company Name or Domain"}
                         </Label>
                         <div className="flex gap-2">
                             <Input
                                 id="entity-query"
-                                placeholder={isProspect ? "e.g. john@acme.com or LinkedIn URL" : "e.g. Salesforce or salesforce.com"}
+                                placeholder={isProspect ? "e.g. john@acme.com or profile URL" : "e.g. Salesforce or salesforce.com"}
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}

@@ -184,7 +184,7 @@ export default function CompanyEnrichmentPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="linkedin-urls">LinkedIn URLs</Label>
+                <Label htmlFor="linkedin-urls">Profile URLs</Label>
                 <Textarea
                   id="linkedin-urls"
                   placeholder="e.g., https://linkedin.com/company/salesforce&#10;(comma-separated, up to 25)"
@@ -446,7 +446,7 @@ export default function CompanyEnrichmentPage() {
                                 className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
                               >
                                 <Linkedin className="h-4 w-4" />
-                                LinkedIn
+                                Profile
                                 <ExternalLink className="h-3 w-3" />
                               </a>
                             )}

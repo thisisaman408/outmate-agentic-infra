@@ -116,8 +116,8 @@ export default function CopilotSettingsPage() {
 
           <div className="flex items-center justify-between">
             <div>
-              <Label>Slack Notifications</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">Send brief to a Slack channel via webhook</p>
+              <Label>Messaging Notifications</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">Send brief to a messaging channel via webhook</p>
             </div>
             <Switch
               checked={preferences?.notify_slack ?? false}
@@ -128,7 +128,7 @@ export default function CopilotSettingsPage() {
 
           {preferences?.notify_slack && (
             <div className="space-y-1.5">
-              <Label htmlFor="slack-url">Slack Webhook URL</Label>
+              <Label htmlFor="slack-url">Webhook URL</Label>
               <Input
                 id="slack-url"
                 placeholder="https://hooks.slack.com/services/..."

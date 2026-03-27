@@ -175,7 +175,7 @@ export default function CompanyIdentificationPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="linkedin">LinkedIn URL</Label>
+                <Label htmlFor="linkedin">Profile URL</Label>
                 <Input
                   id="linkedin"
                   placeholder="e.g., https://linkedin.com/company/salesforce"
@@ -185,7 +185,7 @@ export default function CompanyIdentificationPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="crunchbase">Crunchbase URL</Label>
+                <Label htmlFor="crunchbase">Company Profile URL</Label>
                 <Input
                   id="crunchbase"
                   placeholder="e.g., https://crunchbase.com/organization/salesforce"
@@ -323,7 +323,7 @@ export default function CompanyIdentificationPage() {
                                 className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
                               >
                                 <Linkedin className="h-4 w-4" />
-                                LinkedIn
+                                Profile
                                 <ExternalLink className="h-3 w-3" />
                               </a>
                               {result.crunchbase_profile_url && (
@@ -333,7 +333,7 @@ export default function CompanyIdentificationPage() {
                                   rel="noopener noreferrer"
                                   className="text-green-600 hover:text-green-800 flex items-center gap-1 text-sm"
                                 >
-                                  Crunchbase
+                                  Company Profile
                                   <ExternalLink className="h-3 w-3" />
                                 </a>
                               )}

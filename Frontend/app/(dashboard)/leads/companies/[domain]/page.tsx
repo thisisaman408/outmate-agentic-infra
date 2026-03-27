@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   Building2, Globe, Users, DollarSign, Calendar, MapPin, Phone, Mail, 
-  Linkedin, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
+  Social, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
   Zap, Award, Code, Briefcase, Target, Activity, RefreshCw, Check, Eye
 } from "lucide-react";
 import Image from "next/image";
@@ -36,8 +36,8 @@ export default function CompanyProfilePage() {
   const [company, setCompany] = useState<any>(null);
   const [comprehensiveData, setComprehensiveData] = useState<any>(null);
   const [decisionMakers, setDecisionMakers] = useState<any[]>([]);
-  const [linkedinPosts, setLinkedinPosts] = useState<any[]>([]);
-  const [linkedinInsights, setLinkedinInsights] = useState<any>(null);
+  const [SocialPosts, setSocialPosts] = useState<any[]>([]);
+  const [SocialInsights, setSocialInsights] = useState<any>(null);
   const [technographics, setTechnographics] = useState<any>(null);
   const [socialMediaPresence, setSocialMediaPresence] = useState<any>(null);
   const [businessIntent, setBusinessIntent] = useState<any>(null);
@@ -59,8 +59,8 @@ export default function CompanyProfilePage() {
           let companyData = null;
           let cachedHit = false;
           let decisionMakersData: any[] = [];
-          let linkedinPostsData: any[] = [];
-          let linkedinInsightsData = null;
+          let SocialPostsData: any[] = [];
+          let SocialInsightsData = null;
 
           if (cachedData && !searchCache.isExpired(cachedData.timestamp)) {
             console.log('Using cached company data for domain:', domain);
@@ -141,9 +141,9 @@ export default function CompanyProfilePage() {
             ...(enrichToken ? { 'Authorization': `Bearer ${enrichToken}` } : {}),
           }
 
-          // Fetch LinkedIn posts via Explorium (insights)
+          // Fetch Social posts via Explorium (insights)
           try {
-            const postsResponse = await fetch(`/api/explorium/linkedin-insights`, {
+            const postsResponse = await fetch(`/api/explorium/Social-insights`, {
               method: 'POST',
               headers: enrichHeaders,
               body: JSON.stringify({ domain, include_posts: true, posts_limit: 10 }),
@@ -151,16 +151,16 @@ export default function CompanyProfilePage() {
             if (postsResponse.ok) {
               const postsResult = await postsResponse.json();
               if (postsResult.success && postsResult.data) {
-                linkedinPostsData = Array.isArray(postsResult.data) ? postsResult.data : (postsResult.data.posts || []);
+                SocialPostsData = Array.isArray(postsResult.data) ? postsResult.data : (postsResult.data.posts || []);
               }
             }
           } catch (error) {
-            console.log('Failed to fetch LinkedIn posts (Explorium):', error);
+            console.log('Failed to fetch Social posts (Explorium):', error);
           }
 
-          // Fetch LinkedIn insights from Explorium API
+          // Fetch Social insights from Explorium API
           try {
-            const insightsResponse = await fetch(`/api/explorium/linkedin-insights`, {
+            const insightsResponse = await fetch(`/api/explorium/Social-insights`, {
               method: 'POST',
               headers: enrichHeaders,
               body: JSON.stringify({
@@ -172,16 +172,16 @@ export default function CompanyProfilePage() {
             if (insightsResponse.ok) {
               const insightsResult = await insightsResponse.json();
               if (insightsResult.success && insightsResult.data) {
-                linkedinInsightsData = insightsResult.data;
+                SocialInsightsData = insightsResult.data;
                 // if posts were not fetched above, extract from insights payload
-                if (linkedinPostsData.length === 0) {
+                if (SocialPostsData.length === 0) {
                   const extracted = Array.isArray(insightsResult.data) ? insightsResult.data : (insightsResult.data.posts || []);
-                  linkedinPostsData = extracted || [];
+                  SocialPostsData = extracted || [];
                 }
               }
             }
           } catch (error) {
-            console.log('Failed to fetch LinkedIn insights:', error);
+            console.log('Failed to fetch Social insights:', error);
           }
 
           // Fetch Technographics from Explorium API
@@ -229,9 +229,9 @@ export default function CompanyProfilePage() {
                   employee_count_range: f.number_of_employees_range || prev?.employee_count_range,
                   revenue_range: f.yearly_revenue_range || prev?.revenue_range,
                   revenue_exact: f.yearly_revenue_exact || f.yearly_revenue || prev?.revenue_exact,
-                  industry: f.naics_description || f.sic_code_description || f.linkedin_industry_category || prev?.industry,
-                  linkedin_industry_category: f.linkedin_industry_category || prev?.linkedin_industry_category,
-                  linkedin_url: f.linkedin_profile || prev?.linkedin_url,
+                  industry: f.naics_description || f.sic_code_description || f.Social_industry_category || prev?.industry,
+                  Social_industry_category: f.Social_industry_category || prev?.Social_industry_category,
+                  Social_url: f.Social_profile || prev?.Social_url,
                   website: f.website || prev?.website,
                   description: f.company_description || f.description || prev?.description,
                   headquarters_country: f.country_name || prev?.headquarters_country,
@@ -244,7 +244,7 @@ export default function CompanyProfilePage() {
                   naics: f.naics_code || prev?.naics,
                   sic_code_description: f.sic_code_description || prev?.sic_code_description,
                   founded_year: f.year_founded || f.founded_year || prev?.founded_year,
-                  logo_url: f.logo_url || f.linkedin_logo_url || prev?.logo_url,
+                  logo_url: f.logo_url || f.Social_logo_url || prev?.logo_url,
                 }));
               }
             }
@@ -378,15 +378,15 @@ export default function CompanyProfilePage() {
           }
 
           setDecisionMakers(decisionMakersData);
-          setLinkedinPosts(linkedinPostsData);
-          setLinkedinInsights(linkedinInsightsData);
+          setSocialPosts(SocialPostsData);
+          setSocialInsights(SocialInsightsData);
           setLoading(false);
           
           console.log('All data fetched successfully:', {
             company: companyData?.name,
             decisionMakers: decisionMakersData.length,
-            linkedinPosts: linkedinPostsData.length,
-            linkedinInsights: linkedinInsightsData ? 'available' : 'not available',
+            SocialPosts: SocialPostsData.length,
+            SocialInsights: SocialInsightsData ? 'available' : 'not available',
             decisionMakersData: decisionMakersData
           });
         } catch (err) {
@@ -398,22 +398,22 @@ export default function CompanyProfilePage() {
     }
   }, [domain]);
 
-  const [revealing, setRevealing] = useState<string | null>(null); // key = `${type}:${linkedin_url}`
+  const [revealing, setRevealing] = useState<string | null>(null); // key = `${type}:${Social_url}`
 
   // Defined here so it's available in the DM cards
   const revealContact = async (person: any) => {
-    if (!person?.linkedin_url) {
-      toast({ title: 'Error', description: 'No LinkedIn profile available for this contact', variant: 'destructive' });
+    if (!person?.Social_url) {
+      toast({ title: 'Error', description: 'No Social profile available for this contact', variant: 'destructive' });
       return;
     }
-    const key = `email:${person.linkedin_url}`;
+    const key = `email:${person.Social_url}`;
     setRevealing(key);
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null;
       const res = await fetch('/api/contactout/reveal-contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ linkedin_url: person.linkedin_url, include_phone: true }),
+        body: JSON.stringify({ Social_url: person.Social_url, include_phone: true }),
       });
       if (!res.ok) throw new Error('Reveal failed');
       const data = await res.json();
@@ -422,7 +422,7 @@ export default function CompanyProfilePage() {
       const phone = data.data?.phones?.[0] || '';
       setRevealedPersonContacts(prev => ({
         ...prev,
-        [person.linkedin_url]: { email: email || prev[person.linkedin_url]?.email, phone: phone || prev[person.linkedin_url]?.phone },
+        [person.Social_url]: { email: email || prev[person.Social_url]?.email, phone: phone || prev[person.Social_url]?.phone },
       }));
       toast({ title: 'Contact Revealed', description: email || phone || 'No contact found' });
     } catch (err: any) {
@@ -433,21 +433,21 @@ export default function CompanyProfilePage() {
   };
   const [revealedPersonContacts, setRevealedPersonContacts] = useState<Record<string, { phone?: string; email?: string }>>({})
 
-  const enrichLinkedInProfile = async (person: any) => {
-    if (!person.linkedin_url || enrichedProfiles[person.linkedin_url]) {
-      return enrichedProfiles[person.linkedin_url] || person;
+  const enrichSocialProfile = async (person: any) => {
+    if (!person.Social_url || enrichedProfiles[person.Social_url]) {
+      return enrichedProfiles[person.Social_url] || person;
     }
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
-      const response = await fetch(`/api/contactout/linkedin-enrich`, {
+      const response = await fetch(`/api/contactout/Social-enrich`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          linkedin_url: person.linkedin_url,
+          Social_url: person.Social_url,
           include_experience: true,
           include_education: true,
           include_skills: true,
@@ -459,13 +459,13 @@ export default function CompanyProfilePage() {
         if (data.success && data.profile) {
           setEnrichedProfiles(prev => ({
             ...prev,
-            [person.linkedin_url]: data.profile
+            [person.Social_url]: data.profile
           }));
           return data.profile;
         }
       }
     } catch (error) {
-      console.log('Failed to enrich LinkedIn profile:', error);
+      console.log('Failed to enrich Social profile:', error);
     }
     
     return person;
@@ -475,8 +475,8 @@ export default function CompanyProfilePage() {
     try {
       setRevealing(type);
 
-      if (!person?.linkedin_url) {
-        throw new Error('No LinkedIn profile available');
+      if (!person?.Social_url) {
+        throw new Error('No Social profile available');
       }
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
@@ -487,7 +487,7 @@ export default function CompanyProfilePage() {
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          linkedin_url: person.linkedin_url,
+          Social_url: person.Social_url,
           include_phone: type === 'phone',
         }),
       });
@@ -509,7 +509,7 @@ export default function CompanyProfilePage() {
 
       setRevealedPersonContacts((prev) => ({
         ...prev,
-        [person.linkedin_url]: { ...(prev[person.linkedin_url] || {}), [type]: revealedValue }
+        [person.Social_url]: { ...(prev[person.Social_url] || {}), [type]: revealedValue }
       }))
       toast({ title: 'Success', description: `${person.full_name || 'Contact'} ${type}: ${revealedValue}` });
     } catch (error: any) {
@@ -600,12 +600,12 @@ export default function CompanyProfilePage() {
   const normalizeCrustdataCompany = (raw: any) => {
     if (!raw) return null;
 
-    const linkedinUrl = raw.linkedin_profile_url || raw.company_linkedin_url || raw.linkedin_url;
+    const SocialUrl = raw.Social_profile_url || raw.company_Social_url || raw.Social_url;
     const website = raw.company_website || raw.company_website_url || raw.website || raw.company_domain;
 
     const employeeCountExact =
-      raw.linkedin_headcount ??
-      raw.headcount?.linkedin_headcount ??
+      raw.Social_headcount ??
+      raw.headcount?.Social_headcount ??
       raw.headcount?.headcount ??
       raw.headcount?.employee_count ??
       raw.employee_count_exact;
@@ -619,12 +619,12 @@ export default function CompanyProfilePage() {
     ));
 
     const followerCount =
-      raw.linkedin_followers?.follower_count ??
-      raw.linkedin_followers?.followers ??
+      raw.Social_followers?.follower_count ??
+      raw.Social_followers?.followers ??
       raw.follower_count;
 
     const industry =
-      (Array.isArray(raw.linkedin_industries) ? raw.linkedin_industries[0] : raw.linkedin_industries) ??
+      (Array.isArray(raw.Social_industries) ? raw.Social_industries[0] : raw.Social_industries) ??
       raw.industry;
 
     const employeeCountRange = raw.employee_count_range ?? raw.employee_range ?? raw.employee_count ?? raw.employee_count_range;
@@ -674,9 +674,9 @@ export default function CompanyProfilePage() {
     return {
       name: raw.company_name || raw.name,
       domain: raw.company_website_domain || raw.company_domain,
-      logo_url: raw.linkedin_logo_url || raw.logo_url,
+      logo_url: raw.Social_logo_url || raw.logo_url,
       website,
-      linkedin_url: linkedinUrl,
+      Social_url: SocialUrl,
       description: raw.description || raw.company_description,
       industry,
       company_type: raw.company_type,
@@ -732,7 +732,7 @@ export default function CompanyProfilePage() {
 
       phone: raw.phone,
       email: raw.email,
-      linkedin_url: raw.linkedin_url,
+      Social_url: raw.Social_url,
       twitter_url: raw.twitter_url,
       facebook_url: raw.facebook_url,
       follower_count: raw.follower_count,
@@ -844,7 +844,7 @@ export default function CompanyProfilePage() {
   const isEmailBlurred = emailValue.includes('***') || emailValue.includes('contact@');
 
   // Defined variables to fix reference errors
-  const posts = Array.isArray(linkedinPosts) ? linkedinPosts : [];
+  const posts = Array.isArray(SocialPosts) ? SocialPosts : [];
   const reactionsSum = posts.reduce((acc: number, p: any) => {
     const likes = typeof p?.likes === 'number' ? p.likes : (typeof p?.total_reactions === 'number' ? p.total_reactions : 0);
     return acc + likes;
@@ -911,7 +911,7 @@ export default function CompanyProfilePage() {
                 {/* Badges Row */}
                 <div className="mt-3 flex items-center gap-3 flex-wrap">
                   {company.industry && <Badge variant="secondary" className="text-sm px-3 py-1">{company.industry}</Badge>}
-                  {company.linkedin_industry_category && company.linkedin_industry_category !== "N/A" && <Badge variant="secondary" className="text-sm px-3 py-1">{company.linkedin_industry_category}</Badge>}
+                  {company.Social_industry_category && company.Social_industry_category !== "N/A" && <Badge variant="secondary" className="text-sm px-3 py-1">{company.Social_industry_category}</Badge>}
                   {company.company_type && company.company_type !== "N/A" && <Badge variant="outline" className="text-sm px-3 py-1">{company.company_type}</Badge>}
                   {(company.domain || domain) && <Badge variant="outline" className="text-sm px-3 py-1">{company.domain || domain}</Badge>}
                   {company.growth_category && company.growth_category !== 'N/A' && <Badge variant="secondary" className="text-sm px-3 py-1">{company.growth_category}</Badge>}
@@ -958,11 +958,11 @@ export default function CompanyProfilePage() {
                     </a>
                   </Button>
                 )}
-                {company.linkedin_url && company.linkedin_url !== "N/A" && (
+                {company.Social_url && company.Social_url !== "N/A" && (
                   <Button variant="outline" size="sm" asChild>
-                    <a href={company.linkedin_url.startsWith('http') ? company.linkedin_url : `https://${company.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
-                      <Linkedin className="h-4 w-4" />
-                      LinkedIn
+                    <a href={company.Social_url.startsWith('http') ? company.Social_url : `https://${company.Social_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
+                      <Social className="h-4 w-4" />
+                      Social
                     </a>
                   </Button>
                 )}
@@ -1030,13 +1030,13 @@ export default function CompanyProfilePage() {
 
         
         
-        {/* Realtime LinkedIn Insights */}
+        {/* Realtime Social Insights */}
         {(posts.length > 0 || company.follower_count) && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Linkedin className="h-5 w-5" />
-                Realtime LinkedIn Insights
+                <Social className="h-5 w-5" />
+                Realtime Social Insights
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -1362,18 +1362,18 @@ export default function CompanyProfilePage() {
         )}
 
         {/* Social Links */}
-        {(company.linkedin_url !== "N/A" || company.twitter_url !== "N/A" || company.facebook_url !== "N/A") && (
+        {(company.Social_url !== "N/A" || company.twitter_url !== "N/A" || company.facebook_url !== "N/A") && (
           <Card>
             <CardHeader>
               <CardTitle>Social Presence</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-3">
-                {company.linkedin_url && company.linkedin_url !== "N/A" && (
+                {company.Social_url && company.Social_url !== "N/A" && (
                   <Button variant="outline" asChild className="gap-2">
-                    <a href={company.linkedin_url.startsWith('http') ? company.linkedin_url : `https://${company.linkedin_url}`} target="_blank" rel="noopener noreferrer">
-                      <Linkedin className="h-4 w-4" />
-                      LinkedIn
+                    <a href={company.Social_url.startsWith('http') ? company.Social_url : `https://${company.Social_url}`} target="_blank" rel="noopener noreferrer">
+                      <Social className="h-4 w-4" />
+                      Social
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   </Button>
@@ -1633,8 +1633,8 @@ export default function CompanyProfilePage() {
             <CardContent className="p-0">
               <div className="divide-y divide-border/50">
                 {decisionMakers.map((person: any, index: number) => {
-                  const revealed = revealedPersonContacts[person.linkedin_url] || {};
-                  const revealKey = `email:${person.linkedin_url}`;
+                  const revealed = revealedPersonContacts[person.Social_url] || {};
+                  const revealKey = `email:${person.Social_url}`;
                   const isRevealing = revealing === revealKey;
                   const hasEmail = revealed.email && !revealed.email.includes('***');
                   const hasPhone = revealed.phone && !revealed.phone.includes('***');
@@ -1664,10 +1664,10 @@ export default function CompanyProfilePage() {
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {person.linkedin_url && (
-                              <a href={person.linkedin_url.startsWith('http') ? person.linkedin_url : `https://${person.linkedin_url}`} target="_blank" rel="noopener noreferrer"
+                            {person.Social_url && (
+                              <a href={person.Social_url.startsWith('http') ? person.Social_url : `https://${person.Social_url}`} target="_blank" rel="noopener noreferrer"
                                 className="p-1 rounded hover:bg-blue-100 text-blue-600 transition-colors">
-                                <Linkedin className="h-4 w-4" />
+                                <Social className="h-4 w-4" />
                               </a>
                             )}
                           </div>
@@ -1704,7 +1704,7 @@ export default function CompanyProfilePage() {
                         )}
 
                         {/* Actions */}
-                        {!hasEmail && !hasPhone && person.linkedin_url && (
+                        {!hasEmail && !hasPhone && person.Social_url && (
                           <Button
                             variant="outline" size="sm"
                             className="mt-2 h-7 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/5"
@@ -1723,15 +1723,15 @@ export default function CompanyProfilePage() {
           </Card>
         )}
 
-        {/* Enhanced LinkedIn Posts */}
-        {Array.isArray(linkedinPosts) && linkedinPosts.length > 0 && (
+        {/* Enhanced Social Posts */}
+        {Array.isArray(SocialPosts) && SocialPosts.length > 0 && (
           <Card className="border-border/50 shadow-2xl hover:shadow-3xl transition-shadow duration-300">
             <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
               <CardTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-3">
                 <Activity className="h-6 w-6" />
-                Recent LinkedIn Activity
+                Recent Social Activity
                 <Badge variant="secondary" className="ml-auto bg-blue-100 text-blue-800">
-                  {linkedinPosts.length} Posts
+                  {SocialPosts.length} Posts
                 </Badge>
               </CardTitle>
             </CardHeader>
@@ -1741,27 +1741,27 @@ export default function CompanyProfilePage() {
                 <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl text-center">
                   <TrendingUp className="h-8 w-8 mx-auto mb-2 text-blue-600" />
                   <p className="text-sm font-medium text-muted-foreground mb-1">Total Posts</p>
-                  <p className="text-2xl font-bold text-blue-600">{linkedinPosts.length}</p>
+                  <p className="text-2xl font-bold text-blue-600">{SocialPosts.length}</p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl text-center">
                   <Calendar className="h-8 w-8 mx-auto mb-2 text-green-600" />
                   <p className="text-sm font-medium text-muted-foreground mb-1">Latest Post</p>
                   <p className="text-lg font-bold text-green-600">
-                    {linkedinPosts.length > 0 ? new Date(linkedinPosts[0]?.date || linkedinPosts[0]?.created_at).toLocaleDateString() : 'N/A'}
+                    {SocialPosts.length > 0 ? new Date(SocialPosts[0]?.date || SocialPosts[0]?.created_at).toLocaleDateString() : 'N/A'}
                   </p>
                 </div>
                 <div className="p-4 bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl text-center">
                   <Users className="h-8 w-8 mx-auto mb-2 text-purple-600" />
                   <p className="text-sm font-medium text-muted-foreground mb-1">Avg. Engagement</p>
                   <p className="text-2xl font-bold text-purple-600">
-                    {linkedinPosts.length > 0 ? Math.round(linkedinPosts.reduce((sum: number, post: any) => sum + (post.likes || post.reactions || 0), 0) / linkedinPosts.length) : 0}
+                    {SocialPosts.length > 0 ? Math.round(SocialPosts.reduce((sum: number, post: any) => sum + (post.likes || post.reactions || 0), 0) / SocialPosts.length) : 0}
                   </p>
                 </div>
               </div>
 
               {/* Posts Grid */}
               <div className="space-y-4">
-                {linkedinPosts.slice(0, 6).map((post: any, idx: number) => {
+                {SocialPosts.slice(0, 6).map((post: any, idx: number) => {
                   const postDate = new Date(post.date || post.created_at);
                   const isRecent = postDate.getTime() > Date.now() - (7 * 24 * 60 * 60 * 1000); // 7 days ago
                   
@@ -1857,14 +1857,14 @@ export default function CompanyProfilePage() {
               </div>
 
               {/* View More Button */}
-              {linkedinPosts.length > 6 && (
+              {SocialPosts.length > 6 && (
                 <div className="text-center mt-6">
                   <Button 
                     variant="outline" 
                     onClick={() => {
                       // Load more posts logic
-                      const morePosts = linkedinPosts.slice(6);
-                      setLinkedinPosts([...linkedinPosts, ...morePosts]);
+                      const morePosts = SocialPosts.slice(6);
+                      setSocialPosts([...SocialPosts, ...morePosts]);
                     }}
                     className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700"
                   >

@@ -525,7 +525,7 @@ export function CompaniesResultsTable({
         { key: 'revenue_range', label: 'Rev. Range', defaultVisible: false, width: '100px', category: 'firmographic', sortable: true },
         { key: 'company_type', label: 'Type', defaultVisible: false, width: '100px', category: 'firmographic', sortable: true },
         { key: 'founded_year', label: 'Founded', defaultVisible: false, width: '80px', category: 'firmographic', sortable: true },
-        { key: 'linkedin_industry_category', label: 'LinkedIn Industry', defaultVisible: false, width: '150px', category: 'firmographic', sortable: true },
+        { key: 'linkedin_industry_category', label: 'Social Industry', defaultVisible: false, width: '150px', category: 'firmographic', sortable: true },
         { key: 'headquarters_country', label: 'Country', defaultVisible: false, width: '120px', category: 'location', sortable: true },
         { key: 'headquarters_state', label: 'State', defaultVisible: false, width: '120px', category: 'location', sortable: true },
         { key: 'headquarters_city', label: 'City', defaultVisible: false, width: '120px', category: 'location', sortable: true },
@@ -574,11 +574,11 @@ export function CompaniesResultsTable({
             ),
         },
         {
-            key: 'linkedin_url', label: 'LinkedIn', defaultVisible: true, width: '100px', category: 'social', sortable: false,
+            key: 'linkedin_url', label: 'Social', defaultVisible: true, width: '100px', category: 'social', sortable: false,
             render: (value) => value ? (
                 <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
-                    LinkedIn <ExternalLink className="h-3 w-3" />
+                    Social <ExternalLink className="h-3 w-3" />
                 </a>
             ) : <>N/A</>,
         },

@@ -38,10 +38,10 @@ export const integrationsApi = {
           },
           {
             id: "3",
-            name: "Slack",
+            name: "Messaging",
             category: "communication",
             icon: "💬",
-            description: "Send notifications and updates to Slack channels",
+            description: "Send notifications and updates to messaging channels",
             status: "connected",
             connectedAt: "2025-01-03T00:00:00Z",
             config: {
@@ -51,10 +51,10 @@ export const integrationsApi = {
           },
           {
             id: "4",
-            name: "Gmail",
+            name: "Email",
             category: "email",
             icon: "📧",
-            description: "Send campaigns and track emails through Gmail",
+            description: "Send campaigns and track emails through your email provider",
             status: "disconnected",
           },
           {
@@ -71,10 +71,10 @@ export const integrationsApi = {
           },
           {
             id: "6",
-            name: "Zapier",
+            name: "Automation",
             category: "data",
             icon: "⚡",
-            description: "Connect with 5000+ apps through Zapier",
+            description: "Connect with 5000+ apps through automation connectors",
             status: "disconnected",
           },
         ]

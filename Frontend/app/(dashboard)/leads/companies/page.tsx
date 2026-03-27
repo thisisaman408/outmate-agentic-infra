@@ -31,11 +31,11 @@ const apiSections: {
   {
     id: "identification",
     title: "Company Identification",
-    description: "Identify companies by name, website, LinkedIn URL, Crunchbase URL, or company ID",
+    description: "Identify companies by name, website, profile URL, or company ID",
     icon: IdCard,
     accent: "primary",
     href: "/leads/companies/identification",
-    features: ["Name Search", "Domain Lookup", "LinkedIn URL", "Crunchbase URL", "Company ID"],
+    features: ["Name Search", "Domain Lookup", "Profile URL", "Company ID"],
   },
   {
     id: "enrichment",
@@ -57,8 +57,8 @@ const apiSections: {
   },
   {
     id: "linkedin-posts",
-    title: "LinkedIn Posts by Company",
-    description: "Get recent LinkedIn posts and engagement metrics for a specific company",
+    title: "Social Posts by Company",
+    description: "Get recent social posts and engagement metrics for a specific company",
     icon: MessageSquare,
     accent: "warning",
     href: "/leads/companies/linkedin-posts",
@@ -66,8 +66,8 @@ const apiSections: {
   },
   {
     id: "keyword-search",
-    title: "LinkedIn Posts Keyword Search",
-    description: "Search LinkedIn posts containing specific keywords across companies",
+    title: "Social Posts Keyword Search",
+    description: "Search social posts containing specific keywords across companies",
     icon: Hash,
     accent: "destructive",
     href: "/leads/companies/keyword-search",
@@ -93,7 +93,7 @@ export default function CompanyIntelligencePage() {
           <h1 className="text-2xl font-bold tracking-tight">Companies</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Access powerful company intelligence, enrichment, and LinkedIn data
+          Access powerful company intelligence and enrichment insights
         </p>
       </div>
 

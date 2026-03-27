@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   Building2, Globe, Users, DollarSign, Calendar, MapPin, Phone, Mail, 
-  Linkedin, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
+  Social, Twitter, Facebook, ExternalLink, Lock, Unlock, TrendingUp, 
   Zap, Award, Code, Activity
 } from "lucide-react";
 import Image from "next/image";
@@ -120,7 +120,7 @@ export default function PublicCompanyPage() {
     );
   }
 
-  const posts = Array.isArray(company.linkedin_posts) ? company.linkedin_posts : [];
+  const posts = Array.isArray(company.Social_posts) ? company.Social_posts : [];
   const reactionsSum = posts.reduce((acc, p) => acc + (typeof p?.total_reactions === 'number' ? p.total_reactions : 0), 0);
   const commentsSum = posts.reduce((acc, p) => acc + (typeof p?.total_comments === 'number' ? p.total_comments : 0), 0);
   const sharesSum = posts.reduce((acc, p) => acc + (typeof p?.num_shares === 'number' ? p.num_shares : 0), 0);
@@ -166,11 +166,11 @@ export default function PublicCompanyPage() {
                     </a>
                   </Button>
                 )}
-                {company.linkedin_url && company.linkedin_url !== "N/A" && (
+                {company.Social_url && company.Social_url !== "N/A" && (
                   <Button variant="outline" size="sm" asChild>
-                    <a href={company.linkedin_url.startsWith('http') ? company.linkedin_url : `https://${company.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
-                      <Linkedin className="h-4 w-4" />
-                      LinkedIn
+                    <a href={company.Social_url.startsWith('http') ? company.Social_url : `https://${company.Social_url}`} target="_blank" rel="noopener noreferrer" className="gap-2">
+                      <Social className="h-4 w-4" />
+                      Social
                     </a>
                   </Button>
                 )}
@@ -208,8 +208,8 @@ export default function PublicCompanyPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Linkedin className="h-5 w-5" />
-                Realtime LinkedIn Insights
+                <Social className="h-5 w-5" />
+                Realtime Social Insights
               </CardTitle>
             </CardHeader>
             <CardContent>

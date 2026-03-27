@@ -269,7 +269,7 @@ export default function ProspectProfilePage() {
                                             {profile.flagship_profile_url && (
                                                 <Button asChild className="gap-2">
                                                     <a href={profile.flagship_profile_url} target="_blank" rel="noopener noreferrer">
-                                                        <Linkedin className="h-4 w-4" />LinkedIn
+                                                        <Linkedin className="h-4 w-4" />Profile
                                                     </a>
                                                 </Button>
                                             )}
@@ -391,7 +391,7 @@ export default function ProspectProfilePage() {
                                                 {currentEmployer.company_linkedin_profile_url && (
                                                     <Button variant="outline" size="sm" asChild className="gap-2">
                                                         <a href={currentEmployer.company_linkedin_profile_url.startsWith('http') ? currentEmployer.company_linkedin_profile_url : `https://${currentEmployer.company_linkedin_profile_url}`} target="_blank" rel="noopener noreferrer">
-                                                            <Linkedin className="h-4 w-4" />Company LinkedIn
+                                                            <Linkedin className="h-4 w-4" />Company Profile
                                                         </a>
                                                     </Button>
                                                 )}
@@ -497,7 +497,7 @@ export default function ProspectProfilePage() {
                                     {(profile.location_details as any)?.continent && (
                                         <InfoRow icon={Globe} label="Continent" value={(profile.location_details as any).continent} />
                                     )}
-                                    <InfoRow icon={Linkedin} label="LinkedIn" value="View Profile" href={profile.flagship_profile_url || profile.linkedin_profile_url || undefined} />
+                                    <InfoRow icon={Linkedin} label="Profile" value="View Profile" href={profile.flagship_profile_url || profile.linkedin_profile_url || undefined} />
                                     {profile.twitter_handle && (
                                         <InfoRow icon={Twitter} label="Twitter" value={`@${profile.twitter_handle}`} href={`https://twitter.com/${profile.twitter_handle}`} />
                                     )}

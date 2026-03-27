@@ -381,8 +381,8 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">Slack Notifications</p>
-                    <p className="text-sm text-muted-foreground">Receive notifications in Slack</p>
+                    <p className="font-medium">Messaging Notifications</p>
+                    <p className="text-sm text-muted-foreground">Receive notifications in your messaging channel</p>
                   </div>
                   <Switch
                     checked={notifications?.slackNotifications}

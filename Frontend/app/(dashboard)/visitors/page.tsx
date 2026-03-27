@@ -1398,7 +1398,7 @@ export default function VisitorsPage() {
                                                     )}
                                                     {d.linkedinUrl && i === 0 && (
                                                         <a href={d.linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-blue-600 hover:underline">
-                                                            <Linkedin className="h-3 w-3" /> LinkedIn Profile
+                                                            <Linkedin className="h-3 w-3" /> Profile
                                                         </a>
                                                     )}
                                                 </div>
@@ -1438,7 +1438,7 @@ export default function VisitorsPage() {
                                             )}
                                             {d.companyLinkedin && (
                                                 <a href={d.companyLinkedin} target="_blank" rel="noopener noreferrer">
-                                                    <Button size="sm" variant="outline" className="gap-1.5 text-xs"><Linkedin className="h-3 w-3" />Company LinkedIn</Button>
+                                                    <Button size="sm" variant="outline" className="gap-1.5 text-xs"><Linkedin className="h-3 w-3" />Company Profile</Button>
                                                 </a>
                                             )}
                                         </div>

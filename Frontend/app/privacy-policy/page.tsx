@@ -79,7 +79,7 @@ const PrivacyPolicyPage = () => (
             <ul className="list-disc list-inside space-y-1">
               <li>Authentication via Google OAuth</li>
               <li>Provider integrations (Crustdata, Explorium, ContactOut, etc.)</li>
-              <li>Optional Gmail send scope: <code className="bg-muted px-2 py-1 rounded text-sm">https://www.googleapis.com/auth/gmail.send</code></li>
+              <li>Optional email send scope: <code className="bg-muted px-2 py-1 rounded text-sm">https://www.googleapis.com/auth/gmail.send</code></li>
             </ul>
           </section>
 
@@ -161,7 +161,7 @@ const PrivacyPolicyPage = () => (
 
           <section>
             <h2 className="text-2xl font-semibold text-white mb-4">9. Google OAuth Details</h2>
-            <p className="mb-4">We use Google OAuth for login and optional Gmail send capability.</p>
+            <p className="mb-4">We use OAuth for login and optional email send capability.</p>
             <ul className="list-disc list-inside mb-6 space-y-1">
               <li>Required scopes: <code className="bg-muted px-2 py-1 rounded text-sm">openid</code>, <code className="bg-muted px-2 py-1 rounded text-sm">email</code>, <code className="bg-muted px-2 py-1 rounded text-sm">profile</code></li>
               <li>Optional scope: <code className="bg-muted px-2 py-1 rounded text-sm">https://www.googleapis.com/auth/gmail.send</code></li>

@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('LinkedIn enrich request received');
+    console.log('Profile enrich request received');
     
     const body = await request.json();
     const { linkedin_url, include_experience, include_education, include_skills } = body;
     
     if (!linkedin_url) {
       return NextResponse.json(
-        { success: false, error: 'LinkedIn URL is required' },
+        { success: false, error: 'Profile URL is required' },
         { status: 400 }
       )
     }
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       include_skills: include_skills || false
     }
 
-    console.log('Calling backend LinkedIn enrich API:', backendUrl, requestBody);
+    console.log('Calling backend profile enrich API:', backendUrl, requestBody);
 
     const authHeader = request.headers.get('Authorization')
     const headers: Record<string, string> = {
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Backend LinkedIn enrich API error:', response.status, errorText);
+      console.error('Backend profile enrich API error:', response.status, errorText);
       return NextResponse.json(
         { success: false, error: `Backend API error: ${response.status}` },
         { status: response.status }
@@ -50,12 +50,12 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json();
-    console.log('LinkedIn enrich response:', data);
+    console.log('Profile enrich response:', data);
 
     return NextResponse.json(data);
 
   } catch (error) {
-    console.error('LinkedIn enrich error:', error);
+    console.error('Profile enrich error:', error);
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
