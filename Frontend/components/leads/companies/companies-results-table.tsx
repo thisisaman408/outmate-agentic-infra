@@ -174,6 +174,7 @@ function ContactCell({
     contactCache,
     onContactReveal,
     waterfallAttempts,
+    enrichingRows,
 }: {
     company: CompanyData
     field: 'email' | 'phone'
@@ -182,6 +183,7 @@ function ContactCell({
     contactCache: Record<string, ContactCacheEntry>
     onContactReveal?: (company: CompanyData, field: 'email' | 'phone') => Promise<void>
     waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
+    enrichingRows?: Record<string, boolean>
 }) {
     const isPhoneCol = field === 'phone'
     const isEmailCol = field === 'email'
@@ -205,6 +207,7 @@ function ContactCell({
     const attemptRecord = waterfallAttempts?.[companyId] || {}
     const attemptedWaterfall = isPhoneCol ? attemptRecord.phone : attemptRecord.email
     const attemptMessage = isEmailCol ? "Email not available" : "Phone not available"
+    const isEnriching = Boolean(enrichingRows?.[companyId]) || Boolean(enrichData?.loading)
     const iconColorClass = waterfallValue
         ? "text-emerald-500 hover:text-emerald-600"
         : attemptedWaterfall
@@ -239,13 +242,13 @@ function ContactCell({
                     <span className="text-xs text-muted-foreground">Revealing...</span>
                 </div>
             )}
-            {enrichData?.loading && !waterfallValue && !contactValue && (
+            {isEnriching && !waterfallValue && !contactValue && (
                 <div className="flex items-center gap-2">
                     <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
                     <span className="text-xs text-muted-foreground">Enriching...</span>
                 </div>
             )}
-            {showRevealControls && (
+            {showRevealControls && !isEnriching && (
                 contactAttempted ? (
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">{attemptMessage}</span>
@@ -257,6 +260,7 @@ function ContactCell({
                         </Button>
                         <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                             onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                            disabled={isEnriching}
                             title={`Advanced enrichment: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry" : ""}`}
                         >
                             <Zap className="h-3 w-3" />
@@ -273,6 +277,7 @@ function ContactCell({
                         </Button>
                         <Button variant="ghost" size="sm" className={`h-7 w-7 p-0 ml-1 ${iconColorClass}`}
                             onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                            disabled={isEnriching}
                             title={`Advanced enrichment: ${formatCreditsLabel(waterfallCredits)}${waterfallValue ? "" : attemptedWaterfall ? " · retry" : ""}`}
                         >
                             <Zap className="h-3 w-3" />
@@ -283,6 +288,7 @@ function ContactCell({
             {contactValue && !waterfallValue && (
                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-blue-500 hover:text-blue-600"
                     onClick={(e) => { e.stopPropagation(); onEnrichReveal?.(companyId, field) }}
+                    disabled={isEnriching}
                     title="Advanced enrichment"
                 >
                     <Zap className="h-3 w-3" />
@@ -555,14 +561,16 @@ export function CompaniesResultsTable({
             key: 'email', label: 'Email', defaultVisible: true, width: '240px', category: 'location', sortable: false,
             render: (_v, company) => (
                 <ContactCell company={company} field="email" enrichData={enrichCache[company.domain || company.id]}
-                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts} />
+                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts}
+                    enrichingRows={enrichingRows} />
             ),
         },
         {
             key: 'phone', label: 'Phone', defaultVisible: true, width: '220px', category: 'location', sortable: false,
             render: (_v, company) => (
                 <ContactCell company={company} field="phone" enrichData={enrichCache[company.domain || company.id]}
-                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts} />
+                    onEnrichReveal={onEnrichReveal} contactCache={contactCache} onContactReveal={handleContactReveal} waterfallAttempts={waterfallAttempts}
+                    enrichingRows={enrichingRows} />
             ),
         },
         {
@@ -630,7 +638,7 @@ export function CompaniesResultsTable({
             key: 'enriched', label: 'Enriched', defaultVisible: false, width: '80px', category: 'metadata', sortable: true,
             render: (value) => value ? <Badge variant="default" className="bg-green-500">Yes</Badge> : <Badge variant="secondary">No</Badge>,
         },
-    ], [enrichCache, onEnrichReveal, contactCache, waterfallAttempts]) // eslint-disable-line react-hooks/exhaustive-deps
+    ], [enrichCache, onEnrichReveal, contactCache, waterfallAttempts, enrichingRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const getRowId = useCallback((row: CompanyData, _idx: number) => row.id || row.domain || String(_idx), [])
 
