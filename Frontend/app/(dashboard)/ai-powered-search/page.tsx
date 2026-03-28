@@ -127,6 +127,13 @@ const PROMPT_LIBRARY: PromptLibraryItem[] = [
     description: "Find e-commerce companies showing strong hiring signals.",
     prompt: "Find e-commerce companies in the US with more than 50 employees that have grown headcount by at least 20% in the last 12 months.",
   },
+  {
+    id: "build-5",
+    useCase: "Build Lead Lists",
+    title: "AI tech-enabled services hiring (CTO/Head of Tech/IT Procurement)",
+    description: "Find non-recruiting companies hiring for AI tech-enabled services with 100+ employees and signals for personalization.",
+    prompt: "Find the top 50 companies (not staffing or recruiting agencies) that are actively hiring for AI tech-enabled services. Exclude recruiting agencies, staffing, talent firms, HR consultants, and job boards. Company size: 100+ employees. Include signals from technology, social media, and blogs for personalization. Target ICP titles: Head of Tech, CTO, IT Procurement.",
+  },
   // --- Find Contact Info ---
   {
     id: "contact-1",

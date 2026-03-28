@@ -673,9 +673,16 @@ class SignalDetectionService:
             if blog_mentions:
                 top = blog_mentions[0]
                 title = top.get("title") or "Recent blog post"
+                link = top.get("link") or ""
+                snippet = top.get("snippet") or top.get("summary") or ""
+                details = title
+                if snippet:
+                    details = f"{details} - {snippet}"
+                if link:
+                    details = f"{details} ({link})"
                 company_signals.append({
                     "type": "blog_activity",
-                    "description": f"Recent blog activity: {title}",
+                    "description": f"Recent blog activity: {details}",
                     "urgency": "low",
                     "confidence": 65
                 })
@@ -684,9 +691,16 @@ class SignalDetectionService:
             if social_mentions:
                 top = social_mentions[0]
                 title = top.get("title") or "Recent social post"
+                link = top.get("link") or ""
+                snippet = top.get("snippet") or top.get("summary") or ""
+                details = title
+                if snippet:
+                    details = f"{details} - {snippet}"
+                if link:
+                    details = f"{details} ({link})"
                 company_signals.append({
                     "type": "social_mention",
-                    "description": f"Recent social coverage: {title}",
+                    "description": f"Recent social coverage: {details}",
                     "urgency": "low",
                     "confidence": 65
                 })
@@ -827,8 +841,9 @@ class SignalDetectionService:
                 for item in (data.get("organic") or [])[:5]:
                     link = (item.get("link") or "").lower()
                     title = item.get("title") or ""
+                    snippet = item.get("snippet") or item.get("description") or ""
                     if any(host in link for host in ["linkedin.com", "twitter.com", "x.com", "medium.com", "facebook.com"]):
-                        social_items.append({"title": title, "link": item.get("link")})
+                        social_items.append({"title": title, "link": item.get("link"), "snippet": snippet})
 
                 return {"news": news_items, "social": social_items}
         except Exception:
