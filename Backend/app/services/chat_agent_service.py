@@ -245,6 +245,7 @@ Return object with exact keys:
 Rules for Intent:
 - If the query mentions finding PEOPLE, ROLES, TITLES, PROFESSIONALS, "DECISION MAKERS", or "DECISIONS" (short for decision makers), use intent="prospect".
 - If the query focuses on finding COMPANIES, AGENCIES, FIRMS, or businesses, BUT NOT specific roles or people, use intent="company".
+- If the query is about COMPANIES that are hiring for roles (e.g., "companies hiring for CTOs"), keep intent="company" and capture the roles as filters/keywords.
 - Users often have typos or use shorthand. Interpret the MEANING, not exact spelling:
   - "marketting" = "marketing", "enginneering" = "engineering", "decisions" = "decision makers", "descision makers" = "decision makers"
   - "company of 100" = company with ~100 employees, "company size 100" = same thing
@@ -291,6 +292,7 @@ Rules for Filters:
   - "ABM" (Account-Based Marketing) -> keywords: ["account-based marketing", "ABM"]
 - When a query combines a domain like "GTM" with "decision makers" or "leaders", expand to senior titles in that domain:
   - "Marketing Decision Makers in GTM" -> current_title: ["VP of Marketing", "CMO", "Head of Marketing", "Marketing Director", "Head of GTM", "VP of GTM", "GTM Manager", "Director of Growth Marketing"]
+- If roles like "CTO", "Head of Tech", or "IT Procurement" are explicitly mentioned, prefer those titles and DO NOT replace them with unrelated roles like HR.
 - Keep only the five allowed filter keys above.
 - If unknown, return empty arrays for that filter key.
 - IMPORTANT: Be very specific and restrictive to avoid broad results like Google, Amazon, etc."""
@@ -337,6 +339,43 @@ Rules for Filters:
                 for key in ("industry", "location", "company_size", "current_title", "keywords"):
                     if key not in filters:
                         filters[key] = []
+
+                # --- Post-process: enforce role intent for company hiring queries ---
+                query_lower = query.lower()
+                role_titles: List[str] = []
+
+                if re.search(r"\bcto\b|chief technology officer", query_lower):
+                    role_titles.extend(["CTO", "Chief Technology Officer"])
+                if "head of tech" in query_lower or "head of technology" in query_lower:
+                    role_titles.extend(["Head of Tech", "Head of Technology"])
+                if "it procurement" in query_lower or ("procurement" in query_lower and "it" in query_lower):
+                    role_titles.extend(["IT Procurement", "Head of IT Procurement", "IT Procurement Manager", "Director of IT Procurement"])
+
+                # Deduplicate while preserving order
+                seen = set()
+                role_titles = [t for t in role_titles if not (t in seen or seen.add(t))]
+
+                if role_titles:
+                    # If the query is about companies hiring, keep company intent
+                    if "company" in query_lower or "companies" in query_lower or "hiring" in query_lower:
+                        intent = "company"
+
+                    current_titles = filters.get("current_title") or []
+                    current_titles_str = " ".join([str(t).lower() for t in current_titles])
+                    has_role_titles = any(rt.lower() in current_titles_str for rt in ["cto", "head of tech", "head of technology", "it procurement"])
+                    has_hr_titles = any(re.search(r"\bhr\b|human resources|people", str(t).lower()) for t in current_titles)
+
+                    # Override incorrect HR titles or empty titles
+                    if not current_titles or has_hr_titles or not has_role_titles:
+                        filters["current_title"] = role_titles
+
+                    # For company intent, add role titles to keywords too
+                    if intent == "company":
+                        keywords = filters.get("keywords") or []
+                        for rt in role_titles:
+                            if rt not in keywords:
+                                keywords.append(rt)
+                        filters["keywords"] = keywords
 
                 return {
                     "intent": intent,
