@@ -200,8 +200,8 @@ async def toggle_watcher_with_slash(id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{id}")
-async def delete_watcher(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+async def delete_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
     db.delete(db_w); db.commit()
