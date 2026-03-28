@@ -21,6 +21,56 @@ def get_advanced_nlp_service() -> AdvancedNLPService:
         _advanced_nlp_service = AdvancedNLPService()
     return _advanced_nlp_service
 
+
+async def filter_broad_companies(companies: list[Dict[str, Any]], query: str, intent: str) -> list[Dict[str, Any]]:
+    """
+    Filter out broad companies like Google, Amazon, LinkedIn unless explicitly mentioned in query.
+    Only applies to company searches, not prospect searches.
+    """
+    if intent != "company":
+        return companies
+
+    # Define broad companies to filter out
+    broad_companies = {
+        # Tech giants
+        "google", "alphabet", "microsoft", "apple", "meta", "facebook", "amazon", "netflix", "uber", "lyft", "airbnb",
+        # Social media
+        "linkedin", "twitter", "x.com", "instagram", "tiktok", "snapchat", "pinterest", "reddit", "discord", "twitch",
+        # E-commerce
+        "ebay", "walmart", "target", "best buy", "home depot", "lowes", "costco", "kroger", "walgreens", "cvs",
+        # Financial
+        "jpmorgan", "goldman sachs", "morgan stanley", "bank of america", "wells fargo", "citigroup", "paypal", "stripe",
+        # Other large corporations
+        "coca cola", "pepsi", "procter & gamble", "johnson & johnson", "pfizer", "merck", "verizon", "at&t", "comcast",
+        "disney", "netflix", "spotify", "zoom", "slack", "dropbox", "box", "salesforce", "oracle", "sap", "adobe"
+    }
+
+    # Check if any broad company is explicitly mentioned in the query
+    query_lower = query.lower()
+    explicitly_mentioned = any(company in query_lower for company in broad_companies)
+
+    if explicitly_mentioned:
+        # If explicitly mentioned, include all results
+        return companies
+    else:
+        # Filter out broad companies
+        filtered = []
+        for company in companies:
+            company_name = (company.get("name") or "").lower().strip()
+            company_domain = (company.get("domain") or "").lower().strip()
+
+            # Check if this company matches any broad company
+            is_broad = False
+            for broad_company in broad_companies:
+                if broad_company in company_name or broad_company in company_domain:
+                    is_broad = True
+                    break
+
+            if not is_broad:
+                filtered.append(company)
+
+        return filtered
+
 @router.post("/search")
 async def natural_language_search(payload: Dict[str, Any], request: Request):
     """
@@ -107,6 +157,7 @@ async def search_company(payload: Dict[str, Any], db: Session = Depends(get_db))
         options = payload.get("options") or {}
         limit = int(options.get("limit") or 3)
         page = int(options.get("page") or 1)
+        query = payload.get("query", "")  # Add query parameter for filtering
 
         size = max(1, min(3, limit))
         page_size = size
@@ -336,6 +387,9 @@ async def search_company(payload: Dict[str, Any], db: Session = Depends(get_db))
         # Crustdata enrichment disabled for this route - using only Explorium + ContactOut
         # This avoids 401 authentication errors with Crustdata API
         pass
+
+        # Filter out broad companies unless explicitly mentioned in query
+        companies = await filter_broad_companies(companies, query, "company")
 
         # Prefer companies with more filled fields
         def filled_count(obj: Dict[str, Any]) -> int:

@@ -89,11 +89,11 @@ async def dashboard_kpis(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Dict[str, Any]:
-    total_companies = db.query(Company).count()
-    total_prospects = db.query(Prospect).count()
+    total_companies = db.query(Company).filter(Company.user_id == _user.id).count()
+    total_prospects = db.query(Prospect).filter(Prospect.user_id == _user.id).count()
     total_leads = total_companies + total_prospects
 
-    active_signals = db.query(Watcher).filter(Watcher.status == "active").count()
+    active_signals = db.query(Watcher).filter(Watcher.user_id == _user.id, Watcher.status == "active").count()
 
     campaigns = await _dashboard_service.list_campaigns()
     running_campaigns = len([c for c in campaigns if c.get("status") == "running"])
@@ -106,20 +106,20 @@ async def dashboard_kpis(
     prev_start = now - timedelta(days=14)
 
     recent_leads = (
-        db.query(Company).filter(Company.created_at >= recent_start).count()
-        + db.query(Prospect).filter(Prospect.created_at >= recent_start).count()
+        db.query(Company).filter(Company.user_id == _user.id, Company.created_at >= recent_start).count()
+        + db.query(Prospect).filter(Prospect.user_id == _user.id, Prospect.created_at >= recent_start).count()
     )
     prev_leads = (
         db.query(Company)
-        .filter(Company.created_at >= prev_start, Company.created_at < recent_start)
+        .filter(Company.user_id == _user.id, Company.created_at >= prev_start, Company.created_at < recent_start)
         .count()
         + db.query(Prospect)
-        .filter(Prospect.created_at >= prev_start, Prospect.created_at < recent_start)
+        .filter(Prospect.user_id == _user.id, Prospect.created_at >= prev_start, Prospect.created_at < recent_start)
         .count()
     )
 
-    recent_signals = db.query(Watcher).filter(Watcher.created_at >= recent_start).count()
-    prev_signals = db.query(Watcher).filter(Watcher.created_at >= prev_start, Watcher.created_at < recent_start).count()
+    recent_signals = db.query(Watcher).filter(Watcher.user_id == _user.id, Watcher.created_at >= recent_start).count()
+    prev_signals = db.query(Watcher).filter(Watcher.user_id == _user.id, Watcher.created_at >= prev_start, Watcher.created_at < recent_start).count()
 
     recent_campaigns = len(
         [c for c in campaigns if (_parse_dt(c.get("createdAt")) or now) >= recent_start]
@@ -150,12 +150,14 @@ async def dashboard_recent_leads(
 ) -> List[Dict[str, Any]]:
     companies = (
         db.query(Company)
+        .filter(Company.user_id == _user.id)
         .order_by(Company.created_at.desc())
         .limit(limit * 2)
         .all()
     )
     prospects = (
         db.query(Prospect, Company)
+        .filter(Prospect.user_id == _user.id)
         .outerjoin(Company, Prospect.company_id == Company.id)
         .order_by(Prospect.created_at.desc())
         .limit(limit * 2)
@@ -227,7 +229,7 @@ async def dashboard_active_signals(
 ) -> List[Dict[str, Any]]:
     watchers = (
         db.query(Watcher)
-        .filter(Watcher.status == "active")
+        .filter(Watcher.user_id == _user.id, Watcher.status == "active")
         .order_by(Watcher.updated_at.desc())
         .limit(limit)
         .all()
@@ -292,7 +294,7 @@ async def dashboard_ai_activity(
     activities: List[Dict[str, Any]] = []
     now = _now()
 
-    recent_company = db.query(Company).order_by(Company.created_at.desc()).first()
+    recent_company = db.query(Company).filter(Company.user_id == _user.id).order_by(Company.created_at.desc()).first()
     if recent_company:
         activities.append(
             {
@@ -304,7 +306,7 @@ async def dashboard_ai_activity(
             }
         )
 
-    recent_prospect = db.query(Prospect).order_by(Prospect.created_at.desc()).first()
+    recent_prospect = db.query(Prospect).filter(Prospect.user_id == _user.id).order_by(Prospect.created_at.desc()).first()
     if recent_prospect:
         activities.append(
             {
@@ -316,7 +318,7 @@ async def dashboard_ai_activity(
             }
         )
 
-    watcher = db.query(Watcher).order_by(Watcher.updated_at.desc()).first()
+    watcher = db.query(Watcher).filter(Watcher.user_id == _user.id).order_by(Watcher.updated_at.desc()).first()
     if watcher:
         activities.append(
             {

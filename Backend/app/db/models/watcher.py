@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Boolean
+from sqlalchemy import Column, String, DateTime, JSON, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -9,6 +9,7 @@ class Watcher(Base):
     __tablename__ = "watchers"
 
     id = Column(String(64), primary_key=True, default=lambda: f"w-{uuid.uuid4().hex[:8]}")
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
     name = Column(String(255), nullable=False)
     description = Column(String(1024), nullable=True)
     type = Column(String(32), nullable=False)   # 'event', 'account', 'lead'
