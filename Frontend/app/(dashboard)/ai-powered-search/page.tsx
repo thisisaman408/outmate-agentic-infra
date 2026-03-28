@@ -1394,12 +1394,18 @@ export default function DatabaseFinderPage() {
         if (Array.isArray(value)) return value
         return [value]
       }
+      // Build keyword from extracted keywords array (join into single string for backend)
+      const keywordsArr = toArray(extractedFilters.keywords)
+      const keywordStr = Array.isArray(keywordsArr) && keywordsArr.length > 0
+        ? keywordsArr.join(" ")
+        : undefined
       const payload = searchIntent === "prospect"
         ? {
           current_title: toArray(extractedFilters.current_title),
           location: toArray(extractedFilters.location),
           industry: toArray(extractedFilters.industry),
           employees: toArray(extractedFilters.company_size),
+          keyword: keywordStr,
           limit: 3,
         }
         : { query: trimmedQuery, filters: extractedFilters }

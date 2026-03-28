@@ -721,7 +721,7 @@ class AdvancedNLPService:
                     }
 
                 # Call prospects API with filters
-                payload = {"filters": filters, "limit": 3}
+                payload = {"limit": 3}
                 if "industry" in filters:
                     payload["industry"] = filters["industry"]
                 if "location" in filters:
