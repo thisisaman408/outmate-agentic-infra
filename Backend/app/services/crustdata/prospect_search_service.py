@@ -156,28 +156,52 @@ class ProspectSearchService:
             limit=limit
         )
         
-        # Step 2: Build filters using extensible filter builder
-        filters = self.filter_builder.build(
-            current_titles=current_titles,
-            past_titles=past_titles,
-            functions=functions,
-            seniority_levels=seniority_levels,
-            seniority_operator=seniority_operator,
-            locations=locations,
-            industries=industries,
-            keyword=keyword,
-            # NEW: Name filters
-            name=name,
-            first_name=first_name,
-            last_name=last_name,
-            # NEW: Profile Language filter
-            profile_languages=profile_languages,
-            # NEW: Company filter
-            company=company,
-            domain=domain,
-            # NEW: Employees filter
-            employees=employees
-        )
+        # Determine API type based on filters
+        api_type = "realtime" if (keyword and keyword.strip()) else "in_db"
+        
+        # Build filters using the builder - only pass supported filters for the API type
+        if any([
+            current_titles, past_titles, functions, seniority_levels, 
+            locations, industries, name, first_name, last_name, 
+            profile_languages, company, domain, employees
+        ]):
+            builder = ProspectFilterBuilder()
+            
+            if api_type == "realtime":
+                # Realtime API only supports specific filters
+                filters = builder.build(
+                    api_type="realtime",
+                    current_titles=current_titles,
+                    past_titles=past_titles,
+                    locations=locations,
+                    industries=industries,
+                    company=company,
+                    domain=domain,
+                    employees=employees,
+                    keyword=keyword
+                )
+            else:
+                # In-DB API supports all filters
+                filters = builder.build(
+                    api_type="in_db",
+                    current_titles=current_titles,
+                    past_titles=past_titles,
+                    functions=functions,
+                    seniority_levels=seniority_levels,
+                    seniority_operator=seniority_operator,
+                    locations=locations,
+                    industries=industries,
+                    keyword=keyword,
+                    name=name,
+                    first_name=first_name,
+                    last_name=last_name,
+                    profile_languages=profile_languages,
+                    company=company,
+                    domain=domain,
+                    employees=employees
+                )
+        else:
+            filters = None
         
         # Step 2.5: Validate that at least one filter is provided
         if not filters or len(filters) == 0:

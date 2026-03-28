@@ -51,8 +51,24 @@ class ProspectFilterBuilder:
         # Returns: {"op": "and", "conditions": [...]}
     """
     
+    FILTER_TYPE_MAP = {
+        "current_employers.title": "CURRENT_TITLE",
+        "past_employers.title": "PAST_TITLE",
+        "current_employers.function_category": None,  # Not supported in Realtime API
+        "current_employers.seniority_level": None,    # Not supported in Realtime API
+        "region": "REGION",
+        "current_employers.company_linkedin_industry": "INDUSTRY",
+        "current_employers.name": "CURRENT_COMPANY",
+        "current_employers.website": "COMPANY_HEADQUARTERS",
+        "current_employers.company_headcount_range": "COMPANY_HEADCOUNT",
+        "first_name": None,                           # Not supported in Realtime API
+        "last_name": None,                            # Not supported in Realtime API
+        "profile_language": None,                     # Not supported in Realtime API
+    }
+    
     def build(
         self,
+        api_type: str = "in_db",
         current_titles: Optional[List[str]] = None,
         past_titles: Optional[List[str]] = None,
         functions: Optional[List[str]] = None,
@@ -102,76 +118,85 @@ class ProspectFilterBuilder:
         if current_titles and len(current_titles) > 0:
             title_filter = self._build_title_filter(
                 field="current_employers.title",
-                values=current_titles
+                values=current_titles,
+                api_type=api_type
             )
-            conditions.append(title_filter)
-            logger.debug(f"Added current_title filter: {len(current_titles)} title(s)")
+            if title_filter:
+                conditions.append(title_filter)
+                logger.debug(f"Added current_title filter: {len(current_titles)} title(s)")
         
         # Build past_title filter
         if past_titles and len(past_titles) > 0:
             title_filter = self._build_title_filter(
                 field="past_employers.title",
-                values=past_titles
+                values=past_titles,
+                api_type=api_type
             )
-            conditions.append(title_filter)
-            logger.debug(f"Added past_title filter: {len(past_titles)} title(s)")
+            if title_filter:
+                conditions.append(title_filter)
+                logger.debug(f"Added past_title filter: {len(past_titles)} title(s)")
         
         # Build location filter (placeholder for future implementation)
         if locations and len(locations) > 0:
-            location_filter = self._build_location_filter(locations)
-            conditions.append(location_filter)
-            logger.debug(f"Added location filter: {len(locations)} location(s)")
+            location_filter = self._build_location_filter(locations, api_type)
+            if location_filter:
+                conditions.append(location_filter)
+                logger.debug(f"Added location filter: {len(locations)} location(s)")
         
         # Build industry filter (placeholder for future implementation)
         if industries and len(industries) > 0:
-            industry_filter = self._build_industry_filter(industries)
-            conditions.append(industry_filter)
-            logger.debug(f"Added industry filter: {len(industries)} industry(ies)")
+            industry_filter = self._build_industry_filter(industries, api_type)
+            if industry_filter:
+                conditions.append(industry_filter)
+                logger.debug(f"Added industry filter: {len(industries)} industry(ies)")
         
-        # Build function/department filter
-        if functions and len(functions) > 0:
+        # Build function/department filter - only supported in In-DB API
+        if api_type == "in_db" and functions and len(functions) > 0:
             function_filter = self._build_function_filter(functions)
             conditions.append(function_filter)
             logger.debug(f"Added function filter: {len(functions)} function(s)")
         
-        # Build seniority level filter
-        if seniority_levels and len(seniority_levels) > 0:
+        # Build seniority level filter - only supported in In-DB API
+        if api_type == "in_db" and seniority_levels and len(seniority_levels) > 0:
             seniority_filter = self._build_seniority_filter(seniority_levels, seniority_operator)
             conditions.append(seniority_filter)
             logger.debug(f"Added seniority_level filter ({seniority_operator}): {len(seniority_levels)} level(s)")
         
-        # Build keyword filter (company-related search)
-        if keyword and keyword.strip():
+        # Build keyword filter (company-related search) - only supported in Realtime API
+        if api_type == "realtime" and keyword and keyword.strip():
             keyword_filter = self._build_keyword_filter(keyword.strip())
             conditions.append(keyword_filter)
             logger.debug(f"Added keyword filter: '{keyword.strip()}'")
         
         # Build company filter
         if company and company.strip():
-            company_filter = self._build_company_filter(company.strip())
-            conditions.append(company_filter)
-            logger.debug(f"Added company filter: '{company.strip()}'")
-            
+            company_filter = self._build_company_filter(company.strip(), api_type)
+            if company_filter:
+                conditions.append(company_filter)
+                logger.debug(f"Added company filter: '{company.strip()}'")
+                
         # Build domain filter
         if domain and domain.strip():
-            domain_filter = self._build_domain_filter(domain.strip())
-            conditions.append(domain_filter)
-            logger.debug(f"Added domain filter: '{domain.strip()}'")
-            
+            domain_filter = self._build_domain_filter(domain.strip(), api_type)
+            if domain_filter:
+                conditions.append(domain_filter)
+                logger.debug(f"Added domain filter: '{domain.strip()}'")
+                
         # Build employees filter
         if employees and len(employees) > 0:
-            employees_filter = self._build_employees_filter(employees)
-            conditions.append(employees_filter)
-            logger.debug(f"Added employees filter: {employees}")
+            employees_filter = self._build_employees_filter(employees, api_type)
+            if employees_filter:
+                conditions.append(employees_filter)
+                logger.debug(f"Added employees filter: {employees}")
         
-        # Build name filters (first_name and/or last_name)
-        if name or first_name or last_name:
+        # Build name filters (first_name and/or last_name) - only supported in In-DB API
+        if api_type == "in_db" and (name or first_name or last_name):
             name_filters = self._build_name_filters(name, first_name, last_name)
             conditions.extend(name_filters)  # Add all name filters (0-2 filters)
             logger.debug(f"Added name filter(s): {len(name_filters)} filter(s)")
         
-        # Build profile language filter
-        if profile_languages and len(profile_languages) > 0:
+        # Build profile language filter - only supported in In-DB API
+        if api_type == "in_db" and profile_languages and len(profile_languages) > 0:
             language_filter = self._build_profile_language_filter(profile_languages)
             if language_filter:  # Only add if not empty dict
                 conditions.append(language_filter)
@@ -216,7 +241,7 @@ class ProspectFilterBuilder:
                 # Default to array format for Realtime API compatibility
                 return conditions
     
-    def _build_title_filter(self, field: str, values: List[str]) -> Dict[str, Any]:
+    def _build_title_filter(self, field: str, values: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
         Build title filter with smart operator selection
         
@@ -229,9 +254,10 @@ class ProspectFilterBuilder:
         Args:
             field: Field name (e.g., "current_employers.title")
             values: List of title values to match
+            api_type: "in_db" or "realtime" to determine format
             
         Returns:
-            Filter dictionary with appropriate operator
+            Filter dictionary with appropriate operator and format
         """
         # Clean values (remove empty strings, strip whitespace)
         cleaned_values = [v.strip() for v in values if v and v.strip()]
@@ -241,20 +267,42 @@ class ProspectFilterBuilder:
             logger.warning("Title filter values were all empty after cleaning")
             return {}
         
-        if len(cleaned_values) == 1:
-            # Single value: use exact match
-            return {
-                "column": field,
-                "type": "=",
-                "value": cleaned_values[0]
-            }
+        # Get filter_type for Realtime API
+        filter_type = self.FILTER_TYPE_MAP.get(field)
+        
+        if api_type == "realtime":
+            if filter_type is None:
+                # Filter not supported in Realtime API
+                return {}
+            # Realtime API format
+            if len(cleaned_values) == 1:
+                return {
+                    "filter_type": filter_type,
+                    "type": "=",
+                    "value": cleaned_values[0]
+                }
+            else:
+                return {
+                    "filter_type": filter_type,
+                    "type": "in",
+                    "value": cleaned_values
+                }
         else:
-            # Multiple values: use IN operator
-            return {
-                "column": field,
-                "type": "in",
-                "value": cleaned_values
-            }
+            # In-DB API format
+            if len(cleaned_values) == 1:
+                # Single value: use exact match
+                return {
+                    "column": field,
+                    "type": "=",
+                    "value": cleaned_values[0]
+                }
+            else:
+                # Multiple values: use IN operator
+                return {
+                    "column": field,
+                    "type": "in",
+                    "value": cleaned_values
+                }
             
     def _build_function_filter(self, functions: List[str]) -> Dict[str, Any]:
         """
@@ -322,7 +370,7 @@ class ProspectFilterBuilder:
             "value": value
         }
     
-    def _build_location_filter(self, locations: List[str]) -> Dict[str, Any]:
+    def _build_location_filter(self, locations: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
         Build location filter (ready for future implementation)
         
@@ -335,6 +383,7 @@ class ProspectFilterBuilder:
         
         Args:
             locations: List of location strings
+            api_type: "in_db" or "realtime" to determine format
             
         Returns:
             Filter dictionary for location matching
@@ -344,28 +393,43 @@ class ProspectFilterBuilder:
             may need to use autocomplete API to validate location names.
         """
         if len(locations) == 1:
-            # Single location: fuzzy match
-            return {
-                "column": "region",
-                "type": "(.)",
-                "value": locations[0]
-            }
+            if api_type == "realtime":
+                return {
+                    "filter_type": "REGION",
+                    "type": "(.)",
+                    "value": locations[0]
+                }
+            else:  # in_db
+                # Single location: fuzzy match
+                return {
+                    "column": "region",
+                    "type": "(.)",
+                    "value": locations[0]
+                }
         else:
-            # Multiple locations: OR logic
-            # Each location gets fuzzy match, combined with OR
-            return {
-                "op": "or",
-                "conditions": [
-                    {
-                        "column": "region",
-                        "type": "(.)",
-                        "value": loc
-                    }
-                    for loc in locations
-                ]
-            }
+            if api_type == "realtime":
+                # Multiple locations: OR logic in Realtime API format
+                return {
+                    "filter_type": "REGION",
+                    "type": "in",
+                    "value": locations
+                }
+            else:  # in_db
+                # Multiple locations: OR logic
+                # Each location gets fuzzy match, combined with OR
+                return {
+                    "op": "or",
+                    "conditions": [
+                        {
+                            "column": "region",
+                            "type": "(.)",
+                            "value": loc
+                        }
+                        for loc in locations
+                    ]
+                }
     
-    def _build_industry_filter(self, industries: List[str]) -> Dict[str, Any]:
+    def _build_industry_filter(self, industries: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
         Build industry filter (ready for future implementation)
         
@@ -374,6 +438,7 @@ class ProspectFilterBuilder:
         
         Args:
             industries: List of industry names/categories
+            api_type: "in_db" or "realtime" to determine format
             
         Returns:
             Filter dictionary for industry matching
@@ -382,11 +447,18 @@ class ProspectFilterBuilder:
             Industry values should come from CrustData's autocomplete API
             to ensure valid categories are used.
         """
-        return {
-            "column": "current_employers.company_linkedin_industry",
-            "type": "in",
-            "value": industries
-        }
+        if api_type == "realtime":
+            return {
+                "filter_type": "INDUSTRY",
+                "type": "in",
+                "value": industries
+            }
+        else:  # in_db
+            return {
+                "column": "current_employers.company_linkedin_industry",
+                "type": "in",
+                "value": industries
+            }
     
     def _build_keyword_filter(self, keyword: str) -> Dict[str, Any]:
         """
@@ -539,20 +611,27 @@ class ProspectFilterBuilder:
                 "value": cleaned
             }
             
-    def _build_company_filter(self, company: str) -> Dict[str, Any]:
+    def _build_company_filter(self, company: str, api_type: str = "in_db") -> Dict[str, Any]:
         """
         Build company name filter using current_employers.name column.
         """
         if not company:
             return {}
             
-        # Use 'in' operator with single value list as this is the standard
-        # pattern for exact/strict matching in Person DB
-        return {
-            "column": "current_employers.name",
-            "type": "(.)",
-            "value": company
-        }
+        if api_type == "realtime":
+            return {
+                "filter_type": "CURRENT_COMPANY",
+                "type": "(.)",
+                "value": company
+            }
+        else:  # in_db
+            # Use 'in' operator with single value list as this is the standard
+            # pattern for exact/strict matching in Person DB
+            return {
+                "column": "current_employers.name",
+                "type": "(.)",
+                "value": company
+            }
     
     # Valid CrustData headcount ranges with their numeric boundaries
     CRUSTDATA_RANGES = [
@@ -628,7 +707,7 @@ class ProspectFilterBuilder:
         logger.warning(f"Could not normalize employee range: {val}")
         return [val]
 
-    def _build_employees_filter(self, employees: List[str]) -> Dict[str, Any]:
+    def _build_employees_filter(self, employees: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
         Builds the employees/headcount filter.
         Normalizes any range format to valid CrustData API values.
@@ -651,11 +730,18 @@ class ProspectFilterBuilder:
         if not unique_values:
             return {}
 
-        return {
-            "column": "current_employers.company_headcount_range",
-            "type": "in",
-            "value": unique_values
-        }
+        if api_type == "realtime":
+            return {
+                "filter_type": "COMPANY_HEADCOUNT",
+                "type": "in",
+                "value": unique_values
+            }
+        else:  # in_db
+            return {
+                "column": "current_employers.company_headcount_range",
+                "type": "in",
+                "value": unique_values
+            }
 
     def _build_domain_filter(self, domain: str) -> Dict[str, Any]:
         """
