@@ -494,6 +494,18 @@ class SignalDetectionService:
             except Exception as e:
                 print(f">>> [Signals] Blog mentions error for {company_name}: {e}", flush=True)
 
+            # 8. Serper fallback for news/social (if configured)
+            try:
+                serper = await self._fetch_serper_mentions(company_name or company_domain)
+                if serper:
+                    if serper.get("news") and not enrichment_data[bid].get("news_mentions"):
+                        enrichment_data[bid]["news_mentions"] = serper["news"]
+                    if serper.get("social"):
+                        enrichment_data[bid]["social_mentions"] = serper["social"]
+                    print(f">>> [Signals] Serper OK for {company_name}: news={len(serper.get('news', []))} social={len(serper.get('social', []))}", flush=True)
+            except Exception as e:
+                print(f">>> [Signals] Serper error for {company_name}: {e}", flush=True)
+
         # Process enrichment data into signals
         for business_id, data in enrichment_data.items():
             company = business_to_company.get(business_id, {})
@@ -668,6 +680,17 @@ class SignalDetectionService:
                     "confidence": 65
                 })
 
+            social_mentions = data.get("social_mentions", [])
+            if social_mentions:
+                top = social_mentions[0]
+                title = top.get("title") or "Recent social post"
+                company_signals.append({
+                    "type": "social_mention",
+                    "description": f"Recent social coverage: {title}",
+                    "urgency": "low",
+                    "confidence": 65
+                })
+
             # Also extract signals from the company data passed in from search results
             company_data = business_to_company.get(business_id, {})
             if company_data.get("funding_stage"):
@@ -776,6 +799,40 @@ class SignalDetectionService:
                 except Exception:
                     continue
         return []
+
+    async def _fetch_serper_mentions(self, query: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Use Serper (if configured) to fetch news and social mentions."""
+        api_key = getattr(settings, "SERPER_API_KEY", None)
+        if not api_key or not query:
+            return {}
+        try:
+            async with httpx.AsyncClient(timeout=12) as client:
+                response = await client.post(
+                    "https://google.serper.dev/search",
+                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    json={"q": query, "num": 8},
+                )
+                if response.status_code != 200:
+                    return {}
+                data = response.json()
+                news_items = []
+                for item in (data.get("news") or [])[:3]:
+                    title = item.get("title") or ""
+                    link = item.get("link") or ""
+                    date = item.get("date") or ""
+                    if title:
+                        news_items.append({"title": title, "link": link, "published_at": date})
+
+                social_items = []
+                for item in (data.get("organic") or [])[:5]:
+                    link = (item.get("link") or "").lower()
+                    title = item.get("title") or ""
+                    if any(host in link for host in ["linkedin.com", "twitter.com", "x.com", "medium.com", "facebook.com"]):
+                        social_items.append({"title": title, "link": item.get("link")})
+
+                return {"news": news_items, "social": social_items}
+        except Exception:
+            return {}
     
     def _create_company_summary(self, company: Dict[str, Any]) -> str:
         """Create a brief summary of a company for analysis"""
