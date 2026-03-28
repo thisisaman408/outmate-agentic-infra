@@ -24,6 +24,8 @@ import {
   Mic,
   MicOff,
   Activity,
+  Bot,
+  User,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -31,7 +33,7 @@ import { CompaniesResultsTable } from "@/components/leads/companies/companies-re
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
-import { enrichCompany, type CompanyEnrichmentResult } from "@/lib/services/betterContactService"
+import { enrichCompany, enrichProspect, type CompanyEnrichmentResult, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { CsvImportButton } from "@/components/shared/csv-import-button"
@@ -809,8 +811,7 @@ export default function DatabaseFinderPage() {
     setActiveChatId(found.id)
     setDetectedSignals([])  // Clear detected signals when switching chats
     setSuggestedPrompts([])  // Clear suggested prompts when switching chats
-    setAgentMessages([])
-    applySessionToView(found)
+    applySessionToView(found)  // Restores agentMessages from session.messages
   }
 
   // Generate suggested prompts based on current search context
@@ -1083,9 +1084,10 @@ export default function DatabaseFinderPage() {
   const detectIntent = (query: string): "business" | "prospect" => {
     const queryLower = query.toLowerCase()
     const prospectKeywords = [
-      'people', 'prospects', 'person', 'contacts', 'vp', 'ceo', 'cto', 'head of', 'manager',
-      'engineer', 'decision makers', 'decision maker', 'decisions', 'directors', 'founders',
-      'who is', 'who are', 'who works', 'profiles', 'emails', 'phones', 'leaders', 'executives'
+      'people', 'prospects', 'person', 'contacts', 'vp', 'ceo', 'cto', 'cxo', 'cfo', 'cio', 'coo',
+      'head of', 'manager', 'engineer', 'decision makers', 'decision maker', 'decisions',
+      'directors', 'founders', 'who is', 'who are', 'who works', 'profiles', 'emails', 'phones',
+      'leaders', 'executives', 'procurement'
     ]
 
     // If ANY prospect keyword or signal is found, it's a prospect search
@@ -1350,6 +1352,9 @@ export default function DatabaseFinderPage() {
         : [nextSession, ...prev]
       return merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     })
+
+    // Show the user query and AI response in the chat conversation area
+    setAgentMessages(nextSession.messages.map(m => ({ role: m.role, content: m.content })))
 
     const examples = buildExamples(trimmedQuery)
     setWorkflowSteps([
@@ -1738,6 +1743,9 @@ export default function DatabaseFinderPage() {
           : [nextSession, ...prev]
         return merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       })
+
+      // Update visible chat conversation with search results message
+      setAgentMessages(nextSession.messages.map(m => ({ role: m.role, content: m.content })))
     } catch (e) {
       console.error("Search failed:", e)
       setClarification(`Search failed: ${e instanceof Error ? e.message : String(e)}. Please try again or refine your query.`)
@@ -2435,6 +2443,31 @@ export default function DatabaseFinderPage() {
     document.body.removeChild(link)
   }
 
+  const handleProspectEnrichReveal = async (profile: ProspectProfile, field: 'email' | 'phone') => {
+    const linkedinKey = profile.linkedin_profile_url || profile.flagship_profile_url
+    if (!linkedinKey) return
+    const enrichmentKey = `${linkedinKey}-${field}`
+    if (enrichingRows[enrichmentKey]) return
+
+    const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
+    const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
+    const employer = profile.current_employers?.[0]
+    const companyName = employer?.name || ""
+    const companyDomain = employer?.company_website_domain || ""
+
+    setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
+    const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinKey, field)
+    setEnrichedData(prev => ({
+      ...prev,
+      [linkedinKey]: {
+        ...prev[linkedinKey],
+        email: field === 'email' ? result : prev[linkedinKey]?.email,
+        phone: field === 'phone' ? result : prev[linkedinKey]?.phone,
+      },
+    }))
+    setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: false }))
+  }
+
   return (
     <div className="container mx-auto max-w-7xl space-y-6 py-6">
       <Card className="border-border/60 bg-card/80 backdrop-blur-sm">
@@ -2595,6 +2628,41 @@ export default function DatabaseFinderPage() {
               </CardDescription>
             </CardHeader>
              <CardContent className="space-y-6 p-10 flex-1 flex flex-col justify-center">
+              {agentMessages.length > 0 && (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto border rounded-lg p-4 bg-muted/30">
+                  {agentMessages.map((msg, i) => (
+                    <div key={i} className={cn("flex gap-3 items-start", msg.role === "user" ? "justify-end" : "justify-start")}>
+                      {msg.role === "assistant" && (
+                        <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Bot className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                      <div className={cn(
+                        "rounded-lg px-3 py-2 max-w-[80%] text-sm whitespace-pre-wrap",
+                        msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border"
+                      )}>
+                        {msg.content}
+                      </div>
+                      {msg.role === "user" && (
+                        <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {isAgentResponding && (
+                    <div className="flex gap-3 items-start">
+                      <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Bot className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="rounded-lg px-3 py-2 bg-card border">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    </div>
+                  )}
+                  <div ref={agentMessagesEndRef} />
+                </div>
+              )}
                <Textarea
                 ref={queryInputRef}
                 placeholder={hasSearched && results.length > 0
@@ -3175,6 +3243,8 @@ export default function DatabaseFinderPage() {
                     totalCount={tamPreview.count}
                     enableContactReveal={true}
                     tableId="ai-powered-prospects"
+                    onEnrichReveal={handleProspectEnrichReveal}
+                    enrichCache={enrichedData}
                     enrichingRows={enrichingRows}
                   />
                 ) : (

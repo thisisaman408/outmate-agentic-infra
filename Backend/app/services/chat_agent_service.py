@@ -245,7 +245,8 @@ Return object with exact keys:
 Rules for Intent:
 - If the query mentions finding PEOPLE, ROLES, TITLES, PROFESSIONALS, "DECISION MAKERS", or "DECISIONS" (short for decision makers), use intent="prospect".
 - If the query focuses on finding COMPANIES, AGENCIES, FIRMS, or businesses, BUT NOT specific roles or people, use intent="company".
-- If the query is about COMPANIES that are hiring for roles (e.g., "companies hiring for CTOs"), keep intent="company" and capture the roles as filters/keywords.
+- If the query is about finding COMPANIES that are hiring for roles (e.g., "find companies hiring for CTOs"), keep intent="company" and capture the roles as filters/keywords.
+- BUT if the query is about finding specific PEOPLE/ROLES at companies (e.g., "Find CTO at companies hiring for AI" or "Find Head of Tech at those companies"), use intent="prospect" — the user wants to find the PEOPLE, not the companies.
 - Users often have typos or use shorthand. Interpret the MEANING, not exact spelling:
   - "marketting" = "marketing", "enginneering" = "engineering", "decisions" = "decision makers", "descision makers" = "decision makers"
   - "company of 100" = company with ~100 employees, "company size 100" = same thing
@@ -293,6 +294,7 @@ Rules for Filters:
 - When a query combines a domain like "GTM" with "decision makers" or "leaders", expand to senior titles in that domain:
   - "Marketing Decision Makers in GTM" -> current_title: ["VP of Marketing", "CMO", "Head of Marketing", "Marketing Director", "Head of GTM", "VP of GTM", "GTM Manager", "Director of Growth Marketing"]
 - If roles like "CTO", "Head of Tech", or "IT Procurement" are explicitly mentioned, prefer those titles and DO NOT replace them with unrelated roles like HR.
+- IMPORTANT: "CXO" means "Chief Experience Officer" — it is a SPECIFIC title, NOT a shorthand for "all C-suite executives". When user says "CXO", use current_title=["CXO", "Chief Experience Officer"]. Do NOT include CEO, CTO, CFO, CMO, CIO, COO, or other C-level titles unless they are explicitly mentioned. The seniority level "CXO" in databases includes all C-level, but the user means the specific CXO role.
 - Keep only the five allowed filter keys above.
 - If unknown, return empty arrays for that filter key.
 - IMPORTANT: Be very specific and restrictive to avoid broad results like Google, Amazon, etc."""
@@ -350,15 +352,42 @@ Rules for Filters:
                     role_titles.extend(["Head of Tech", "Head of Technology"])
                 if "it procurement" in query_lower or ("procurement" in query_lower and "it" in query_lower):
                     role_titles.extend(["IT Procurement", "Head of IT Procurement", "IT Procurement Manager", "Director of IT Procurement"])
+                # CXO = Chief Experience Officer (specific title, NOT all C-suite)
+                if re.search(r"\bcxo\b|chief experience officer", query_lower):
+                    role_titles.extend(["CXO", "Chief Experience Officer"])
+                    # Remove any other C-suite titles the LLM may have incorrectly added
+                    other_c_suite = {"ceo", "cfo", "cmo", "cio", "coo", "chief marketing officer",
+                                     "chief financial officer", "chief operating officer",
+                                     "chief information officer"}
+                    current_titles = filters.get("current_title") or []
+                    filters["current_title"] = [
+                        t for t in current_titles
+                        if t.lower() not in other_c_suite
+                    ]
 
                 # Deduplicate while preserving order
                 seen = set()
                 role_titles = [t for t in role_titles if not (t in seen or seen.add(t))]
 
                 if role_titles:
-                    # If the query is about companies hiring, keep company intent
-                    if "company" in query_lower or "companies" in query_lower or "hiring" in query_lower:
-                        intent = "company"
+                    # Determine if query is about finding companies or finding people
+                    # "Find companies hiring for CTO" → company intent (roles are the object)
+                    # "Find CTO at companies hiring for AI" → prospect intent (roles are the subject)
+                    # Pattern: if role titles appear BEFORE "at/in/for" + "company/companies", it's prospect
+                    has_company_word = bool(re.search(r"\bcompan(y|ies)\b", query_lower))
+                    has_hiring_word = "hiring" in query_lower
+                    # Check if query structure suggests finding people AT companies
+                    # e.g. "Find CTO at those companies" or "Head of Tech... at companies"
+                    roles_before_company = bool(re.search(
+                        r"\b(cto|head of tech|it procurement|chief technology)\b.*\b(at|in|for|from)\s+(those|these|the)?\s*compan",
+                        query_lower
+                    ))
+                    # Only switch to company intent if it's truly about finding companies
+                    # (e.g. "find companies that are hiring CTOs") AND the LLM also chose company
+                    if has_company_word and has_hiring_word and not roles_before_company and intent == "company":
+                        pass  # keep company intent from LLM
+                    elif roles_before_company or intent == "prospect":
+                        intent = "prospect"
 
                     current_titles = filters.get("current_title") or []
                     current_titles_str = " ".join([str(t).lower() for t in current_titles])
