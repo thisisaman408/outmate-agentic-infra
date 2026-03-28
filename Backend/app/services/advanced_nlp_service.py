@@ -157,22 +157,25 @@ class AdvancedNLPService:
 
     @staticmethod
     def _normalize_industry_term(value: str) -> str:
-        aliases = {
-            # B2B SaaS specific mappings
-            "b2b": "Technology",
-            "b2b saas": "Software Development", 
-            "b2b software": "Software Development",
-            "business software": "Software Development",
+        """Normalize industry terms to valid Crustdata API values"""
+        industry_aliases = {
+            # AI and tech-related terms
+            "ai": "Software Development",
+            "artificial intelligence": "Software Development",
+            "tech": "Software Development",
+            "technology": "Software Development",
+            "tech-enabled": "Software Development",
+            "ai tech": "Software Development",
+            "ai tech-enabled services": "Software Development",
+            "ai tech-enabled": "Software Development",
+            "tech-enabled services": "Software Development",
             "saas": "Software Development",
             "software": "Software Development",
             "software development": "Software Development",
-            "software as a service": "Software Development",
-            "cloud software": "Software Development",
-            "enterprise software": "Software Development",
-            "tech": "Technology",
-            "technology": "Technology",
-            "fintech": "Financial Services",
-            "financial services": "Financial Services",
+            "b2b saas": "Software Development",
+            "b2b software": "Software Development",
+            
+            # Other common industry mappings
             "healthtech": "Healthcare",
             "healthcare": "Healthcare",
             "edtech": "Education",
@@ -474,7 +477,7 @@ class AdvancedNLPService:
             filters = {}
             
             # Industry extraction
-            industries = ["software", "saas", "b2b", "b2b saas", "b2b software", "tech", "healthcare", "finance", "banking", "retail", "fintech", "martech"]
+            industries = ["software", "saas", "tech", "technology", "ai", "artificial intelligence", "tech-enabled", "ai tech", "ai tech-enabled services", "ai tech-enabled", "tech-enabled services", "b2b saas", "b2b software", "healthcare", "finance", "banking", "retail", "fintech", "martech"]
             query_lower = query.lower()
             
             for industry in industries:
