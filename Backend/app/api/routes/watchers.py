@@ -75,16 +75,16 @@ class CreateWatcherRequest(BaseModel):
 
 
 @router.get("/")
-async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(WatcherModel)
+async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    query = db.query(WatcherModel).filter(WatcherModel.user_id == _user.id)
     if type:
         query = query.filter(WatcherModel.type == type)
     return [watcher_to_dict(w) for w in query.order_by(WatcherModel.created_at.desc()).all()]
 
 
 @router.get("/{id}")
-async def get_watcher(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+async def get_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
     return watcher_to_dict(db_w)
@@ -92,19 +92,20 @@ async def get_watcher(id: str, db: Session = Depends(get_db)):
 
 # Handle trailing slash variant
 @router.get("/{id}/")
-async def get_watcher_with_slash(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+async def get_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
     return watcher_to_dict(db_w)
 
 
 @router.post("/event")
-async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depends(get_db)):
+async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     wid = f"w-{uuid4().hex[:8]}"
     logger.info(f">>> [Create Event Watcher] ID: {wid}, Name: {request.name}, Criteria: {request.criteria}")
     db_w = WatcherModel(
         id=wid,
+        user_id=_user.id,
         name=request.name,
         description=request.description,
         type="event",
@@ -126,10 +127,11 @@ async def create_event_watcher_with_slash(request: CreateWatcherRequest, db: Ses
 
 
 @router.post("/account")
-async def create_account_watcher(request: Dict[str, Any], db: Session = Depends(get_db)):
+async def create_account_watcher(request: Dict[str, Any], db: Session = Depends(get_db), _user=Depends(get_current_user)):
     wid = f"w-{uuid4().hex[:8]}"
     db_w = WatcherModel(
         id=wid,
+        user_id=_user.id,
         name=request.get("name", request.get("accountName", "Account Watcher")),
         description=request.get("description"),
         type="account",
@@ -178,8 +180,8 @@ async def create_lead_watcher_with_slash(request: Dict[str, Any], db: Session = 
 
 
 @router.post("/{id}/toggle")
-async def toggle_watcher(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+async def toggle_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
     db_w.status = "paused" if db_w.status == "active" else "active"
