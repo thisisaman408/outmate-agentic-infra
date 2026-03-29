@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.services.explorium_service import ExploriumService
 from app.db.deps import get_db
 from app.db.models.watcher import Watcher as WatcherModel
+from app.api.deps.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
