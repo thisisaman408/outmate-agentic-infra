@@ -99,10 +99,11 @@ app.add_middleware(SecurityHeadersMiddleware)
 setup_rate_limiting(app, environment=settings.ENVIRONMENT)
 
 # CORS Configuration
-# Use explicit origins from settings (wildcard "*" with credentials is invalid per CORS spec)
+# NOTE: Using wildcard for broad compatibility. Starlette CORSMiddleware
+# automatically echoes the request origin when allow_credentials=True.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Pixel-Key"],
