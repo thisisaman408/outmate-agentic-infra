@@ -29,27 +29,36 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       credentials: "include",
-      headers: { 
-        "Content-Type": "application/json", 
+      headers: {
+        "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init.headers ?? {}) 
+        ...(init.headers ?? {})
       },
       ...init
     })
-    
+
     if (res.status === 204) return null as unknown as T
-    
+
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      console.error(`[Watcher API Error] ${res.status} ${res.statusText} for ${path}`);
+      throw new Error(`Server is temporarily unavailable (${res.status}). Please try again in a few moments.`);
+    }
+
     if (!res.ok) {
       console.error(`[Watcher API Error] ${res.status} ${res.statusText} for ${path}`);
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || res.statusText || `Request failed with status ${res.status}`);
     }
-    
+
     const body = await res.json()
     console.log(`[Watcher API Success] ${path} returned:`, body);
     return body as T
   } catch (err) {
     console.error(`[Watcher API Fetch Catch] ${path}:`, err);
+    // Network-level failures (CORS blocked due to 502, no connection, etc.)
+    if (err instanceof TypeError && (err as TypeError).message === "Failed to fetch") {
+      throw new Error("Unable to connect to the server. The backend may be restarting — please try again in a few moments.");
+    }
     throw err;
   }
 }
@@ -84,7 +93,7 @@ export default function WatcherPage() {
   const [detailsOpen,    setDetailsOpen]    = useState(false)
 
   // ── fetch ─────────────────────────────────────────────────
-  const load = useCallback(async () => {
+  const load = useCallback(async (retries = 1) => {
     setLoading(true); setError(null)
     try {
       const [ev, ac, ld] = await Promise.all([
@@ -92,9 +101,16 @@ export default function WatcherPage() {
         api.listByType("account"),
         api.listByType("lead"),
       ])
-      setEvents(ev); setAccounts(ac); setLeads(ld)
-    } catch (e) { setError((e as Error).message) }
-    finally     { setLoading(false) }
+      setEvents(Array.isArray(ev) ? ev : []); setAccounts(Array.isArray(ac) ? ac : []); setLeads(Array.isArray(ld) ? ld : [])
+    } catch (e) {
+      if (retries > 0) {
+        // Auto-retry once after a brief delay (handles server cold starts)
+        await new Promise(r => setTimeout(r, 2000))
+        return load(retries - 1)
+      }
+      setError((e as Error).message)
+    }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -225,7 +241,7 @@ export default function WatcherPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" className="gap-2 bg-background" onClick={load} disabled={loading}>
+                  <Button variant="outline" className="gap-2 bg-background" onClick={() => load(1)} disabled={loading}>
                     <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
                   </Button>
                   <Button variant="outline" className="gap-2 bg-background" onClick={handleExport}>
@@ -250,11 +266,11 @@ export default function WatcherPage() {
             <div className="mx-4 mt-4 flex flex-col gap-3 rounded-lg border border-red-500/30 bg-red-500/8 p-4">
               <div className="flex items-center gap-3">
                 <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-                <p className="text-sm font-bold text-red-600 flex-1">DEBUG ERROR: {error}</p>
+                <p className="text-sm font-medium text-red-600 flex-1">{error}</p>
+                <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-500/10 gap-1" onClick={() => { setError(null); load(1); }}>
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </Button>
                 <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-500/10" onClick={() => setError(null)}>Dismiss</Button>
-              </div>
-              <div className="mt-2 p-2 bg-black/10 rounded text-[10px] font-mono text-red-800 break-all">
-                BASE: {BASE} | API Path: /api/v1/watchers
               </div>
             </div>
           )}

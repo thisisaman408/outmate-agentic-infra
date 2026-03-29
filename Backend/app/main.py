@@ -99,11 +99,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 setup_rate_limiting(app, environment=settings.ENVIRONMENT)
 
 # CORS Configuration
-# NOTE: Temporarily allowing all origins for development to fix cross-origin issues
-# between app.outmate.ai frontend and dev.outmate.ai backend
+# Use explicit origins from settings (wildcard "*" with credentials is invalid per CORS spec)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Pixel-Key"],
