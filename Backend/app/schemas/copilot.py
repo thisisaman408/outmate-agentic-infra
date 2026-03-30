@@ -5,7 +5,7 @@ Pydantic schemas for Co-Pilot API request/response models.
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
-from datetime import date
+from datetime import date, datetime
 
 
 # ── Daily Brief ───────────────────────────────────────────────
@@ -13,6 +13,7 @@ from datetime import date
 class DailyBriefResponse(BaseModel):
     id: str
     brief_date: str
+    greeting: Optional[str] = None
     summary: str
     priority_actions: List[Dict[str, Any]]
     new_signals: List[Dict[str, Any]]
@@ -168,6 +169,16 @@ class CopilotPreferencesRequest(BaseModel):
     slack_webhook_url: Optional[str] = None
     pipeline_alerts_enabled: Optional[bool] = None
     alert_severity_threshold: Optional[str] = None
+
+    @field_validator("daily_brief_timezone")
+    @classmethod
+    def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        from zoneinfo import available_timezones
+        if v not in available_timezones():
+            raise ValueError(f"Unknown timezone: {v}")
+        return v
 
 
 # ── Lead Copilot ──────────────────────────────────────────────
@@ -351,3 +362,19 @@ class ChatSessionFull(BaseModel):
     message_count: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ── Calendar Auto-Brief ────────────────────────────────────────
+
+class CalendarMeetingBriefResponse(BaseModel):
+    id: str
+    meeting_title: str
+    event_start: str
+    calendar_event_id: str
+    context: str
+    objections: List[Dict[str, str]]
+    talking_points: List[str]
+    ask: str
+    enrichment_used: bool
+    created_at: str
+    viewed_at: Optional[str] = None

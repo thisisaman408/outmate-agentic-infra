@@ -1,3 +1,4 @@
+import ssl
 from celery import Celery
 from celery.schedules import crontab
 from app.core.config import settings
@@ -25,9 +26,9 @@ celery_app.conf.update(
     broker_connection_max_retries=3,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
-    # SSL/TLS for Upstash
-    broker_use_ssl=True,
-    redis_backend_use_ssl=True,
+    # SSL/TLS for Upstash — ssl_cert_reqs must be ssl.CERT_NONE constant (not bool, not string)
+    broker_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
+    redis_backend_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
     # ── Celery Beat periodic schedule ─────────────────────────────────────────
     beat_schedule={
         # GDPR auto-deletion: runs every day at 02:00 UTC

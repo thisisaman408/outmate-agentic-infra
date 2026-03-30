@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -14,6 +14,8 @@ class CopilotMeetingPrep(Base):
     company_domain = Column(String(255), nullable=True)
     prospect_name  = Column(String(500), nullable=True)
     prospect_title = Column(String(500), nullable=True)
-    meeting_type   = Column(String(50), default="discovery")
-    content        = Column(JSONB, nullable=False)
-    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    meeting_type      = Column(String(50), default="discovery")
+    content           = Column(JSONB, nullable=False)
+    calendar_event_id = Column(Text, nullable=True, index=True)
+    viewed_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())

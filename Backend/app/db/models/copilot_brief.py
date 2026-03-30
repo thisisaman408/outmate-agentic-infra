@@ -14,6 +14,7 @@ class CopilotBrief(Base):
     brief_type = Column(String(50), default="daily")
     content    = Column(JSONB, nullable=False)
     status     = Column(String(20), default="generated")
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

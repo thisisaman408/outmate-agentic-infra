@@ -1,21 +1,52 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { Loader2, Settings } from "lucide-react"
+import { Loader2, Settings, Calendar, CheckCircle2 } from "lucide-react"
 import { useCopilotPreferences } from "@/hooks/use-copilot"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/hooks/use-toast"
 
 export default function CopilotSettingsPage() {
   const { preferences, isLoading, isSaving, fetchPreferences, savePreferences } = useCopilotPreferences()
+  const { toast } = useToast()
+  const [calendarConnecting, setCalendarConnecting] = useState(false)
+  const [calendarConnected, setCalendarConnected] = useState(false)
 
   useEffect(() => {
     fetchPreferences()
   }, [fetchPreferences])
+
+  const handleConnectCalendar = async () => {
+    setCalendarConnecting(true)
+    try {
+      const res = await fetch("/api/calendar/register", { method: "POST" })
+      if (res.ok) {
+        const data = await res.json()
+        setCalendarConnected(true)
+        toast({
+          title: "Google Calendar connected",
+          description: `Auto-briefs active. Webhook renews on ${new Date(data.expires_at).toLocaleDateString()}.`,
+        })
+      } else {
+        const err = await res.json().catch(() => ({}))
+        toast({
+          title: "Connection failed",
+          description: err?.detail || "Could not register calendar webhook",
+          variant: "destructive",
+        })
+      }
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Network error", variant: "destructive" })
+    } finally {
+      setCalendarConnecting(false)
+    }
+  }
 
   const handleToggle = (key: string, value: boolean) => {
     if (!preferences) return
@@ -182,6 +213,54 @@ export default function CopilotSettingsPage() {
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Google Calendar integration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-primary" />
+            Google Calendar
+          </CardTitle>
+          <CardDescription>
+            Auto-generate meeting briefs 30 minutes before external calls
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Connect your Google Calendar and Co-Pilot will prepare a brief for every external
+            meeting — enriched with company research, talking points, objections, and a specific
+            ask — delivered via Slack and visible here, with no action required from you.
+          </p>
+          {calendarConnected ? (
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <span className="text-sm text-green-600 font-medium">Calendar connected</span>
+              <Badge variant="outline" className="text-xs border-green-500/40 text-green-600">
+                Active
+              </Badge>
+            </div>
+          ) : (
+            <Button
+              onClick={handleConnectCalendar}
+              disabled={calendarConnecting}
+              variant="outline"
+              size="sm"
+              className="gap-2"
+            >
+              {calendarConnecting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Calendar className="h-4 w-4" />
+              )}
+              Connect Google Calendar
+            </Button>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Requires Google account connected via Settings → Account. Only reads calendar
+            metadata — no email content is accessed.
+          </p>
         </CardContent>
       </Card>
 

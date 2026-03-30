@@ -89,6 +89,30 @@ export interface CopilotPreferences {
   alert_severity_threshold?: string
 }
 
+// ── Daily Brief Types ────────────────────────────────────────
+
+export interface DailyBriefPriorityAction {
+  priority: number
+  tier: string
+  action: string
+  reason: string
+  entity: string
+  entity_type: string
+  icp_score: number
+}
+
+export interface DailyBriefResponse {
+  id: string
+  brief_date: string
+  greeting?: string
+  summary: string
+  priority_actions: DailyBriefPriorityAction[]
+  new_signals: Array<{ signal_type: string; entity: string; description: string; urgency: string }>
+  follow_ups: Array<{ prospect: string; company: string; last_contact: string; suggested_action: string }>
+  key_metrics: { active_campaigns: number; open_rate_trend: string; new_leads_today: number; signals_detected: number }
+  status: string
+}
+
 // ── Lead Copilot Types ──────────────────────────────────────
 
 export type LeadActionType = 
@@ -212,12 +236,12 @@ export { InsufficientCreditsError }
 
 export const copilotApi = {
   // Daily Brief
-  getDailyBrief: async () => {
+  getDailyBrief: async (): Promise<DailyBriefResponse> => {
     const response = await fetchWithAuth(`${BACKEND_BASE}/api/copilot/daily-brief`)
     return handleResponse(response, "Failed to fetch daily brief")
   },
 
-  regenerateDailyBrief: async () => {
+  regenerateDailyBrief: async (): Promise<DailyBriefResponse> => {
     const response = await fetchWithAuth(`${BACKEND_BASE}/api/copilot/daily-brief/generate`, {
       method: "POST",
     })

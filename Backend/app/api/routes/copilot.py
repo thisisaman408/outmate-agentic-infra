@@ -28,6 +28,12 @@ from app.api.deps.auth import get_current_user
 from app.db.deps import get_db
 from app.db.models.user import User
 from app.db.utils import get_user_credits, deduct_credits
+from app.services.signal_event_service import drain_signal_queue
+from app.core.redis import get_redis
+from app.db.models.copilot_preferences import CopilotUserPreferences
+from app.services.copilot.daily_brief_service import _extract_first_name
+from zoneinfo import ZoneInfo
+from datetime import datetime
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -87,6 +93,26 @@ router = APIRouter(tags=["copilot"])
 
 # ── Daily Brief ───────────────────────────────────────────────
 
+def _get_brief_context(db: Session, user_id: str, user_email: str, full_name: str | None = None) -> tuple[str, str, str]:
+    """Return (first_name, local_date_iso, tz_str) for a user."""
+    if full_name:
+        first_name = full_name.strip().split()[0].capitalize()
+    else:
+        first_name = _extract_first_name(user_email) if user_email else "there"
+    prefs = (
+        db.query(CopilotUserPreferences)
+        .filter(CopilotUserPreferences.user_id == user_id)
+        .first()
+    )
+    tz_str = (prefs.daily_brief_timezone if prefs and prefs.daily_brief_timezone else None) or "UTC"
+    try:
+        tz = ZoneInfo(tz_str)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    local_date_iso = datetime.now(tz).date().isoformat()
+    return first_name, local_date_iso, tz_str
+
+
 @router.get("/daily-brief")
 async def get_daily_brief(
     current_user: User = Depends(get_current_user),
@@ -94,9 +120,21 @@ async def get_daily_brief(
 ):
     """Get today's daily brief. Generates one if it doesn't exist yet (costs credits only on generation)."""
     try:
+        user_id = str(current_user.id)
+        first_name, local_date_iso, tz_str = _get_brief_context(db, user_id, current_user.email or "", getattr(current_user, "full_name", None))
+
+        redis = await get_redis()
+        events = await drain_signal_queue(redis, user_id)
+
         service = CopilotService(db)
-        result, was_generated = await service.daily_brief.get_or_generate(str(current_user.id))
-        if was_generated:
+        result, was_generated = await service.daily_brief.get_or_generate(
+            user_id,
+            first_name=first_name,
+            events=events,
+            local_date_iso=local_date_iso,
+            tz_str=tz_str,
+        )
+        if was_generated and result.get("status") != "empty":
             cost = COPILOT_CREDIT_COSTS["daily_brief"]
             _deduct(db, current_user.id, cost, "Copilot: Daily brief auto-generated")
         return result
@@ -114,11 +152,23 @@ async def regenerate_daily_brief(
 ):
     """Force-regenerate today's daily brief."""
     cost = COPILOT_CREDIT_COSTS["daily_brief"]
-    _check_credits(db, current_user.id, cost)
     try:
+        user_id = str(current_user.id)
+        first_name, local_date_iso, tz_str = _get_brief_context(db, user_id, current_user.email or "", getattr(current_user, "full_name", None))
+
+        redis = await get_redis()
+        events = await drain_signal_queue(redis, user_id)
+
         service = CopilotService(db)
-        result = await service.daily_brief.generate(str(current_user.id))
-        _deduct(db, current_user.id, cost, "Copilot: Daily brief regenerated")
+        result = await service.daily_brief.generate(
+            user_id,
+            first_name=first_name,
+            events=events,
+            local_date_iso=local_date_iso,
+            tz_str=tz_str,
+        )
+        if result.get("status") != "empty":
+            _deduct(db, current_user.id, cost, "Copilot: Daily brief regenerated")
         return result
     except HTTPException:
         raise
@@ -375,7 +425,17 @@ async def update_preferences(
             setattr(prefs, field, value)
 
         db.commit()
-        return {"success": True}
+        db.refresh(prefs)
+        return {
+            "daily_brief_enabled": prefs.daily_brief_enabled,
+            "daily_brief_time": prefs.daily_brief_time,
+            "daily_brief_timezone": prefs.daily_brief_timezone,
+            "notify_email": prefs.notify_email,
+            "notify_slack": prefs.notify_slack,
+            "slack_webhook_url": prefs.slack_webhook_url,
+            "pipeline_alerts_enabled": prefs.pipeline_alerts_enabled,
+            "alert_severity_threshold": prefs.alert_severity_threshold,
+        }
     except Exception as e:
         logger.error(f"Update preferences error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update preferences: {str(e)}")
@@ -681,3 +741,72 @@ async def delete_chat_session(
         raise HTTPException(status_code=404, detail="Chat session not found")
     db.commit()
     return {"success": True}
+
+
+# ── Calendar Auto-Brief: pending + viewed ─────────────────────
+
+@router.get("/meeting-prep/pending")
+async def get_pending_meeting_briefs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return auto-generated meeting briefs (from calendar) not yet viewed by the user.
+    Used for the in-app banner on the Meeting Prep tab.
+    """
+    from app.db.models.copilot_meeting_prep import CopilotMeetingPrep
+
+    briefs = (
+        db.query(CopilotMeetingPrep)
+        .filter(
+            CopilotMeetingPrep.user_id == str(current_user.id),
+            CopilotMeetingPrep.calendar_event_id != None,
+            CopilotMeetingPrep.viewed_at == None,
+        )
+        .order_by(CopilotMeetingPrep.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    result = []
+    for b in briefs:
+        content = b.content or {}
+        result.append({
+            "id": str(b.id),
+            "meeting_title": b.company_name,
+            "calendar_event_id": b.calendar_event_id,
+            "event_start": content.get("event_start", ""),
+            "context": content.get("context", ""),
+            "objections": content.get("objections", []),
+            "talking_points": content.get("talking_points", []),
+            "ask": content.get("ask", ""),
+            "enrichment_used": content.get("enrichment_used", False),
+            "created_at": b.created_at.isoformat() if b.created_at else "",
+            "viewed_at": None,
+        })
+    return result
+
+
+@router.put("/meeting-prep/{brief_id}/viewed")
+async def mark_meeting_brief_viewed(
+    brief_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark an auto-generated meeting brief as viewed (dismisses the banner)."""
+    from app.db.models.copilot_meeting_prep import CopilotMeetingPrep
+
+    brief = (
+        db.query(CopilotMeetingPrep)
+        .filter(
+            CopilotMeetingPrep.id == brief_id,
+            CopilotMeetingPrep.user_id == str(current_user.id),
+        )
+        .first()
+    )
+    if not brief:
+        raise HTTPException(status_code=404, detail="Meeting brief not found")
+
+    brief.viewed_at = datetime.now(ZoneInfo("UTC"))
+    db.commit()
+    return {"success": True, "id": brief_id}

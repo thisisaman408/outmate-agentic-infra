@@ -271,6 +271,10 @@ class Settings(BaseSettings):
         None,
         description="Google OAuth redirect URI"
     )
+    GOOGLE_CALENDAR_WEBHOOK_URL: str = Field(
+        "",
+        description="Public URL for Google Calendar push notifications (e.g. ngrok tunnel)"
+    )
 
     # Unipile Email Configuration
     UNIPILE_API_KEY: Optional[str] = Field(
