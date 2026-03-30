@@ -205,10 +205,11 @@ class LeadCopilotService:
         }
 
         # Build company dict if linked
+        OWN_DOMAINS = {"outmate.ai", "outmate.com"}
         company_data = None
         if prospect.company_id:
             company = self.db.query(Company).filter(Company.id == prospect.company_id).first()
-            if company:
+            if company and (company.domain or "").lower().strip() not in OWN_DOMAINS:
                 hq_parts = [p for p in [company.headquarters_city, company.headquarters_state, company.headquarters_country] if p]
                 company_data = {
                     "id": str(company.id),
@@ -222,6 +223,27 @@ class LeadCopilotService:
                     "technologies": company.technologies or [],
                     "headquarters": ", ".join(hq_parts) if hq_parts else None,
                     "employee_growth_6m_percent": company.employee_growth_6m_percent,
+                }
+
+        # Fall back to raw_data (CrustData profile) for company name if DB record is invalid/missing
+        if not company_data:
+            raw = prospect.raw_data or {}
+            current_employer = (raw.get("current_employers") or [{}])[0] or {}
+            raw_company_name = current_employer.get("name") or raw.get("company_name")
+            raw_company_domain = current_employer.get("company_website_domain") or current_employer.get("company_domain")
+            if raw_company_name:
+                company_data = {
+                    "id": None,
+                    "name": raw_company_name,
+                    "domain": raw_company_domain,
+                    "industry": current_employer.get("company_linkedin_industry"),
+                    "employee_count": current_employer.get("company_headcount_range"),
+                    "revenue_range": None,
+                    "funding_stage": None,
+                    "funding_total": None,
+                    "technologies": [],
+                    "headquarters": current_employer.get("company_hq_location"),
+                    "employee_growth_6m_percent": None,
                 }
 
         # Enrichment status

@@ -1112,11 +1112,7 @@ async def match_business(
             input_name = input_data.get("name") or input_data.get("domain")
             bname = biz.get("name") or biz.get("company_name") or input_name or bid
             bdomain = biz.get("domain") or biz.get("website") or input_data.get("domain")
-            
-            # Canonical Explorium business_id for Events is MD5 of domain
-            if bdomain and isinstance(bdomain, str):
-                bid = hashlib.md5(bdomain.lower().encode()).hexdigest()
-            
+
             if bid:
                 hits.append({"business_id": bid, "name": bname, "domain": bdomain})
         
@@ -1141,7 +1137,15 @@ async def match_business(
         return {"matches": hits}
     except Exception as exc:
         logger.warning("[events] match_business error: %s", exc)
-        return {"matches": [], "error": str(exc)}
+        # Explorium threw — fall back to MD5(domain) so enrollment can still proceed
+        hits = []
+        if body.domain:
+            bid = hashlib.md5(body.domain.lower().encode()).hexdigest()
+            hits.append({"business_id": bid, "name": body.name or body.domain, "domain": body.domain})
+        elif body.name:
+            bid = hashlib.md5(body.name.strip().lower().encode()).hexdigest()
+            hits.append({"business_id": bid, "name": body.name.strip(), "domain": None})
+        return {"matches": hits, "error": str(exc), "fallback": True}
 
 
 # ---------------------------------------------------------------------------
