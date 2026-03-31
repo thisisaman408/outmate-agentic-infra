@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Eye, Linkedin, Loader2, Lock, Sparkles, Zap } from "lucide-react"
@@ -332,6 +333,9 @@ export function ProspectsResultsTable({
                 render: (_v, prospect) => {
                     const displayName = asText(prospect.name) || "Unknown"
                     const profileConfidence = computeConfidence(prospect)
+                    const icpData = prospect._icpScore
+                    const icpBadgeClass = icpData?.tier === 'Hot' ? 'bg-green-500/90 text-white' : icpData?.tier === 'Warm' ? 'bg-yellow-500/90 text-white' : icpData?.tier === 'Cold' ? 'bg-zinc-500/80 text-white' : ''
+                    const isStale = icpData?.timestamp ? (Date.now() - icpData.timestamp) > 24 * 60 * 60 * 1000 : false
                     return (
                         <div className="flex flex-col">
                             <div className="flex items-center gap-1.5">
@@ -343,7 +347,32 @@ export function ProspectsResultsTable({
                             <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                 {(Number(prospect.num_of_connections) || 0).toLocaleString()} connections
                             </span>
-                            <span className="text-[10px] text-muted-foreground">Confidence Score: {profileConfidence}%</span>
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-muted-foreground">Confidence: {profileConfidence}%</span>
+                                {icpData && (
+                                    <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                                        <div className="flex items-center gap-0.5">
+                                            <Badge variant="default" className={`text-[10px] px-1.5 py-0 ${icpBadgeClass}`}>
+                                                ICP: {icpData.tier} ({Math.round(icpData.score)})
+                                            </Badge>
+                                            {isStale && <span className="text-[9px] text-orange-400">outdated</span>}
+                                        </div>
+                                    </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-[200px]">
+                                        <p className="font-semibold mb-1">ICP Score: {icpData.score}/100 ({icpData.tier})</p>
+                                        {icpData.breakdown && (
+                                            <div className="space-y-0.5">
+                                                <p>Title: {icpData.breakdown.title ? `+${icpData.breakdown.title}` : '0'}</p>
+                                                <p>Industry: {icpData.breakdown.industry ? `+${icpData.breakdown.industry}` : '0'}</p>
+                                                <p>Location: {icpData.breakdown.location ? `+${icpData.breakdown.location}` : '0'}</p>
+                                                <p>Size: {icpData.breakdown.size ? `+${icpData.breakdown.size}` : '0'}</p>
+                                                <p>Seniority: {icpData.breakdown.seniority ? `+${icpData.breakdown.seniority}` : '0'}</p>
+                                                <p>Keywords: {icpData.breakdown.keywords ? `+${icpData.breakdown.keywords}` : '0'}</p>
+                                            </div>
+                                        )}
+                                        {isStale && <p className="mt-1 text-orange-400">Score is older than 24 hours</p>}
+                                    </TooltipContent></Tooltip></TooltipProvider>
+                                )}
+                            </div>
                         </div>
                     )
                 },

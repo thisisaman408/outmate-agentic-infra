@@ -6,6 +6,7 @@ Provides context-aware follow-up conversations after search results are returned
 import os
 import re
 import json
+import hashlib
 import logging
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
@@ -222,6 +223,21 @@ class QueryParserService:
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY is not set")
 
+        # --- Redis cache check ---
+        normalized_query = query.strip().lower()
+        query_hash = hashlib.sha256(normalized_query.encode()).hexdigest()
+        cache_key = f"parse_query:{query_hash}"
+
+        try:
+            from app.services.redis_service import RedisService
+            redis_svc = RedisService()
+            cached = await redis_svc.get_cached_filter_result(cache_key)
+            if cached is not None:
+                logger.info(f"Cache HIT for query: {query[:60]}...")
+                return cached
+        except Exception as exc:
+            logger.warning(f"Redis cache lookup failed (non-fatal): {exc}")
+
         prompt = f"""You are an intent router and filter mapper for B2B sales search.
 Analyze this query and return ONLY valid JSON.
 
@@ -273,7 +289,14 @@ Rules for Filters:
   - "manufacturing" -> ["Manufacturing"]
   - "real estate" -> ["Real Estate"]
   - NEVER use made-up industry names like "Financial Technology" or "Fintech" — always use the LinkedIn standard name.
-- Map location terms to country/state names.
+- Map location terms to SPECIFIC country or state names that CrustData recognizes. NEVER use macro-regions like "European Union", "Europe", "Asia Pacific", "APAC", "North America", "LATAM", "MENA", "Nordics", "DACH", or "Benelux" — always expand them into individual countries. Examples:
+  - "EU" or "Europe" -> ["Germany", "France", "Netherlands", "Spain", "Italy", "United Kingdom", "Ireland", "Sweden"]
+  - "APAC" or "Asia" -> ["India", "China", "Singapore", "Japan", "Australia"]
+  - "North America" -> ["United States", "Canada"]
+  - "DACH" -> ["Germany", "Austria", "Switzerland"]
+  - "Nordics" -> ["Sweden", "Norway", "Denmark", "Finland"]
+  - "Middle East" -> ["United Arab Emirates", "Saudi Arabia", "Israel"]
+  - US states should be written as "Texas", "California", "New York" (not abbreviated).
 - For company_size: ONLY use these exact CrustData-compatible ranges: "1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+".
   - "100 employees" or "company size 100" -> ["51-200"] (pick the range that contains that number)
   - "100 to 1000 employees" -> ["51-200", "201-500", "501-1000"]
@@ -406,13 +429,22 @@ Rules for Filters:
                                 keywords.append(rt)
                         filters["keywords"] = keywords
 
-                return {
+                result = {
                     "intent": intent,
                     "is_relevant": parsed.get("is_relevant", True),
                     "reason": parsed.get("reason", ""),
                     "confidence": parsed.get("confidence", 80),
                     "filters": filters,
                 }
+
+                # --- Cache the parsed result in Redis (1-hour TTL) ---
+                try:
+                    await redis_svc.set_cached_filter_result(cache_key, result, ttl=3600)
+                    logger.info(f"Cached parse result for query: {query[:60]}...")
+                except Exception as exc:
+                    logger.warning(f"Redis cache store failed (non-fatal): {exc}")
+
+                return result
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM JSON: {e}")

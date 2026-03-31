@@ -162,7 +162,15 @@ class BaseCrustDataClient:
                     except Exception:
                         # Response might not be JSON
                         pass
-                    
+
+                    # CrustData returns 400 with "No profiles match" when zero
+                    # results are found.  Treat this as an empty result, not an error.
+                    if response.status_code == 400 and error_data:
+                        no_match_msg = (error_data.get("error") or error_data.get("message") or "").lower()
+                        if "no profiles" in no_match_msg or "no results" in no_match_msg or "no match" in no_match_msg:
+                            logger.info("CrustData returned no matching profiles — treating as empty result set")
+                            return {"profiles": [], "total_count": 0, "total_display_count": 0}
+
                     error_message = self._format_error_message(response.status_code, response.text)
                     logger.error(
                         f"CrustData API error: {error_message}",
@@ -171,7 +179,7 @@ class BaseCrustDataClient:
                             "error_data": error_data
                         }
                     )
-                    
+
                     raise CrustDataAPIError(
                         status_code=response.status_code,
                         message=error_message,

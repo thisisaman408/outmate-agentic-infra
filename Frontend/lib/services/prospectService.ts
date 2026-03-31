@@ -63,6 +63,12 @@ export interface ProspectProfile {
         continent: string;
     };
     data_quality_score?: number;
+    _icpScore?: {
+        score: number;
+        tier: string;
+        breakdown: Record<string, boolean>;
+        timestamp: number;
+    };
 }
 
 export interface EducationItem {
