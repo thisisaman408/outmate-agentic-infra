@@ -186,7 +186,7 @@ function buildContextOverrides(prospect: any) {
       department: prospect?.department,
       data_quality_score: prospect?.data_quality_score,
     }
-    return { prospect: contextProspect, company }
+    return { prospect: contextProspect, company, entity_type: "company" }
   }
   const employer = prospect?.current_employers?.[0] || prospect?.employer?.[0] || {}
   const company = {

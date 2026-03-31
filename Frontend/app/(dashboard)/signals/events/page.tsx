@@ -222,6 +222,7 @@ function AddEnrollDialog({ open, onClose, entityType, eventTypeOptions, onSave }
                     setChosenId(res.matches[0].business_id)
                     setChosenName(res.matches[0].name)
                 }
+                if ((res as any).error) toast.error(`Lookup error: ${(res as any).error}`)
             }
         } catch {
             toast.error("Lookup failed — try a different query")

@@ -1120,15 +1120,24 @@ async def match_business(
             if bid:
                 hits.append({"business_id": bid, "name": bname, "domain": bdomain})
         
-        # Fallback if no Explorium match but we have a domain
-        if not hits and body.domain:
-            bid = hashlib.md5(body.domain.lower().encode()).hexdigest()
-            hits.append({
-                "business_id": bid,
-                "name": body.name or body.domain,
-                "domain": body.domain
-            })
-            
+        # Fallback if no Explorium match
+        if not hits:
+            if body.domain:
+                bid = hashlib.md5(body.domain.lower().encode()).hexdigest()
+                hits.append({
+                    "business_id": bid,
+                    "name": body.name or body.domain,
+                    "domain": body.domain
+                })
+            elif body.name:
+                # Name-only fallback: MD5 of lowercased name so enrollment can proceed
+                bid = hashlib.md5(body.name.strip().lower().encode()).hexdigest()
+                hits.append({
+                    "business_id": bid,
+                    "name": body.name.strip(),
+                    "domain": None
+                })
+
         return {"matches": hits}
     except Exception as exc:
         logger.warning("[events] match_business error: %s", exc)
@@ -1210,7 +1219,15 @@ async def match_prospect(
                 # LinkedIn-only fallback: we have no ID to use; return empty so user knows it failed
                 logger.warning("[events] match_prospect: LinkedIn lookup returned no ID → no fallback available")
             elif body.full_name:
-                return {"matches": [], "error": "No match found. Please provide an Email, LinkedIn URL, or Company Name."}
+                # Name-only fallback: SHA1 of lowercased name so enrollment can proceed
+                pid = hashlib.sha1(body.full_name.strip().lower().encode()).hexdigest()
+                hits.append({
+                    "prospect_id": pid,
+                    "name": body.full_name.strip(),
+                    "company": body.company_name or "",
+                    "email": None,
+                    "linkedin": None,
+                })
             
         return {"matches": hits}
     except Exception as exc:

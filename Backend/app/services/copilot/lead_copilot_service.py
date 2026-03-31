@@ -279,6 +279,9 @@ class LeadCopilotService:
                 "employee_growth_6m_percent": override_company.get("employee_growth_6m_percent"),
             }
 
+        # Detect company entity (no real prospect — actions target the company itself)
+        is_company_entity = (context_overrides or {}).get("entity_type") == "company"
+
         # Prepare enrichment context
         name = prospect.get("name", "")
         company_name = company.get("name") or prospect.get("company", "")
@@ -336,6 +339,7 @@ class LeadCopilotService:
             company=company,
             prompt=prompt,
             context_overrides=context_overrides,
+            is_company_entity=is_company_entity,
         )
 
         # Store in cache (24h TTL)
@@ -407,6 +411,9 @@ class LeadCopilotService:
                 "employee_growth_6m_percent": override_company.get("employee_growth_6m_percent"),
             }
 
+        # Detect company entity
+        is_company_entity = (context_overrides or {}).get("entity_type") == "company"
+
         name = prospect.get("name", "")
         company_name = company.get("name") or prospect.get("company", "")
         role = prospect.get("title", "")
@@ -442,17 +449,22 @@ class LeadCopilotService:
             return
 
         # ── Phase 1: Enrichment ──
-        yield {"stage": "enriching", "message": "Researching lead..."}
-        try:
-            include_company = action_type in ("research", "custom")
-            lead_context = await LeadEnrichmentService.enrich(
-                name, company_name, role, domain,
-                include_company_data=include_company,
-                include_company_news=include_company,
-            )
-        except Exception as e:
-            logger.warning("Enrichment failed during stream: %s", e)
-            lead_context = LeadContext(name=name, company=company_name, role=role, domain=domain)
+        if is_company_entity:
+            # Company entity: skip person-level enrichment, use company data directly
+            yield {"stage": "enriching", "message": f"Analyzing {company_name}..."}
+            lead_context = None  # No person to enrich
+        else:
+            yield {"stage": "enriching", "message": "Researching lead..."}
+            try:
+                include_company = action_type in ("research", "custom")
+                lead_context = await LeadEnrichmentService.enrich(
+                    name, company_name, role, domain,
+                    include_company_data=include_company,
+                    include_company_news=include_company,
+                )
+            except Exception as e:
+                logger.warning("Enrichment failed during stream: %s", e)
+                lead_context = LeadContext(name=name, company=company_name, role=role, domain=domain)
 
         # ── Phase 2: Build prompt + stream LLM ──
         yield {"stage": "generating", "message": "Generating response..."}
@@ -476,7 +488,10 @@ class LeadCopilotService:
         else:
             extra = None
 
-        user_prompt_text = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+        if is_company_entity:
+            user_prompt_text = self._build_company_prompt(company, extra=extra)
+        else:
+            user_prompt_text = self._build_user_prompt(prospect, company, lead_context, extra=extra)
 
         max_tokens_map = {"draft_email": 800, "research": 700, "objection_handler": 700, "custom": 700}
         temp_map = {"draft_email": 0.4, "research": 0.3, "objection_handler": 0.3, "custom": 0.4}
@@ -512,19 +527,16 @@ class LeadCopilotService:
         if self.mock:
             return MOCK_ANNOTATED_EMAIL
 
-        # Enrich the lead
-        lead_context = await LeadEnrichmentService.enrich(
-            name,
-            company_name,
-            role,
-            domain,
-            include_company_data=False,
-        )
+        is_company = kwargs.get("is_company_entity", False)
+        extra = f"USER INSTRUCTION: {prompt}" if prompt else "Write a cold outreach email."
 
-        user_prompt = self._build_user_prompt(
-            prospect, company, lead_context,
-            extra=f"USER INSTRUCTION: {prompt}" if prompt else "Write a cold outreach email."
-        )
+        if is_company:
+            user_prompt = self._build_company_prompt(company, extra=extra)
+        else:
+            lead_context = await LeadEnrichmentService.enrich(
+                name, company_name, role, domain, include_company_data=False,
+            )
+            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=ANNOTATED_EMAIL_SYSTEM_PROMPT,
@@ -556,9 +568,12 @@ class LeadCopilotService:
         if self.mock:
             return MOCK_RESEARCH
 
-        lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
-
-        user_prompt = self._build_user_prompt(prospect, company, lead_context)
+        is_company = kwargs.get("is_company_entity", False)
+        if is_company:
+            user_prompt = self._build_company_prompt(company)
+        else:
+            lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
+            user_prompt = self._build_user_prompt(prospect, company, lead_context)
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=LEAD_RESEARCH_SYSTEM_PROMPT,
@@ -714,19 +729,17 @@ class LeadCopilotService:
         if self.mock:
             return MOCK_OBJECTION
 
-        lead_context = await LeadEnrichmentService.enrich(
-            name,
-            company_name,
-            role,
-            domain,
-            include_company_data=False,
-        )
-
+        is_company = kwargs.get("is_company_entity", False)
         objection_text = prompt or "Not interested right now"
-        user_prompt = self._build_user_prompt(
-            prospect, company, lead_context,
-            extra=f"OBJECTION FROM PROSPECT: <user_command>{objection_text}</user_command>"
-        )
+        extra = f"OBJECTION FROM PROSPECT: <user_command>{objection_text}</user_command>"
+
+        if is_company:
+            user_prompt = self._build_company_prompt(company, extra=extra)
+        else:
+            lead_context = await LeadEnrichmentService.enrich(
+                name, company_name, role, domain, include_company_data=False,
+            )
+            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
 
         try:
             result = await self.openrouter.chat_completion_structured(
@@ -764,12 +777,14 @@ class LeadCopilotService:
         if not prompt:
             raise ValueError("Custom action requires a prompt")
 
-        lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
+        is_company = kwargs.get("is_company_entity", False)
+        extra = f"USER COMMAND: <user_command>{prompt}</user_command>"
 
-        user_prompt = self._build_user_prompt(
-            prospect, company, lead_context,
-            extra=f"USER COMMAND: <user_command>{prompt}</user_command>"
-        )
+        if is_company:
+            user_prompt = self._build_company_prompt(company, extra=extra)
+        else:
+            lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
+            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT,
@@ -1108,4 +1123,27 @@ class LeadCopilotService:
         if extra:
             sections.append(extra)
 
+        return "\n\n".join(sections)
+
+    def _build_company_prompt(self, company: dict, extra: Optional[str] = None) -> str:
+        """Build a company-focused prompt (no person-level data)."""
+        techs = company.get("technologies") or []
+        tech_str = ", ".join(techs) if isinstance(techs, list) else str(techs)
+        sections = [
+            f"=== TARGET COMPANY ===\n"
+            f"Company: {company.get('name', 'Unknown')}\n"
+            f"Industry: {company.get('industry', 'Unknown')}\n"
+            f"Domain: {company.get('domain', 'N/A')}\n"
+            f"Employees: {company.get('employee_count', 'Unknown')}\n"
+            f"Revenue: {company.get('revenue_range', 'Unknown')}\n"
+            f"Funding: {company.get('funding_stage', 'Unknown')} (${company.get('funding_total', 'N/A')})\n"
+            f"Tech Stack: {tech_str}\n"
+            f"HQ: {company.get('headquarters', 'Unknown')}\n"
+            f"Growth: {company.get('employee_growth_6m_percent', 'N/A')}% (6mo)\n"
+            f"=== END COMPANY ===\n\n"
+            f"NOTE: This is a company-level analysis. There is no specific prospect — "
+            f"target your response at senior decision-makers at {company.get('name', 'this company')}."
+        ]
+        if extra:
+            sections.append(extra)
         return "\n\n".join(sections)
