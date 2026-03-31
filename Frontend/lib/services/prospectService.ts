@@ -39,6 +39,7 @@ export interface ProspectProfile {
     skills: string[];
     languages: string[];
     linkedin_profile_url: string;
+    Social_profile_url: string;
     flagship_profile_url: string;
     emails: string[];
     profile_picture_url: string;

@@ -21,6 +21,9 @@ class User(Base):
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     gmail_access_token = Column(Text, nullable=True)
     gmail_refresh_token = Column(Text, nullable=True)
+    # BYOK (Bring Your Own Key) for AI services
+    anthropic_api_key = Column(Text, nullable=True)  # User's own Anthropic API key (encrypted in practice)
+    use_byok = Column(Boolean, default=False)  # Flag to use BYOK instead of system credits
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True))

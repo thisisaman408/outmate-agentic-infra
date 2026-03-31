@@ -276,6 +276,10 @@ async def startup_event():
             ("google_id",          "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);"),
             ("is_email_verified",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT FALSE;"),
             ("terms_accepted_at",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;"),
+            ("gmail_access_token", "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_access_token TEXT;"),
+            ("gmail_refresh_token", "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT;"),
+            ("anthropic_api_key",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS anthropic_api_key TEXT;"),
+            ("use_byok",           "ALTER TABLE users ADD COLUMN IF NOT EXISTS use_byok BOOLEAN DEFAULT FALSE;"),
         ]
         with engine.begin() as conn:
             for col_name, ddl in migrations:
@@ -283,10 +287,6 @@ async def startup_event():
                     conn.execute(text(ddl))
                     logger.info(f"Added missing users.{col_name} column")
 
-        if "hashed_password" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
-            logger.info("Added missing users.hashed_password column")
         watcher_columns = {col["name"] for col in inspector.get_columns("watchers")} if inspector.has_table("watchers") else set()
         if "watchers" in {t for t in inspector.get_table_names()} and "matches" not in watcher_columns:
             with engine.begin() as conn:

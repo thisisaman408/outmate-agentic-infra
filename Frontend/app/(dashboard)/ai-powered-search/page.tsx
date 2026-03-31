@@ -275,7 +275,7 @@ export default function DatabaseFinderPage() {
     min_employees: 201,
     max_employees: 5000,
     seniority: [],
-    keywords: ["AI", "artificial intelligence", "tech-enabled services"]
+    keywords: ["AI", "artificial intelligence", "tech-enabled services"],
   })
   const creditUsageEntries = creditUsage ? Object.entries(creditUsage) : []
   const totalCreditsUsed = creditUsageEntries.reduce((sum, [, value]) => sum + (value ?? 0), 0)
@@ -575,17 +575,8 @@ export default function DatabaseFinderPage() {
           data: session,
         }),
       })
-      console.log('ICP config fetching...')
-      const response = await fetch('/api/v1/icp/config');
-      if (response.ok) {
-        const data = await response.json();
-        console.log('ICP config fetched successfully:', data);
-        setIcpConfig(data);
-      } else {
-        console.log('ICP config fetch failed:', response.status);
-      }
     } catch (error) {
-      console.error('Failed to fetch ICP config:', error);
+      console.error('Failed to sync chat with server:', error);
     }
   }
 
@@ -704,9 +695,9 @@ export default function DatabaseFinderPage() {
         summary: item?.summary || raw?.summary || "",
         skills: Array.isArray(item?.skills) ? item.skills : (Array.isArray(raw?.skills) ? raw.skills : []),
         languages: Array.isArray(item?.languages) ? item.languages : (Array.isArray(raw?.languages) ? raw.languages : []),
-        linkedin_profile_url: profileUrl,
-        Social_profile_url: profileUrl,
-        flagship_profile_url: profileUrl,
+        'linkedin_profile_url': profileUrl,
+        'Social_profile_url': profileUrl,
+        'flagship_profile_url': profileUrl,
         emails: email ? [email] : [],
         profile_picture_url: item?.profile_picture_url || raw?.profile_picture_url || "",
         profile_picture_permalink: item?.profile_picture_permalink || raw?.profile_picture_permalink || "",
@@ -1866,8 +1857,8 @@ export default function DatabaseFinderPage() {
             skills: Array.isArray(item.skills) ? item.skills : (Array.isArray(raw.skills) ? raw.skills : []),
             languages: Array.isArray(item.languages) ? item.languages : (Array.isArray(raw.languages) ? raw.languages : []),
             linkedin_profile_url: item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
-            Social_profile_url: item.Social_profile_url || item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.Social_profile_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
-            flagship_profile_url: item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
+            'Social_profile_url': item.Social_profile_url || item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.Social_profile_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
+            'flagship_profile_url': item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
             emails: email ? [email] : [],
             profile_picture_url: item.profile_picture_url || raw.profile_picture_url || "",
             profile_picture_permalink: item.profile_picture_permalink || raw.profile_picture_permalink || "",

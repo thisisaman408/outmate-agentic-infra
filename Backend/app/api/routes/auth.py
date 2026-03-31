@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.api.deps.auth import get_current_user
 from app.core.rate_limiting import limiter, RateLimits
 from app.core.redis import get_redis
 from app.db.deps import get_db
@@ -53,6 +54,18 @@ class OtpSendRequest(BaseModel):
 class OtpVerifyRequest(BaseModel):
     email: EmailStr
     otp: str
+
+
+class ByokSetupRequest(BaseModel):
+    """Request to set up BYOK (Bring Your Own Key)."""
+    anthropic_api_key: str
+    use_byok: bool = True
+
+
+class ByokStatusResponse(BaseModel):
+    """Response with BYOK status."""
+    use_byok: bool
+    has_key: bool
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -556,3 +569,65 @@ async def google_oauth_callback(
         logger.error(f"Unexpected error in Google OAuth callback: {e}")
         frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
         return RedirectResponse(url=f"{frontend_base}/auth/login?error=unexpected_error")
+
+
+# ─── BYOK (Bring Your Own Key) Routes ────────────────────────────────────────
+
+@router.post("/byok/setup")
+async def setup_byok(
+    request: ByokSetupRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set up BYOK (Bring Your Own Key) for the user's Anthropic API key."""
+    try:
+        # In production, the API key should be encrypted before storage
+        # For now, using plaintext is acceptable for MVP but should be encrypted
+        user.anthropic_api_key = request.anthropic_api_key
+        user.use_byok = request.use_byok
+        db.commit()
+        db.refresh(user)
+
+        logger.info(f"BYOK setup for user {user.email}: enabled={request.use_byok}")
+
+        return {
+            "success": True,
+            "message": "BYOK configured successfully",
+            "use_byok": user.use_byok,
+        }
+    except Exception as e:
+        logger.error(f"BYOK setup error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set up BYOK")
+
+
+@router.get("/byok/status")
+async def get_byok_status(
+    user: User = Depends(get_current_user),
+) -> ByokStatusResponse:
+    """Get BYOK status for the current user."""
+    return ByokStatusResponse(
+        use_byok=user.use_byok or False,
+        has_key=bool(user.anthropic_api_key),
+    )
+
+
+@router.post("/byok/disable")
+async def disable_byok(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Disable BYOK and clear the stored API key."""
+    try:
+        user.use_byok = False
+        user.anthropic_api_key = None
+        db.commit()
+
+        logger.info(f"BYOK disabled for user {user.email}")
+
+        return {
+            "success": True,
+            "message": "BYOK disabled successfully",
+        }
+    except Exception as e:
+        logger.error(f"BYOK disable error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disable BYOK")
