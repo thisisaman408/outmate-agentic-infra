@@ -25,6 +25,8 @@ from app.db.models.watcher import Watcher
 from app.db.models.identity_graph import IdentityNode
 from app.db.models.product_knowledge import ProductKnowledge
 from app.db.models.copilot_chat_session import CopilotChatSession
+# Signal pipeline
+from app.db.models.signal_event import SignalEvent
 
 __all__ = [
     "User",
@@ -56,4 +58,6 @@ __all__ = [
     "IdentityNode",
     "ProductKnowledge",
     "CopilotChatSession",
+    # Signal pipeline
+    "SignalEvent",
 ]
