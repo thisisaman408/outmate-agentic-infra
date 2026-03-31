@@ -204,7 +204,8 @@ class DailyBriefService:
             except Exception as exc:
                 logger.debug("Could not fetch pipeline alerts: %s", exc)
 
-            # 4. Pull prospects
+            # 4. Pull prospects with job title
+            prospect_companies = []
             try:
                 from app.db.models.prospect import Prospect
                 prospects = (
@@ -217,19 +218,92 @@ class DailyBriefService:
                     has_real_data = True
                     db_context_lines.append("=== YOUR PROSPECTS ===")
                     for p in prospects:
-                        name = getattr(p, "name", None) or getattr(p, "full_name", None) or "Unknown"
-                        company = getattr(p, "company", None) or ""
-                        db_context_lines.append(f"- {name} @ {company}")
+                        name = p.full_name or f"{p.first_name or ''} {p.last_name or ''}".strip() or "Unknown"
+                        company = getattr(p, "company_name", None) or ""
+                        # try to get company from company relation
+                        if not company and p.company_id:
+                            try:
+                                from app.db.models.company import Company
+                                co = self.db.query(Company).filter(Company.id == p.company_id).first()
+                                company = co.name if co else ""
+                            except Exception:
+                                pass
+                        title = p.job_title or ""
+                        line = f"- {name}"
+                        if title:
+                            line += f", {title}"
+                        if company:
+                            line += f" @ {company}"
+                            prospect_companies.append(company)
+                        db_context_lines.append(line)
                     db_context_lines.append("=== END PROSPECTS ===")
             except Exception as exc:
                 logger.debug("Could not fetch prospects: %s", exc)
 
-            # 5. Build events block from Redis queue
+            # 5. Pull Explorium event cache for prospect companies
+            try:
+                from app.db.models.event_cache import EventCache
+                from datetime import timedelta
+                cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+                event_filters = [EventCache.fetched_at >= cutoff]
+                if prospect_companies:
+                    from sqlalchemy import or_
+                    event_filters.append(
+                        or_(*[EventCache.entity_name.ilike(f"%{c}%") for c in prospect_companies[:5]])
+                    )
+                events_cached = (
+                    self.db.query(EventCache)
+                    .filter(*event_filters)
+                    .order_by(EventCache.fetched_at.desc())
+                    .limit(10)
+                    .all()
+                )
+                if events_cached:
+                    has_real_data = True
+                    db_context_lines.append("=== RECENT SIGNALS FROM YOUR ACCOUNTS ===")
+                    for e in events_cached:
+                        ts = e.timestamp or ""
+                        desc = e.description or e.event_label or e.event_type
+                        db_context_lines.append(
+                            f"- [{e.event_type.upper()}] {e.entity_name}: {desc} ({ts})"
+                        )
+                    db_context_lines.append("=== END SIGNALS ===")
+            except Exception as exc:
+                logger.debug("Could not fetch event cache: %s", exc)
+
+            # 6. Pull watcher recent updates
+            try:
+                from app.db.models.watcher import Watcher
+                watchers = (
+                    self.db.query(Watcher)
+                    .filter(
+                        Watcher.user_id == user_id,
+                        Watcher.status == "active",
+                    )
+                    .limit(5)
+                    .all()
+                )
+                watcher_lines = []
+                for w in watchers:
+                    updates = w.recent_updates or []
+                    for upd in updates[:2]:
+                        if isinstance(upd, dict):
+                            msg = upd.get("message") or upd.get("description") or str(upd)
+                            watcher_lines.append(f"- [{w.name}] {msg}")
+                if watcher_lines:
+                    has_real_data = True
+                    db_context_lines.append("=== WATCHER ALERTS ===")
+                    db_context_lines.extend(watcher_lines)
+                    db_context_lines.append("=== END WATCHER ALERTS ===")
+            except Exception as exc:
+                logger.debug("Could not fetch watchers: %s", exc)
+
+            # 8. Build events block from Redis queue
             events_block = _build_events_block(events or [])
             db_context = "\n".join(db_context_lines) if db_context_lines else ""
             has_pipeline_data = bool(events_block or db_context)
 
-            # 6. Fetch B2B news only when there is real pipeline data to augment
+            # 9. Fetch B2B news only when there is real pipeline data to augment
             news_block = ""
             if has_pipeline_data:
                 try:

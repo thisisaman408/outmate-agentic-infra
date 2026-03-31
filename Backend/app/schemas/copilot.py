@@ -355,6 +355,31 @@ class ChatSessionSummary(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+
+# ── Notifications ─────────────────────────────────────────────
+
+class NotificationCreate(BaseModel):
+    type: str
+    title: str
+    body: str
+    cta_url: str = ""
+    priority: str = "green"
+    company: Optional[str] = None  # used for grouping check
+
+
+class NotificationOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str
+    cta_url: str
+    priority: str
+    is_read: bool
+    grouped_count: int
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
 class ChatSessionFull(BaseModel):
     id: str
     title: str

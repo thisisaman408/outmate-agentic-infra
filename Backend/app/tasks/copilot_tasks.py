@@ -181,6 +181,21 @@ async def _generate_for_user(
         if notify_email or notify_slack:
             send_brief_notification_task.delay(user_id, brief)
 
+        # In-app notification
+        try:
+            from app.db.repositories.notification_repository import NotificationRepository
+            repo = NotificationRepository(db)
+            repo.create(
+                user_id=user_id,
+                type="brief_ready",
+                title="Your Daily Brief Is Ready",
+                body="Today's pipeline summary and priority actions are ready to review.",
+                cta_url="/copilot/daily-brief",
+                priority="green",
+            )
+        except Exception as _ne:
+            logger.warning("Failed to create brief_ready notification: %s", _ne)
+
         return {"status": "generated", "user_id": user_id}
     finally:
         db.close()
@@ -346,6 +361,25 @@ def send_hot_signal_slack(self, event_data: dict):
             blocks=blocks,
             text=f"Hot signal: {event_data.get('company')} — {event_data.get('type')}",
         )
+
+        # In-app notification
+        company = event_data.get("company", "Unknown")
+        contact = event_data.get("contact", "Unknown")
+        try:
+            from app.db.repositories.notification_repository import NotificationRepository
+            repo = NotificationRepository(db)
+            repo.create(
+                user_id=user_id,
+                type="hot_signal",
+                title=f"Hot Signal: {company} ICP Match",
+                body=f"{company} scored 80+ on ICP. {contact} is likely a buyer.",
+                cta_url="/copilot/pipeline-alerts",
+                priority="red",
+                company=company,
+            )
+        except Exception as _ne:
+            logger.warning("Failed to create hot_signal notification: %s", _ne)
+
         return {"status": "sent"}
     except Exception as exc:
         logger.error("send_hot_signal_slack failed for user %s: %s", user_id, exc)
@@ -592,6 +626,21 @@ External attendees:
                 meeting_title=meeting_title,
                 event_start=event_start_str,
             )
+
+        # In-app notification
+        try:
+            from app.db.repositories.notification_repository import NotificationRepository
+            repo = NotificationRepository(db)
+            repo.create(
+                user_id=user_id,
+                type="meeting_prep_ready",
+                title=f"Meeting Brief Ready: {meeting_title}",
+                body=f"Pre-call brief for {meeting_title} generated 30 minutes before your meeting.",
+                cta_url="/copilot/meeting-prep?show=latest",
+                priority="green",
+            )
+        except Exception as _ne:
+            logger.warning("Failed to create meeting_prep_ready notification: %s", _ne)
     finally:
         db.close()
 

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -105,6 +106,17 @@ export default function MeetingPrepPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [autoBriefs, setAutoBriefs] = useState<AutoBrief[]>([])
   const { toast } = useToast()
+  const searchParams = useSearchParams()
+
+  // Restore last result when arriving from a notification
+  useEffect(() => {
+    if (searchParams.get("show") === "latest") {
+      try {
+        const saved = localStorage.getItem("last_meeting_prep")
+        if (saved) setResult(JSON.parse(saved))
+      } catch {}
+    }
+  }, [searchParams])
 
   const fetchPendingBriefs = useCallback(async () => {
     try {
@@ -168,6 +180,7 @@ export default function MeetingPrepPage() {
     try {
       const data = await copilotApi.generateMeetingPrep(form)
       setResult(data)
+      localStorage.setItem("last_meeting_prep", JSON.stringify(data))
     } catch (err: any) {
       toast({
         title: "Error",

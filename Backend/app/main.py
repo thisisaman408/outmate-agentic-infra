@@ -47,6 +47,7 @@ from app.api.routes import gtm_agents
 from app.api.routes import visitors
 from app.api.routes import diagnostics
 from app.api.routes import copilot
+from app.api.routes.copilot import sse_router as copilot_sse_router
 from app.api.routes import calendar as calendar_router
 from app.api.routes import watchers
 from app.api.routes import dashboard
@@ -251,6 +252,7 @@ app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"], depen
 logger.info("Dashboard router registered")
 
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
+app.include_router(copilot_sse_router, prefix="/api/copilot")  # no auth — SSE validates JWT via ?token=
 logger.info("Copilot router registered")
 
 app.include_router(calendar_router.router, prefix="/api/calendar", tags=["calendar"])

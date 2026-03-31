@@ -4,6 +4,7 @@ import React from "react"
 import { useStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import dynamic from "next/dynamic"
+import { useNotifications } from "@/hooks/use-notifications"
 const GlobalCopilotPanel = dynamic(
     () => import("@/components/copilot/global-copilot-panel").then(mod => mod.GlobalCopilotPanel),
     { ssr: false }
@@ -15,6 +16,7 @@ const LeadCopilotPanel = dynamic(
 
 export function MainLayoutWrapper({ children }: { children: React.ReactNode }) {
     const { sidebarCollapsed } = useStore()
+    useNotifications()  // Connect SSE once for the whole session
 
     return (
         <div

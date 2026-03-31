@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -83,6 +84,16 @@ export default function CampaignOptimizerPage() {
   const [result, setResult] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (searchParams.get("show") === "latest") {
+      try {
+        const saved = localStorage.getItem("last_campaign_result")
+        if (saved) setResult(JSON.parse(saved))
+      } catch {}
+    }
+  }, [searchParams])
 
   const hasLeadContext = Boolean(leadName.trim() && leadCompany.trim())
   const hasOptimizerResult = result?.optimized_email
@@ -110,10 +121,12 @@ export default function CampaignOptimizerPage() {
         }
         const data = await copilotApi.optimizeEmail(payload)
         setResult(data)
+        localStorage.setItem("last_campaign_result", JSON.stringify(data))
       } else {
         const payload: CampaignOptimizerInput = { ...form, metrics }
         const data = await copilotApi.analyzeCampaign(payload)
         setResult(data)
+        localStorage.setItem("last_campaign_result", JSON.stringify(data))
       }
     } catch (err: any) {
       toast({

@@ -70,6 +70,18 @@ COPILOT_CREDIT_COSTS = {
 }
 
 
+def _notify(db: Session, user_id: str, type: str, title: str, body: str, cta_url: str, priority: str = "green", company: str = None):
+    """Best-effort in-app notification — never raises, never blocks the response."""
+    try:
+        from app.db.repositories.notification_repository import NotificationRepository
+        NotificationRepository(db).create(
+            user_id=user_id, type=type, title=title,
+            body=body, cta_url=cta_url, priority=priority, company=company,
+        )
+    except Exception as _e:
+        logger.warning("_notify failed (non-fatal): %s", _e)
+
+
 def _check_credits(db: Session, user_id, cost: int):
     """Raise HTTP 402 if user has insufficient credits."""
     balance = get_user_credits(db, user_id)
@@ -89,6 +101,8 @@ def _deduct(db: Session, user_id, cost: int, description: str, reference_id=None
     deduct_credits(db, user_id, cost, reference_id, description)
 
 router = APIRouter(tags=["copilot"])
+# No global auth — SSE endpoint validates JWT manually via ?token= query param
+sse_router = APIRouter(tags=["copilot"])
 
 
 # ── Daily Brief ───────────────────────────────────────────────
@@ -137,6 +151,9 @@ async def get_daily_brief(
         if was_generated and result.get("status") != "empty":
             cost = COPILOT_CREDIT_COSTS["daily_brief"]
             _deduct(db, current_user.id, cost, "Copilot: Daily brief auto-generated")
+            _notify(db, str(current_user.id), "brief_ready", "Your Daily Brief Is Ready",
+                    "Today's pipeline summary and priority actions are ready to review.",
+                    "/copilot/daily-brief", "green")
         return result
     except HTTPException:
         raise
@@ -169,6 +186,9 @@ async def regenerate_daily_brief(
         )
         if result.get("status") != "empty":
             _deduct(db, current_user.id, cost, "Copilot: Daily brief regenerated")
+            _notify(db, str(current_user.id), "brief_ready", "Your Daily Brief Is Ready",
+                    "Today's pipeline summary and priority actions are ready to review.",
+                    "/copilot/daily-brief", "green")
         return result
     except HTTPException:
         raise
@@ -200,6 +220,10 @@ async def generate_meeting_prep(
             additional_context=request.additional_context,
         )
         _deduct(db, current_user.id, cost, f"Copilot: Meeting prep for {request.company_name}")
+        _notify(db, str(current_user.id), "meeting_prep_ready",
+                f"Meeting Brief Ready: {request.company_name}",
+                f"Pre-call brief for {request.company_name} is ready to review.",
+                "/copilot/meeting-prep?show=latest", "green")
         return result
     except HTTPException:
         raise
@@ -246,6 +270,11 @@ async def analyze_campaign(
             metrics=request.metrics,
         )
         _deduct(db, current_user.id, cost, "Copilot: Campaign optimization")
+        score = result.get("overall_score", 0)
+        _notify(db, str(current_user.id), "campaign_scored",
+                f"Campaign Scored {score}/100",
+                "Your campaign analysis is ready. See improvement suggestions.",
+                "/copilot/campaign-optimizer?show=latest", "indigo")
         return result
     except HTTPException:
         raise
@@ -290,6 +319,12 @@ async def optimize_email(
             timeout=90.0,
         )
         _deduct(db, current_user.id, cost, "Copilot: Email optimization with enrichment")
+        lead_label = request.lead_name or request.lead_company or "your lead"
+        _notify(db, str(current_user.id), "email_optimized",
+                f"Email Optimized for {lead_label}",
+                "Your personalized email draft and follow-up sequence are ready.",
+                "/copilot/campaign-optimizer?show=latest", "indigo",
+                company=request.lead_company)
         return result
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Email optimization timed out. Please try again.")
@@ -335,6 +370,12 @@ async def scan_pipeline(
         deals = [d.model_dump() for d in request.deals]
         result = await service.pipeline_risk.scan(str(current_user.id), deals)
         _deduct(db, current_user.id, cost, "Copilot: Pipeline risk scan")
+        alert_count = len(result.get("alerts", []))
+        if alert_count > 0:
+            _notify(db, str(current_user.id), "hot_signal",
+                    f"Pipeline Scan: {alert_count} Risk Alert{'s' if alert_count > 1 else ''} Found",
+                    f"Your pipeline scan flagged {alert_count} deal{'s' if alert_count > 1 else ''} that need attention.",
+                    "/copilot/pipeline-alerts?show=latest", "red")
         return result
     except HTTPException:
         raise
@@ -810,3 +851,141 @@ async def mark_meeting_brief_viewed(
     brief.viewed_at = datetime.now(ZoneInfo("UTC"))
     db.commit()
     return {"success": True, "id": brief_id}
+
+
+# ── In-App Notifications ──────────────────────────────────────
+
+from app.db.repositories.notification_repository import NotificationRepository
+from app.schemas.copilot import NotificationCreate, NotificationOut
+from uuid import UUID
+
+
+@router.get("/notifications", response_model=list[NotificationOut])
+async def list_notifications(
+    unread_only: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return up to 50 notifications for the authenticated user."""
+    repo = NotificationRepository(db)
+    notifs = repo.list_for_user(str(current_user.id), limit=50, unread_only=unread_only)
+    return [
+        NotificationOut(
+            id=str(n.id),
+            type=n.type,
+            title=n.title,
+            body=n.body,
+            cta_url=n.cta_url,
+            priority=n.priority,
+            is_read=n.is_read,
+            grouped_count=n.grouped_count,
+            created_at=n.created_at.isoformat(),
+        )
+        for n in notifs
+    ]
+
+
+@router.patch("/notifications/read-all")
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark all notifications as read for the authenticated user."""
+    repo = NotificationRepository(db)
+    updated = repo.mark_all_read(str(current_user.id))
+    return {"updated": updated}
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a single notification as read."""
+    repo = NotificationRepository(db)
+    notif = repo.mark_read(str(current_user.id), notification_id)
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"success": True}
+
+
+@router.post("/notifications", response_model=NotificationOut, status_code=201)
+async def create_notification(
+    payload: NotificationCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Internal endpoint to create a notification for the authenticated user."""
+    repo = NotificationRepository(db)
+    notif = repo.create(
+        user_id=str(current_user.id),
+        type=payload.type,
+        title=payload.title,
+        body=payload.body,
+        cta_url=payload.cta_url,
+        priority=payload.priority,
+        company=payload.company,
+    )
+    return NotificationOut(
+        id=str(notif.id),
+        type=notif.type,
+        title=notif.title,
+        body=notif.body,
+        cta_url=notif.cta_url,
+        priority=notif.priority,
+        is_read=notif.is_read,
+        grouped_count=notif.grouped_count,
+        created_at=notif.created_at.isoformat(),
+    )
+
+
+@sse_router.get("/notifications/stream")
+async def notifications_stream(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """SSE endpoint — subscribes to Redis pub/sub for real-time notifications.
+
+    Auth via ?token= query param (JWT) because EventSource cannot set headers.
+    """
+    import jwt as _jwt
+    from app.core.config import settings as _settings
+    from app.core.redis import subscribe_notifications
+
+    # Validate JWT manually (EventSource cannot send Authorization header)
+    try:
+        payload = _jwt.decode(token, _settings.JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("no sub")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    async def event_generator():
+        import asyncio
+        from app.core.redis import subscribe_notifications as _sub
+
+        async def _stream():
+            async for raw in _sub(user_id):
+                yield f"data: {raw}\n\n"
+
+        gen = _stream()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(gen.__anext__(), timeout=25)
+                yield chunk
+            except asyncio.TimeoutError:
+                # Heartbeat keeps the connection open
+                yield ": heartbeat\n\n"
+            except StopAsyncIteration:
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

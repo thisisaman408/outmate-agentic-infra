@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,6 +35,16 @@ export default function PipelineAlertsPage() {
   const [result, setResult] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (searchParams.get("show") === "latest") {
+      try {
+        const saved = localStorage.getItem("last_pipeline_result")
+        if (saved) setResult(JSON.parse(saved))
+      } catch {}
+    }
+  }, [searchParams])
 
   const addDeal = () => {
     if (deals.length >= 20) {
@@ -61,6 +72,7 @@ export default function PipelineAlertsPage() {
     try {
       const data = await copilotApi.scanPipeline(validDeals)
       setResult(data)
+      localStorage.setItem("last_pipeline_result", JSON.stringify(data))
     } catch (err: any) {
       toast({ title: "Error", description: err?.message || "Pipeline scan failed", variant: "destructive" })
     } finally {
