@@ -37,6 +37,7 @@ from app.api.routes import leads, contactout_routes, crustdata_routes
 from app.api.routes import explorium_routes
 from app.api.routes import auth
 from app.api.routes import signals
+from app.api.routes import signal_pipeline
 from app.api.routes import campaigns
 from app.api.routes import chat
 from app.api.routes import chat_history
@@ -50,6 +51,9 @@ from app.api.routes import copilot
 from app.api.routes import watchers
 from app.api.routes import dashboard
 from app.api.routes import events_routes
+
+# Import Celery tasks to register them (must be before app startup)
+from app.tasks import signal_tasks  # noqa: F401
 
 # Register routers
 
@@ -189,6 +193,8 @@ app.include_router(crustdata_routes.router, prefix="/api/v1/crustdata", tags=["c
 app.include_router(explorium_routes.router, prefix="/api/v1/explorium", tags=["explorium"], dependencies=auth_dependencies)
 app.include_router(signals.router, prefix="/api/v1/signals", tags=["signals"], dependencies=auth_dependencies)
 logger.info("Signals router registered")
+app.include_router(signal_pipeline.router, tags=["signal_pipeline"], dependencies=auth_dependencies)
+logger.info("Signal Pipeline router registered")
 app.include_router(campaigns.public_router, prefix="/api/v1/campaigns", tags=["campaigns"])
 logger.info("Campaigns public router registered")
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"], dependencies=auth_dependencies)
@@ -276,6 +282,10 @@ async def startup_event():
             ("google_id",          "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);"),
             ("is_email_verified",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT FALSE;"),
             ("terms_accepted_at",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;"),
+            ("gmail_access_token", "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_access_token TEXT;"),
+            ("gmail_refresh_token", "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT;"),
+            ("anthropic_api_key",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS anthropic_api_key TEXT;"),
+            ("use_byok",           "ALTER TABLE users ADD COLUMN IF NOT EXISTS use_byok BOOLEAN DEFAULT FALSE;"),
         ]
         with engine.begin() as conn:
             for col_name, ddl in migrations:
@@ -283,10 +293,6 @@ async def startup_event():
                     conn.execute(text(ddl))
                     logger.info(f"Added missing users.{col_name} column")
 
-        if "hashed_password" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"))
-            logger.info("Added missing users.hashed_password column")
         watcher_columns = {col["name"] for col in inspector.get_columns("watchers")} if inspector.has_table("watchers") else set()
         if "watchers" in {t for t in inspector.get_table_names()} and "matches" not in watcher_columns:
             with engine.begin() as conn:
@@ -370,6 +376,39 @@ async def startup_event():
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
         logger.info("✓ Database tables ensured")
+
+        # ── Signal pipeline v1 indexes (idempotent) ──────────────────
+        # Ensure signal_events table indexes exist
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_signal_type "
+                "ON signal_events (signal_type);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_company_id "
+                "ON signal_events (company_id);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_company_domain "
+                "ON signal_events (company_domain);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_prospect_id "
+                "ON signal_events (prospect_id);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_fingerprint "
+                "ON signal_events (fingerprint);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_is_archived "
+                "ON signal_events (is_archived);"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_signal_events_ingested_at "
+                "ON signal_events (ingested_at);"
+            ))
+        logger.info("✓ Signal pipeline v1 indexes ensured")
     except Exception as e:
         logger.error(f"✗ Database init failed (app will start without DB): {e}")
 

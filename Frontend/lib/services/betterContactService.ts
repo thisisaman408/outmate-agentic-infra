@@ -14,6 +14,7 @@ export interface ProspectEnrichmentResult {
   not_found?: boolean
   credits_consumed?: number
   credits_left?: number
+  confidence?: 'verified' | 'inferred'
 }
 
 export interface CompanyEnrichmentResult {
@@ -27,6 +28,7 @@ export interface CompanyEnrichmentResult {
   not_found?: boolean
   credits_consumed?: number
   credits_left?: number
+  confidence?: 'verified' | 'inferred'
 }
 
 export async function enrichProspect(
@@ -56,7 +58,8 @@ export async function enrichProspect(
       return { success: false, error: `API error: ${res.status}` }
     }
 
-    return await res.json()
+    const result = await res.json()
+    return { ...result, confidence: result.success ? 'verified' : 'inferred' }
   } catch (err: any) {
     console.error("BetterContact prospect enrichment error:", err)
     return { success: false, error: err.message || "Network error" }

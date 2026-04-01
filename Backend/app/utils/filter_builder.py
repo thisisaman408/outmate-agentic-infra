@@ -182,12 +182,15 @@ class ProspectFilterBuilder:
                 conditions.append(domain_filter)
                 logger.debug(f"Added domain filter: '{domain.strip()}'")
                 
-        # Build employees filter
-        if employees and len(employees) > 0:
+        # Build employees filter — COMPANY_HEADCOUNT is NOT supported in Realtime
+        # person search API, only in In-DB and company search APIs.
+        if employees and len(employees) > 0 and api_type != "realtime":
             employees_filter = self._build_employees_filter(employees, api_type)
             if employees_filter:
                 conditions.append(employees_filter)
                 logger.debug(f"Added employees filter: {employees}")
+        elif employees and len(employees) > 0 and api_type == "realtime":
+            logger.debug(f"Skipping employees filter (COMPANY_HEADCOUNT not supported in Realtime person search API)")
         
         # Build name filters (first_name and/or last_name) - only supported in In-DB API
         if api_type == "in_db" and (name or first_name or last_name):
@@ -274,19 +277,12 @@ class ProspectFilterBuilder:
             if filter_type is None:
                 # Filter not supported in Realtime API
                 return {}
-            # Realtime API format
-            if len(cleaned_values) == 1:
-                return {
-                    "filter_type": filter_type,
-                    "type": "=",
-                    "value": cleaned_values[0]
-                }
-            else:
-                return {
-                    "filter_type": filter_type,
-                    "type": "in",
-                    "value": cleaned_values
-                }
+            # Realtime API format — always use "in" with a list value
+            return {
+                "filter_type": filter_type,
+                "type": "in",
+                "value": cleaned_values
+            }
         else:
             # In-DB API format
             if len(cleaned_values) == 1:
@@ -370,34 +366,98 @@ class ProspectFilterBuilder:
             "value": value
         }
     
+    # Macro-region aliases → canonical CrustData REGION values
+    # CrustData requires specific country/area names, not macro-regions.
+    REGION_ALIASES: Dict[str, List[str]] = {
+        "european union": ["Germany", "France", "Netherlands", "Spain", "Italy", "Ireland", "Sweden", "Belgium", "Austria", "Poland"],
+        "europe": ["United Kingdom", "Germany", "France", "Netherlands", "Spain", "Italy", "Ireland", "Sweden", "Belgium", "Austria", "Switzerland", "Poland", "Norway", "Denmark", "Finland"],
+        "eu": ["Germany", "France", "Netherlands", "Spain", "Italy", "Ireland", "Sweden", "Belgium", "Austria", "Poland"],
+        "north america": ["United States", "Canada", "Mexico"],
+        "na": ["United States", "Canada"],
+        "latin america": ["Brazil", "Mexico", "Argentina", "Colombia", "Chile"],
+        "latam": ["Brazil", "Mexico", "Argentina", "Colombia", "Chile"],
+        "asia pacific": ["India", "China", "Singapore", "Japan", "Australia", "South Korea", "Indonesia"],
+        "apac": ["India", "China", "Singapore", "Japan", "Australia", "South Korea"],
+        "asia": ["India", "China", "Singapore", "Japan", "South Korea", "Indonesia"],
+        "middle east": ["United Arab Emirates", "Saudi Arabia", "Israel"],
+        "mena": ["United Arab Emirates", "Saudi Arabia", "Israel", "Egypt"],
+        "nordics": ["Sweden", "Norway", "Denmark", "Finland", "Iceland"],
+        "dach": ["Germany", "Austria", "Switzerland"],
+        "benelux": ["Belgium", "Netherlands", "Luxembourg"],
+        "uk": ["United Kingdom"],
+        "usa": ["United States"],
+        "us": ["United States"],
+        # US states → CrustData canonical format "State, United States"
+        "texas": ["Texas, United States"],
+        "tx": ["Texas, United States"],
+        "california": ["California, United States"],
+        "ca": ["California, United States"],
+        "new york": ["New York, United States"],
+        "ny": ["New York, United States"],
+        "florida": ["Florida, United States"],
+        "fl": ["Florida, United States"],
+        "illinois": ["Illinois, United States"],
+        "il": ["Illinois, United States"],
+        "ohio": ["Ohio, United States"],
+        "michigan": ["Michigan, United States"],
+        "massachusetts": ["Massachusetts, United States"],
+        "washington": ["Washington, United States"],
+        "georgia": ["Georgia, United States"],
+        "pennsylvania": ["Pennsylvania, United States"],
+        "colorado": ["Colorado, United States"],
+        "virginia": ["Virginia, United States"],
+        "north carolina": ["North Carolina, United States"],
+        "arizona": ["Arizona, United States"],
+        "new jersey": ["New Jersey, United States"],
+        "oregon": ["Oregon, United States"],
+        "minnesota": ["Minnesota, United States"],
+        "maryland": ["Maryland, United States"],
+        "tennessee": ["Tennessee, United States"],
+        "indiana": ["Indiana, United States"],
+        "utah": ["Utah, United States"],
+        "connecticut": ["Connecticut, United States"],
+    }
+
+    def _normalize_regions(self, locations: List[str]) -> List[str]:
+        """Expand macro-region aliases into canonical CrustData REGION values."""
+        expanded: List[str] = []
+        for loc in locations:
+            alias_match = self.REGION_ALIASES.get(loc.lower().strip())
+            if alias_match:
+                for region in alias_match:
+                    if region not in expanded:
+                        expanded.append(region)
+            else:
+                if loc not in expanded:
+                    expanded.append(loc)
+        return expanded
+
     def _build_location_filter(self, locations: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
-        Build location filter (ready for future implementation)
-        
+        Build location filter.
+
         Location filtering strategy:
-        - Single location: Fuzzy match with (..) operator
+        - Expands macro-region aliases (EU, Europe, APAC, etc.) into individual countries
+        - Single location: Fuzzy match with (..) operator (in_db) or "in" list (realtime)
         - Multiple locations: OR logic (match ANY location)
-        
-        CrustData supports fuzzy matching for locations which is important
-        since location names can vary (e.g., "New York" vs "New York City").
-        
+
         Args:
             locations: List of location strings
             api_type: "in_db" or "realtime" to determine format
-            
+
         Returns:
             Filter dictionary for location matching
-            
-        Note:
-            This is a placeholder implementation. Actual implementation
-            may need to use autocomplete API to validate location names.
         """
+        # Expand macro-region aliases to canonical CrustData values
+        locations = self._normalize_regions(locations)
+
         if len(locations) == 1:
             if api_type == "realtime":
+                # Realtime API REGION only supports "in"/"not in" with a list value
                 return {
                     "filter_type": "REGION",
-                    "type": "(.)",
-                    "value": locations[0]
+                    "type": "in",
+                    "value": [locations[0]]
                 }
             else:  # in_db
                 # Single location: fuzzy match
@@ -429,24 +489,77 @@ class ProspectFilterBuilder:
                     ]
                 }
     
+    # Common industry aliases → canonical LinkedIn industry names accepted by CrustData.
+    INDUSTRY_ALIASES: Dict[str, str] = {
+        "advertising": "Advertising Services",
+        "marketing": "Marketing Services",
+        "software": "Software Development",
+        "saas": "Software Development",
+        "fintech": "Financial Services",
+        "financial technology": "Financial Services",
+        "healthcare": "Hospitals and Health Care",
+        "health care": "Hospitals and Health Care",
+        "e-commerce": "Retail",
+        "ecommerce": "Retail",
+        "ai": "Technology, Information and Internet",
+        "artificial intelligence": "Technology, Information and Internet",
+        "consulting": "Business Consulting and Services",
+        "manufacturing": "Manufacturing",
+        "real estate": "Real Estate",
+        "technology": "Technology, Information and Internet",
+        "tech": "Technology, Information and Internet",
+        "education": "Education",
+        "insurance": "Insurance",
+        "banking": "Banking",
+        "retail": "Retail",
+        "media": "Online Audio and Video Media",
+        "telecommunications": "Telecommunications",
+        "telecom": "Telecommunications",
+        "construction": "Construction",
+        "hospitality": "Hospitality",
+        "automotive": "Motor Vehicle Manufacturing",
+        "pharma": "Pharmaceutical Manufacturing",
+        "pharmaceutical": "Pharmaceutical Manufacturing",
+        "logistics": "Transportation, Logistics, Supply Chain and Storage",
+        "staffing": "Staffing and Recruiting",
+        "recruiting": "Staffing and Recruiting",
+        "legal": "Legal Services",
+        "accounting": "Accounting",
+        "venture capital": "Venture Capital and Private Equity Principals",
+        "vc": "Venture Capital and Private Equity Principals",
+        "private equity": "Venture Capital and Private Equity Principals",
+    }
+
+    def _normalize_industries(self, industries: List[str]) -> List[str]:
+        """Normalize industry names to canonical LinkedIn/CrustData values."""
+        normalized: List[str] = []
+        for ind in industries:
+            canonical = self.INDUSTRY_ALIASES.get(ind.lower().strip())
+            if canonical:
+                if canonical not in normalized:
+                    normalized.append(canonical)
+            else:
+                # Already a canonical value (or unknown) — pass through
+                if ind not in normalized:
+                    normalized.append(ind)
+        return normalized
+
     def _build_industry_filter(self, industries: List[str], api_type: str = "in_db") -> Dict[str, Any]:
         """
-        Build industry filter (ready for future implementation)
-        
+        Build industry filter.
+
         Industry filtering uses the company's LinkedIn industry category.
-        Multiple industries are combined with IN operator.
-        
+        Normalizes common aliases to canonical LinkedIn names before building.
+
         Args:
             industries: List of industry names/categories
             api_type: "in_db" or "realtime" to determine format
-            
+
         Returns:
             Filter dictionary for industry matching
-            
-        Note:
-            Industry values should come from CrustData's autocomplete API
-            to ensure valid categories are used.
         """
+        industries = self._normalize_industries(industries)
+
         if api_type == "realtime":
             return {
                 "filter_type": "INDUSTRY",
@@ -491,6 +604,14 @@ class ProspectFilterBuilder:
                 "value": ["artificial intelligence"]
             }
         """
+        # CrustData KEYWORD works best with short phrases. If the keyword
+        # string is very long (e.g. multiple keywords joined), take only the
+        # first meaningful phrase (up to ~50 chars / 5 words).
+        words = keyword.split()
+        if len(words) > 5:
+            keyword = " ".join(words[:5])
+            logger.debug(f"Truncated keyword to first 5 words: '{keyword}'")
+
         return {
             "filter_type": "KEYWORD",
             "type": "in",
