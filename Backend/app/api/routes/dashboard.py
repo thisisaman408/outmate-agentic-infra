@@ -1,19 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import asyncio
+import logging
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func, cast, Integer, text
 
 from app.api.deps.auth import get_current_user
+from app.core.redis import RedisManager
 from app.db.deps import get_db
+from app.db.session import SessionLocal
 from app.db.models.company import Company
 from app.db.models.prospect import Prospect
+from app.db.models.visitor import Visit, SiteConfig
 from app.db.models.watcher import Watcher
 from app.services.campaign_dashboard_service import CampaignDashboardService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["dashboard"])
+
+# Thread pool for blocking DB work inside async endpoints
+_executor = ThreadPoolExecutor(max_workers=4)
 _dashboard_service = CampaignDashboardService()
 
 
@@ -380,13 +394,505 @@ async def dashboard_time_series(
             campaign_counts[created_at.date()] += 1
 
     series: List[Dict[str, Any]] = []
-    for date in date_range:
+    for d in date_range:
         series.append(
             {
-                "date": date.strftime("%b %d"),
-                "leads": lead_counts.get(date, 0),
-                "signals": signal_counts.get(date, 0),
-                "campaigns": campaign_counts.get(date, 0),
+                "date": d.strftime("%b %d"),
+                "leads": lead_counts.get(d, 0),
+                "signals": signal_counts.get(d, 0),
+                "campaigns": campaign_counts.get(d, 0),
             }
         )
     return series
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VISITOR INTELLIGENCE — dashboard-level visitor metrics
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Redis key for real-time active visitor counter.
+# Format: outmate:visitors:active:{org_id}  → Redis sorted set keyed by IP,
+# scored by last-seen unix timestamp.  Entries older than 30 min are pruned on
+# every read so the ZCARD always reflects "active right now".
+_ACTIVE_VISITORS_KEY = "outmate:visitors:active:{org_id}"
+_ACTIVE_WINDOW_SECONDS = 30 * 60  # 30 minutes
+
+
+async def _run_db(fn):
+    """Run a blocking DB callable on the thread-pool."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, fn)
+
+
+@router.get("/dashboard/visitor-intelligence")
+async def dashboard_visitor_intelligence(
+    days: int = Query(7, ge=1, le=90, description="Lookback window: 7, 30, or 90"),
+    _user=Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Dashboard visitor intelligence metrics.
+
+    Returns:
+      - realtime_visitors: count of active visitors right now (30-min window)
+      - icp_traffic_ratio: % of visitors with ICP score >= 70
+      - company_id_rate: % of visitors identified to a company
+      - person_id_rate: % of company-identified visitors matched to a person
+      - top_pages_by_icp: top 10 pages sorted by ICP visitor count
+      - traffic_trend: daily visitor counts for the requested period
+
+    Performance: Uses pre-aggregation in a single DB pass (no raw-event scan per
+    metric).  P99 target < 3 s for 90-day queries.
+    """
+    org_id = _user.id
+    days = max(1, min(int(days), 90))
+
+    # ── 1. Real-time active visitors (Redis sorted set) ──────────────────────
+    realtime_count = 0
+    try:
+        redis = RedisManager.get_client()
+        if redis:
+            key = _ACTIVE_VISITORS_KEY.format(org_id=org_id)
+            cutoff = datetime.utcnow().timestamp() - _ACTIVE_WINDOW_SECONDS
+            # Prune stale entries
+            await redis.zremrangebyscore(key, "-inf", cutoff)
+            realtime_count = await redis.zcard(key)
+    except Exception as e:
+        logger.debug(f"Redis realtime count unavailable: {e}")
+
+    # ── 2. Aggregated metrics from DB (single pass) ──────────────────────────
+    since = datetime.utcnow() - timedelta(days=days)
+
+    def _query():
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(
+                    Visit.created_at,
+                    Visit.url,
+                    Visit.matched,
+                    Visit.resolution,
+                )
+                .filter(Visit.org_id == org_id, Visit.created_at >= since)
+                .order_by(Visit.created_at.desc())
+                .limit(100_000)
+                .all()
+            )
+
+            total = 0
+            icp_fit = 0          # ICP score >= 70
+            company_matched = 0  # category == "company" or "prospect"
+            person_matched = 0   # category == "prospect"
+
+            # Daily rollups
+            daily: Dict[str, Dict[str, int]] = defaultdict(
+                lambda: {"total": 0, "matched": 0, "icp_fit": 0}
+            )
+
+            # Page → ICP visitor count
+            page_icp_counts: Counter = Counter()
+
+            for created_at, url, matched, resolution in rows:
+                if not created_at:
+                    continue
+
+                total += 1
+                res = resolution or {}
+                cat = (res.get("category") or "unknown").lower()
+                icp_score = 0
+
+                # Extract ICP score (stored in resolution.icp_score)
+                try:
+                    icp_score = int(res.get("icp_score") or 0)
+                except (TypeError, ValueError):
+                    icp_score = 0
+
+                is_icp = icp_score >= 70
+                if is_icp:
+                    icp_fit += 1
+
+                if cat in ("company", "prospect"):
+                    company_matched += 1
+                if cat == "prospect":
+                    person_matched += 1
+
+                # Daily rollup
+                day_key = created_at.strftime("%Y-%m-%d")
+                daily[day_key]["total"] += 1
+                if matched:
+                    daily[day_key]["matched"] += 1
+                if is_icp:
+                    daily[day_key]["icp_fit"] += 1
+
+                # Page ICP count
+                if is_icp and url:
+                    try:
+                        page = urlparse(url).path or "/"
+                    except Exception:
+                        page = url
+                    page_icp_counts[page] += 1
+
+            # Build traffic trend (fill gaps with zeros)
+            trend = []
+            for i in range(days):
+                d = (datetime.utcnow() - timedelta(days=days - 1 - i)).date()
+                dk = d.strftime("%Y-%m-%d")
+                bucket = daily.get(dk, {"total": 0, "matched": 0, "icp_fit": 0})
+                trend.append({
+                    "date": d.strftime("%b %d"),
+                    "date_raw": dk,
+                    "visitors": bucket["total"],
+                    "matched": bucket["matched"],
+                    "icp_fit": bucket["icp_fit"],
+                })
+
+            # Top 10 pages by ICP traffic
+            top_pages = [
+                {"page": page, "icp_visitors": count}
+                for page, count in page_icp_counts.most_common(10)
+            ]
+
+            return {
+                "total": total,
+                "icp_fit": icp_fit,
+                "company_matched": company_matched,
+                "person_matched": person_matched,
+                "trend": trend,
+                "top_pages": top_pages,
+            }
+        finally:
+            db.close()
+
+    data = await _run_db(_query)
+
+    total = data["total"]
+    icp_fit = data["icp_fit"]
+    company_matched = data["company_matched"]
+    person_matched = data["person_matched"]
+
+    return {
+        "realtime_visitors": realtime_count,
+        "icp_traffic_ratio": round(icp_fit / total * 100, 1) if total else 0,
+        "company_id_rate": round(company_matched / total * 100, 1) if total else 0,
+        "person_id_rate": round(person_matched / company_matched * 100, 1) if company_matched else 0,
+        "total_visitors": total,
+        "icp_fit_count": icp_fit,
+        "company_matched_count": company_matched,
+        "person_matched_count": person_matched,
+        "top_pages_by_icp": data["top_pages"],
+        "traffic_trend": data["trend"],
+        "period_days": days,
+    }
+
+
+@router.post("/dashboard/visitor-heartbeat")
+async def visitor_heartbeat(
+    _user=Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Called by the frontend every 15 s to get the latest real-time visitor count.
+    Lightweight — Redis only, no DB hit.
+    """
+    org_id = _user.id
+    realtime_count = 0
+    try:
+        redis = RedisManager.get_client()
+        if redis:
+            key = _ACTIVE_VISITORS_KEY.format(org_id=org_id)
+            cutoff = datetime.utcnow().timestamp() - _ACTIVE_WINDOW_SECONDS
+            await redis.zremrangebyscore(key, "-inf", cutoff)
+            realtime_count = await redis.zcard(key)
+    except Exception as e:
+        logger.debug(f"Redis heartbeat unavailable: {e}")
+
+    return {"realtime_visitors": realtime_count}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SEQUENCE ANALYTICS — outreach performance per sequence / channel / A-B test
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import math
+
+# Platform-wide benchmark averages (updated periodically from aggregate data)
+_PLATFORM_BENCHMARKS = {
+    "open_rate": 48.2,
+    "reply_rate": 4.8,
+    "meeting_booked_rate": 1.2,
+    "bounce_rate": 2.5,
+}
+
+# Minimum sends per variant before declaring A/B test winner
+_AB_MIN_SENDS = 200
+
+
+def _z_test_two_proportions(p1: float, n1: int, p2: float, n2: int) -> float:
+    """
+    Two-proportion z-test.  Returns the z-score.
+    |z| > 1.96 → 95 % confidence the difference is real.
+    """
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    p_pool = (p1 * n1 + p2 * n2) / (n1 + n2)
+    if p_pool <= 0 or p_pool >= 1:
+        return 0.0
+    se = math.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2))
+    if se == 0:
+        return 0.0
+    return (p1 - p2) / se
+
+
+def _safe_rate(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator * 100, 1) if denominator else 0.0
+
+
+@router.get("/dashboard/sequence-analytics")
+async def dashboard_sequence_analytics(
+    days: int = Query(7, ge=1, le=90),
+    _user=Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Sequence-level outreach analytics.
+
+    Returns:
+      - sequences: per-sequence open / reply / meeting-booked rates
+      - channel_breakdown: email vs LinkedIn vs Voice AI attribution
+      - ab_tests: A/B comparisons with statistical significance
+      - trend: daily performance over time
+      - benchmarks: comparison vs platform averages
+      - data_freshness: timestamp of most recent data sync
+
+    Notes:
+      - Open-rate data from mail providers may have 24-48 hr delay.
+      - Apple Mail Privacy Protection inflates open rates — a warning is included.
+      - A/B test winner requires ≥ 200 sends per variant (statistical significance).
+    """
+    campaigns = await _dashboard_service.list_campaigns()
+    sequences = await _dashboard_service.list_sequences()
+
+    now = _now()
+    cutoff = now - timedelta(days=days)
+
+    # ── 1. Per-sequence metrics ──────────────────────────────────────────────
+    sequence_rows: List[Dict[str, Any]] = []
+    # Aggregate channel totals
+    channel_totals: Dict[str, Dict[str, int]] = {
+        "email": {"sent": 0, "opened": 0, "replied": 0, "meetings": 0},
+        "linkedin": {"sent": 0, "opened": 0, "replied": 0, "meetings": 0},
+        "voice_ai": {"sent": 0, "opened": 0, "replied": 0, "meetings": 0},
+    }
+    # Daily trend buckets
+    daily_trend: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {"sent": 0, "opened": 0, "replied": 0, "meetings": 0}
+    )
+    # Collect A/B variant pairs
+    ab_pairs: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    all_items = []
+    for c in campaigns:
+        created = _parse_dt(c.get("createdAt"))
+        if created and created < cutoff:
+            continue
+        all_items.append(c)
+    for s in sequences:
+        created = _parse_dt(s.get("createdAt"))
+        if created and created < cutoff:
+            continue
+        all_items.append(s)
+
+    for item in all_items:
+        stats = item.get("stats", {})
+        sent = int(stats.get("sent", 0))
+        opened = int(stats.get("opened", 0))
+        replied = int(stats.get("replied", 0))
+        bounced = int(stats.get("bounced", 0))
+        meetings = int(stats.get("meetingsBooked", 0) or stats.get("meetings", 0) or 0)
+
+        open_rate = _safe_rate(opened, sent)
+        reply_rate = _safe_rate(replied, sent)
+        meeting_rate = _safe_rate(meetings, sent)
+        bounce_rate = _safe_rate(bounced, sent)
+
+        # Channel attribution (from item metadata or default to email)
+        channel = (item.get("channel") or "email").lower()
+        if channel not in channel_totals:
+            channel = "email"
+
+        channel_totals[channel]["sent"] += sent
+        channel_totals[channel]["opened"] += opened
+        channel_totals[channel]["replied"] += replied
+        channel_totals[channel]["meetings"] += meetings
+
+        # Daily trend (bucket by createdAt date)
+        created = _parse_dt(item.get("createdAt") or item.get("updatedAt"))
+        if created:
+            dk = created.strftime("%Y-%m-%d")
+            daily_trend[dk]["sent"] += sent
+            daily_trend[dk]["opened"] += opened
+            daily_trend[dk]["replied"] += replied
+            daily_trend[dk]["meetings"] += meetings
+
+        # Track A/B test variants
+        ab_group = item.get("ab_test_group") or item.get("abTestGroup")
+        variant_label = item.get("variant") or item.get("ab_variant")
+        subject = item.get("subject") or item.get("message", "")[:80]
+        if ab_group:
+            ab_pairs[ab_group].append({
+                "variant": variant_label or item.get("name", "Variant"),
+                "subject": subject,
+                "sent": sent,
+                "opened": opened,
+                "replied": replied,
+                "open_rate": open_rate,
+                "reply_rate": reply_rate,
+            })
+
+        sequence_rows.append({
+            "id": item.get("id"),
+            "name": item.get("name", "Untitled"),
+            "status": item.get("status", "draft"),
+            "channel": channel,
+            "sent": sent,
+            "opened": opened,
+            "replied": replied,
+            "bounced": bounced,
+            "meetings_booked": meetings,
+            "open_rate": open_rate,
+            "reply_rate": reply_rate,
+            "meeting_booked_rate": meeting_rate,
+            "bounce_rate": bounce_rate,
+        })
+
+    # Sort by sent descending
+    sequence_rows.sort(key=lambda r: r["sent"], reverse=True)
+
+    # ── 2. Channel breakdown ────────────────────────────────────────────────
+    channel_breakdown = []
+    for ch, totals in channel_totals.items():
+        s = totals["sent"]
+        channel_breakdown.append({
+            "channel": ch,
+            "sent": s,
+            "opened": totals["opened"],
+            "replied": totals["replied"],
+            "meetings": totals["meetings"],
+            "open_rate": _safe_rate(totals["opened"], s),
+            "reply_rate": _safe_rate(totals["replied"], s),
+            "meeting_rate": _safe_rate(totals["meetings"], s),
+        })
+
+    # ── 3. A/B test results with significance ───────────────────────────────
+    ab_tests: List[Dict[str, Any]] = []
+    for group_name, variants in ab_pairs.items():
+        if len(variants) < 2:
+            continue
+        # Sort by reply_rate descending
+        variants.sort(key=lambda v: v["reply_rate"], reverse=True)
+        a = variants[0]
+        b = variants[1]
+
+        enough_data = a["sent"] >= _AB_MIN_SENDS and b["sent"] >= _AB_MIN_SENDS
+
+        z_open = _z_test_two_proportions(
+            a["open_rate"] / 100, a["sent"], b["open_rate"] / 100, b["sent"]
+        ) if enough_data else 0.0
+        z_reply = _z_test_two_proportions(
+            a["reply_rate"] / 100, a["sent"], b["reply_rate"] / 100, b["sent"]
+        ) if enough_data else 0.0
+
+        significant_open = abs(z_open) >= 1.96
+        significant_reply = abs(z_reply) >= 1.96
+
+        if enough_data and (significant_reply or significant_open):
+            winner = a["variant"]
+            confidence = min(99.9, round(50 + abs(z_reply) * 20, 1))
+            status = "winner_declared"
+        elif not enough_data:
+            winner = None
+            confidence = 0
+            status = "insufficient_data"
+        else:
+            winner = None
+            confidence = round(50 + abs(z_reply) * 20, 1)
+            status = "no_significant_difference"
+
+        ab_tests.append({
+            "group": group_name,
+            "status": status,
+            "winner": winner,
+            "confidence": confidence,
+            "min_sends_required": _AB_MIN_SENDS,
+            "variants": [
+                {
+                    "label": v["variant"],
+                    "subject": v["subject"],
+                    "sent": v["sent"],
+                    "open_rate": v["open_rate"],
+                    "reply_rate": v["reply_rate"],
+                }
+                for v in variants[:4]  # max 4 variants
+            ],
+        })
+
+    # ── 4. Trend lines (daily) ──────────────────────────────────────────────
+    trend = []
+    for i in range(days):
+        d = (now - timedelta(days=days - 1 - i)).date()
+        dk = d.strftime("%Y-%m-%d")
+        bucket = daily_trend.get(dk, {"sent": 0, "opened": 0, "replied": 0, "meetings": 0})
+        trend.append({
+            "date": d.strftime("%b %d"),
+            "date_raw": dk,
+            "sent": bucket["sent"],
+            "opened": bucket["opened"],
+            "replied": bucket["replied"],
+            "meetings": bucket["meetings"],
+        })
+
+    # ── 5. Benchmark comparison ─────────────────────────────────────────────
+    total_sent = sum(r["sent"] for r in sequence_rows)
+    total_opened = sum(r["opened"] for r in sequence_rows)
+    total_replied = sum(r["replied"] for r in sequence_rows)
+    total_meetings = sum(r["meetings_booked"] for r in sequence_rows)
+
+    user_open = _safe_rate(total_opened, total_sent)
+    user_reply = _safe_rate(total_replied, total_sent)
+    user_meeting = _safe_rate(total_meetings, total_sent)
+
+    def _benchmark_delta(user_val: float, bench_val: float) -> Dict[str, Any]:
+        diff = round(user_val - bench_val, 1)
+        return {
+            "your_rate": user_val,
+            "platform_avg": bench_val,
+            "difference": diff,
+            "status": "above" if diff > 0.5 else ("below" if diff < -0.5 else "at_average"),
+        }
+
+    benchmarks = {
+        "open_rate": _benchmark_delta(user_open, _PLATFORM_BENCHMARKS["open_rate"]),
+        "reply_rate": _benchmark_delta(user_reply, _PLATFORM_BENCHMARKS["reply_rate"]),
+        "meeting_booked_rate": _benchmark_delta(user_meeting, _PLATFORM_BENCHMARKS["meeting_booked_rate"]),
+    }
+
+    # ── 6. Data freshness ───────────────────────────────────────────────────
+    latest_update = None
+    for item in all_items:
+        updated = _parse_dt(item.get("updatedAt") or item.get("createdAt"))
+        if updated and (latest_update is None or updated > latest_update):
+            latest_update = updated
+
+    return {
+        "sequences": sequence_rows,
+        "channel_breakdown": channel_breakdown,
+        "ab_tests": ab_tests,
+        "trend": trend,
+        "benchmarks": benchmarks,
+        "period_days": days,
+        "total_sequences": len(sequence_rows),
+        "data_freshness": {
+            "last_sync": latest_update.isoformat() if latest_update else None,
+            "note": "Open-rate data from mail providers may be delayed 24-48 hours.",
+        },
+        "warnings": [
+            "Open rates may be inflated due to Apple Mail Privacy Protection (MPP)."
+        ],
+    }

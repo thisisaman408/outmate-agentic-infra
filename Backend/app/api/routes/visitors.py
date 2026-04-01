@@ -363,6 +363,17 @@ async def track_visitor(request: Request):
             queued_via = "inline"
             asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
 
+        # Update real-time active visitor counter (Redis sorted set, 30-min window)
+        try:
+            redis_client = RedisManager.get_client()
+            if redis_client:
+                rt_key = f"outmate:visitors:active:{site_config.org_id}"
+                now_ts = datetime.now(timezone.utc).timestamp()
+                await redis_client.zadd(rt_key, {ip: now_ts})
+                await redis_client.expire(rt_key, 1800)  # 30 min TTL on entire key
+        except Exception as e:
+            logger.debug("Real-time counter update failed: %s", e)
+
         logger.info("Visitor tracked: %s for org %s", ip, site_config.org_id)
         return {"status": "queued", "queued_via": queued_via}
 

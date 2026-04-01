@@ -78,6 +78,111 @@ const parseJson = async <T>(response: Response): Promise<T> => {
   return response.json() as Promise<T>
 }
 
+// ── Visitor Intelligence types ────────────────────────────────────────────
+export interface VisitorIntelligence {
+  realtime_visitors: number
+  icp_traffic_ratio: number
+  company_id_rate: number
+  person_id_rate: number
+  total_visitors: number
+  icp_fit_count: number
+  company_matched_count: number
+  person_matched_count: number
+  top_pages_by_icp: { page: string; icp_visitors: number }[]
+  traffic_trend: {
+    date: string
+    date_raw: string
+    visitors: number
+    matched: number
+    icp_fit: number
+  }[]
+  period_days: number
+}
+
+export interface RealtimeHeartbeat {
+  realtime_visitors: number
+}
+
+// ── Sequence Analytics types ─────────────────────────────────────────────
+export interface SequenceRow {
+  id: string
+  name: string
+  status: string
+  channel: string
+  sent: number
+  opened: number
+  replied: number
+  bounced: number
+  meetings_booked: number
+  open_rate: number
+  reply_rate: number
+  meeting_booked_rate: number
+  bounce_rate: number
+}
+
+export interface ChannelBreakdown {
+  channel: string
+  sent: number
+  opened: number
+  replied: number
+  meetings: number
+  open_rate: number
+  reply_rate: number
+  meeting_rate: number
+}
+
+export interface ABTestVariant {
+  label: string
+  subject: string
+  sent: number
+  open_rate: number
+  reply_rate: number
+}
+
+export interface ABTestResult {
+  group: string
+  status: "winner_declared" | "insufficient_data" | "no_significant_difference"
+  winner: string | null
+  confidence: number
+  min_sends_required: number
+  variants: ABTestVariant[]
+}
+
+export interface BenchmarkComparison {
+  your_rate: number
+  platform_avg: number
+  difference: number
+  status: "above" | "below" | "at_average"
+}
+
+export interface SequenceTrendPoint {
+  date: string
+  date_raw: string
+  sent: number
+  opened: number
+  replied: number
+  meetings: number
+}
+
+export interface SequenceAnalytics {
+  sequences: SequenceRow[]
+  channel_breakdown: ChannelBreakdown[]
+  ab_tests: ABTestResult[]
+  trend: SequenceTrendPoint[]
+  benchmarks: {
+    open_rate: BenchmarkComparison
+    reply_rate: BenchmarkComparison
+    meeting_booked_rate: BenchmarkComparison
+  }
+  period_days: number
+  total_sequences: number
+  data_freshness: {
+    last_sync: string | null
+    note: string
+  }
+  warnings: string[]
+}
+
 export const dashboardApi = {
   getKPIs: async (): Promise<KPIData> => {
     const response = await fetchWithAuth("/api/v1/dashboard/kpis")
@@ -107,5 +212,22 @@ export const dashboardApi = {
   getTimeSeriesData: async (): Promise<TimeSeriesData[]> => {
     const response = await fetchWithAuth("/api/v1/dashboard/time-series?days=7")
     return parseJson<TimeSeriesData[]>(response)
+  },
+
+  // ── Visitor Intelligence ────────────────────────────────────────────────
+  getVisitorIntelligence: async (days: number = 7): Promise<VisitorIntelligence> => {
+    const response = await fetchWithAuth(`/api/v1/dashboard/visitor-intelligence?days=${days}`)
+    return parseJson<VisitorIntelligence>(response)
+  },
+
+  getRealtimeHeartbeat: async (): Promise<RealtimeHeartbeat> => {
+    const response = await fetchWithAuth("/api/v1/dashboard/visitor-heartbeat", { method: "POST" })
+    return parseJson<RealtimeHeartbeat>(response)
+  },
+
+  // ── Sequence Analytics ──────────────────────────────────────────────────
+  getSequenceAnalytics: async (days: number = 7): Promise<SequenceAnalytics> => {
+    const response = await fetchWithAuth(`/api/v1/dashboard/sequence-analytics?days=${days}`)
+    return parseJson<SequenceAnalytics>(response)
   },
 }
