@@ -6,7 +6,7 @@ import httpx
 import os
 from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Literal, List, Dict, Any
 import logging
@@ -18,7 +18,7 @@ from app.services.gmail_service import GmailService
 from app.services.unipile_service import UnipileService
 from app.services.campaign_dashboard_service import CampaignDashboardService
 from app.services.openrouter_service import OpenRouterService
-from app.api.deps.auth import get_current_user
+from app.api.deps.auth import get_current_user, get_current_user_optional
 from app.db.models.user import User
 from sqlalchemy.orm import Session
 from app.db.deps import get_db
@@ -52,7 +52,10 @@ async def generate_campaign_draft(request: CampaignDraftRequest):
 
 
 @router.post("/generate-message")
-async def generate_campaign_message(request: OpenRouterMessageRequest):
+async def generate_campaign_message(
+    request: OpenRouterMessageRequest,
+    user: Optional[User] = Depends(get_current_user_optional),
+):
     def _extract_json_payload(text: str) -> Dict[str, Any]:
         try:
             return json.loads(text)
@@ -66,18 +69,43 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
         return {}
 
     try:
-        openrouter = OpenRouterService()
-        prompt_lines = [
-            "You are an expert B2B outreach copywriter crafting short email and LinkedIn touch.",
-            f"Objective: {request.objective}",
-            f"Selected lead IDs: {', '.join(request.leads) if request.leads else 'none'}",
-            f"Signal references to highlight: {', '.join(request.signals) if request.signals else 'general momentum (funding, hiring, tech adoption)'}",
-            "Use {{firstName}} and {{companyName}} placeholders (people+company) in the email body and email subject, and {{companyName}} in the LinkedIn touch.",
-            "Start each message referencing the strongest signal, offer value, and end with a clear low-friction CTA.",
-            "Output JSON with subject, email_body, linkedin_message. Keep each under 120 words.",
-        ]
-        prompt = "\n".join(prompt_lines)
-        response = await openrouter.chat_completion(prompt)
+        # Initialize OpenRouterService with BYOK if user has it enabled
+        api_key = None
+        use_byok = False
+        if user and user.use_byok and user.anthropic_api_key:
+            api_key = user.anthropic_api_key
+            use_byok = True
+
+        openrouter = OpenRouterService(
+            api_key=api_key,
+            user_id=str(user.id) if user else None,
+            use_byok=use_byok
+        )
+
+        # Build user prompt for campaign message generation
+        user_prompt = f"""Generate a personalized B2B campaign message.
+
+Objective: {request.objective}
+Lead IDs: {', '.join(request.leads) if request.leads else 'general audience'}
+Signal references: {', '.join(request.signals) if request.signals else 'company momentum, hiring, tech adoption'}
+
+Requirements:
+- Use {{firstName}} and {{companyName}} placeholders for personalization
+- Email subject should reference the strongest signal
+- Email body and LinkedIn message should offer clear value with low-friction CTA
+- Keep each message under 120 words
+- Output as JSON with keys: subject, email_body, linkedin_message
+
+Return ONLY valid JSON."""
+
+        response = await openrouter.agent_call(
+            user_prompt=user_prompt,
+            agent_type="campaign",
+            temperature=0.7,
+            max_tokens=800,
+            stream=False
+        )
+
         extracted = _extract_json_payload(response)
         return {
             "subject": extracted.get("subject", ""),
@@ -93,7 +121,92 @@ async def generate_campaign_message(request: OpenRouterMessageRequest):
         raise HTTPException(status_code=500, detail="An error occurred generating the campaign draft")
 
 
-# --- Send Email ---
+@router.post("/generate-message-stream")
+async def generate_campaign_message_stream(
+    request: OpenRouterMessageRequest,
+    user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Generate campaign message with streaming support for progressive display."""
+    def _extract_json_payload(text: str) -> Dict[str, Any]:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]+\}", text)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+        return {}
+
+    async def stream_generator():
+        try:
+            # Initialize OpenRouterService with BYOK if user has it enabled
+            api_key = None
+            use_byok = False
+            if user and user.use_byok and user.anthropic_api_key:
+                api_key = user.anthropic_api_key
+                use_byok = True
+
+            openrouter = OpenRouterService(
+                api_key=api_key,
+                user_id=str(user.id) if user else None,
+                use_byok=use_byok
+            )
+
+            user_prompt = f"""Generate a personalized B2B campaign message.
+
+Objective: {request.objective}
+Lead IDs: {', '.join(request.leads) if request.leads else 'general audience'}
+Signal references: {', '.join(request.signals) if request.signals else 'company momentum, hiring, tech adoption'}
+
+Requirements:
+- Use {{firstName}} and {{companyName}} placeholders for personalization
+- Email subject should reference the strongest signal
+- Email body and LinkedIn message should offer clear value with low-friction CTA
+- Keep each message under 120 words
+- Output as JSON with keys: subject, email_body, linkedin_message
+
+Return ONLY valid JSON."""
+
+            accumulated_text = ""
+            async for chunk in await openrouter.agent_call(
+                user_prompt=user_prompt,
+                agent_type="campaign",
+                temperature=0.7,
+                max_tokens=800,
+                stream=True
+            ):
+                if chunk.get("type") == "token":
+                    content = chunk.get("content", "")
+                    accumulated_text += content
+                    # Stream each token as SSE
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+
+                elif chunk.get("type") == "done":
+                    # Parse complete response
+                    extracted = _extract_json_payload(accumulated_text)
+                    final_result = {
+                        "subject": extracted.get("subject", ""),
+                        "email_body": extracted.get("email_body", extracted.get("body", accumulated_text)),
+                        "linkedin_message": extracted.get("linkedin_message", extracted.get("linkedin", "")),
+                        "raw": accumulated_text,
+                    }
+                    yield f"data: {json.dumps({'type': 'done', 'result': final_result})}\n\n"
+
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Upstream HTTP error: {exc}")
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'Upstream service error'})}\n\n"
+        except Exception as exc:
+            logger.error(f"Campaign stream generation error: {exc}")
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'An error occurred generating the campaign draft'})}\n\n"
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream"
+    )
+
+
 
 class SendEmailRequest(BaseModel):
     to_email: str

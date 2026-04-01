@@ -268,6 +268,15 @@ export default function DatabaseFinderPage() {
   const [isVoiceListening, setIsVoiceListening] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
   const [creditUsage, setCreditUsage] = useState<Record<string, number> | null>(null)
+  const [icpConfig, setIcpConfig] = useState({
+    titles: ["Head of Tech", "CTO", "IT Procurement"],
+    industries: ["Technology", "Information and Internet", "Software Development"],
+    locations: [],
+    min_employees: 201,
+    max_employees: 5000,
+    seniority: [],
+    keywords: ["AI", "artificial intelligence", "tech-enabled services"],
+  })
   const creditUsageEntries = creditUsage ? Object.entries(creditUsage) : []
   const totalCreditsUsed = creditUsageEntries.reduce((sum, [, value]) => sum + (value ?? 0), 0)
   const hasHydratedCampaignState = useRef(false)
@@ -337,6 +346,15 @@ export default function DatabaseFinderPage() {
     // Check Social (Messaging provider) status
     fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setSocialConnected(true)
+    }).catch(() => { })
+    // Fetch workspace ICP config for scoring search results
+    fetch(`${API}/api/v1/visitors/site-config`).then(r => {
+      if (r.ok) return r.json()
+      return null
+    }).then(data => {
+      if (data?.icp_filters && Object.keys(data.icp_filters).length > 0) {
+        setIcpConfig(data.icp_filters)
+      }
     }).catch(() => { })
   }, [])
 
@@ -558,7 +576,7 @@ export default function DatabaseFinderPage() {
         }),
       })
     } catch (error) {
-      console.warn("Persisting chat session failed:", error)
+      console.error('Failed to sync chat with server:', error);
     }
   }
 
@@ -677,9 +695,9 @@ export default function DatabaseFinderPage() {
         summary: item?.summary || raw?.summary || "",
         skills: Array.isArray(item?.skills) ? item.skills : (Array.isArray(raw?.skills) ? raw.skills : []),
         languages: Array.isArray(item?.languages) ? item.languages : (Array.isArray(raw?.languages) ? raw.languages : []),
-        linkedin_profile_url: profileUrl,
-        Social_profile_url: profileUrl,
-        flagship_profile_url: profileUrl,
+        'linkedin_profile_url': profileUrl,
+        'Social_profile_url': profileUrl,
+        'flagship_profile_url': profileUrl,
         emails: email ? [email] : [],
         profile_picture_url: item?.profile_picture_url || raw?.profile_picture_url || "",
         profile_picture_permalink: item?.profile_picture_permalink || raw?.profile_picture_permalink || "",
@@ -1054,6 +1072,122 @@ export default function DatabaseFinderPage() {
     }
   }
 
+  const computeIcpScore = (result: any, icp: Record<string, any>): { score: number, tier: 'Hot' | 'Warm' | 'Cold', breakdown: Record<string, number>, timestamp: number } => {
+    let score = 0
+    const breakdown: Record<string, number> = { title: 0, industry: 0, location: 0, size: 0, seniority: 0, keywords: 0 }
+
+    // Title match: +25 pts
+    const targetTitles: string[] = icp.titles || icp.current_title || []
+    if (targetTitles.length > 0) {
+      const resultTitle = [
+        result.headline, result.job_title, result.current_title,
+        result.current_employers?.[0]?.title, result.name
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (targetTitles.some((t: string) => resultTitle.includes(t.toLowerCase()))) {
+        score += 25
+        breakdown.title = 25
+      }
+    }
+
+    // Industry match: +25 pts
+    const targetIndustries: string[] = icp.industries || icp.industry || []
+    if (targetIndustries.length > 0) {
+      const resultIndustry = [
+        result.industry, result.company_linkedin_industry,
+        result.linkedin_industry_category, result.sub_industry,
+        result.current_employers?.[0]?.company_linkedin_industry
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (targetIndustries.some((ind: string) => resultIndustry.includes(ind.toLowerCase()))) {
+        score += 25
+        breakdown.industry = 25
+      }
+    }
+
+    // Location match: +20 pts
+    const targetLocations: string[] = icp.locations || icp.location || []
+    if (targetLocations.length > 0) {
+      const resultLocation = [
+        result.region, result.location, result.location_display,
+        result.headquarters_city, result.headquarters_state, result.headquarters_country,
+        result.headquarters_address,
+        result.location_details?.country, result.location_details?.state, result.location_details?.city
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (targetLocations.some((loc: string) => resultLocation.includes(loc.toLowerCase()))) {
+        score += 20
+        breakdown.location = 20
+      }
+    }
+
+    // Company size match: +20 pts
+    // Support both min/max numbers (workspace ICP) and string ranges (search filter fallback)
+    let sizeMatched = false
+    const minEmp = icp.min_employees
+    const maxEmp = icp.max_employees
+    const sizeRanges: string[] = icp.company_size || []
+    const empCount = result.employee_count_exact || result.employee_count ||
+      result.current_employers?.[0]?.company_headcount_latest || 0
+    const empRange = (result.employee_count_range || result.company_size || "").toLowerCase()
+
+    if (minEmp || maxEmp) {
+      // Workspace ICP: numeric min/max
+      if (empCount > 0) {
+        const inRange = (!minEmp || empCount >= minEmp) && (!maxEmp || empCount <= maxEmp)
+        if (inRange) sizeMatched = true
+      }
+    }
+    if (!sizeMatched && sizeRanges.length > 0) {
+      // Search filter fallback: match string ranges like "51-200"
+      if (sizeRanges.some((r: string) => empRange.includes(r.toLowerCase()))) {
+        sizeMatched = true
+      } else if (empCount > 0) {
+        // Parse the ICP ranges and check if empCount falls within any
+        for (const range of sizeRanges) {
+          const match = range.match(/^(\d+)\s*[-–]\s*(\d+)/)
+          if (match) {
+            const lo = parseInt(match[1]), hi = parseInt(match[2])
+            if (empCount >= lo && empCount <= hi) { sizeMatched = true; break }
+          }
+          if (range.includes("+")) {
+            const base = parseInt(range)
+            if (!isNaN(base) && empCount >= base) { sizeMatched = true; break }
+          }
+        }
+      }
+    }
+    if (sizeMatched) {
+      score += 20
+      breakdown.size = 20
+    }
+
+    // Seniority match: +10 pts
+    const targetSeniority: string[] = icp.seniority || []
+    if (targetSeniority.length > 0) {
+      const resultSeniority = [
+        result.current_employers?.[0]?.seniority_level, result.seniority
+      ].filter(Boolean).join(" ").toLowerCase()
+      if (targetSeniority.some((s: string) => resultSeniority.includes(s.toLowerCase()))) {
+        score += 10
+        breakdown.seniority = 10
+      }
+    }
+
+    // Keywords match: +10 pts
+    const targetKeywords: string[] = icp.keywords || []
+    if (targetKeywords.length > 0) {
+      const resultText = JSON.stringify(result).toLowerCase()
+      if (targetKeywords.some((kw: string) => resultText.includes(kw.toLowerCase()))) {
+        score += 10
+        breakdown.keywords = 10
+      }
+    }
+
+    let tier: 'Hot' | 'Warm' | 'Cold' = 'Cold'
+    if (score >= 70) tier = 'Hot'
+    else if (score >= 40) tier = 'Warm'
+
+    return { score: Math.min(score, 100), tier, breakdown, timestamp: Date.now() }
+  }
+
   const generateClarificationMessage = (query: string, intent: string, filters: Record<string, any>): string => {
     const intentText = intent === "prospect" ? "people/prospects" : "companies"
     const filterList = []
@@ -1079,6 +1213,65 @@ export default function DatabaseFinderPage() {
       : "I've analyzed your query and will search for relevant data based on the context.\n\n"
 
     return `I'll help you find ${intentText} for your query: "${query}"\n\n${filtersText}Please review the filters above and confirm if you'd like me to proceed with the search, or let me know if you'd like to modify any filters.`
+  }
+
+  const generateQuerySuggestions = (query: string, filters: Record<string, any>): string[] => {
+    const suggestions: string[] = []
+    const queryLower = query.toLowerCase()
+
+    // Suggest broadening location
+    if (filters.location?.length) {
+      const withoutLocation = query.replace(/\b(in|from|based in|located in)\s+[A-Za-z\s,]+/gi, "").replace(/\s+/g, " ").trim()
+      if (withoutLocation && withoutLocation !== query) {
+        suggestions.push(withoutLocation)
+      }
+    }
+
+    // Suggest broader role category
+    if (filters.current_title?.length) {
+      const titles = filters.current_title as string[]
+      const hasNarrowTitle = titles.some((t: string) =>
+        /\b(senior|sr|junior|jr|lead|principal|staff)\b/i.test(t)
+      )
+      if (hasNarrowTitle) {
+        const broader = query.replace(/\b(senior|sr\.|junior|jr\.|lead|principal|staff)\s*/gi, "").trim()
+        if (broader !== query) suggestions.push(broader)
+      }
+    }
+
+    // Suggest increasing company size range
+    if (filters.company_size?.length) {
+      const sizeLabels = filters.company_size as string[]
+      const allSmall = sizeLabels.every((s: string) => ["1-10", "11-50"].includes(s))
+      if (allSmall) {
+        const broader = query
+          .replace(/\b(small|startup|1\s*-\s*10|11\s*-\s*50|1\s+to\s+50)\b/gi, "mid-size")
+          .trim()
+        if (broader !== query) suggestions.push(broader)
+      }
+    }
+
+    // Generic fallback: remove qualifiers
+    if (suggestions.length < 2) {
+      const simplified = query
+        .replace(/\b(only|verified|with emails?|with contact info|active|recently)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+      if (simplified !== query && simplified.length > 10) suggestions.push(simplified)
+    }
+
+    // Always offer an industry-broadened variant if industry filter is present
+    if (filters.industry?.length && suggestions.length < 3) {
+      const withoutIndustry = query
+        .replace(/\b(in|at|for)\s+(the\s+)?([\w\s]+?)\s+(industry|sector|space|companies)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+      if (withoutIndustry && withoutIndustry !== query && withoutIndustry.length > 10) {
+        suggestions.push(withoutIndustry)
+      }
+    }
+
+    return suggestions.slice(0, 3)
   }
 
   const detectIntent = (query: string): "business" | "prospect" => {
@@ -1291,38 +1484,92 @@ export default function DatabaseFinderPage() {
     let extractedFilters = overrideFilters ?? extractFiltersFromQuery(trimmedQuery)
     setLatestExtractedFilters(extractedFilters)
 
-    try {
-      const parseRes = await fetch(`${API}/api/v1/chat/parse-query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmedQuery })
-      })
-      if (parseRes.ok) {
-        const parsed = await parseRes.json()
-        console.log('[AI Search] LLM parsed:', parsed)
-        // Use LLM results
-        searchIntent = parsed.intent === "company" ? "business" : "prospect"
-        const llmFilters = parsed.filters || {}
-        // Merge LLM filters (prefer LLM, keep any client-side extras)
-        extractedFilters = {
-          ...extractedFilters,
-          ...Object.fromEntries(
-            Object.entries(llmFilters).filter(([_, v]) => Array.isArray(v) && (v as any[]).length > 0)
-          )
+    // --- Hybrid fast path: skip LLM for simple, well-structured queries ---
+    const complexClauses = /\b(hiring|companies that|at those|series|funding|raised|grew|growth|recently|competitors|pain[- ]?point)\b/i
+    const hasStrongFilters = !!(
+      extractedFilters.current_title?.length &&
+      (extractedFilters.location?.length || extractedFilters.industry?.length || extractedFilters.company_size?.length)
+    )
+    const isSimpleQuery = hasStrongFilters && !complexClauses.test(trimmedQuery)
+
+    if (isSimpleQuery && !overrideFilters) {
+      console.log('[AI Search] Fast path: skipping LLM, client-side filters are strong enough', extractedFilters)
+    } else {
+      try {
+        const parseRes = await fetch(`${API}/api/v1/chat/parse-query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: trimmedQuery })
+        })
+        if (parseRes.ok) {
+          const parsed = await parseRes.json()
+          console.log('[AI Search] LLM parsed:', parsed)
+          // Use LLM results
+          searchIntent = parsed.intent === "company" ? "business" : "prospect"
+          const llmFilters = parsed.filters || {}
+          // Merge LLM filters (prefer LLM, keep any client-side extras)
+          extractedFilters = {
+            ...extractedFilters,
+            ...Object.fromEntries(
+              Object.entries(llmFilters).filter(([_, v]) => Array.isArray(v) && (v as any[]).length > 0)
+            )
+          }
+          if (!parsed.is_relevant) {
+            setQueryRelevant(false)
+            setQueryReason(parsed.reason || "Query may not be relevant to B2B search.")
+          }
+        } else {
+          console.warn('[AI Search] LLM parse failed, using client-side fallback')
         }
-        if (!parsed.is_relevant) {
-          setQueryRelevant(false)
-          setQueryReason(parsed.reason || "Query may not be relevant to B2B search.")
-        }
-      } else {
-        console.warn('[AI Search] LLM parse failed, using client-side fallback')
+      } catch (e) {
+        console.warn('[AI Search] LLM parse error, using client-side fallback:', e)
       }
-    } catch (e) {
-      console.warn('[AI Search] LLM parse error, using client-side fallback:', e)
     }
 
     setIntent(searchIntent)
     setLatestExtractedFilters(extractedFilters)
+
+    // Guard: if filters are too vague (no title, location, industry, or company_size),
+    // ask the user to be more specific instead of attempting a search that will fail.
+    const hasAnyFilter = !!(
+      extractedFilters.current_title?.length ||
+      extractedFilters.location?.length ||
+      extractedFilters.industry?.length ||
+      extractedFilters.company_size?.length
+    )
+    if (!hasAnyFilter) {
+      const vagueMessage = `Your query "${trimmedQuery}" is too broad for me to search effectively.\n\nPlease include at least one of:\nJob title or role (e.g. "CTOs", "Marketing decision makers")\nIndustry (e.g. "in SaaS", "at healthcare companies")\nLocation (e.g. "in Texas", "in Europe")\nCompany size (e.g. "with 50-200 employees")\n\nExample: "Find Marketing VPs at SaaS companies in California with 50-500 employees"`
+      setClarification(vagueMessage)
+      setIsSearching(false)
+
+      const now = new Date().toISOString()
+      const baseSession = chats.find((c) => c.id === activeChatId) || createEmptySession()
+      const nextSession: ChatSession = {
+        ...baseSession,
+        query: trimmedQuery,
+        intent: searchIntent,
+        clarification: vagueMessage,
+        extractedFilters,
+        clarificationStep: "pending",
+        updatedAt: now,
+        title: baseSession.title === "New Chat" ? createSessionTitle(trimmedQuery) : baseSession.title,
+        messages: [
+          ...baseSession.messages,
+          { role: "user", content: trimmedQuery, createdAt: now },
+          { role: "assistant", content: vagueMessage, createdAt: now }
+        ]
+      }
+      setActiveChatId(nextSession.id)
+      setChats((prev) => {
+        const exists = prev.some((c) => c.id === nextSession.id)
+        const merged = exists
+          ? prev.map((c) => (c.id === nextSession.id ? nextSession : c))
+          : [nextSession, ...prev]
+        return merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      })
+      setAgentMessages(nextSession.messages.map(m => ({ role: m.role, content: m.content })))
+      return
+    }
 
     const clarificationMessage = generateClarificationMessage(trimmedQuery, searchIntent, extractedFilters)
     setClarification(clarificationMessage)
@@ -1484,7 +1731,7 @@ export default function DatabaseFinderPage() {
         },
         {
           title: "Search Execution",
-          tool: searchIntent === "prospect" ? "Crustdata People Search" : "Explorium Company Search",
+          tool: searchIntent === "prospect" ? "Prospect Search" : "Company Search",
           endpoint: workflowEndpoint,
           input: { query: trimmedQuery, filters: latestExtractedFilters },
           output: {
@@ -1610,8 +1857,8 @@ export default function DatabaseFinderPage() {
             skills: Array.isArray(item.skills) ? item.skills : (Array.isArray(raw.skills) ? raw.skills : []),
             languages: Array.isArray(item.languages) ? item.languages : (Array.isArray(raw.languages) ? raw.languages : []),
             linkedin_profile_url: item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
-            Social_profile_url: item.Social_profile_url || item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.Social_profile_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
-            flagship_profile_url: item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
+            'Social_profile_url': item.Social_profile_url || item.linkedin_profile_url || item.flagship_profile_url || item.linkedin_url || raw.Social_profile_url || raw.linkedin_profile_url || raw.flagship_profile_url || raw.linkedin_url || "",
+            'flagship_profile_url': item.flagship_profile_url || item.linkedin_profile_url || item.linkedin_url || item.Social_profile_url || item.Social_url || raw.flagship_profile_url || raw.linkedin_profile_url || raw.linkedin_url || raw.Social_profile_url || raw.Social_url || "",
             emails: email ? [email] : [],
             profile_picture_url: item.profile_picture_url || raw.profile_picture_url || "",
             profile_picture_permalink: item.profile_picture_permalink || raw.profile_picture_permalink || "",
@@ -1676,6 +1923,58 @@ export default function DatabaseFinderPage() {
         console.log('=== COMPANY MAPPING END ===');
       }
 
+      console.log('ICP config at scoring:', icpConfig)
+      console.log('Search intent at scoring:', searchIntent)
+      console.log('Mapped results length:', mappedResults.length)
+      if (mappedResults.length > 0) {
+        console.log('First result before ICP:', {name: mappedResults[0].name, hasIcp: !!mappedResults[0]._icpScore})
+      }
+
+      // ICP scoring: use workspace ICP config, or fall back to search filters as ICP proxy
+      const effectiveIcp: Record<string, any> = (icpConfig && Object.keys(icpConfig).length > 0)
+        ? icpConfig
+        : {
+          // Derive ICP from the search filters so scoring always runs
+          ...(extractedFilters.current_title?.length ? { titles: extractedFilters.current_title } : {}),
+          ...(extractedFilters.industry?.length ? { industries: extractedFilters.industry } : {}),
+          ...(extractedFilters.location?.length ? { locations: extractedFilters.location } : {}),
+          ...(extractedFilters.company_size?.length ? { company_size: extractedFilters.company_size } : {}),
+          ...(extractedFilters.keywords?.length ? { keywords: extractedFilters.keywords } : {}),
+        }
+      const hasEffectiveIcp = Object.keys(effectiveIcp).length > 0
+
+      if (hasEffectiveIcp) {
+        const icpConfigHash = JSON.stringify(effectiveIcp)
+        console.log('Effective ICP config:', icpConfigHash)
+        mappedResults = mappedResults.map((r: any) => {
+          const contactId = r.person_id || r.domain || r.id || r.name
+          const cacheKey = `icp_score_${contactId}_${icpConfigHash}`
+          const cachedStr = localStorage.getItem(cacheKey)
+          if (cachedStr) {
+            try {
+              const cached = JSON.parse(cachedStr)
+              const isFresh = (Date.now() - cached.timestamp) < 24 * 60 * 60 * 1000
+              if (isFresh) {
+                console.log('Using cached ICP score for', r.name || r.company_name, cached)
+                return { ...r, _icpScore: cached }
+              }
+            } catch (e) {
+              // Invalid cache, recompute
+            }
+          }
+          const score = computeIcpScore(r, effectiveIcp)
+          localStorage.setItem(cacheKey, JSON.stringify(score))
+          console.log('[ICP Debug] Computed score for', r.name || r.company_name || r.person_name, score)
+          return { ...r, _icpScore: score }
+        })
+        mappedResults.sort((a: any, b: any) => (b._icpScore?.score || 0) - (a._icpScore?.score || 0))
+        console.log('[AI Search] ICP scored and sorted results with caching')
+      } else {
+        console.log('ICP scoring skipped - no ICP config and no search filters to derive from')
+      }
+
+      console.log('After ICP scoring, first result:', {name: mappedResults[0]?.name, icp: mappedResults[0]?._icpScore})
+
       console.log('Final mappedResults length:', mappedResults.length);
       setResults(mappedResults);
       setHasSearched(true);
@@ -1724,6 +2023,14 @@ export default function DatabaseFinderPage() {
       }
       setTamPreview(nextTamPreview);
 
+      // Low result count warning
+      let resultSummary = `Found ${totalCount} ${searchIntent === "prospect" ? "prospects" : "companies"} for "${trimmedQuery}".`
+      if (totalCount > 0 && totalCount < 20) {
+        const lowCountWarning = `\n\nOnly ${totalCount} results found. Your filters may be too narrow — consider broadening location, title, or company size.`
+        resultSummary += lowCountWarning
+        setClarification((prev) => prev + lowCountWarning)
+      }
+
       const now = new Date().toISOString()
       const baseSession = chats.find((c) => c.id === activeChatId) || createEmptySession()
       const nextSession: ChatSession = {
@@ -1737,7 +2044,7 @@ export default function DatabaseFinderPage() {
         messages: [
           ...baseSession.messages,
           { role: "user", content: "Confirm filters", createdAt: now },
-          { role: "assistant", content: `Found ${totalCount} ${searchIntent === "prospect" ? "prospects" : "companies"} for "${trimmedQuery}".`, createdAt: now }
+          { role: "assistant", content: resultSummary, createdAt: now }
         ]
       }
 
@@ -2769,7 +3076,7 @@ export default function DatabaseFinderPage() {
                   <CardContent className="pt-2">
                     <p className="whitespace-pre-line text-sm">{clarification}</p>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Button onClick={handleConfirmFilters} disabled={isSearching} size="sm">
+                      <Button onClick={() => { console.log('Confirm and Search clicked'); handleConfirmFilters(); }} disabled={isSearching} size="sm">
                         {isSearching ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -3213,6 +3520,9 @@ export default function DatabaseFinderPage() {
                     </CardTitle>
                     <CardDescription>
                       Found {tamPreview.count.toLocaleString()} {intent === "prospect" ? "prospects" : "companies"} • Showing {results.length} results
+                      {icpConfig && results.some((r: any) => r._icpScore?.score > 0) && (
+                        <span className="ml-2 text-xs text-emerald-500 font-medium">• ICP scored</span>
+                      )}
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -3243,6 +3553,32 @@ export default function DatabaseFinderPage() {
                 </div>
               </CardHeader>
               <CardContent>
+                {results.some((r: any) => r._icpScore?.score > 0) && (
+                  <div className="flex flex-wrap gap-1.5 mb-3 pb-3 border-b border-border/40">
+                    <span className="text-xs text-muted-foreground mr-1">ICP Scores:</span>
+                    {results.slice(0, 10).map((r: any, idx: number) => {
+                      const s = r._icpScore
+                      if (!s) return null
+                      return (
+                        <Badge
+                          key={idx}
+                          variant={s.tier === "Hot" ? "default" : "secondary"}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0",
+                            s.tier === "Hot" && "bg-emerald-500/90 text-white",
+                            s.tier === "Warm" && "bg-amber-500/80 text-white",
+                            s.tier === "Cold" && "bg-zinc-500/60 text-white"
+                          )}
+                        >
+                          {(r.name || r.first_name || `#${idx + 1}`).split(" ")[0]}: {s.score} ({s.tier})
+                        </Badge>
+                      )
+                    })}
+                    {results.length > 10 && (
+                      <span className="text-[10px] text-muted-foreground">+{results.length - 10} more</span>
+                    )}
+                  </div>
+                )}
                 {intent === "prospect" ? (
                   <ProspectsResultsTable
                     data={results}
@@ -3304,7 +3640,7 @@ export default function DatabaseFinderPage() {
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button onClick={handlePullAllCompanies} disabled={isSearching} size="sm">
                       <Users className="mr-2 h-4 w-4" />
-                      Pull All {tamPreview.count.toLocaleString()} Companies
+                      Pull More Companies
                     </Button>
                     <Button onClick={handleRefineSearch} variant="outline" size="sm">
                       Refine Search
@@ -3343,18 +3679,41 @@ export default function DatabaseFinderPage() {
           )}
 
           {/* Fallback for no results */}
-          {hasSearched && !isSearching && results.length === 0 && (
-             <div className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
+          {hasSearched && !isSearching && results.length === 0 && (() => {
+            const querySuggestions = generateQuerySuggestions(naturalLanguageQuery, latestExtractedFilters)
+            return (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
                 <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
                   <Search className="h-6 w-6 text-muted-foreground/40" />
                 </div>
                 <div>
-                   <h3 className="text-lg font-semibold">No results found</h3>
-                   <p className="text-sm text-muted-foreground max-w-xs mx-auto">Try refining your search terms or using a different prompt.</p>
+                  <h3 className="text-lg font-semibold">No results found</h3>
+                  <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                    Your filters may be too narrow. Try one of these broader searches:
+                  </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setNaturalLanguageQuery("")}>Clear Search</Button>
-             </div>
-          )}
+                {querySuggestions.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                    {querySuggestions.map((suggestion, idx) => (
+                      <Button
+                        key={idx}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => {
+                          setNaturalLanguageQuery(suggestion)
+                          setTimeout(() => handleClarifyFilters(), 100)
+                        }}
+                      >
+                        {suggestion}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setNaturalLanguageQuery("")}>Clear Search</Button>
+              </div>
+            )
+          })()}
         </div>
 
         {(detectedSignals.length > 0 || isDetectingSignals || workflowSteps.length > 0 || totalCreditsUsed > 0) && (

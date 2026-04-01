@@ -113,6 +113,12 @@ export interface CompanyData {
     sic_code_description?: string
     social_insights?: string[]
     raw_data?: Record<string, any>
+    _icpScore?: {
+        score: number
+        tier: 'Hot' | 'Warm' | 'Cold'
+        breakdown: Record<string, number>
+        timestamp: number
+    }
 }
 
 type ContactCacheEntry = {
@@ -467,6 +473,12 @@ export function CompaniesResultsTable({
             render: (_v, company) => {
                 const companyConfidence = typeof company.data_quality_score === 'number'
                     ? Math.max(0, Math.min(100, Math.round(company.data_quality_score))) : undefined
+                const icpTier = company._icpScore?.tier
+                const icpScore = company._icpScore?.score
+                const icpBadgeClass = icpTier === 'Hot' ? 'bg-green-500/90 text-white' : icpTier === 'Warm' ? 'bg-yellow-500/90 text-white' : icpTier === 'Cold' ? 'bg-zinc-500/80 text-white' : ''
+                const icpTimestamp = company._icpScore?.timestamp
+                const isStale = icpTimestamp ? (Date.now() - icpTimestamp) > 24 * 60 * 60 * 1000 : false
+                const icpBreakdown = company._icpScore?.breakdown
                 return (
                     <div className="flex items-center gap-3">
                         <div className="h-8 w-8 rounded border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden relative">
@@ -485,9 +497,34 @@ export function CompaniesResultsTable({
                         <div className="flex flex-col">
                             <span className="font-medium truncate max-w-[150px]">{company.name}</span>
                             <span className="text-[10px] text-muted-foreground truncate max-w-[150px]">{company.domain}</span>
-                            {typeof companyConfidence === 'number' && (
-                                <span className="text-[10px] text-muted-foreground">Confidence Score: {companyConfidence}%</span>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {typeof companyConfidence === 'number' && (
+                                    <span className="text-[10px] text-muted-foreground">Confidence: {companyConfidence}%</span>
+                                )}
+                                {icpTier && (
+                                    <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1">
+                                            <Badge variant="default" className={`text-[10px] px-1.5 py-0 ${icpBadgeClass}`}>
+                                                ICP: {icpTier} {typeof icpScore === 'number' && `(${Math.round(icpScore)})`}
+                                            </Badge>
+                                            {isStale && <span className="text-[9px] text-orange-400">Score outdated</span>}
+                                        </div>
+                                    </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-[200px]">
+                                        <p className="font-semibold mb-1">ICP Score: {icpScore}/100 ({icpTier})</p>
+                                        {icpBreakdown && (
+                                            <div className="space-y-0.5">
+                                                <p>Title: {icpBreakdown.title ? `+${icpBreakdown.title}` : '0'}</p>
+                                                <p>Industry: {icpBreakdown.industry ? `+${icpBreakdown.industry}` : '0'}</p>
+                                                <p>Location: {icpBreakdown.location ? `+${icpBreakdown.location}` : '0'}</p>
+                                                <p>Size: {icpBreakdown.size ? `+${icpBreakdown.size}` : '0'}</p>
+                                                <p>Seniority: {icpBreakdown.seniority ? `+${icpBreakdown.seniority}` : '0'}</p>
+                                                <p>Keywords: {icpBreakdown.keywords ? `+${icpBreakdown.keywords}` : '0'}</p>
+                                            </div>
+                                        )}
+                                        {isStale && <p className="mt-1 text-orange-400">Score is older than 24 hours</p>}
+                                    </TooltipContent></Tooltip></TooltipProvider>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )

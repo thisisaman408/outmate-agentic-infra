@@ -24,6 +24,16 @@ export function LoginForm() {
   const [formData, setFormData] = useState({ email: "", password: "" })
 
   useEffect(() => {
+    if (searchParams.get("expired") === "true") {
+      toast({
+        title: "Session Expired",
+        description: "Your session has expired. Please log in again to continue.",
+        variant: "destructive",
+      })
+    }
+  }, [searchParams, toast])
+
+  useEffect(() => {
     const error = searchParams.get("error")
     if (error) {
       let errorMessage = "An error occurred during authentication."

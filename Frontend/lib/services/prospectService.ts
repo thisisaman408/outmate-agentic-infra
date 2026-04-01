@@ -39,6 +39,7 @@ export interface ProspectProfile {
     skills: string[];
     languages: string[];
     linkedin_profile_url: string;
+    Social_profile_url: string;
     flagship_profile_url: string;
     emails: string[];
     profile_picture_url: string;
@@ -63,6 +64,12 @@ export interface ProspectProfile {
         continent: string;
     };
     data_quality_score?: number;
+    _icpScore?: {
+        score: number;
+        tier: string;
+        breakdown: Record<string, boolean>;
+        timestamp: number;
+    };
 }
 
 export interface EducationItem {
