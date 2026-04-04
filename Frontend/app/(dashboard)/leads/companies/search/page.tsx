@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { Database, Sparkles, Zap, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FilterSidebar } from "@/components/leads/companies/filter-sidebar"
@@ -16,6 +16,9 @@ import { enrichCompany, type CompanyEnrichmentResult } from "@/lib/services/bett
 import { CsvImportButton } from "@/components/shared/csv-import-button"
 import { normalizeCsvRecord } from "@/lib/utils/csv"
 import { useToast } from "@/hooks/use-toast"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
+import { useAgentHighlight } from "@/hooks/use-agent-highlight"
+import { cn } from "@/lib/utils"
 
 function InDbCompanySearchPageContent() {
   const params = useSearchParams()
@@ -27,6 +30,49 @@ function InDbCompanySearchPageContent() {
   const [autoSearch, setAutoSearch] = useState(false)
   const [restored, setRestored] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+
+  // ── Copilot automation agent bridge ──────────────────────────────────────
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['companies'])
+  const isFilterHighlighted = useAgentHighlight('companies-filters-panel')
+  const lastCopilotCompanyKey = useRef<string>('')
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotCompanyKey.current) return
+    lastCopilotCompanyKey.current = key
+
+    // Map copilot store keys → company API filter keys
+    const mapped: Record<string, any> = {}
+    if (copilotFilters.industry) {
+      const ind = copilotFilters.industry
+      mapped.industry = Array.isArray(ind) ? ind : [String(ind)]
+    }
+    if (copilotFilters.company_size) {
+      const sz = copilotFilters.company_size
+      mapped.employee_count = Array.isArray(sz) ? sz : [String(sz)]
+    }
+    if (copilotFilters.location) mapped.country = copilotFilters.location
+    if (copilotFilters.funding_stage) {
+      const fs = copilotFilters.funding_stage
+      mapped.funding_stage = Array.isArray(fs) ? fs : [String(fs)]
+    }
+    if (copilotFilters.tech_stack) {
+      const ts = copilotFilters.tech_stack
+      mapped.technologies = Array.isArray(ts) ? ts : [String(ts)]
+    }
+    if (copilotFilters.name) mapped.name = String(copilotFilters.name)
+    if (copilotFilters.domain) mapped.domain = String(copilotFilters.domain)
+    if (copilotFilters.keywords) mapped.keyword = String(copilotFilters.keywords)
+
+    if (Object.keys(mapped).length === 0) return
+
+    // Show applied filters in sidebar and kick off search directly (avoids timing issues)
+    setRestoredFilters(mapped)
+    handleNlpSearch(mapped)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Enrichment state
   const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
@@ -407,14 +453,16 @@ function InDbCompanySearchPageContent() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
-      <FilterSidebar
-        onSearch={handleSearch}
-        initialFilters={restoredFilters}
-        autoSearchOnMount={restored ? false : autoSearch}
-        defaultPinnedIds={PINNED_FILTERS_DEFAULT}
-        searchOptions={{ limit: 3, page: 1 }}
-        hideCategoryHeaders
-      />
+      <div id="companies-filters-panel" className={cn('transition-all duration-300', isFilterHighlighted && 'ring-2 ring-primary ring-offset-2 rounded-xl')}>
+        <FilterSidebar
+          onSearch={handleSearch}
+          initialFilters={restoredFilters}
+          autoSearchOnMount={restored ? false : autoSearch}
+          defaultPinnedIds={PINNED_FILTERS_DEFAULT}
+          searchOptions={{ limit: 3, page: 1 }}
+          hideCategoryHeaders
+        />
+      </div>
       <div className="flex-1 flex flex-col min-w-0 p-4">
         <div className="mb-4 flex flex-col gap-3">
           <Database className="h-8 w-8 text-primary" />

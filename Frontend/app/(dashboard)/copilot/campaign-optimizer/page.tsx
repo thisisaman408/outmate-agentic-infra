@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import {
   type CampaignOptimizerInput,
   type EmailOptimizerInput,
 } from "@/lib/api/copilot"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 
 // ---------------------------------------------------------------------------
 // Shared small components
@@ -85,6 +86,63 @@ export default function CampaignOptimizerPage() {
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
   const searchParams = useSearchParams()
+
+  // ── Agent store subscription ──
+  const agentForm = useCoPilotAgentStore(
+    (state) => state.copilotForms?.['email_optimizer']
+  )
+  const isAgentHighlighted = useCoPilotAgentStore(
+    (state) => state.highlightedElement === 'email_optimizer-form-panel'
+  )
+  const prevSubmitSignal = useRef<number>(0)
+
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+
+    // Pre-fill all form fields
+    if (f.subject_line !== undefined) setForm((prev) => ({ ...prev, subject_line: f.subject_line }))
+    if (f.email_body !== undefined) setForm((prev) => ({ ...prev, email_body: f.email_body }))
+    if (f.lead_name !== undefined) setLeadName(f.lead_name)
+    if (f.lead_company !== undefined) setLeadCompany(f.lead_company)
+    if (f.lead_role !== undefined) setLeadRole(f.lead_role)
+    if (f.lead_domain !== undefined) setLeadDomain(f.lead_domain)
+    if (f.open_rate !== undefined) setOpenRate(String(f.open_rate))
+    if (f.reply_rate !== undefined) setReplyRate(String(f.reply_rate))
+
+    // Auto-submit when signal increments
+    if (submitSignal > prevSubmitSignal.current && f.subject_line && f.email_body) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(() => {
+        setIsLoading(true)
+        const metrics =
+          f.open_rate || f.reply_rate
+            ? { opened: f.open_rate ? parseFloat(f.open_rate) : undefined, replied: f.reply_rate ? parseFloat(f.reply_rate) : undefined }
+            : undefined
+
+        const hasLead = Boolean(f.lead_name?.trim() && f.lead_company?.trim())
+        const promise = hasLead
+          ? copilotApi.optimizeEmail({
+              subject_line: f.subject_line,
+              email_body: f.email_body,
+              metrics,
+              lead_name: f.lead_name?.trim(),
+              lead_company: f.lead_company?.trim(),
+              lead_role: f.lead_role?.trim() || undefined,
+              lead_domain: f.lead_domain?.trim() || undefined,
+            })
+          : copilotApi.analyzeCampaign({ subject_line: f.subject_line, email_body: f.email_body, metrics })
+
+        promise.then((data) => {
+          setResult(data)
+          localStorage.setItem("last_campaign_result", JSON.stringify(data))
+        }).catch((err: any) => {
+          toast({ title: "Error", description: err?.message || "Failed to analyze campaign", variant: "destructive" })
+        }).finally(() => setIsLoading(false))
+      }, 50)
+    }
+  }, [agentForm, toast])
 
   useEffect(() => {
     if (searchParams.get("show") === "latest") {
@@ -149,7 +207,10 @@ export default function CampaignOptimizerPage() {
       </div>
 
       {/* ── Form ────────────────────────────────────────────── */}
-      <Card>
+      <Card
+        id="email_optimizer-form-panel"
+        className={isAgentHighlighted ? "ring-2 ring-primary/60 shadow-lg shadow-primary/20 transition-shadow duration-300" : ""}
+      >
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1">

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -71,6 +72,31 @@ export function LookalikePanel() {
   const [results, setResults] = useState<LookalikeResult[]>([])
   const [addingId, setAddingId] = useState<string | null>(null)
   const [seedPool, setSeedPool] = useState(["Stripe", "Airbnb", "Notion"])
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['lookalike'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    const pool: string[] = Array.isArray(f.seed_pool) ? f.seed_pool : []
+    if (pool.length > 0) setSeedPool(pool)
+    if (submitSignal > prevSubmitSignal.current && pool.length > 0) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsAnalyzing(true)
+        setResults([])
+        try {
+          const r = await aiAgentsApi.findLookalikeCompanies(pool)
+          setResults(r)
+          toast({ title: 'Lookalikes Identified', description: `Agent found ${r.length} high-fidelity clones.` })
+        } catch (err: any) {
+          toast({ title: 'Analysis Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsAnalyzing(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleAddSeed = () => {
     const candidate = window?.prompt?.("Enter a seed company name to expand the pool:")

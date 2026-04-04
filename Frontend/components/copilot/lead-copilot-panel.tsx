@@ -375,7 +375,7 @@ export function LeadCopilotPanel() {
               <ProfileHeader
                 name={context?.prospect?.name || name}
                 title={context?.prospect?.title || title}
-                company={context?.company?.name || company}
+                company={company || context?.company?.name}
                 email={context?.prospect?.email}
                 phone={context?.prospect?.phone}
                 linkedin={context?.prospect?.linkedin_url || selectedProspect?.linkedin_profile_url}

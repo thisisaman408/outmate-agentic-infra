@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -95,6 +96,74 @@ export default function KeywordSearchPage() {
   const [mentioningCompany, setMentioningCompany] = useState("")
   // removed unsupported content-type filter (backend does not accept it)
   const [members, setMembers] = useState("")
+
+  // ── Copilot automation agent bridge ──────────────────────────────────
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['social_keyword_search'])
+  const lastCopilotKeyRef = useRef('')
+
+  const handleCopilotKeywordSearch = async (cf: Record<string, unknown>) => {
+    setLoading(true)
+    setError(null)
+    setPosts([])
+
+    try {
+      const params = new URLSearchParams()
+      if (cf.keyword) params.append('keyword', String(cf.keyword))
+      if (cf.exact_match) params.append('exact_keyword_match', 'true')
+      params.append('sort_by', String(cf.sort_by || 'relevance'))
+      params.append('date_posted', String(cf.date_range || 'past-month'))
+      params.append('page', String(cf.page || '1'))
+      params.append('limit', String(cf.limit || '5'))
+
+      const advFilters: Array<{filter_type: string; type: string; value: string[]}> = []
+      if (cf.author_industry) advFilters.push({ filter_type: 'AUTHOR_INDUSTRY', type: 'in', value: String(cf.author_industry).split(',').map(s => s.trim()) })
+      if (cf.author_title) advFilters.push({ filter_type: 'AUTHOR_TITLE', type: 'in', value: String(cf.author_title).split(',').map(s => s.trim()) })
+      if (advFilters.length > 0) params.append('filters', JSON.stringify(advFilters))
+
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const body: Record<string, unknown> = {
+        keyword: cf.keyword,
+        exact_keyword_match: Boolean(cf.exact_match ?? false),
+        sort_by: cf.sort_by || 'relevance',
+        date_posted: cf.date_range || 'past-month',
+        page: parseInt(String(cf.page || '1')),
+        limit: parseInt(String(cf.limit || '5')),
+      }
+      if (advFilters.length > 0) body.filters = advFilters
+      const response = await fetch(`${API}/api/v1/crustdata/linkedin_posts/keyword_search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const data = await response.json()
+      setPosts(data.posts || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotKeyRef.current) return
+    lastCopilotKeyRef.current = key
+
+    if (copilotFilters.keyword) setKeyword(String(copilotFilters.keyword))
+    if (copilotFilters.exact_match !== undefined) setExactKeywordMatch(Boolean(copilotFilters.exact_match))
+    if (copilotFilters.sort_by) setSortBy(String(copilotFilters.sort_by))
+    if (copilotFilters.date_range) setDatePosted(String(copilotFilters.date_range))
+    if (copilotFilters.page) setPage(String(copilotFilters.page))
+    if (copilotFilters.limit) setLimit(String(copilotFilters.limit))
+    if (copilotFilters.author_industry) setAuthorIndustry(String(copilotFilters.author_industry))
+    if (copilotFilters.author_title) setAuthorTitle(String(copilotFilters.author_title))
+
+    handleCopilotKeywordSearch(copilotFilters as Record<string, unknown>)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────
 
   // content type filtering removed (unsupported)
 

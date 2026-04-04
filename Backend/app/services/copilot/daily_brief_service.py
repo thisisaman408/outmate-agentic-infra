@@ -336,7 +336,7 @@ class DailyBriefService:
                 system_prompt=DAILY_BRIEF_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.4,
-                max_tokens=900,
+                max_tokens=1200,
             )
 
             # Ensure greeting is present

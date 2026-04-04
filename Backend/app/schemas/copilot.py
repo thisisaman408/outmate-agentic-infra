@@ -403,3 +403,104 @@ class CalendarMeetingBriefResponse(BaseModel):
     enrichment_used: bool
     created_at: str
     viewed_at: Optional[str] = None
+
+
+# ── Orchestrator ───────────────────────────────────────────────
+
+class PlanStep(BaseModel):
+    step_id: str
+    action: str
+    label: str
+    depends_on: List[str] = []
+    input_from: List[str] = []
+    extra_instruction: Optional[str] = None
+
+
+class ExecutionPlan(BaseModel):
+    intent: str
+    steps: List[PlanStep]
+    estimated_credits: int = 0
+    parallel_groups: List[List[str]] = []
+
+
+# ── Automation Agent (Tool Calling) ───────────────────────────
+
+class AgentMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class AgentToolSchema(BaseModel):
+    name: str
+    description: str
+    input_schema: Dict[str, Any]  # Anthropic-format, converted to OpenAI internally
+
+
+class AgentContext(BaseModel):
+    route: Optional[str] = None
+
+
+class AgentChatRequest(BaseModel):
+    messages: List[AgentMessage]
+    tools: List[AgentToolSchema]
+    system: Optional[str] = None
+    context: Optional[AgentContext] = None
+
+
+class AgentToolCall(BaseModel):
+    id: str
+    name: str
+    input: Dict[str, Any]
+
+
+class AgentChatResponse(BaseModel):
+    text: str
+    tool_calls: List[AgentToolCall] = []
+    stop_reason: str = "end_turn"
+
+
+class OrchestratorRequest(BaseModel):
+    prospect_id: str
+    task: str  # Free-form user instruction
+    context_overrides: Optional[Dict[str, Any]] = None  # CrustData prospect data
+
+
+class ArtifactSection(BaseModel):
+    step_id: str
+    label: str
+    action: str
+    result: Dict[str, Any]
+
+
+class OrchestratorArtifact(BaseModel):
+    intent: str
+    summary: str
+    steps_completed: List[str]
+    sections: List[ArtifactSection]
+    credits_used: int
+    duration_ms: int
+
+
+# ── Audit Log ─────────────────────────────────────────────────
+
+class AuditLogEntry(BaseModel):
+    id: str
+    action_type: str
+    user_prompt: Optional[str] = None
+    prospect_id: Optional[str] = None
+    company_name: Optional[str] = None
+    status: str
+    credits_used: int
+    duration_ms: Optional[int] = None
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogEntryFull(AuditLogEntry):
+    plan: Optional[Dict[str, Any]] = None
+    steps_run: Optional[List[Dict[str, Any]]] = None
+    output: Optional[Dict[str, Any]] = None
+    enrichment_sources: Optional[List[str]] = None
+
+    model_config = {"from_attributes": True}

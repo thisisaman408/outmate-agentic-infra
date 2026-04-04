@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,6 +70,56 @@ export default function CompanyEnrichmentPage() {
   const [fields, setFields] = useState("")
   const [exactMatch, setExactMatch] = useState(false)
   const [enrichRealtime, setEnrichRealtime] = useState(false)
+
+  // ── Copilot automation agent bridge ──────────────────────────────────
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['company_enrichment'])
+  const lastCopilotKeyRef = useRef('')
+
+  const handleCopilotEnrich = async (cf: Record<string, unknown>) => {
+    setLoading(true)
+    setError(null)
+    setResults([])
+
+    try {
+      const params = new URLSearchParams()
+      if (cf.domains) params.append('company_domain', String(cf.domains))
+      if (cf.company_names) params.append('company_name', String(cf.company_names))
+      if (cf.company_ids) params.append('company_id', String(cf.company_ids))
+      if (cf.profile_urls) params.append('company_linkedin_url', String(cf.profile_urls))
+      if (cf.fields) params.append('fields', String(cf.fields))
+      if (cf.exact_match) params.append('exact_match', 'true')
+      if (cf.realtime) params.append('enrich_realtime', 'true')
+
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${API}/api/v1/crustdata/enrich?${params.toString()}`)
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const data = await response.json()
+      setResults(Array.isArray(data) ? data : [data])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotKeyRef.current) return
+    lastCopilotKeyRef.current = key
+
+    if (copilotFilters.domains) setDomains(String(copilotFilters.domains))
+    if (copilotFilters.company_names) setNames(String(copilotFilters.company_names))
+    if (copilotFilters.company_ids) setIds(String(copilotFilters.company_ids))
+    if (copilotFilters.profile_urls) setLinkedinUrls(String(copilotFilters.profile_urls))
+    if (copilotFilters.fields) setFields(String(copilotFilters.fields))
+    if (copilotFilters.exact_match !== undefined) setExactMatch(Boolean(copilotFilters.exact_match))
+    if (copilotFilters.realtime !== undefined) setEnrichRealtime(Boolean(copilotFilters.realtime))
+
+    handleCopilotEnrich(copilotFilters as Record<string, unknown>)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────
 
   const handleSearch = async () => {
     setLoading(true)

@@ -6,13 +6,15 @@ import {
   LayoutDashboard, Zap, AlertTriangle, CreditCard, Bot,
   Signal, Users, Mail, BarChart3, Eye, Workflow, Target,
   Search, Settings, BrainCircuit, ChevronRight, History,
-  Plus, Trash2, ChevronLeft, Clock
+  Plus, Trash2, ChevronLeft, Clock, Layers, Play, ExternalLink,
+  Building2, User,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { useChatbot, ChatSession } from "@/hooks/use-chatbot"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { useChatbot, ChatSession, OrchestrateIntentData } from "@/hooks/use-chatbot"
+import { copilotApi, OrchestratorEvent } from "@/lib/api/copilot"
 import { usePathname, useRouter } from "next/navigation"
 import ReactMarkdown from "react-markdown"
 
@@ -326,9 +328,180 @@ function ChatHistoryView({
 }
 
 
+// ── Orchestrate card (shown inline when chatbot detects a workflow intent) ──
+type InlineStatus = "idle" | "running" | "done" | "error"
+
+function OrchestrateCard({
+  data,
+  onNavigate,
+}: {
+  data: OrchestrateIntentData
+  onNavigate: (url: string) => void
+}) {
+  const [inlineStatus, setInlineStatus] = useState<InlineStatus>("idle")
+  const [inlineError, setInlineError] = useState("")
+  const [stepCount, setStepCount] = useState(0)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const handleRunInline = async () => {
+    if (!data.prospect_id || data.source === "not_found") return
+    setInlineStatus("running")
+    setStepCount(0)
+    setInlineError("")
+    abortRef.current = new AbortController()
+    try {
+      await copilotApi.orchestrate(
+        data.prospect_id,
+        data.task,
+        (event: OrchestratorEvent) => {
+          if (event.type === "step_complete") setStepCount((n) => n + 1)
+          if (event.type === "complete") setInlineStatus("done")
+          if (event.type === "error") {
+            setInlineError(event.data.message || "Orchestration failed")
+            setInlineStatus("error")
+          }
+        },
+        abortRef.current.signal
+      )
+    } catch (err: unknown) {
+      if ((err as Error)?.name !== "AbortError") {
+        setInlineError(err instanceof Error ? err.message : "Unknown error")
+        setInlineStatus("error")
+      }
+    }
+  }
+
+  const handleOpenFull = () => {
+    const params = new URLSearchParams({ task: data.task })
+    if (data.prospect_id && data.source !== "not_found") {
+      params.set("prospect_id", data.prospect_id)
+    }
+    onNavigate(`/copilot/orchestrate?${params.toString()}`)
+  }
+
+  const notFound = data.source === "not_found"
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="mt-2 rounded-xl border border-violet-200/60 dark:border-violet-800/40 bg-violet-50/60 dark:bg-violet-950/20 p-3 space-y-2.5"
+    >
+      {/* Header row */}
+      <div className="flex items-center gap-2">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/40 shrink-0">
+          <Layers className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+        </div>
+        <span className="text-xs font-semibold text-violet-700 dark:text-violet-300">
+          Co-Pilot Orchestrate
+        </span>
+        {!notFound && (
+          <span className="ml-auto text-[10px] text-muted-foreground">~{data.estimated_credits} credits</span>
+        )}
+      </div>
+
+      {/* Prospect info */}
+      <div className="flex flex-col gap-1 text-xs text-foreground/80">
+        {data.prospect_name && (
+          <div className="flex items-center gap-1.5">
+            <User className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span className="font-medium">{data.prospect_name}</span>
+            {data.prospect_title && <span className="text-muted-foreground">· {data.prospect_title}</span>}
+          </div>
+        )}
+        {data.prospect_company && (
+          <div className="flex items-center gap-1.5">
+            <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+            <span>{data.prospect_company}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Task */}
+      <p className="text-[11px] text-muted-foreground leading-relaxed italic">"{data.task}"</p>
+
+      {/* Status / Actions */}
+      {inlineStatus === "idle" && (
+        <div className="flex items-center gap-2">
+          {!notFound && (
+            <Button
+              size="sm"
+              className="h-7 text-[11px] gap-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3"
+              onClick={handleRunInline}
+            >
+              <Play className="h-3 w-3" />
+              Run inline
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] gap-1.5 rounded-lg px-3 border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30"
+            onClick={handleOpenFull}
+          >
+            <ExternalLink className="h-3 w-3" />
+            Open full view
+          </Button>
+        </div>
+      )}
+
+      {inlineStatus === "running" && (
+        <div className="flex items-center gap-2 text-xs text-violet-600 dark:text-violet-400">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+          >
+            <Layers className="h-3.5 w-3.5" />
+          </motion.div>
+          <span>Running… {stepCount > 0 ? `${stepCount} step${stepCount > 1 ? "s" : ""} complete` : "starting"}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-[10px] ml-auto text-muted-foreground"
+            onClick={() => { abortRef.current?.abort(); setInlineStatus("idle") }}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {inlineStatus === "done" && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Done — {stepCount} steps completed</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-[10px] ml-auto gap-1 rounded-lg border-violet-200 dark:border-violet-800"
+            onClick={handleOpenFull}
+          >
+            <ExternalLink className="h-2.5 w-2.5" />
+            View results
+          </Button>
+        </div>
+      )}
+
+      {inlineStatus === "error" && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-red-500">{inlineError || "Error occurred"}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-[10px] ml-auto"
+            onClick={() => setInlineStatus("idle")}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+
 // ── Main panel ───────────────────────────────────────────────────────
-export function GlobalCopilotPanel() {
-  const [open, setOpen] = useState(false)
+export function GlobalCopilotPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const setOpen = onOpenChange
   const [input, setInput] = useState("")
   const [showHistory, setShowHistory] = useState(false)
   const {
@@ -386,22 +559,6 @@ export function GlobalCopilotPanel() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      {/* ── Floating trigger button ─────────────────────── */}
-      <SheetTrigger asChild>
-        <Button
-          size="icon"
-          className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-xl bg-primary hover:bg-primary/90 transition-all duration-300 group"
-          title="Outmate Copilot"
-        >
-          <motion.div
-            className="absolute inset-0 rounded-full bg-primary/20"
-            animate={{ scale: [1, 1.35, 1], opacity: [0.5, 0, 0.5] }}
-            transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-          />
-          <Sparkles className="h-6 w-6 relative z-10 group-hover:rotate-12 transition-transform duration-300" />
-        </Button>
-      </SheetTrigger>
-
       {/* ── Panel ───────────────────────────────────────── */}
       <SheetContent
         side="right"
@@ -628,6 +785,14 @@ export function GlobalCopilotPanel() {
                             </motion.div>
                           )}
                         </div>
+
+                        {/* Orchestrate card — shown below assistant bubble when intent detected */}
+                        {msg.role === "assistant" && msg.orchestrateData && (
+                          <OrchestrateCard
+                            data={msg.orchestrateData}
+                            onNavigate={(url) => { handleLinkClick(url) }}
+                          />
+                        )}
                       </motion.div>
                     ))}
                   </AnimatePresence>

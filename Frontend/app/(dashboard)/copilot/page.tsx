@@ -5,12 +5,13 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Sparkles, Calendar, Target, AlertTriangle, Settings, Coins } from "lucide-react"
+import { Sparkles, Calendar, Target, AlertTriangle, Settings, Coins, Layers } from "lucide-react"
 import { useCopilotCredits } from "@/hooks/use-copilot"
 import DailyBriefPage from "./daily-brief/page"
 import MeetingPrepPage from "./meeting-prep/page"
 import CampaignOptimizerPage from "./campaign-optimizer/page"
 import PipelineAlertsPage from "./pipeline-alerts/page"
+import OrchestratePage from "./orchestrate/page"
 
 export default function CopilotPage() {
   const { credits, fetchCredits } = useCopilotCredits()
@@ -46,7 +47,7 @@ export default function CopilotPage() {
       </div>
 
       <Tabs defaultValue="daily-brief" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="daily-brief" className="flex items-center gap-2">
             <Sparkles className="h-4 w-4" />
             Daily Brief
@@ -57,11 +58,15 @@ export default function CopilotPage() {
           </TabsTrigger>
           <TabsTrigger value="campaign-optimizer" className="flex items-center gap-2">
             <Target className="h-4 w-4" />
-            Campaign Optimizer
+            Campaign
           </TabsTrigger>
           <TabsTrigger value="pipeline-alerts" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
-            Pipeline Alerts
+            Pipeline
+          </TabsTrigger>
+          <TabsTrigger value="orchestrate" className="flex items-center gap-2">
+            <Layers className="h-4 w-4" />
+            Orchestrate
           </TabsTrigger>
         </TabsList>
 
@@ -76,6 +81,9 @@ export default function CopilotPage() {
         </TabsContent>
         <TabsContent value="pipeline-alerts" className="mt-6">
           <PipelineAlertsPage />
+        </TabsContent>
+        <TabsContent value="orchestrate" className="mt-6">
+          <OrchestratePage />
         </TabsContent>
       </Tabs>
     </div>

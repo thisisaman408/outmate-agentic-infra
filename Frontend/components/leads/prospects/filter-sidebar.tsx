@@ -29,12 +29,19 @@ interface FilterSidebarProps {
     onApplyFilters?: (filters: Record<string, any>) => void
     filterOperators?: Record<string, 'in' | 'not_in'>
     onOperatorChange?: (filterId: string, operator: 'in' | 'not_in') => void
+    externalFilters?: Record<string, any>
 }
 
-export function FilterSidebar({ onApplyFilters, filterOperators = {}, onOperatorChange }: FilterSidebarProps) {
+export function FilterSidebar({ onApplyFilters, filterOperators = {}, onOperatorChange, externalFilters }: FilterSidebarProps) {
     const [pinnedFilterIds, setPinnedFilterIds] = React.useState<string[]>(PINNED_FILTERS_DEFAULT)
     const [showAllFilters, setShowAllFilters] = React.useState(false)
     const [filters, setFilters] = React.useState<Record<string, any>>({})
+
+    // Sync copilot-injected filters into local sidebar state
+    React.useEffect(() => {
+        if (!externalFilters || Object.keys(externalFilters).length === 0) return
+        setFilters(prev => ({ ...prev, ...externalFilters }))
+    }, [externalFilters])
 
     const handleFilterChange = (id: string, value: any) => {
         setFilters(prev => ({

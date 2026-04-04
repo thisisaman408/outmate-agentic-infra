@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -15,6 +15,9 @@ import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 import { enrichProspect, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
 import { Zap } from "lucide-react"
 import { normalizeCsvRecord } from "@/lib/utils/csv"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
+import { useAgentHighlight } from "@/hooks/use-agent-highlight"
+import { cn } from "@/lib/utils"
 
 // IMPORTANT: Credit protection - limit results during testing
 const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
@@ -36,6 +39,77 @@ function ProspectsPageContent() {
         seniority_level: 'in',  // Default to include
     })
   const [error, setError] = useState<string | null>(null)
+  const [copilotMappedFilters, setCopilotMappedFilters] = useState<Record<string, any> | null>(null)
+
+  // ── Copilot automation agent bridge ──────────────────────────────────────
+  // Watch for filter injections from the automation agent and run the search
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['prospects'])
+  const isFilterHighlighted = useAgentHighlight('prospects-filters-panel')
+  const lastCopilotKey = useRef<string>('')
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotKey.current) return
+    lastCopilotKey.current = key
+
+    // Map copilot store keys → prospects filter sidebar IDs
+    const mapped: Record<string, any> = {}
+    const toArray = (v: any) => Array.isArray(v) ? v : [v]
+
+    // Current title (Claude may use job_title or current_title)
+    if (copilotFilters.current_title) mapped.current_title = toArray(copilotFilters.current_title)
+    if (copilotFilters.job_title && !mapped.current_title) mapped.current_title = toArray(copilotFilters.job_title)
+
+    // Past title
+    if (copilotFilters.past_title) mapped.past_title = toArray(copilotFilters.past_title)
+
+    // Function / Department — handleApplyFilters reads filters.function → API param "functions"
+    if (copilotFilters.functions) mapped.function = toArray(copilotFilters.functions)
+    if (copilotFilters.department && !mapped.function) mapped.function = toArray(copilotFilters.department)
+
+    // Seniority level (Claude may use seniority or seniority_level)
+    if (copilotFilters.seniority_level) mapped.seniority_level = toArray(copilotFilters.seniority_level)
+    if (copilotFilters.seniority && !mapped.seniority_level) mapped.seniority_level = toArray(copilotFilters.seniority)
+
+    // Seniority operator (include vs exclude)
+    const rawOp = copilotFilters.seniority_operator || copilotFilters.seniority_level_operator
+    if (rawOp) {
+      const op = String(rawOp).toLowerCase().includes('not') || String(rawOp) === 'exclude' ? 'not_in' : 'in'
+      setFilterOperators(prev => ({ ...prev, seniority_level: op as 'in' | 'not_in' }))
+    }
+
+    // Location
+    if (copilotFilters.location) mapped.location = toArray(copilotFilters.location)
+
+    // Name filters
+    if (copilotFilters.first_name) mapped.first_name = String(copilotFilters.first_name)
+    if (copilotFilters.last_name) mapped.last_name = String(copilotFilters.last_name)
+
+    // Profile language
+    if (copilotFilters.profile_languages) mapped.profile_languages = toArray(copilotFilters.profile_languages)
+    if (copilotFilters.languages && !mapped.profile_languages) mapped.profile_languages = toArray(copilotFilters.languages)
+
+    // Industry
+    if (copilotFilters.industry) mapped.industry = toArray(copilotFilters.industry)
+
+    // Company name
+    if (copilotFilters.company) mapped.company = String(copilotFilters.company)
+
+    // Employee size (Claude may use employees or company_size)
+    if (copilotFilters.employees) mapped.employees = toArray(copilotFilters.employees)
+    if (copilotFilters.company_size && !mapped.employees) mapped.employees = toArray(copilotFilters.company_size)
+
+    // Keyword
+    if (copilotFilters.keyword) mapped.keyword = String(copilotFilters.keyword)
+    if (copilotFilters.keywords && !mapped.keyword) mapped.keyword = String(copilotFilters.keywords)
+
+    if (Object.keys(mapped).length === 0) return
+    setCopilotMappedFilters(mapped)
+    handleApplyFilters(mapped)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────────
   const [isImporting, setIsImporting] = useState(false)
 
     // Enrichment state - field-specific like companies
@@ -686,7 +760,8 @@ function ProspectsPageContent() {
     return (
         <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
             {/* Left Sidebar - Filters */}
-            <FilterSidebar
+            <div id="prospects-filters-panel" className={cn('transition-all duration-300', isFilterHighlighted && 'ring-2 ring-primary ring-offset-2 rounded-xl')}>
+              <FilterSidebar
                 onApplyFilters={handleApplyFilters}
                 filterOperators={filterOperators}
                 onOperatorChange={(filterId, operator) => {
@@ -695,7 +770,9 @@ function ProspectsPageContent() {
                         [filterId]: operator
                     }))
                 }}
-            />
+                externalFilters={copilotMappedFilters ?? undefined}
+              />
+            </div>
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-muted/5">

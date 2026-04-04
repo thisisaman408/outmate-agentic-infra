@@ -1498,7 +1498,9 @@ class ExploriumService:
                     request=resp.request,
                     response=resp,
                 )
-            return resp.json()
+            result = resp.json()
+            import logging; logging.getLogger(__name__).info("[DEBUG] fetch_business_events payload=%s raw_response=%s", payload, str(result)[:500])
+            return result
 
     async def fetch_prospect_events(
         self,
@@ -1528,7 +1530,9 @@ class ExploriumService:
                     request=resp.request,
                     response=resp,
                 )
-            return resp.json()
+            result = resp.json()
+            import logging; logging.getLogger(__name__).info("[DEBUG] fetch_prospect_events payload=%s raw_response=%s", payload, str(result)[:500])
+            return result
 
     async def enroll_business_events(self, business_ids: List[str], event_types: List[str]) -> Dict[str, Any]:
         payload = {

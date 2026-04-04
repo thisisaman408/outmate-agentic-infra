@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { AgenticSearchPanel } from "@/components/ai-agents/agentic-search-panel"
 import { LookalikePanel } from "@/components/ai-agents/lookalike-panel"
 import { ResearchPanel } from "@/components/ai-agents/research-panel"
@@ -98,8 +99,34 @@ const AGENTS = [
   },
 ]
 
+// Map store agent keys → tab IDs
+const AGENT_KEY_TO_TAB: Record<string, string> = {
+  agentic_search: 'search',
+  lookalike: 'lookalike',
+  research: 'research',
+  predictive: 'predictive',
+  crossfire: 'crossfire',
+  compliance_oracle: 'compliance',
+  virality_engine: 'virality',
+  talent_radar: 'talent',
+  regime_shifter: 'regime',
+}
+
 export default function AIAgentsPage() {
   const [activeTab, setActiveTab] = useState("search")
+
+  // Auto-switch tab when Automation Agent injects a form
+  const copilotForms = useCoPilotAgentStore((s) => s.copilotForms)
+  useEffect(() => {
+    const agentKeys = Object.keys(AGENT_KEY_TO_TAB)
+    for (const key of agentKeys) {
+      if (copilotForms?.[key]) {
+        const tabId = AGENT_KEY_TO_TAB[key]
+        setActiveTab(tabId)
+        break
+      }
+    }
+  }, [copilotForms])
 
   const activeAgent = AGENTS.find((a) => a.id === activeTab) || AGENTS[0]
 

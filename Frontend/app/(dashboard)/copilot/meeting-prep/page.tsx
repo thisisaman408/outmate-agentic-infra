@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Loader2, Calendar, ChevronDown, ChevronUp, X, Clock, Zap } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { copilotApi, type MeetingPrepInput } from "@/lib/api/copilot"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 
 interface AutoBrief {
   id: string
@@ -107,6 +108,50 @@ export default function MeetingPrepPage() {
   const [autoBriefs, setAutoBriefs] = useState<AutoBrief[]>([])
   const { toast } = useToast()
   const searchParams = useSearchParams()
+
+  // ── Agent store subscription ──
+  const agentForm = useCoPilotAgentStore(
+    (state) => state.copilotForms?.['meeting_prep']
+  )
+  const isAgentHighlighted = useCoPilotAgentStore(
+    (state) => state.highlightedElement === 'meeting_prep-form-panel'
+  )
+  const prevSubmitSignal = useRef<number>(0)
+
+  // When agent injects fields, pre-fill and optionally auto-submit
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+
+    // Pre-fill form fields
+    setForm({
+      company_name: f.company_name ?? "",
+      company_domain: f.company_domain ?? "",
+      prospect_name: f.prospect_name ?? "",
+      prospect_title: f.prospect_title ?? "",
+    })
+
+    // Auto-submit only when submitSignal increments (new injection)
+    if (submitSignal > prevSubmitSignal.current && f.company_name) {
+      prevSubmitSignal.current = submitSignal
+      // Run submit after state has settled
+      setTimeout(() => {
+        setIsLoading(true)
+        copilotApi.generateMeetingPrep({
+          company_name: f.company_name,
+          company_domain: f.company_domain,
+          prospect_name: f.prospect_name,
+          prospect_title: f.prospect_title,
+        }).then((data) => {
+          setResult(data)
+          localStorage.setItem("last_meeting_prep", JSON.stringify(data))
+        }).catch((err: any) => {
+          toast({ title: "Error", description: err?.message || "Failed to generate meeting prep", variant: "destructive" })
+        }).finally(() => setIsLoading(false))
+      }, 50)
+    }
+  }, [agentForm, toast])
 
   // Restore last result when arriving from a notification
   useEffect(() => {
@@ -213,7 +258,10 @@ export default function MeetingPrepPage() {
         </div>
       )}
 
-      <Card>
+      <Card
+        id="meeting_prep-form-panel"
+        className={isAgentHighlighted ? "ring-2 ring-primary/60 shadow-lg shadow-primary/20 transition-shadow duration-300" : ""}
+      >
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">

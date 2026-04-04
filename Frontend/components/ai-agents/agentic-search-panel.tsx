@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -121,6 +122,30 @@ export function AgenticSearchPanel() {
   const [isSearching, setIsSearching] = useState(false)
   const [results, setResults] = useState<AgenticSearchResult[]>([])
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['agentic_search'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.query) setQuery(f.query as string)
+    if (submitSignal > prevSubmitSignal.current && f.query) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsSearching(true)
+        setResults([])
+        try {
+          const r = await aiAgentsApi.searchProspects(f.query as string)
+          setResults(r)
+          toast({ title: 'Search Complete', description: `Agent identified ${r.length} prospects.` })
+        } catch (err: any) {
+          toast({ title: 'Search Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsSearching(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const getCardKey = (result: AgenticSearchResult, idx: number) =>
     `${result.id ?? `record-${idx}`}-${idx}`

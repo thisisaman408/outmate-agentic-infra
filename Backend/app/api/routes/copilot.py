@@ -22,6 +22,12 @@ from app.schemas.copilot import (
     ProductAssistantRequest,
     ProductAssistantResponse,
     SaveChatSessionRequest,
+    OrchestratorRequest,
+    AuditLogEntry,
+    AuditLogEntryFull,
+    AgentChatRequest,
+    AgentChatResponse,
+    AgentToolCall,
 )
 from app.db.models.copilot_chat_session import CopilotChatSession
 from app.api.deps.auth import get_current_user
@@ -499,6 +505,94 @@ async def get_credits(
 
 # ── Lead Copilot ──────────────────────────────────────────────
 
+@router.get("/prospect-search")
+async def search_prospects(
+    q: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Search prospects by name — DB first, CrustData fallback if no DB results."""
+    import uuid as _uuid
+    from app.db.models.prospect import Prospect
+    from app.db.models.company import Company
+
+    results = []
+
+    # ── 1. DB search ──────────────────────────────────────────────────────
+    try:
+        rows = (
+            db.query(
+                Prospect.id,
+                Prospect.full_name,
+                Prospect.job_title,
+                Company.name.label("company_name"),
+            )
+            .outerjoin(Company, Prospect.company_id == Company.id)
+            .filter(
+                Prospect.user_id == _uuid.UUID(str(current_user.id)),
+                Prospect.full_name.ilike(f"%{q}%"),
+            )
+            .limit(5)
+            .all()
+        )
+        results = [
+            {
+                "id": str(r.id),
+                "name": r.full_name or "",
+                "title": r.job_title or "",
+                "company": r.company_name or "",
+                "source": "db",
+                "context_overrides": None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning(f"Prospect DB search error: {e}")
+
+    if results:
+        return results
+
+    # ── 2. CrustData fallback ─────────────────────────────────────────────
+    try:
+        from app.core.config import settings
+        from app.services.crustdata.prospect_search_service import ProspectSearchService
+
+        api_key = getattr(settings, "CRUSTDATA_API_KEY", "")
+        if api_key and api_key not in ("", "placeholder_for_dev"):
+            svc = ProspectSearchService(api_key)
+            name_parts = q.strip().split()
+            raw = await svc.search(name=q, limit=5)
+            profiles = raw.get("profiles") or raw.get("people") or []
+            for p in profiles:
+                raw_id = p.get("person_id") or p.get("linkedin_profile_urn") or p.get("id") or ""
+                employer = (p.get("current_employers") or [{}])[0] or {}
+                results.append({
+                    "id": str(raw_id),
+                    "name": p.get("name") or p.get("full_name") or q,
+                    "title": p.get("job_title") or p.get("headline") or "",
+                    "company": employer.get("name") or "",
+                    "source": "crustdata",
+                    "context_overrides": {
+                        "prospect": {
+                            "id": str(raw_id),
+                            "name": p.get("name") or q,
+                            "title": p.get("job_title") or "",
+                            "company": employer.get("name") or "",
+                            "email": p.get("email") or None,
+                            "linkedin_url": p.get("flagship_profile_url") or p.get("linkedin_url") or None,
+                        },
+                        "company": {
+                            "name": employer.get("name") or "",
+                            "domain": employer.get("company_website_domain") or None,
+                        },
+                    },
+                })
+    except Exception as e:
+        logger.warning(f"CrustData prospect search error: {e}")
+
+    return results
+
+
 @router.get("/lead-context/{prospect_id}")
 async def get_lead_context(
     prospect_id: str,
@@ -663,7 +757,8 @@ async def ask_product_assistant_stream(
         try:
             async for chunk in service.stream_ask(
                 question=request.question,
-                route=request.context.route if request.context else None
+                route=request.context.route if request.context else None,
+                user_id=str(current_user.id),
             ):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
@@ -988,4 +1083,242 @@ async def notifications_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ── Orchestrator ──────────────────────────────────────────────
+
+@router.post("/orchestrate")
+async def orchestrate(
+    request: OrchestratorRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Multi-step Co-Pilot orchestration with live SSE progress."""
+    from app.services.copilot.orchestrator_service import OrchestratorService
+
+    # Minimum 1 credit for the planner; actual cost grows with steps.
+    _check_credits(db, current_user.id, 1)
+
+    async def event_generator():
+        svc = OrchestratorService(db)
+        total_credits = 0
+        try:
+            async for event in svc.execute(
+                user_id=str(current_user.id),
+                prospect_id=request.prospect_id,
+                task=request.task,
+                context_overrides=request.context_overrides,
+            ):
+                if event.get("type") == "complete":
+                    artifact = event.get("data", {})
+                    total_credits = artifact.get("credits_used", 0)
+                    # Deduct credits on success
+                    if total_credits > 0:
+                        _deduct(
+                            db,
+                            current_user.id,
+                            total_credits,
+                            f"Copilot Orchestrate: {request.task[:60]}",
+                        )
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.error("Orchestrate stream error: %s", exc, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'data': {'message': str(exc)}})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.delete("/context/invalidate/{prospect_id}", status_code=204)
+async def invalidate_context(
+    prospect_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Manually bust the Redis context cache for a prospect."""
+    from app.services.copilot.context_engine import context_engine
+    await context_engine.invalidate(str(current_user.id), prospect_id)
+
+
+# ── Audit Log ─────────────────────────────────────────────────
+
+@router.get("/audit-log", response_model=list[AuditLogEntry])
+def get_audit_log(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Returns the last N Co-Pilot actions for the current user."""
+    from app.services.copilot.audit_log_service import AuditLogService
+    svc = AuditLogService(db)
+    rows = svc.list_for_user(str(current_user.id), limit=limit, offset=offset)
+    return [
+        AuditLogEntry(
+            id=str(r.id),
+            action_type=r.action_type,
+            user_prompt=r.user_prompt,
+            prospect_id=str(r.prospect_id) if r.prospect_id else None,
+            company_name=r.company_name,
+            status=r.status,
+            credits_used=r.credits_used or 0,
+            duration_ms=r.duration_ms,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        )
+        for r in rows
+    ]
+
+
+# ── Automation Agent (Tool Calling) ──────────────────────────
+
+@router.post("/chat-with-tools", response_model=AgentChatResponse)
+async def chat_with_tools(
+    request: AgentChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Co-Pilot Automation Agent — Claude with tool calling via OpenRouter.
+
+    Claude uses tools to: navigate_to, set_filters, execute_search,
+    get_module_parameters, create_campaign, create_workflow, summarize_results.
+
+    Cost: 0 credits (automation agent is credit-free for basic navigation).
+    """
+    from app.services.openrouter_service import OpenRouterService
+    from app.core.config import settings as _settings
+
+    # Build system prompt (use provided or default automation system prompt)
+    system_prompt = request.system or (
+        "You are an automation agent for Outmate, a B2B sales intelligence platform. "
+        "Use the available tools to navigate to pages, set filters, and execute searches "
+        "based on the user's request. Always navigate to the correct page before setting filters."
+    )
+
+    # Convert messages to dict format
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+    # Convert tools to dict format
+    tools = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "input_schema": t.input_schema,
+        }
+        for t in request.tools
+    ]
+
+    svc = OpenRouterService()
+    result = await svc.chat_with_tools(
+        system_prompt=system_prompt,
+        messages=messages,
+        tools=tools,
+        temperature=0.3,
+        max_tokens=1024,
+    )
+
+    tool_calls = [
+        AgentToolCall(
+            id=tc["id"],
+            name=tc["name"],
+            input=tc["input"],
+        )
+        for tc in result["tool_calls"]
+    ]
+
+    return AgentChatResponse(
+        text=result["text"],
+        tool_calls=tool_calls,
+        stop_reason=result["stop_reason"],
+    )
+
+
+@router.post("/chat-with-tools/stream")
+async def chat_with_tools_stream(
+    request: AgentChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Co-Pilot Automation Agent — streaming SSE variant.
+
+    Sends SSE events:
+      data: {"type": "text_delta", "text": "..."}
+      data: {"type": "tool_calls",  "tool_calls": [...]}
+      data: {"type": "done"}
+      data: {"type": "error",       "message": "..."}
+
+    Cost: 0 credits (same as the non-streaming endpoint).
+    """
+    import json as _json
+    from fastapi.responses import StreamingResponse
+    from app.services.openrouter_service import OpenRouterService
+
+    system_prompt = request.system or (
+        "You are an automation agent for Outmate. "
+        "Use the available tools to navigate, set filters, and execute searches."
+    )
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    tools = [
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        for t in request.tools
+    ]
+
+    async def event_generator():
+        svc = OpenRouterService()
+        try:
+            async for chunk in svc.chat_with_tools_stream(
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                temperature=0.3,
+                max_tokens=1024,
+            ):
+                yield f"data: {_json.dumps(chunk)}\n\n"
+        except Exception as exc:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        finally:
+            yield f"data: {_json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/audit-log/{entry_id}", response_model=AuditLogEntryFull)
+def get_audit_log_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Full detail for one audit log entry."""
+    from app.services.copilot.audit_log_service import AuditLogService
+    svc = AuditLogService(db)
+    row = svc.get_by_id(entry_id)
+    if not row or str(row.user_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Audit log entry not found")
+    return AuditLogEntryFull(
+        id=str(row.id),
+        action_type=row.action_type,
+        user_prompt=row.user_prompt,
+        prospect_id=str(row.prospect_id) if row.prospect_id else None,
+        company_name=row.company_name,
+        status=row.status,
+        credits_used=row.credits_used or 0,
+        duration_ms=row.duration_ms,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        plan=row.plan,
+        steps_run=row.steps_run,
+        output=row.output,
+        enrichment_sources=row.enrichment_sources,
     )

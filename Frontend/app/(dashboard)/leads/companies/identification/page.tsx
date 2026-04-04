@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,6 +58,73 @@ export default function CompanyIdentificationPage() {
   const [companyId, setCompanyId] = useState("")
   const [exactMatch, setExactMatch] = useState(false)
   const [count, setCount] = useState("10")
+
+  // ── Copilot automation agent bridge ──────────────────────────────────
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['company_identification'])
+  const lastCopilotKeyRef = useRef('')
+
+  const handleCopilotSearch = async (cf: Record<string, unknown>) => {
+    setLoading(true)
+    setError(null)
+    setResults([])
+    setSearched(true)
+
+    try {
+      const requestBody: Record<string, unknown> = {
+        exact_match: Boolean(cf.exact_match ?? false),
+        count: parseInt(String(cf.num_results ?? '10')),
+      }
+      if (cf.company_name) requestBody.query_company_name = cf.company_name
+      else if (cf.domain) requestBody.query_company_website = cf.domain
+      else if (cf.profile_url) requestBody.query_company_linkedin_url = cf.profile_url
+      else if (cf.company_profile_url) requestBody.query_company_crunchbase_url = cf.company_profile_url
+      else if (cf.company_id) requestBody.query_company_id = cf.company_id
+      else { setError("Please provide at least one identifier"); setLoading(false); return }
+
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${API}/api/v1/crustdata/identify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const data = await response.json()
+      const normalizedResults = Array.isArray(data)
+        ? data.filter((item: unknown) => {
+            if (!item || typeof item !== "object") return false
+            const r = item as Record<string, unknown>
+            return Boolean(r.company_name || r.company_website_domain || r.company_website || r.linkedin_profile_url || r.company_id)
+          })
+        : []
+      setResults(normalizedResults as IdentificationResult[])
+      if (normalizedResults.length === 0) setError("No results found")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotKeyRef.current) return
+    lastCopilotKeyRef.current = key
+
+    // Update form fields for UI display
+    if (copilotFilters.company_name) setCompanyName(String(copilotFilters.company_name))
+    if (copilotFilters.domain) setCompanyWebsite(String(copilotFilters.domain))
+    if (copilotFilters.profile_url) setLinkedinUrl(String(copilotFilters.profile_url))
+    if (copilotFilters.company_profile_url) setCrunchbaseUrl(String(copilotFilters.company_profile_url))
+    if (copilotFilters.company_id) setCompanyId(String(copilotFilters.company_id))
+    if (copilotFilters.num_results) setCount(String(copilotFilters.num_results))
+    if (copilotFilters.exact_match !== undefined) setExactMatch(Boolean(copilotFilters.exact_match))
+
+    // Search directly with filter values (avoids stale closure issue)
+    handleCopilotSearch(copilotFilters as Record<string, unknown>)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────
 
   const handleSearch = async () => {
     setLoading(true)

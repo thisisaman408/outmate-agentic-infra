@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +25,36 @@ export function CrossfirePanel() {
   const [notes, setNotes] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['crossfire'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.competitor_domain) setCompetitorDomain(f.competitor_domain as string)
+    if (f.target_region) setTargetRegion(f.target_region as string)
+    if (f.extra_context) setNotes(f.extra_context as string)
+    if (submitSignal > prevSubmitSignal.current && f.competitor_domain) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsRunning(true)
+        setOutput(null)
+        try {
+          const res = await gtmAgentsApi.runCrossfire({
+            competitor_domain: f.competitor_domain as string,
+            target_region: f.target_region as string | undefined,
+            notes: f.extra_context as string | undefined,
+          })
+          setOutput(extractResultText(res))
+          toast({ title: 'Crossfire Deployed', description: 'Competitive intelligence run complete.' })
+        } catch (err: any) {
+          toast({ title: 'Crossfire Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsRunning(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleRun = async () => {
     if (!competitorDomain.trim()) {

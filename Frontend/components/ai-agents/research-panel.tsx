@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -72,6 +73,32 @@ export function ResearchPanel() {
   const [depth, setDepth] = useState<"quick" | "standard" | "deep">("standard")
   const [isResearching, setIsResearching] = useState(false)
   const [result, setResult] = useState<ResearchResult | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['research'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.entity_name) setCompanyName(f.entity_name as string)
+    if (f.scan_intensity && ['quick','standard','deep'].includes(f.scan_intensity)) setDepth(f.scan_intensity as "quick"|"standard"|"deep")
+    if (submitSignal > prevSubmitSignal.current && f.entity_name) {
+      prevSubmitSignal.current = submitSignal
+      const d = (f.scan_intensity as "quick"|"standard"|"deep") || 'standard'
+      setTimeout(async () => {
+        setIsResearching(true)
+        setResult(null)
+        try {
+          const r = await aiAgentsApi.researchCompany(f.entity_name as string, d)
+          setResult(r)
+          toast({ title: 'Intelligence Gathered', description: `Deep research on ${f.entity_name} complete.` })
+        } catch (err: any) {
+          toast({ title: 'Research Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsResearching(false) }
+      }, 80)
+    }
+  }, [agentForm])
   const derived = result
     ? {
         companyInitial: result.companyName?.[0] || "?",

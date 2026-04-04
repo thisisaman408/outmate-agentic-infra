@@ -26,6 +26,7 @@ from app.db.models.identity_graph import IdentityNode
 from app.db.models.product_knowledge import ProductKnowledge
 from app.db.models.copilot_chat_session import CopilotChatSession
 from app.db.models.copilot_notification import CopilotNotification
+from app.db.models.copilot_audit_log import CopilotAuditLog
 # Signal pipeline
 from app.db.models.signal_event import SignalEvent
 
@@ -60,6 +61,7 @@ __all__ = [
     "ProductKnowledge",
     "CopilotChatSession",
     "CopilotNotification",
+    "CopilotAuditLog",
     # Signal pipeline
     "SignalEvent",
 ]

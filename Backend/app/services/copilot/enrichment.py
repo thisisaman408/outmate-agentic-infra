@@ -149,7 +149,7 @@ def format_prospect_context(articles: list[dict], prospect_name: str) -> str:
     """Build a text block of prospect information for the LLM prompt."""
     if not articles:
         return ""
-    lines = [f"=== PUBLIC INFO ABOUT {prospect_name.upper()} (from web search) ==="]
+    lines = [f"=== PUBLIC INFO ABOUT {(prospect_name or '').upper()} (from web search) ==="]
     for a in articles[:3]:
         title = a.get("title", "")
         snippet = a.get("content", "")[:200]

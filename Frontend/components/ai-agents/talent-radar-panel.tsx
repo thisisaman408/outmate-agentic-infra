@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -23,6 +24,34 @@ export function TalentRadarPanel() {
   const [lookback, setLookback] = useState(90)
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['talent_radar'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.key_accounts) setAccounts(f.key_accounts as string)
+    if (typeof f.lookback_window === 'number') setLookback(f.lookback_window)
+    if (submitSignal > prevSubmitSignal.current && f.key_accounts) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsRunning(true)
+        setOutput(null)
+        try {
+          const res = await gtmAgentsApi.runTalentRadar({
+            accounts: f.key_accounts as string,
+            lookback_days: (typeof f.lookback_window === 'number' ? f.lookback_window : 90),
+          })
+          setOutput(extractResultText(res))
+          toast({ title: 'Talent Radar Signal Map Ready', description: 'Review early churn risk and retention plays.' })
+        } catch (err: any) {
+          toast({ title: 'Talent Radar Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsRunning(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleRun = async () => {
     if (!accounts.trim()) {

@@ -439,4 +439,146 @@ export const copilotApi = {
     )
     return handleResponse(response, "Failed to load suggestions")
   },
+
+  // Prospect search
+  searchProspects: async (q: string): Promise<{ id: string; name: string; title: string; company: string }[]> => {
+    const response = await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/prospect-search?q=${encodeURIComponent(q)}`
+    )
+    return handleResponse(response, "Failed to search prospects")
+  },
+
+  // ── Orchestrator ──────────────────────────────────────────────
+
+  orchestrate: async (
+    prospectId: string,
+    task: string,
+    onEvent: (event: OrchestratorEvent) => void,
+    signal?: AbortSignal,
+    contextOverrides?: Record<string, unknown> | null,
+  ): Promise<void> => {
+    const authHeaders = authService.getAuthHeaders()
+    const response = await fetch(`${BACKEND_BASE}/api/copilot/orchestrate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({ prospect_id: prospectId, task, context_overrides: contextOverrides ?? null }),
+      signal,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      if (response.status === 402 && error?.detail?.credits_required !== undefined) {
+        throw new InsufficientCreditsError(error.detail)
+      }
+      throw new Error(error?.detail || "Orchestration failed")
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error("No response body")
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const event: OrchestratorEvent = JSON.parse(line.slice(6))
+            onEvent(event)
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+    }
+  },
+
+  invalidateContext: async (prospectId: string): Promise<void> => {
+    await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/context/invalidate/${encodeURIComponent(prospectId)}`,
+      { method: "DELETE" },
+    )
+  },
+
+  // ── Audit Log ─────────────────────────────────────────────────
+
+  getAuditLog: async (limit = 50, offset = 0): Promise<AuditLogEntry[]> => {
+    const response = await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/audit-log?limit=${limit}&offset=${offset}`
+    )
+    return handleResponse(response, "Failed to load audit log")
+  },
+
+  getAuditLogEntry: async (id: string): Promise<AuditLogEntryFull> => {
+    const response = await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/audit-log/${encodeURIComponent(id)}`
+    )
+    return handleResponse(response, "Failed to load audit log entry")
+  },
+}
+
+// ── Orchestrator types ────────────────────────────────────────
+
+export type OrchestratorEvent =
+  | { type: "context_loading" }
+  | { type: "planning" }
+  | { type: "plan_ready"; data: { intent: string; steps: PlanStep[]; estimated_credits: number } }
+  | { type: "steps_starting"; data: { steps: string[] } }
+  | { type: "step_complete"; data: { step_id: string; label: string; result: unknown; credits: number } }
+  | { type: "merging" }
+  | { type: "complete"; data: OrchestratorArtifact }
+  | { type: "error"; data: { message: string; step_id?: string } }
+
+export interface PlanStep {
+  step_id: string
+  action: string
+  label: string
+  depends_on: string[]
+  input_from: string[]
+  extra_instruction?: string
+}
+
+export interface ArtifactSection {
+  step_id: string
+  label: string
+  action: string
+  result: Record<string, unknown>
+}
+
+export interface OrchestratorArtifact {
+  intent: string
+  summary: string
+  steps_completed: string[]
+  sections: ArtifactSection[]
+  credits_used: number
+  duration_ms: number
+}
+
+// ── Audit log types ───────────────────────────────────────────
+
+export interface AuditLogEntry {
+  id: string
+  action_type: string
+  user_prompt?: string
+  prospect_id?: string
+  company_name?: string
+  status: string
+  credits_used: number
+  duration_ms?: number
+  created_at?: string
+}
+
+export interface AuditLogEntryFull extends AuditLogEntry {
+  plan?: Record<string, unknown>
+  steps_run?: Record<string, unknown>[]
+  output?: Record<string, unknown>
+  enrichment_sources?: string[]
 }

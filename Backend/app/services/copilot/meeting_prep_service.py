@@ -128,7 +128,7 @@ class MeetingPrepService:
                 system_prompt=MEETING_PREP_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.4,
-                max_tokens=2000,
+                max_tokens=600,
             )
 
         prep = CopilotMeetingPrep(

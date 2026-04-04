@@ -70,6 +70,7 @@ function NotificationRow({
 export function NotificationDropdown() {
   const router = useRouter()
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications()
+  const unread = notifications.filter((n) => !n.is_read)
 
   function handleRead(id: string, url: string) {
     markRead(id)
@@ -112,14 +113,14 @@ export function NotificationDropdown() {
 
         {/* List */}
         <ScrollArea className="max-h-[400px]">
-          {notifications.length === 0 ? (
+          {unread.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
               <Inbox className="h-8 w-8 opacity-40" />
-              <p className="text-sm">No notifications yet</p>
+              <p className="text-sm">You're all caught up</p>
             </div>
           ) : (
             <div className="p-2 flex flex-col gap-0.5">
-              {notifications.map((n) => (
+              {unread.map((n) => (
                 <NotificationRow key={n.id} notif={n} onRead={handleRead} />
               ))}
             </div>

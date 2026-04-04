@@ -271,7 +271,13 @@ class OpenRouterService:
             )
 
         data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        if "error" in data:
+            err = data["error"]
+            raise ValueError(f"OpenRouter error: {err.get('message', err)}")
+
+        choice = data.get("choices", [{}])[0]
+        content = choice.get("message", {}).get("content", "")
         if isinstance(content, list):
             content = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
 
@@ -281,6 +287,10 @@ class OpenRouterService:
         output_tokens = usage.get("completion_tokens", 0)
         model_used = payload.get("model", self.default_model)
         self._log_token_usage(model_used, input_tokens, output_tokens, agent_type)
+
+        if not str(content).strip():
+            finish_reason = choice.get("finish_reason", "unknown")
+            raise ValueError(f"LLM returned empty content (finish_reason={finish_reason})")
 
         return str(content).strip()
 
@@ -300,8 +310,10 @@ class OpenRouterService:
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
         }
+        # Only add response_format for OpenAI models — Claude handles JSON via prompt
+        if "openai/" in self.default_model or "openai/" in self.fallback_model:
+            payload["response_format"] = {"type": "json_object"}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -320,6 +332,12 @@ class OpenRouterService:
             )
 
         data = response.json()
+
+        # OpenRouter may return a top-level error even on 200
+        if "error" in data:
+            err = data["error"]
+            raise ValueError(f"OpenRouter error: {err.get('message', err)}")
+
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
         content = message.get("content", "")
@@ -336,7 +354,17 @@ class OpenRouterService:
         model_used = payload.get("model", self.default_model)
         self._log_token_usage(model_used, input_tokens, output_tokens, agent_type)
 
-        return json.loads(content)
+        if not content:
+            finish_reason = choice.get("finish_reason", "unknown")
+            raise ValueError(f"LLM returned empty content (finish_reason={finish_reason})")
+
+        # Strip markdown code fences if model ignored json_object mode
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            lines = stripped.split("\n")
+            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        return json.loads(stripped)
 
     async def chat_completion_structured_stream(
         self,
@@ -359,9 +387,10 @@ class OpenRouterService:
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
             "stream": True,
         }
+        if "openai/" in self.default_model or "openai/" in self.fallback_model:
+            payload["response_format"] = {"type": "json_object"}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -370,46 +399,47 @@ class OpenRouterService:
             "X-OpenRouter-Title": "Outmate AI",
         }
 
-        response = await self._try_completion_with_fallback(payload, headers, timeout=45, stream=True)
-
         accumulated = ""
         total_input_tokens = 0
         total_output_tokens = 0
 
-        async with response:
-            if response.status_code >= 400:
-                body = await response.aread()
-                raise httpx.HTTPStatusError(
-                    f"{response.status_code}: {body.decode()}",
-                    request=response.request,
-                    response=response,
-                )
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data_str = line[6:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content", "")
-                    if token:
-                        accumulated += token
-                        yield {"type": "token", "content": token}
-
-                    # Accumulate usage from streaming chunks
-                    usage = chunk.get("usage", {})
-                    if usage:
-                        total_input_tokens = max(total_input_tokens, usage.get("prompt_tokens", 0))
-                        total_output_tokens += usage.get("completion_tokens", 0)
-
-                except (json.JSONDecodeError, IndexError):
-                    continue
+        payload["model"] = self.default_model
+        async with httpx.AsyncClient(timeout=45) as client:
+            async with client.stream("POST", f"{self.base_url}/chat/completions", json=payload, headers=headers) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise httpx.HTTPStatusError(
+                        f"{response.status_code}: {body.decode()}",
+                        request=response.request,
+                        response=response,
+                    )
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            accumulated += token
+                            yield {"type": "token", "content": token}
+                        usage = chunk.get("usage", {})
+                        if usage:
+                            total_input_tokens = max(total_input_tokens, usage.get("prompt_tokens", 0))
+                            total_output_tokens += usage.get("completion_tokens", 0)
+                    except (json.JSONDecodeError, IndexError):
+                        continue
 
         # Parse the accumulated JSON and yield the final result
+        stripped = accumulated.strip()
+        if stripped.startswith("```"):
+            lines = stripped.split("\n")
+            stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
         try:
-            result = json.loads(accumulated)
+            result = json.loads(stripped)
         except json.JSONDecodeError:
             result = {"raw_text": accumulated}
 
@@ -450,48 +480,269 @@ class OpenRouterService:
             "X-OpenRouter-Title": "Outmate AI",
         }
 
-        response = await self._try_completion_with_fallback(payload, headers, timeout=45, stream=True)
-
         accumulated = ""
         total_input_tokens = 0
         total_output_tokens = 0
 
-        async with response:
-            if response.status_code >= 400:
-                body = await response.aread()
-                raise httpx.HTTPStatusError(
-                    f"{response.status_code}: {body.decode()}",
-                    request=response.request,
-                    response=response,
-                )
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data_str = line[6:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content", "")
-                    if token:
-                        accumulated += token
-                        yield {"type": "token", "content": token}
-
-                    # Accumulate usage from streaming chunks
-                    usage = chunk.get("usage", {})
-                    if usage:
-                        total_input_tokens = max(total_input_tokens, usage.get("prompt_tokens", 0))
-                        total_output_tokens += usage.get("completion_tokens", 0)
-
-                except (json.JSONDecodeError, IndexError):
-                    continue
+        payload["model"] = self.default_model
+        async with httpx.AsyncClient(timeout=45) as client:
+            async with client.stream("POST", f"{self.base_url}/chat/completions", json=payload, headers=headers) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise httpx.HTTPStatusError(
+                        f"{response.status_code}: {body.decode()}",
+                        request=response.request,
+                        response=response,
+                    )
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            accumulated += token
+                            yield {"type": "token", "content": token}
+                        usage = chunk.get("usage", {})
+                        if usage:
+                            total_input_tokens = max(total_input_tokens, usage.get("prompt_tokens", 0))
+                            total_output_tokens += usage.get("completion_tokens", 0)
+                    except (json.JSONDecodeError, IndexError):
+                        continue
 
         # Log token usage for streaming
         model_used = payload.get("model", self.default_model)
         self._log_token_usage(model_used, total_input_tokens, total_output_tokens, agent_type)
 
         yield {"type": "done", "result": accumulated.strip()}
+
+    async def chat_with_tools(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+    ) -> Dict[str, Any]:
+        """Call Claude via OpenRouter with tool calling (OpenAI-compatible format).
+
+        Args:
+            system_prompt: System instructions for the agent
+            messages: Conversation history [{"role": "user"/"assistant", "content": "..."}]
+            tools: Tools in Anthropic format (with input_schema) — converted to OpenAI format internally
+            temperature: Model temperature
+            max_tokens: Max tokens in response
+
+        Returns:
+            Dict with "text" (assistant text), "tool_calls" (list of tool calls), "stop_reason"
+        """
+
+        # Convert Anthropic-format tools to OpenAI-compatible format
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            })
+
+        # Build messages with system as first message (OpenAI format)
+        all_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        payload = {
+            "messages": all_messages,
+            "tools": openai_tools,
+            "tool_choice": "auto",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:3000",
+            "X-OpenRouter-Title": "Outmate AI",
+        }
+
+        response = await self._try_completion_with_fallback(payload, headers, timeout=45)
+
+        if response.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{response.status_code} {response.reason_phrase}: {response.text}",
+                request=response.request,
+                response=response,
+            )
+
+        data = response.json()
+
+        if "error" in data:
+            err = data["error"]
+            raise ValueError(f"OpenRouter error: {err.get('message', err)}")
+
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        stop_reason = choice.get("finish_reason", "stop")
+
+        # Extract text content
+        text_content = message.get("content") or ""
+
+        # Extract tool calls (OpenAI format → normalized format)
+        raw_tool_calls = message.get("tool_calls") or []
+        tool_calls = []
+        for tc in raw_tool_calls:
+            fn = tc.get("function", {})
+            args_str = fn.get("arguments", "{}")
+            try:
+                args = json.loads(args_str)
+            except json.JSONDecodeError:
+                args = {"raw": args_str}
+            tool_calls.append({
+                "id": tc.get("id", ""),
+                "name": fn.get("name", ""),
+                "input": args,
+            })
+
+        # Log token usage
+        usage = data.get("usage", {})
+        self._log_token_usage(
+            payload.get("model", self.default_model),
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            "automation_agent",
+        )
+
+        return {
+            "text": text_content,
+            "tool_calls": tool_calls,
+            "stop_reason": stop_reason,
+        }
+
+    async def chat_with_tools_stream(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+    ):
+        """Stream Claude's response with tool calling via SSE.
+
+        Yields dicts:
+          {"type": "text_delta", "text": "..."}   — incremental text from Claude
+          {"type": "tool_calls", "tool_calls": [...]}  — final tool calls (all at once)
+
+        Tool call arguments are accumulated across chunks and emitted once complete.
+        """
+        import json as _json
+
+        # Convert Anthropic-format tools to OpenAI format
+        openai_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            }
+            for t in tools
+        ]
+
+        all_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        payload = {
+            "messages": all_messages,
+            "tools": openai_tools,
+            "tool_choice": "auto",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:3000",
+            "X-OpenRouter-Title": "Outmate AI",
+        }
+
+        # Accumulate tool call arguments across delta chunks
+        # Structure: {index: {"id": str, "name": str, "arguments": str}}
+        pending_tool_calls: Dict[int, Dict[str, Any]] = {}
+        finish_reason: str = "stop"
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise ValueError(f"OpenRouter stream error {response.status_code}: {body.decode()}")
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    raw = line[6:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = _json.loads(raw)
+                    except _json.JSONDecodeError:
+                        continue
+
+                    choice = (chunk.get("choices") or [{}])[0]
+                    finish_reason = choice.get("finish_reason") or finish_reason
+                    delta = choice.get("delta", {})
+
+                    # Stream text delta
+                    text_piece = delta.get("content") or ""
+                    if text_piece:
+                        yield {"type": "text_delta", "text": text_piece}
+
+                    # Accumulate tool call argument chunks
+                    for tc_delta in delta.get("tool_calls") or []:
+                        idx = tc_delta.get("index", 0)
+                        if idx not in pending_tool_calls:
+                            pending_tool_calls[idx] = {
+                                "id": tc_delta.get("id", ""),
+                                "name": tc_delta.get("function", {}).get("name", ""),
+                                "arguments": "",
+                            }
+                        else:
+                            if tc_delta.get("id"):
+                                pending_tool_calls[idx]["id"] = tc_delta["id"]
+                            if tc_delta.get("function", {}).get("name"):
+                                pending_tool_calls[idx]["name"] = tc_delta["function"]["name"]
+
+                        pending_tool_calls[idx]["arguments"] += (
+                            tc_delta.get("function", {}).get("arguments", "")
+                        )
+
+        # Emit tool calls after stream ends
+        if pending_tool_calls:
+            tool_calls_out = []
+            for idx in sorted(pending_tool_calls.keys()):
+                tc = pending_tool_calls[idx]
+                try:
+                    args = _json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except _json.JSONDecodeError:
+                    args = {"raw": tc["arguments"]}
+                tool_calls_out.append({
+                    "id": tc["id"] or f"tc_{idx}",
+                    "name": tc["name"],
+                    "input": args,
+                })
+            yield {"type": "tool_calls", "tool_calls": tool_calls_out}
 
     async def agent_call(
         self,

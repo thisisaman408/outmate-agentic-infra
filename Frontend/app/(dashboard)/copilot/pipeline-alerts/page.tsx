@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, AlertTriangle, Plus, Trash2, CheckCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { copilotApi, type DealInput } from "@/lib/api/copilot"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 
 const riskColor = (level: string) => {
   if (level === "red") return "destructive"
@@ -36,6 +37,49 @@ export default function PipelineAlertsPage() {
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
   const searchParams = useSearchParams()
+
+  // ── Agent store subscription ──
+  const agentForm = useCoPilotAgentStore(
+    (state) => state.copilotForms?.['pipeline_alerts']
+  )
+  const isAgentHighlighted = useCoPilotAgentStore(
+    (state) => state.highlightedElement === 'pipeline_alerts-form-panel'
+  )
+  const prevSubmitSignal = useRef<number>(0)
+
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+
+    if (Array.isArray(f.deals) && f.deals.length > 0) {
+      // Map agent deal objects to DealInput shape
+      const injected: DealInput[] = (f.deals as any[]).map((d) => ({
+        company: d.company ?? "",
+        stage: d.stage ?? "",
+        last_activity: d.last_activity ?? new Date().toISOString().split("T")[0],
+        value: typeof d.value === "number" ? d.value : parseFloat(d.value) || 0,
+      }))
+      setDeals(injected)
+
+      // Auto-submit when signal increments
+      if (submitSignal > prevSubmitSignal.current) {
+        prevSubmitSignal.current = submitSignal
+        const validDeals = injected.filter((d) => d.company && d.stage)
+        if (validDeals.length > 0) {
+          setTimeout(() => {
+            setIsLoading(true)
+            copilotApi.scanPipeline(validDeals).then((data) => {
+              setResult(data)
+              localStorage.setItem("last_pipeline_result", JSON.stringify(data))
+            }).catch((err: any) => {
+              toast({ title: "Error", description: err?.message || "Pipeline scan failed", variant: "destructive" })
+            }).finally(() => setIsLoading(false))
+          }, 50)
+        }
+      }
+    }
+  }, [agentForm, toast])
 
   useEffect(() => {
     if (searchParams.get("show") === "latest") {
@@ -91,7 +135,10 @@ export default function PipelineAlertsPage() {
       </div>
 
       {/* Deal Input Table */}
-      <Card>
+      <Card
+        id="pipeline_alerts-form-panel"
+        className={isAgentHighlighted ? "ring-2 ring-primary/60 shadow-lg shadow-primary/20 transition-shadow duration-300" : ""}
+      >
         <CardHeader>
           <CardTitle className="text-base">Enter Your Deals</CardTitle>
         </CardHeader>
