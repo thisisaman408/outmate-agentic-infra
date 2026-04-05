@@ -48,6 +48,7 @@ const navItems: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Visitors", href: "/visitors", icon: Users },
   { name: "AI-Powered Search", href: "/ai-powered-search", icon: Database },
+  { name: "Database", href: "/database", icon: Globe },
   {
     name: "Leads",
     href: "/leads",

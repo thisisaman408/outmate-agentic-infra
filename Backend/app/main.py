@@ -57,6 +57,7 @@ from app.api.routes import copilot
 from app.api.routes import watchers
 from app.api.routes import dashboard
 from app.api.routes import events_routes
+from app.api.routes import database_finder
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -312,6 +313,9 @@ logger.info("Copilot router registered")
 
 app.include_router(events_routes.router, prefix="/api/v1/events", tags=["events"], dependencies=auth_dependencies)
 logger.info("Events router registered")
+
+app.include_router(database_finder.router, prefix="/api/v1/database", tags=["database"], dependencies=auth_dependencies)
+logger.info("Database Finder router registered")
 
 @app.on_event("startup")
 async def startup_event():
