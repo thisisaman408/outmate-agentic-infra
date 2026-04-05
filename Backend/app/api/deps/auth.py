@@ -4,6 +4,7 @@ from typing import Optional
 import jwt
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -45,7 +46,20 @@ async def get_current_user(
             logger.warning("Redis denylist check failed (resetting client): %s", _redis_err)
             RedisManager.reset()
 
-    user = db.query(User).filter(User.id == user_id).first()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+    except OperationalError as db_err:
+        logger.error("Database unavailable during auth lookup for user_id=%s: %s", user_id, db_err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication backend temporarily unavailable",
+        )
+    except SQLAlchemyError as db_err:
+        logger.error("Database error during auth lookup for user_id=%s: %s", user_id, db_err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication backend temporarily unavailable",
+        )
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
@@ -85,7 +99,20 @@ async def get_current_user_optional(
             logger.warning("Redis denylist check failed (resetting client): %s", _redis_err)
             RedisManager.reset()
 
-    user = db.query(User).filter(User.id == user_id).first()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+    except OperationalError as db_err:
+        logger.error("Database unavailable during optional auth lookup for user_id=%s: %s", user_id, db_err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication backend temporarily unavailable",
+        )
+    except SQLAlchemyError as db_err:
+        logger.error("Database error during optional auth lookup for user_id=%s: %s", user_id, db_err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication backend temporarily unavailable",
+        )
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
