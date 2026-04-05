@@ -23,6 +23,12 @@ from app.db.models.copilot_pipeline_alert import CopilotPipelineAlert
 from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.db.models.watcher import Watcher
 from app.db.models.identity_graph import IdentityNode
+from app.db.models.company_resolution_alias import CompanyResolutionAlias
+from app.db.models.anonymous_visitor_profile import AnonymousVisitorProfile
+from app.db.models.office_ip_cluster import OfficeIpCluster
+from app.db.models.company_visitor_memory import CompanyVisitorMemory
+from app.db.models.person_resolution_learning_stat import PersonResolutionLearningStat
+from app.db.models.visitor_journey_sequence import VisitorJourneySequence
 from app.db.models.product_knowledge import ProductKnowledge
 from app.db.models.copilot_chat_session import CopilotChatSession
 # Signal pipeline
@@ -56,6 +62,12 @@ __all__ = [
     "CopilotPipelineAlert",
     "CopilotUserPreferences",
     "IdentityNode",
+    "CompanyResolutionAlias",
+    "AnonymousVisitorProfile",
+    "OfficeIpCluster",
+    "CompanyVisitorMemory",
+    "PersonResolutionLearningStat",
+    "VisitorJourneySequence",
     "ProductKnowledge",
     "CopilotChatSession",
     # Signal pipeline

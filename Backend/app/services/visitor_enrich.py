@@ -20,6 +20,7 @@ Design principle: the email argument is ONLY from pixel form-capture or manual i
 Login emails are NEVER passed into this pipeline.
 """
 
+import hashlib
 import httpx
 import ipinfo
 import json
@@ -37,6 +38,22 @@ from app.services.fullcontact_service import FullContactService
 from app.services.employee_discovery import EmployeeDiscoveryService
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_email(email: str | None) -> str | None:
+    if not email:
+        return None
+    cleaned = str(email).strip().lower()
+    return cleaned or None
+
+
+def _clean_text(value: Any, max_len: int = 255) -> str | None:
+    if value is None:
+        return None
+    cleaned = " ".join(str(value).strip().split())
+    if not cleaned:
+        return None
+    return cleaned[:max_len]
 
 # ── ISP / Cloud / Residential filter ─────────────────────────────────────────
 # If the IP org resolves to any of these → it's a residential/consumer/cloud IP
@@ -370,6 +387,341 @@ class VisitorEnricher:
             bool(self.contactout.api_key),
         )
 
+    def _set_person_identification(
+        self,
+        resolution: Dict[str, Any],
+        *,
+        method: str,
+        confidence: float,
+        status: str = "identified",
+        is_predicted: bool = False,
+    ) -> None:
+        current = resolution.get("person_identification") or {}
+        current_conf = float(current.get("confidence") or 0.0)
+        if current and current_conf > confidence:
+            return
+        resolution["person_identification"] = {
+            "status": status,
+            "method": method,
+            "confidence": round(float(confidence), 2),
+            "is_predicted": bool(is_predicted),
+        }
+
+    def _merge_cached_person(self, resolution: Dict[str, Any], cached_person: Dict[str, Any]) -> None:
+        if not isinstance(cached_person, dict):
+            return
+        for key in ("full_name", "email", "phone", "linkedin_url", "job_title"):
+            if cached_person.get(key) and not resolution.get(key):
+                resolution[key] = cached_person[key]
+        if cached_person.get("company") and not resolution.get("company"):
+            resolution["company"] = cached_person["company"]
+        if cached_person.get("domain") and not resolution.get("domain"):
+            resolution["domain"] = cached_person["domain"]
+        if any(resolution.get(key) for key in ("full_name", "phone", "linkedin_url", "job_title")):
+            resolution["_sources"].append("person_cache")
+            self._set_person_identification(
+                resolution,
+                method="person_cache",
+                confidence=max(float(cached_person.get("confidence") or 0.0), 0.82),
+            )
+
+    def _get_person_cache_key(self, email: str) -> str:
+        normalized = _normalize_email(email) or email
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        return f"enrich:person:{digest}"
+
+    def _add_company_candidate(
+        self,
+        resolution: Dict[str, Any],
+        *,
+        source: str,
+        company: Optional[str] = None,
+        domain: Optional[str] = None,
+        score: int = 0,
+    ) -> None:
+        company_name = _normalize_company_name(company) or _clean_text(company)
+        company_domain = _clean_domain(domain)
+        if not company_name and not company_domain:
+            return
+
+        suppressed_names = {
+            str(name).lower()
+            for name in (resolution.get("_suppressed_company_names") or [])
+            if name
+        }
+        suppressed_domains = {
+            _clean_domain(name)
+            for name in (resolution.get("_suppressed_company_domains") or [])
+            if _clean_domain(name)
+        }
+        if company_name and company_name.lower() in suppressed_names:
+            return
+        if company_domain and company_domain in suppressed_domains:
+            return
+
+        if company_name and is_isp_or_cloud(company_name, self._isp_allowlist):
+            score -= 35
+        if company_domain and is_isp_or_cloud(company_domain, self._isp_allowlist):
+            score -= 35
+        if company_domain and not resolution.get("_mx_unverified"):
+            score += 10
+
+        candidate = {
+            "source": source,
+            "company": company_name,
+            "domain": company_domain,
+            "score": max(score, 0),
+        }
+        candidates = resolution.setdefault("_company_candidates", [])
+        for existing in candidates:
+            if (
+                existing.get("source") == source
+                and existing.get("company") == candidate["company"]
+                and existing.get("domain") == candidate["domain"]
+            ):
+                existing["score"] = max(existing.get("score", 0), candidate["score"])
+                return
+        candidates.append(candidate)
+
+    def _finalize_company_resolution(self, resolution: Dict[str, Any]) -> None:
+        candidates: list[Dict[str, Any]] = []
+        if isinstance(resolution.get("_company_candidates"), list):
+            candidates.extend(dict(c) for c in resolution["_company_candidates"] if isinstance(c, dict))
+
+        person_id = resolution.get("person_identification") or {}
+        person_method = str(person_id.get("method") or "").lower()
+        primary_score = 60
+        if person_id.get("status") == "verified":
+            primary_score += 25
+        elif person_method in {"captured_work_email", "identity_graph"}:
+            primary_score += 15
+        if resolution.get("_company_alias_match"):
+            primary_score += 20
+
+        self._add_company_candidate(
+            resolution,
+            source="primary",
+            company=resolution.get("company"),
+            domain=resolution.get("domain"),
+            score=primary_score,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="explorium",
+            company=(resolution.get("explorium") or {}).get("name"),
+            domain=(resolution.get("explorium") or {}).get("domain"),
+            score=100,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="enrich_so_ip",
+            company=(resolution.get("enrich_company") or {}).get("name"),
+            domain=(resolution.get("enrich_company") or {}).get("company_domain"),
+            score=90,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="ipinfo",
+            company=(resolution.get("ipinfo_company") or {}).get("name"),
+            domain=(resolution.get("ipinfo_company") or {}).get("domain"),
+            score=55,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="domain_rdap",
+            company=resolution.get("_domain_rdap_org"),
+            domain=resolution.get("domain"),
+            score=80,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="rdap",
+            company=resolution.get("_rdap_org"),
+            domain=resolution.get("domain"),
+            score=35,
+        )
+        self._add_company_candidate(
+            resolution,
+            source="ipapi",
+            company=resolution.get("_ipapi_org"),
+            domain=resolution.get("domain"),
+            score=25,
+        )
+        person = resolution.get("person") or {}
+        self._add_company_candidate(
+            resolution,
+            source="person_signal",
+            company=person.get("company_name"),
+            domain=person.get("company_domain") or resolution.get("domain"),
+            score=88,
+        )
+        if resolution.get("email") and "@" in str(resolution["email"]):
+            email_domain = _clean_domain(str(resolution["email"]).split("@")[-1])
+            if email_domain and email_domain not in PERSONAL_EMAIL_DOMAINS:
+                self._add_company_candidate(
+                    resolution,
+                    source="email_domain",
+                    domain=email_domain,
+                    score=92 if person_id.get("status") == "verified" else 78,
+                )
+
+        candidates = [dict(c) for c in resolution.get("_company_candidates", []) if isinstance(c, dict)]
+        if not candidates:
+            return
+
+        normalized_name_counts: dict[str, int] = {}
+        normalized_domain_counts: dict[str, int] = {}
+        for candidate in candidates:
+            name = candidate.get("company")
+            domain = candidate.get("domain")
+            if name:
+                normalized_name_counts[name.lower()] = normalized_name_counts.get(name.lower(), 0) + 1
+            if domain:
+                normalized_domain_counts[domain] = normalized_domain_counts.get(domain, 0) + 1
+
+        for candidate in candidates:
+            name = candidate.get("company")
+            domain = candidate.get("domain")
+            if name:
+                agree = normalized_name_counts.get(name.lower(), 0)
+                if agree > 1:
+                    candidate["score"] += (agree - 1) * 12
+            if domain:
+                d_agree = normalized_domain_counts.get(domain, 0)
+                if d_agree > 1:
+                    candidate["score"] += (d_agree - 1) * 10
+            if name and domain and domain.replace("-", " ").split(".")[0] in name.lower():
+                candidate["score"] += 8
+            if domain and resolution.get("email") and "@" in str(resolution["email"]):
+                email_domain = _clean_domain(str(resolution["email"]).split("@")[-1])
+                if email_domain and email_domain == domain:
+                    candidate["score"] += 14
+
+        best = max(candidates, key=lambda c: c.get("score", 0))
+        current_company = resolution.get("company")
+        current_domain = resolution.get("domain")
+        if best.get("company"):
+            resolution["company"] = best["company"]
+        if best.get("domain"):
+            resolution["domain"] = best["domain"]
+        if best.get("score"):
+            resolution["confidence"] = max(resolution.get("confidence", 0), min(best["score"] / 100.0, 0.96))
+        resolution["_company_resolution_method"] = best.get("source")
+        resolution["_company_sources_considered"] = len(candidates)
+        resolution["_company_candidates"] = candidates
+        if current_company != resolution.get("company") or current_domain != resolution.get("domain"):
+            logger.info(
+                "[Enrichment] Final company resolution chose %s (%s) via %s",
+                resolution.get("company"), resolution.get("domain"), best.get("source"),
+            )
+
+    async def _apply_company_aliases(self, resolution: Dict[str, Any]) -> None:
+        try:
+            from app.db.models.company_resolution_alias import CompanyResolutionAlias
+            from app.db.session import SessionLocal
+
+            lookup_values: list[tuple[str, str]] = []
+            company = _normalize_company_name(resolution.get("company"))
+            domain = _clean_domain(resolution.get("domain"))
+            email = _normalize_email(resolution.get("email"))
+            ipapi_org = _normalize_company_name(resolution.get("_ipapi_org"))
+            if domain:
+                lookup_values.append(("domain", domain))
+            if company:
+                lookup_values.append(("company_name", company.lower()))
+            if email and "@" in email:
+                lookup_values.append(("email_domain", email.split("@")[-1]))
+            if ipapi_org:
+                lookup_values.append(("asn_org", ipapi_org.lower()))
+
+            if not lookup_values:
+                return
+
+            db = SessionLocal()
+            try:
+                aliases = []
+                for match_type, match_value in lookup_values:
+                    alias = (
+                        db.query(CompanyResolutionAlias)
+                        .filter(
+                            CompanyResolutionAlias.is_active == True,  # noqa: E712
+                            CompanyResolutionAlias.match_type == match_type,
+                            CompanyResolutionAlias.match_value == match_value,
+                        )
+                        .order_by(CompanyResolutionAlias.confidence_boost.desc(), CompanyResolutionAlias.updated_at.desc())
+                        .first()
+                    )
+                    if alias:
+                        aliases.append(alias)
+
+                if not aliases:
+                    return
+
+                suppress_aliases = []
+                override_aliases = []
+                for alias in aliases:
+                    metadata = alias.metadata_json or {}
+                    action = str(metadata.get("action") or "").strip().lower()
+                    if action == "suppress":
+                        suppress_aliases.append(alias)
+                    else:
+                        override_aliases.append(alias)
+
+                if suppress_aliases:
+                    suppressed_names = set(resolution.get("_suppressed_company_names") or [])
+                    suppressed_domains = set(resolution.get("_suppressed_company_domains") or [])
+                    email_domain = None
+                    if email and "@" in email:
+                        email_domain = _clean_domain(email.split("@")[-1])
+
+                    for alias in suppress_aliases:
+                        match_value = str(alias.match_value or "").strip().lower()
+                        if alias.match_type in {"asn_org", "company_name"} and match_value:
+                            suppressed_names.add(match_value)
+                            current_company = _normalize_company_name(resolution.get("company"))
+                            if current_company and current_company.lower() == match_value:
+                                resolution["company"] = None
+                        if alias.match_type in {"domain", "email_domain"} and match_value:
+                            clean_match = _clean_domain(match_value)
+                            if clean_match:
+                                suppressed_domains.add(clean_match)
+                                if resolution.get("domain") and _clean_domain(resolution.get("domain")) == clean_match:
+                                    if not email_domain or email_domain != clean_match:
+                                        resolution["domain"] = None
+
+                    resolution["_suppressed_company_names"] = sorted(suppressed_names)
+                    resolution["_suppressed_company_domains"] = sorted(suppressed_domains)
+                    resolution["_sources"].append("company_alias_suppress")
+
+                if override_aliases:
+                    best_alias = max(override_aliases, key=lambda a: int(a.confidence_boost or 0))
+                    if best_alias.canonical_company:
+                        resolution["company"] = _normalize_company_name(best_alias.canonical_company) or best_alias.canonical_company
+                    if best_alias.canonical_domain:
+                        resolution["domain"] = _clean_domain(best_alias.canonical_domain)
+                    resolution["_sources"].append("company_alias")
+                    resolution["_company_alias_match"] = {
+                        "match_type": best_alias.match_type,
+                        "match_value": best_alias.match_value,
+                        "canonical_company": best_alias.canonical_company,
+                        "canonical_domain": best_alias.canonical_domain,
+                    }
+                    resolution["confidence"] = max(
+                        resolution.get("confidence", 0),
+                        min(0.72 + (int(best_alias.confidence_boost or 0) / 100.0), 0.97),
+                    )
+                    logger.info(
+                        "[Enrichment] Company alias applied: %s=%s -> %s (%s)",
+                        best_alias.match_type,
+                        best_alias.match_value,
+                        resolution.get("company"),
+                        resolution.get("domain"),
+                    )
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug("[Enrichment] Company alias lookup failed: %s", e)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Public entry point
     # ─────────────────────────────────────────────────────────────────────────
@@ -449,6 +801,12 @@ class VisitorEnricher:
             "logo_url": None,
             # Enrichment source flags (for debugging)
             "_sources": [],
+            "person_identification": {
+                "status": "anonymous",
+                "method": None,
+                "confidence": 0.0,
+                "is_predicted": False,
+            },
         }
 
         # If a form-captured work email is available, pre-fill domain
@@ -457,6 +815,12 @@ class VisitorEnricher:
             if domain_from_email not in PERSONAL_EMAIL_DOMAINS:
                 resolution["domain"] = _clean_domain(domain_from_email)
                 resolution["confidence"] = max(resolution["confidence"], 0.5)
+                self._set_person_identification(
+                    resolution,
+                    method="captured_work_email",
+                    confidence=0.5,
+                    status="partial",
+                )
 
         if is_private:
             logger.info("[Enrichment] Private IP %s — skipping external lookups", ip)
@@ -477,7 +841,18 @@ class VisitorEnricher:
                     resolution["domain"] = graph_hit["company_domain"]
                 resolution["_sources"].append("identity_graph")
                 resolution["confidence"] = max(resolution["confidence"], 0.85)
+                if any(graph_hit.get(key) for key in ("full_name", "email", "phone", "linkedin_url", "job_title")):
+                    self._set_person_identification(
+                        resolution,
+                        method="identity_graph",
+                        confidence=0.85,
+                    )
                 logger.info("[Enrichment] Identity graph HIT for visitor_id=%s ip=%s", visitor_id, ip)
+
+            if resolution["email"]:
+                cached_person = await self._get_cached_person_enrichment(resolution["email"])
+                if cached_person:
+                    self._merge_cached_person(resolution, cached_person)
                 
             # ── STEP -0.5: PDL (People Data Labs) / LiveRamp Stub ─────────────
             # TODO: Integrate external Data Cooperative graph API here.
@@ -544,6 +919,7 @@ class VisitorEnricher:
                     await self._step_enrich_so_email(resolution)
                     await self._step_bettercontact(resolution)
                     await self._step_contactout_email(resolution)
+                    await self._cache_person_enrichment(resolution)
                 # ── STEP 4: ContactOut DM from company domain (supplementary data) ──
                 if resolution.get("domain"):
                     await self._step_contactout_dm(resolution)
@@ -578,6 +954,8 @@ class VisitorEnricher:
             # ── STEP 7: Multi-source company agreement confidence booster ─────
             # Cross-validate all sources — if 2+ agree on the same company name,
             # confidence jumps significantly. Runs even when cache was hit.
+            await self._apply_company_aliases(resolution)
+            self._finalize_company_resolution(resolution)
             self._boost_confidence_by_agreement(resolution)
 
             # ── Append default Logo ──────────────────────────────────────────
@@ -586,6 +964,9 @@ class VisitorEnricher:
 
             # ── STEP 8: Store/update identity graph ───────────────────────────
             await self._step_identity_graph_store(ip, visitor_id, resolution)
+
+            if resolution.get("email"):
+                await self._cache_person_enrichment(resolution)
 
         except Exception as e:
             logger.error("[Enrichment] Unhandled fatal error: %s", e, exc_info=True)
@@ -923,8 +1304,8 @@ class VisitorEnricher:
             org_name = None
             if org and " " in org:
                 org_name = org.split(" ", 1)[1].strip()
-            elif isp:
-                org_name = isp
+            elif org:
+                org_name = org.strip()
 
             resolution["_ipapi_isp"] = isp
             resolution["_ipapi_org"] = org_name
@@ -1028,8 +1409,10 @@ class VisitorEnricher:
 
             if org_name and not resolution.get("company"):
                 resolution["company"] = _normalize_company_name(org_name) or org_name
-                resolution["ipinfo_company"] = {"name": resolution["company"]}
+                resolution["ipinfo_company"] = {"name": resolution["company"], "domain": domain}
                 resolution["confidence"] = max(resolution["confidence"], 0.35)
+            elif org_name or domain:
+                resolution["ipinfo_company"] = {"name": _normalize_company_name(org_name) or org_name, "domain": domain}
 
             if domain and not resolution.get("domain"):
                 resolution["domain"] = domain
@@ -1151,6 +1534,11 @@ class VisitorEnricher:
 
             resolution["_sources"].append("enrich_so_email")
             resolution["confidence"] = max(resolution["confidence"], 0.8)
+            self._set_person_identification(
+                resolution,
+                method="enrich_so_email",
+                confidence=0.8,
+            )
             logger.info("[Enrichment] Step 3a success: full_name=%s", full)
 
         except Exception as e:
@@ -1181,6 +1569,11 @@ class VisitorEnricher:
                 resolution["job_title"] = resolution["job_title"] or bc.get("job_title")
                 resolution["_sources"].append("bettercontact")
                 resolution["confidence"] = max(resolution["confidence"], 0.75)
+                self._set_person_identification(
+                    resolution,
+                    method="bettercontact",
+                    confidence=0.75,
+                )
                 logger.info("[Enrichment] Step 3b success: %s", bc.get("full_name"))
         except Exception as e:
             logger.warning("[Enrichment] Step 3b: BetterContact failed: %s", e)
@@ -1205,6 +1598,11 @@ class VisitorEnricher:
                 resolution["job_title"] = resolution["job_title"] or profile.get("headline") or profile.get("job_title")
                 resolution["_sources"].append("contactout_email")
                 resolution["confidence"] = max(resolution["confidence"], 0.75)
+                self._set_person_identification(
+                    resolution,
+                    method="contactout_email",
+                    confidence=0.75,
+                )
                 logger.info("[Enrichment] Step 3c success: %s", resolution["full_name"])
         except Exception as e:
             logger.warning("[Enrichment] Step 3c: ContactOut email failed: %s", e)
@@ -1648,24 +2046,45 @@ class VisitorEnricher:
         self, ip: str, visitor_id: Optional[str], resolution: Dict[str, Any]
     ) -> None:
         """Upsert enrichment results into identity_nodes."""
-        if not visitor_id:
+        normalized_email = _normalize_email(resolution.get("email"))
+        if not visitor_id and not normalized_email and not self._fp:
             return
         # Only store if we have meaningful person or company data
         has_data = any(resolution.get(k) for k in ("full_name", "email", "company", "domain"))
-        if not has_data:
+        if not has_data and not self._fp:
             return
         try:
             from app.db.session import SessionLocal
             from app.db.models.identity_graph import IdentityNode
+            from sqlalchemy import text
             db = SessionLocal()
             try:
-                node = db.query(IdentityNode).filter(IdentityNode.visitor_id == visitor_id).first()
+                node = None
+                if visitor_id:
+                    node = db.query(IdentityNode).filter(IdentityNode.visitor_id == visitor_id).first()
+                if not node and normalized_email:
+                    node = db.query(IdentityNode).filter(IdentityNode.email == normalized_email).first()
+                if not node and self._fp:
+                    fp_row = db.execute(
+                        text("""
+                            SELECT id
+                            FROM identity_nodes
+                            WHERE raw_data->>'fingerprint' = :fp
+                            ORDER BY last_seen_at DESC
+                            LIMIT 1
+                        """),
+                        {"fp": self._fp},
+                    ).first()
+                    if fp_row:
+                        node = db.query(IdentityNode).filter(IdentityNode.id == fp_row.id).first()
                 if node:
                     # Update existing — fill empty fields
                     if ip:
                         node.ip = ip
+                    if visitor_id and not node.visitor_id:
+                        node.visitor_id = visitor_id
                     # Email from form capture always wins (explicit identification)
-                    form_email = resolution.get("email")
+                    form_email = normalized_email
                     if form_email and form_email != node.email:
                         node.email = form_email
                     for attr, res_key in [
@@ -1681,19 +2100,24 @@ class VisitorEnricher:
                     existing_sources = node.sources or []
                     new_sources = resolution.get("_sources", [])
                     node.sources = list(set(existing_sources + new_sources))
+                    node.last_seen_at = datetime.now(timezone.utc)
                     # Store fingerprint in raw_data for cross-org matching
+                    raw = dict(node.raw_data or {})
                     if self._fp:
-                        raw = dict(node.raw_data or {})
                         raw["fingerprint"] = self._fp
-                        node.raw_data = raw
+                    if resolution.get("person_identification"):
+                        raw["person_identification"] = resolution["person_identification"]
+                    node.raw_data = raw
                 else:
                     raw_data: Dict[str, Any] = {}
                     if self._fp:
                         raw_data["fingerprint"] = self._fp
+                    if resolution.get("person_identification"):
+                        raw_data["person_identification"] = resolution["person_identification"]
                     node = IdentityNode(
                         visitor_id=visitor_id,
                         ip=ip,
-                        email=resolution.get("email"),
+                        email=normalized_email,
                         full_name=resolution.get("full_name"),
                         phone=resolution.get("phone"),
                         linkedin_url=resolution.get("linkedin_url"),
@@ -1717,6 +2141,7 @@ class VisitorEnricher:
 
     CACHE_TTL = 72 * 3600        # 72 hours for domain enrichment
     ASN_CACHE_TTL = 24 * 3600   # 24 hours for ASN → company mapping
+    PERSON_CACHE_TTL = 12 * 3600
 
     # ── ASN → company name Redis cache ────────────────────────────────────────
 
@@ -1742,6 +2167,50 @@ class VisitorEnricher:
             await redis.set(f"enrich:asn:{asn}", company_name, ex=self.ASN_CACHE_TTL)
         except Exception:
             pass
+
+    async def _get_cached_person_enrichment(self, email: str) -> Optional[Dict[str, Any]]:
+        normalized = _normalize_email(email)
+        if not normalized:
+            return None
+        try:
+            redis = RedisManager.get_client()
+            raw = await redis.get(self._get_person_cache_key(normalized))
+            if raw:
+                logger.info("[Enrichment] Person cache HIT for %s", normalized)
+                return json.loads(raw)
+        except Exception as e:
+            logger.debug("[Enrichment] Person cache read error: %s", e)
+        return None
+
+    async def _cache_person_enrichment(self, resolution: Dict[str, Any]) -> None:
+        email = _normalize_email(resolution.get("email"))
+        if not email:
+            return
+        person_payload = {
+            "email": email,
+            "full_name": resolution.get("full_name"),
+            "phone": resolution.get("phone"),
+            "linkedin_url": resolution.get("linkedin_url"),
+            "job_title": resolution.get("job_title"),
+            "company": resolution.get("company"),
+            "domain": resolution.get("domain"),
+            "confidence": resolution.get("confidence", 0.0),
+        }
+        has_person_data = any(
+            person_payload.get(key) for key in ("full_name", "phone", "linkedin_url", "job_title")
+        )
+        if not has_person_data:
+            return
+        try:
+            redis = RedisManager.get_client()
+            await redis.set(
+                self._get_person_cache_key(email),
+                json.dumps(person_payload, default=str),
+                ex=self.PERSON_CACHE_TTL,
+            )
+            logger.info("[Enrichment] Cached person enrichment for %s (TTL=%dh)", email, self.PERSON_CACHE_TTL // 3600)
+        except Exception as e:
+            logger.debug("[Enrichment] Person cache write error: %s", e)
 
     # ── Domain enrichment Redis cache ─────────────────────────────────────────
 

@@ -96,6 +96,11 @@ def _normalize_employee(raw: Dict[str, Any], source: str) -> Dict[str, Any]:
         "linkedin_url": linkedin_url,
         "seniority": raw.get("seniority") or _guess_seniority(job_title),
         "department": raw.get("department") or _guess_department(job_title),
+        "country": raw.get("country") or raw.get("location_country") or "",
+        "city": raw.get("city") or raw.get("location_city") or "",
+        "state": raw.get("state") or raw.get("location_state") or "",
+        "crm_owner_email": raw.get("crm_owner_email") or raw.get("owner_email") or "",
+        "campaign_engagement": raw.get("campaign_engagement") or {},
         "source": source,
     }
 
@@ -143,6 +148,11 @@ def _merge_into(existing: Dict[str, Any], new: Dict[str, Any]) -> None:
     for key in ("email", "linkedin_url", "job_title", "seniority", "department"):
         if not existing.get(key) and new.get(key):
             existing[key] = new[key]
+    for key in ("country", "city", "state", "crm_owner_email"):
+        if not existing.get(key) and new.get(key):
+            existing[key] = new[key]
+    if not existing.get("campaign_engagement") and new.get("campaign_engagement"):
+        existing["campaign_engagement"] = new["campaign_engagement"]
     # Merge source tags
     existing_src = existing.get("source", "")
     new_src = new.get("source", "")
@@ -305,6 +315,9 @@ class EmployeeDiscoveryService:
                 "linkedin_url": p.get("linkedin_url"),
                 "seniority": p.get("seniority"),
                 "department": p.get("departments", [""])[0] if p.get("departments") else "",
+                "city": p.get("city"),
+                "state": p.get("state"),
+                "country": p.get("country"),
             }, source="apollo"))
 
         logger.info("[EmployeeDiscovery] Apollo: %d people for %s", len(results), domain)
@@ -358,6 +371,9 @@ class EmployeeDiscoveryService:
                 "email": p.get("work_email") or (p.get("emails", [{}])[0].get("address") if p.get("emails") else ""),
                 "linkedin_url": p.get("linkedin_url"),
                 "department": p.get("job_title_sub_role") or p.get("job_company_industry"),
+                "city": p.get("location_locality"),
+                "state": p.get("location_region"),
+                "country": p.get("location_country"),
             }, source="pdl"))
 
         logger.info("[EmployeeDiscovery] PDL: %d people for %s", len(results), domain)

@@ -5,6 +5,7 @@ import asyncio
 
 from app.core.redis import RedisManager
 from app.db.session import SessionLocal
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 router = APIRouter()
@@ -24,25 +25,21 @@ async def redis_health():
 
 
 @router.get("/supabase")
-def supabase_health():
+async def supabase_health():
     try:
         def _check():
             db = SessionLocal()
             try:
-                # lightweight check
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
                 return True
             finally:
                 db.close()
 
         loop = asyncio.get_event_loop()
-        ok = loop.run_in_executor(None, _check)
-        # wait up to 10s
-        res = asyncio.get_event_loop().run_until_complete(asyncio.wait_for(ok, timeout=10.0))
+        res = await asyncio.wait_for(loop.run_in_executor(None, _check), timeout=10.0)
         if res:
             return {"status": "ok", "supabase": True}
-        else:
-            raise Exception("Unknown DB error")
+        raise Exception("Unknown DB error")
     except Exception as e:
         logger.error(f"Supabase healthcheck failed: {e}")
         return JSONResponse(status_code=503, content={"status": "error", "supabase": False, "error": str(e)})
@@ -65,7 +62,7 @@ async def all_health():
         def _check_db():
             db = SessionLocal()
             try:
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
                 return True
             finally:
                 db.close()

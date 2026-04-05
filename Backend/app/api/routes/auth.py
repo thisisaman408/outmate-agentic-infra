@@ -32,6 +32,8 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    visitor_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):
@@ -45,6 +47,8 @@ class RegisterRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     credential: str          # Google id_token (JWT) from GIS
     terms_accepted: bool = False
+    visitor_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class OtpSendRequest(BaseModel):
@@ -235,6 +239,22 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
 
     token = create_access_token(user)
 
+    if body.visitor_id or body.session_id:
+        try:
+            from app.tasks.visitors import apply_identity_event
+            await apply_identity_event(str(user.id), {
+                "visitor_id": body.visitor_id,
+                "session_id": body.session_id,
+                "identity_traits": {
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "company_name": user.company_name,
+                    "event_source": "app_login",
+                },
+            })
+        except Exception as exc:
+            logger.warning("Login identity stitching failed for %s: %s", user.email, exc)
+
     return {"token": token, "user": user_response(user)}
 
 
@@ -291,6 +311,21 @@ async def google_auth(request: Request, body: GoogleAuthRequest, db: Session = D
         db.refresh(user)
 
     token = create_access_token(user)
+    if body.visitor_id or body.session_id:
+        try:
+            from app.tasks.visitors import apply_identity_event
+            await apply_identity_event(str(user.id), {
+                "visitor_id": body.visitor_id,
+                "session_id": body.session_id,
+                "identity_traits": {
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "company_name": user.company_name,
+                    "event_source": "google_login",
+                },
+            })
+        except Exception as exc:
+            logger.warning("Google login identity stitching failed for %s: %s", user.email, exc)
     return {"token": token, "user": user_response(user)}
 
 

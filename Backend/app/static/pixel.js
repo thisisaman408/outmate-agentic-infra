@@ -1,5 +1,5 @@
 (function () {
-    // Outmate.ai Visitor Tracking Pixel v2.2
+    // Outmate.ai Visitor Tracking Pixel v2.3
     // Features: SPA route tracking, dwell time, scroll depth, click tracking,
     //           cookie fallback (Safari ITP), email auto-capture, bot filtering,
     //           browser fingerprinting, full consent/opt-out support.
@@ -116,6 +116,8 @@
 
     const EMAIL_KEY = 'outmate_visitor_email';
     const VISITOR_ID_KEY = 'outmate_visitor_id';
+    const SESSION_ID_KEY = 'outmate_session_id';
+    const IDENTITY_KEY = 'outmate_identity_traits';
     const MIN_DWELL_MS = 500;
 
     // ─── Persistence: localStorage with cookie fallback (Safari ITP) ─────────
@@ -141,12 +143,35 @@
         try { document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`; } catch (_) {}
     }
 
+    function getJson(key) {
+        try {
+            const raw = storageGet(key);
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function setJson(key, value) {
+        try { storageSet(key, JSON.stringify(value)); } catch (_) {}
+    }
+
     // ─── Visitor ID ──────────────────────────────────────────────────────────
     function getVisitorId() {
         let id = storageGet(VISITOR_ID_KEY);
         if (!id) {
             id = `v_${Math.random().toString(36).substring(2, 14)}${Date.now().toString(36)}`;
             storageSet(VISITOR_ID_KEY, id);
+        }
+        return id;
+    }
+
+    function getSessionId() {
+        let id = null;
+        try { id = sessionStorage.getItem(SESSION_ID_KEY); } catch (_) {}
+        if (!id) {
+            id = `s_${Math.random().toString(36).substring(2, 10)}${Date.now().toString(36)}`;
+            try { sessionStorage.setItem(SESSION_ID_KEY, id); } catch (_) {}
         }
         return id;
     }
@@ -229,11 +254,74 @@
         const text = (el.textContent || '').trim();
         const href = el.getAttribute('href') || '';
         if (CTA_PATTERNS.test(text) || CTA_PATTERNS.test(href)) _ctaClicks++;
+        if (el.tagName === 'A' && href) {
+            try {
+                const target = new URL(href, globalThis.location.href);
+                if (target.host && target.host !== globalThis.location.host) {
+                    _outboundClicks++;
+                    _lastOutboundDomain = target.host.replace(/^www\./, '');
+                }
+            } catch (_) {}
+        }
     }, true);
 
     // ─── Page State ──────────────────────────────────────────────────────────
     let _lastTrackedUrl = null;
     let _pageEntryTime = Date.now();
+    let _activeMs = 0;
+    let _lastActivityAt = Date.now();
+    let _outboundClicks = 0;
+    let _lastOutboundDomain = null;
+
+    function inferPageType(url) {
+        try {
+            const path = new URL(url, globalThis.location.origin).pathname.toLowerCase();
+            if (/pricing|plans|quote|checkout/.test(path)) return 'pricing';
+            if (/demo|book|schedule|contact-sales/.test(path)) return 'demo';
+            if (/docs|api|developer|sdk|reference/.test(path)) return 'docs';
+            if (/security|compliance|privacy|gdpr|soc2/.test(path)) return 'security';
+            if (/integrations|integration|partners/.test(path)) return 'integrations';
+            if (/blog|resources|webinar|case-studies|customers/.test(path)) return 'content';
+            if (/careers|jobs|hiring/.test(path)) return 'careers';
+            return 'general';
+        } catch (_) {
+            return 'general';
+        }
+    }
+
+    function flushActivity(now) {
+        const delta = Math.max(0, Math.min((now || Date.now()) - _lastActivityAt, 15000));
+        _activeMs += delta;
+        _lastActivityAt = now || Date.now();
+    }
+
+    function markActivity() {
+        flushActivity(Date.now());
+    }
+
+    ['mousemove', 'scroll', 'keydown', 'click', 'touchstart'].forEach((evt) => {
+        document.addEventListener(evt, markActivity, { passive: true, capture: true });
+    });
+
+    function getIdentityTraits() {
+        const saved = getJson(IDENTITY_KEY) || {};
+        if (saved.email && !storageGet(EMAIL_KEY)) storageSet(EMAIL_KEY, saved.email);
+        return saved;
+    }
+
+    function mergeIdentityTraits(traits) {
+        const current = getIdentityTraits();
+        const next = Object.assign({}, current);
+        Object.keys(traits || {}).forEach((key) => {
+            const value = traits[key];
+            if (value !== undefined && value !== null && String(value).trim() !== '') {
+                next[key] = String(value).trim();
+            }
+        });
+        if (next.email) storageSet(EMAIL_KEY, next.email);
+        setJson(IDENTITY_KEY, next);
+        return next;
+    }
 
     function track(email, forcedUrl, action = 'pageview') {
         // Consent gate — re-checked on every call to catch mid-session revocation
@@ -256,9 +344,13 @@
             _lastTrackedUrl = url;
             _maxScrollPct = 0;
             _ctaClicks = 0;
+            _outboundClicks = 0;
+            _lastOutboundDomain = null;
         }
 
+        flushActivity(Date.now());
         const dwellMs = action === 'leave' ? (Date.now() - _pageEntryTime) : undefined;
+        const identity = getIdentityTraits();
 
         // Page meta — richer than URL slug alone for persona classification
         const _pageTitle = (document.title || '').trim().slice(0, 120);
@@ -271,17 +363,23 @@
             url,
             referrer: document.referrer || '',
             pixel_key: PIXEL_KEY,
-            email: email ?? storageGet(EMAIL_KEY),
+            email: email ?? storageGet(EMAIL_KEY) ?? identity.email,
             visitor_id: getVisitorId(),
+            session_id: getSessionId(),
             fp: getFingerprintHash(),
             viewport_w: window.innerWidth,
             viewport_h: window.innerHeight,
             dwell_time: dwellMs,
+            active_ms: _activeMs,
             scroll_depth: _maxScrollPct,
             cta_clicks: _ctaClicks,
+            outbound_clicks: _outboundClicks,
+            last_outbound_domain: _lastOutboundDomain || undefined,
             page_title: _pageTitle || undefined,
             page_h1: _pageH1 || undefined,
             connection_type: _conn ? (_conn.effectiveType || _conn.type || undefined) : undefined,
+            page_type: inferPageType(url),
+            identity_traits: identity,
         });
 
         let sent = false;
@@ -353,9 +451,65 @@
         return null;
     }
 
-    function handleFormEmail(form) {
+    function findFieldValue(form, selectors) {
+        for (const selector of selectors) {
+            const input = form.querySelector(selector);
+            const val = input?.value?.trim();
+            if (val) return val;
+        }
+        return null;
+    }
+
+    function extractIdentityFromForm(form) {
         const email = findEmailInForm(form);
-        if (email) { storageSet(EMAIL_KEY, email); track(email); }
+        const fullName = findFieldValue(form, [
+            'input[name*="full" i][name*="name" i]',
+            'input[id*="full" i][id*="name" i]',
+            'input[placeholder*="full name" i]',
+        ]);
+        const firstName = findFieldValue(form, [
+            'input[name*="first" i][name*="name" i]',
+            'input[id*="first" i][id*="name" i]',
+            'input[placeholder*="first name" i]',
+        ]);
+        const lastName = findFieldValue(form, [
+            'input[name*="last" i][name*="name" i]',
+            'input[id*="last" i][id*="name" i]',
+            'input[placeholder*="last name" i]',
+        ]);
+        const companyName = findFieldValue(form, [
+            'input[name*="company" i]',
+            'input[id*="company" i]',
+            'input[placeholder*="company" i]',
+        ]);
+        const jobTitle = findFieldValue(form, [
+            'input[name*="title" i]',
+            'input[name*="role" i]',
+            'input[id*="title" i]',
+            'input[id*="role" i]',
+            'input[placeholder*="title" i]',
+            'input[placeholder*="role" i]',
+        ]);
+        const linkedinUrl = findFieldValue(form, [
+            'input[name*="linkedin" i]',
+            'input[id*="linkedin" i]',
+            'input[placeholder*="linkedin" i]',
+        ]);
+        return {
+            email: email || undefined,
+            full_name: fullName || undefined,
+            first_name: firstName || undefined,
+            last_name: lastName || undefined,
+            company_name: companyName || undefined,
+            job_title: jobTitle || undefined,
+            linkedin_url: linkedinUrl || undefined,
+        };
+    }
+
+    function handleFormEmail(form) {
+        const traits = extractIdentityFromForm(form);
+        const merged = mergeIdentityTraits(traits);
+        track(merged.email || null);
     }
 
     document.addEventListener('submit', (e) => {
@@ -372,13 +526,21 @@
     globalThis.outmate = {
         identify(email) {
             if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                storageSet(EMAIL_KEY, email);
+                mergeIdentityTraits({ email });
                 track(email);
+            }
+        },
+        identifyUser(traits) {
+            if (traits && typeof traits === 'object') {
+                const merged = mergeIdentityTraits(traits);
+                track(merged.email || null);
             }
         },
         reset() {
             storageRemove(EMAIL_KEY);
             storageRemove(VISITOR_ID_KEY);
+            storageRemove(IDENTITY_KEY);
+            try { sessionStorage.removeItem(SESSION_ID_KEY); } catch (_) {}
             _lastTrackedUrl = null;
         },
         trackPage() {
@@ -389,6 +551,7 @@
             storageSet(OPT_OUT_KEY, '1');
             storageRemove(EMAIL_KEY);
             storageRemove(VISITOR_ID_KEY);
+            storageRemove(IDENTITY_KEY);
             _consentGranted = false;
         },
         optIn() {
