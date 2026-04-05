@@ -181,6 +181,30 @@ class DatabaseFinderService:
         logger.info(f"Found {len(unique_urls)} LinkedIn URLs for '{query}'")
         return unique_urls
 
+    async def _search_tavily_linkedin(self, query: str, location: str = "United States", num_results: int = 20) -> List[str]:
+        """Fallback: Tavily search for LinkedIn profile URLs."""
+        if not self.tavily_api_key:
+            return []
+
+        search_query = f'site:linkedin.com/in "{query}" {location}'.strip()
+        results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
+        urls: List[str] = []
+        for r in results:
+            url = r.get("url", "")
+            if "linkedin.com/in/" not in url:
+                continue
+            cleaned = url.split("?")[0].split("#")[0].rstrip("/")
+            slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+            if slug_match:
+                cleaned = slug_match.group(1).rstrip("/")
+            if cleaned not in urls:
+                urls.append(cleaned)
+            if len(urls) >= num_results:
+                break
+        if urls:
+            logger.info(f"Tavily fallback found {len(urls)} LinkedIn URLs for '{query}'")
+        return urls
+
     @staticmethod
     def _split_headline(raw: str) -> tuple:
         """
@@ -662,6 +686,13 @@ class DatabaseFinderService:
 
         # Step 1: Google→LinkedIn URL discovery
         urls = await self._search_google_linkedin(query, location, limit)
+        if len(urls) < limit:
+            fallback = await self._search_tavily_linkedin(query, location, limit - len(urls))
+            for u in fallback:
+                if u not in urls:
+                    urls.append(u)
+                if len(urls) >= limit:
+                    break
 
         if not urls:
             return {

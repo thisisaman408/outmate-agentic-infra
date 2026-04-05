@@ -124,9 +124,15 @@ export default function DatabasePage() {
     setMeta(null)
     try {
       const result = await databaseFinderApi.search(query, location, limit, includeSignals)
-      setLeads(result.data.leads)
+      const normalizedLeads = Array.isArray(result.data.leads)
+        ? result.data.leads.slice(0, Math.max(0, limit))
+        : []
+      setLeads(normalizedLeads)
       setMeta(result.data.meta)
-      toast({ title: "Search complete", description: `Found ${result.data.leads.length} leads in ${(result.data.meta.execution_time_ms / 1000).toFixed(1)}s` })
+      toast({
+        title: "Search complete",
+        description: `Showing ${normalizedLeads.length} lead${normalizedLeads.length === 1 ? "" : "s"} in ${(result.data.meta.execution_time_ms / 1000).toFixed(1)}s`,
+      })
     } catch (err: any) {
       toast({ title: "Search failed", description: err.message || "Please try again", variant: "destructive" })
     } finally {
@@ -580,9 +586,41 @@ function DRow({ label, value, link }: { label: string; value?: string; link?: st
 }
 
 function SignalCard({ signal }: { signal: { title: string; url: string; content: string } }) {
+  const inferSignalType = (s: { title?: string; url?: string; content?: string }) => {
+    const title = (s.title || "").toLowerCase()
+    const url = (s.url || "").toLowerCase()
+    const content = (s.content || "").toLowerCase()
+
+    if (/(linkedin\.com|twitter\.com|x\.com|facebook\.com|medium\.com|instagram\.com)/.test(url)) {
+      return "Social"
+    }
+    if (/\/blog\b|blog\./.test(url) || title.includes("blog") || content.includes("blog")) {
+      return "Blog"
+    }
+    if (/news|press|announcement|launch/.test(title) || /news|press/.test(url)) {
+      return "News"
+    }
+    if (/hiring|job|careers|opening/.test(title) || /hiring|careers/.test(url)) {
+      return "Hiring"
+    }
+    if (/tech stack|technology|integration|uses|stack/.test(title + " " + content)) {
+      return "Technology"
+    }
+    return "Research"
+  }
+
+  const signalType = inferSignalType(signal)
+
   return (
     <div className="p-2 rounded bg-muted/50 text-xs mb-1.5">
-      <a href={signal.url} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-500 hover:underline">{signal.title}</a>
+      <div className="flex items-center justify-between gap-2">
+        <a href={signal.url} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-500 hover:underline">
+          {signal.title}
+        </a>
+        <Badge variant="secondary" className="text-[10px]">
+          {signalType}
+        </Badge>
+      </div>
       <p className="text-muted-foreground mt-0.5 line-clamp-2">{signal.content}</p>
     </div>
   )
