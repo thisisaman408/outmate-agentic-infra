@@ -76,8 +76,14 @@ function QualityBar({ score }: { score: number }) {
 }
 
 /** Truncate text with tooltip on hover */
-function TCell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <TableCell className={`text-xs whitespace-nowrap ${className}`}>{children}</TableCell>
+type TCellProps = React.ComponentProps<typeof TableCell>
+
+function TCell({ children, className = "", ...props }: TCellProps) {
+  return (
+    <TableCell className={`text-xs whitespace-nowrap ${className}`} {...props}>
+      {children}
+    </TableCell>
+  )
 }
 
 function LinkCell({ href, label }: { href: string; label?: string }) {
@@ -105,6 +111,7 @@ export default function DatabasePage() {
   const [detailOpen, setDetailOpen] = useState(false)
 
   const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set())
+  const stopRowClick = (e: React.MouseEvent<HTMLElement>) => e.stopPropagation()
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -186,7 +193,7 @@ export default function DatabasePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Database className="h-8 w-8" /> Database
+            <Database className="h-8 w-8" /> Outmate Database
           </h1>
           <p className="text-muted-foreground mt-1">
             Discover leads with AI-powered intelligence. Search by company, industry, or job title.
@@ -347,7 +354,7 @@ export default function DatabasePage() {
                   {leads.map((lead, idx) => (
                     <TableRow key={lead.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => openDetail(lead)}>
                       <TCell className="sticky left-0 bg-background z-10">
-                        <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex gap-0.5" onClick={stopRowClick}>
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEnrich(lead)} disabled={enrichingIds.has(lead.id)} title="Re-enrich">
                             {enrichingIds.has(lead.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                           </Button>
@@ -362,17 +369,17 @@ export default function DatabasePage() {
                       <TCell>{lead.last_name || "—"}</TCell>
                       <TCell className="font-medium">{lead.full_name || "—"}</TCell>
                       <TCell>{lead.email ? <a href={`mailto:${lead.email}`} className="text-blue-500 hover:underline" onClick={(e) => e.stopPropagation()}>{lead.email}</a> : "—"}</TCell>
-                      <TCell>{lead.phone ? <a href={`tel:${lead.phone}`} className="text-blue-500 hover:underline" onClick={(e) => e.stopPropagation()}>{lead.phone}</a> : "—"}</TCell>
-                      <TCell onClick={(e) => e.stopPropagation()}><LinkCell href={lead.linkedin_url} label="Profile" /></TCell>
+                      <TCell>{lead.phone ? <a href={`tel:${lead.phone}`} className="text-blue-500 hover:underline" onClick={stopRowClick}>{lead.phone}</a> : "—"}</TCell>
+                      <TCell onClick={stopRowClick}><LinkCell href={lead.linkedin_url} label="Profile" /></TCell>
                       {/* Professional */}
                       <TCell className="max-w-[180px] truncate">{lead.title || "—"}</TCell>
                       <TCell><SeniorityBadge level={lead.seniority_level} /></TCell>
                       <TCell>{lead.department || "—"}</TCell>
                       <TCell className="font-medium">{lead.organization_name || "—"}</TCell>
                       <TCell>{lead.company_domain || "—"}</TCell>
-                      <TCell onClick={(e) => e.stopPropagation()}><LinkCell href={lead.company_linkedin_url} label="Company" /></TCell>
+                      <TCell onClick={stopRowClick}><LinkCell href={lead.company_linkedin_url} label="Company" /></TCell>
                       <TCell>{lead.education || "—"}</TCell>
-                      <TCell className="max-w-[200px] truncate" title={lead.summary}>{lead.summary || "—"}</TCell>
+                      <TCell className="max-w-[200px] truncate" title={lead.summary ? String(lead.summary) : undefined}>{lead.summary || "—"}</TCell>
                       {/* Location */}
                       <TCell>{lead.location || "—"}</TCell>
                       <TCell>{lead.city || "—"}</TCell>
@@ -388,7 +395,7 @@ export default function DatabasePage() {
                         ) : "—"}
                       </TCell>
                       <TCell className="text-right"><QualityBar score={lead.engagement_score} /></TCell>
-                      <TCell className="max-w-[250px] truncate" title={lead.signals_summary}>{lead.signals_summary || "—"}</TCell>
+                      <TCell className="max-w-[250px] truncate" title={lead.signals_summary ? String(lead.signals_summary) : undefined}>{lead.signals_summary || "—"}</TCell>
                       {/* Metadata */}
                       <TCell>{lead.search_query}</TCell>
                       <TCell className="text-right"><QualityBar score={lead.quality_score} /></TCell>
