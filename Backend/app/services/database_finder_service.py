@@ -78,12 +78,17 @@ class DatabaseFinderService:
     async def _zenrows_get(
         self,
         url: str,
-        js_render: bool = True,
-        premium_proxy: bool = True,
-        antibot: bool = False,
+        mode: str = "auto",
+        js_render: Optional[bool] = None,
+        premium_proxy: Optional[bool] = None,
+        antibot: Optional[bool] = None,
         autoparse: bool = False,
     ) -> str:
-        """Fetch a page through ZenRows proxy."""
+        """Fetch a page through ZenRows proxy.
+
+        By default uses mode=auto which lets ZenRows pick the cheapest
+        working configuration and only charges for the successful attempt.
+        """
         if not self.zenrows_api_key:
             raise DatabaseFinderError("ZENROWS_API_KEY is not configured", 503)
 
@@ -91,12 +96,16 @@ class DatabaseFinderService:
             "apikey": self.zenrows_api_key,
             "url": url,
         }
-        if js_render:
-            params["js_render"] = "true"
-        if premium_proxy:
-            params["premium_proxy"] = "true"
-        if antibot:
-            params["antibot"] = "true"
+        if mode:
+            params["mode"] = mode
+        # Only set manual params when not using auto mode
+        if not mode:
+            if js_render:
+                params["js_render"] = "true"
+            if premium_proxy:
+                params["premium_proxy"] = "true"
+            if antibot:
+                params["antibot"] = "true"
         if autoparse:
             params["autoparse"] = "true"
 
@@ -108,15 +117,12 @@ class DatabaseFinderService:
             )
         }
 
-        # Longer timeout for antibot requests (they take more time)
-        timeout = 90.0 if antibot else self.DEFAULT_TIMEOUT
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
             resp = await client.get(self.ZENROWS_BASE, params=params, headers=headers)
             if resp.status_code >= 400:
                 logger.warning(
                     f"ZenRows returned {resp.status_code} for {url[:80]} "
-                    f"(js={js_render}, proxy={premium_proxy}, antibot={antibot})"
+                    f"(mode={mode})"
                 )
                 raise DatabaseFinderError(
                     f"ZenRows request failed ({resp.status_code})",
@@ -139,27 +145,12 @@ class DatabaseFinderService:
 
         logger.info(f"ZenRows Google search: {query} in {location}")
 
-        # Google needs antibot bypass — try with antibot first,
-        # fall back to js_render + premium_proxy, then plain proxy
-        strategies = [
-            {"js_render": True, "premium_proxy": True, "antibot": True},
-            {"js_render": True, "premium_proxy": True, "antibot": False},
-            {"js_render": False, "premium_proxy": True, "antibot": False},
-        ]
-
-        html = ""
-        last_error = None
-        for strat in strategies:
-            try:
-                html = await self._zenrows_get(search_url, **strat)
-                break
-            except DatabaseFinderError as e:
-                last_error = e
-                logger.info(f"ZenRows strategy {strat} failed ({e.message}), trying next...")
-                continue
-
-        if not html:
-            raise last_error or DatabaseFinderError("All ZenRows strategies failed", 502)
+        # Use mode=auto — ZenRows picks the cheapest working config
+        # and only charges for the successful attempt
+        try:
+            html = await self._zenrows_get(search_url, mode="auto")
+        except DatabaseFinderError:
+            raise
 
         # Extract LinkedIn profile URLs
         pattern = r'href="(https://(?:www\.)?linkedin\.com/in/[^"&]+)"'
@@ -685,7 +676,11 @@ class DatabaseFinderService:
         start = datetime.now(timezone.utc)
 
         # Step 1: Google→LinkedIn URL discovery
-        urls = await self._search_google_linkedin(query, location, limit)
+        try:
+            urls = await self._search_google_linkedin(query, location, limit)
+        except DatabaseFinderError as e:
+            logger.warning(f"ZenRows search failed ({e.message}), falling back to Tavily")
+            urls = []
         if len(urls) < limit:
             fallback = await self._search_tavily_linkedin(query, location, limit - len(urls))
             for u in fallback:
