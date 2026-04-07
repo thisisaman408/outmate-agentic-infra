@@ -788,6 +788,7 @@ def predict_persona(
 def select_best_decision_maker(
     decision_makers: List[Dict[str, Any]],
     predicted_persona: str,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Given a list of decision makers and a predicted persona, select the DM
@@ -801,7 +802,58 @@ def select_best_decision_maker(
     if predicted_persona in ("unknown", ""):
         return decision_makers[0]
 
-    # Score each DM by title → persona match
+    context = context or {}
+    visitor_country = (context.get("visitor_country") or "").lower()
+    visitor_city = (context.get("visitor_city") or "").lower()
+    crm_owner_email = (context.get("crm_owner_email") or "").lower()
+    preferred_seniority = (context.get("preferred_seniority") or "").lower()
+    prior_campaign_engagement = context.get("prior_campaign_engagement") or {}
+
+    seniority_rank = {
+        "c_suite": 5,
+        "vp": 4,
+        "director": 3,
+        "manager": 2,
+        "senior": 1,
+        "individual": 0,
+        "unknown": 0,
+    }
+
+    def infer_seniority(title: str) -> str:
+        title = (title or "").lower()
+        for title_pattern, persona in TITLE_TO_PERSONA.items():
+            if title_pattern in title and persona == "executive":
+                return "c_suite"
+        if "vp" in title or "vice president" in title:
+            return "vp"
+        if "director" in title or "head of" in title:
+            return "director"
+        if "manager" in title or "lead" in title:
+            return "manager"
+        if "senior" in title or "principal" in title or "staff" in title:
+            return "senior"
+        return "individual"
+
+    def engagement_bonus(dm: Dict[str, Any]) -> float:
+        email = (dm.get("email") or "").lower()
+        linkedin = (dm.get("linkedin_url") or "").lower()
+        bonus = 0.0
+        if email and email in prior_campaign_engagement:
+            stats = prior_campaign_engagement[email] or {}
+            bonus += min(float(stats.get("open_count", 0)) * 0.2, 0.8)
+            bonus += min(float(stats.get("reply_count", 0)) * 0.5, 1.2)
+            bonus += min(float(stats.get("meeting_count", 0)) * 1.0, 2.0)
+        elif linkedin and linkedin in prior_campaign_engagement:
+            stats = prior_campaign_engagement[linkedin] or {}
+            bonus += min(float(stats.get("engagement_count", 0)) * 0.3, 1.2)
+        else:
+            stats = dm.get("campaign_engagement") or {}
+            bonus += min(float(stats.get("open_count", 0)) * 0.2, 0.8)
+            bonus += min(float(stats.get("reply_count", 0)) * 0.5, 1.2)
+            bonus += min(float(stats.get("meeting_count", 0)) * 1.0, 2.0)
+        return bonus
+
+    # Score each DM using persona, seniority, geography, CRM ownership, and campaign engagement
     scored: List[tuple] = []
     for dm in decision_makers:
         title = (dm.get("job_title") or dm.get("title") or "").lower().strip()
@@ -813,14 +865,37 @@ def select_best_decision_maker(
                 dm_persona = persona
                 break
 
-        # Score: 2 for exact persona match, 1 for partial match, 0 for no match
+        score = 0.0
         if dm_persona == predicted_persona:
-            scored.append((2, dm))
+            score += 4.0
         elif dm_persona and dm_persona in ("executive",):
-            # Executives are a reasonable fallback for any persona
-            scored.append((1, dm))
-        else:
-            scored.append((0, dm))
+            score += 1.5
+
+        inferred = (dm.get("seniority") or infer_seniority(title)).lower()
+        score += seniority_rank.get(inferred, 0) * 0.35
+
+        if preferred_seniority and inferred == preferred_seniority:
+            score += 0.75
+
+        dm_country = (dm.get("country") or dm.get("location_country") or "").lower()
+        dm_city = (dm.get("city") or dm.get("location_city") or "").lower()
+        if visitor_country and dm_country and visitor_country == dm_country:
+            score += 0.8
+        if visitor_city and dm_city and visitor_city == dm_city:
+            score += 0.4
+
+        owner_email = (dm.get("crm_owner_email") or dm.get("owner_email") or "").lower()
+        if crm_owner_email and owner_email and crm_owner_email == owner_email:
+            score += 1.0
+
+        score += engagement_bonus(dm)
+
+        if dm.get("email"):
+            score += 0.35
+        if dm.get("linkedin_url"):
+            score += 0.25
+
+        scored.append((score, dm))
 
     # Sort by match score descending, return best
     scored.sort(key=lambda x: -x[0])

@@ -1,895 +1,1314 @@
 OUTMATE.AI — VISITOR TRACKER FEATURE: COMPLETE TECHNICAL REFERENCE
-Last Updated: March 2026 (v2.2)
+Last Updated: April 2026 (v2.2 — Full Explorium + Consent + Redis Keepalive)
 
 ================================================================================
  TABLE OF CONTENTS
 ================================================================================
- 1. Overview & Product Goals
- 2. Architecture Diagram
- 3. Database Schema (live)
- 4. Enrichment Pipeline (step-by-step)
- 5. Behavioral Intelligence Engine
- 6. Identity Graph & Cross-Org Matching
- 7. Company-Level Accuracy Techniques
- 8. Pixel.js (v2.2)
- 9. Backend API Routes
-10. Celery Tasks
-11. Real-Time SSE Stream
-12. Webhook Delivery (HMAC-signed)
-13. Privacy & GDPR Controls
-14. Frontend Dashboard
-15. Configuration (SiteConfig)
-16. Performance Indexes
-17. Environment Variables
-18. Cost Model
-19. Known Limitations & Roadmap
+ 1.  Overview & Product Goals
+ 2.  Architecture Diagram
+ 3.  End-to-End Data Flow
+ 4.  Database Schema (live)
+ 5.  Enrichment Pipeline (step-by-step)
+ 6.  Behavioral Intelligence Engine
+ 7.  Identity Graph & Cross-Org Matching
+ 8.  Company-Level Accuracy Techniques
+ 9.  Pixel.js (v2.2)
+10.  Backend API Routes
+11.  Celery Tasks & Beat Schedule
+12.  Real-Time SSE Stream
+13.  Webhook Delivery (HMAC-signed)
+14.  Privacy & GDPR Controls
+15.  Frontend Dashboard
+16.  Configuration (SiteConfig)
+17.  Performance Indexes
+18.  Environment Variables
+19.  Cost Model
+20.  DEEP ANALYSIS: Pros, Cons, Limitations & Accuracy Assessment
+21.  Improvement Roadmap (Prioritised)
 
 
 ================================================================================
  1. OVERVIEW & PRODUCT GOALS
 ================================================================================
 
-Outmate Visitor Tracker is a production-grade B2B website deanonymization system.
-It identifies the company and/or person behind each anonymous website visit using
-a multi-layer IP enrichment pipeline — similar in concept to RB2B and Warmly.ai
-but built entirely on our own stack with no third-party data-cooperative dependency.
+Outmate Visitor Tracker is a B2B deanonymisation and intent-scoring platform.
+When a prospect browses a customer's website, the tracker:
 
-Core user value:
-  - Know WHICH companies are visiting your website right now (company-level)
-  - Know WHO specifically is browsing (person-level, when email is captured)
-  - See WHAT pages they visited, HOW LONG they stayed, WHERE they clicked
-  - Get REAL-TIME alerts when hot accounts hit key pages
-  - Understand BUYING INTENT via multi-signal behavioral scoring
+  1. Captures the visit event via a lightweight JS pixel (<4 KB)
+  2. Identifies the visitor's company from their IP address using a multi-source
+     enrichment waterfall (PTR, ip-api, IPinfo, Enrich.so, Explorium, RDAP)
+  3. Scores their buying intent based on page visited and behavioural signals
+  4. Predicts their job persona (engineering / sales / executive / marketing / HR)
+  5. Pushes the enriched record to the customer's dashboard in real-time via SSE
+  6. Fires webhooks to CRM / Slack integrations when high-value triggers match
 
-Tech stack (unchanged):
-  Backend  : FastAPI + Celery + Redis + PostgreSQL (Supabase)
-  Frontend : Next.js (App Router) + shadcn/ui + SSE
-  Queue    : Celery + Redis (async enrichment)
-  Pixel    : Vanilla JS beacon (pixel.js v2.2)
+Key differentiators vs rb2b / warmly.ai:
+  - Free-tier IP identification via PTR + ip-api + RDAP (zero cost per visit)
+  - Explorium for full firmographic depth: revenue, funding, tech-stack, LinkedIn URL
+  - Cross-org fingerprint identity graph (one visitor re-identified across all orgs)
+  - GDPR-compliant consent gate in pixel.js (TCF 2.0, Cookiebot, OneTrust, DNT, GPC)
+  - Retroactive backfill: when a visitor submits an email, ALL prior anonymous
+    visits are patched with their full identity
+  - Account-level intent scoring aggregated across all employees from same company
 
 
 ================================================================================
  2. ARCHITECTURE DIAGRAM
 ================================================================================
 
-  [Customer's website]
-       |
-  <script src="https://app.outmate.ai/pixel.js?key=PIXEL_KEY">
-       |
-       | POST /api/v1/visitors/track  (JSON beacon)
+  [Browser / Visitor]
+       |  JS pixel.js v2.2 fires POST /api/v1/visitors/track
        v
-  [FastAPI /track endpoint]
-       | — dedup check (Redis, 30-min window per IP+domain)
-       | — bot filter (UA, viewport, bot_score)
-       | — enqueue → Celery
-       v
-  [Celery: process_visitor_task]
-       |
-       |— Create stub visit (enrichment_status='processing')
-       |
-       |— VisitorEnricher.enrich_ip()
-       |     Step -1:  Identity graph    (PostgreSQL identity_nodes)
-       |     Step -0.5 PTR reverse DNS   (free, socket.gethostbyaddr)
-       |     Step  0:  ip-api.com geo    (free, 45 req/min)
-       |     Step  1:  IPinfo            (paid plan, company + ASN)
-       |     Step  2:  Enrich.so IP      (IP → company, $29/mo)
-       |     Step  2.5 MX validation     (DNS, confirms domain is real)
-       |     Step  3:  [email] Enrich.so person + BetterContact + ContactOut
-       |     Step  4:  ContactOut DMs    (domain → decision makers)
-       |     Step  5:  Explorium         (firmographics by domain)
-       |     Step  5b: Hunter.io         (domain → email pattern)
-       |     Step  5c: Clearbit          (firmographic fallback)
-       |     Step  5.5 IP RDAP           (free, rdap.org)
-       |     Step  5.6 Domain RDAP       (free, domain registry)
-       |     Step  7:  Multi-source agreement booster
-       |     Step  8:  Identity graph store (upsert)
-       |
-       |— ICP scoring (per-org configurable weights)
-       |— Behavioral scoring (persona + engagement + buying stage)
-       |— Session upsert (visitor_sessions table)
-       |— Retroactive backfill (all prior visits of same visitor_id)
-       |— Update visit record (enrichment_status='done')
-       |— Publish to Redis pub/sub (SSE stream)
-       |— Trigger webhooks (HMAC-signed, Celery retry)
-       v
-  [PostgreSQL]      [Redis pub/sub]        [Customer webhooks]
-  visits table      → SSE → browser        X-Outmate-Signature header
+  [Next.js Proxy]    ──→  forwards to  ──→  [FastAPI Backend]
+                                                   |
+                              ┌────────────────────┼────────────────────┐
+                              |                    |                    |
+                        [SiteConfig DB]      [Redis]              [Celery Queue]
+                        pixel_key lookup     rate-limit             async task
+                        (~2ms)               dedup                  enqueue
+                                             optout check           (~5ms)
+                                                                     |
+                                                                     v
+                                                           [process_visitor_task]
+                                                                     |
+                                                     [VisitorEnricher.enrich_ip()]
+                                                                     |
+                              ┌──────────────────────────────────────┤
+                              |         ENRICHMENT PIPELINE          |
+                              | Step -1:  Identity Graph lookup      |
+                              | Step -0.5: PTR reverse DNS           |
+                              | Step 0:   ip-api.com (geo+ISP)       |
+                              | Step 1:   IPinfo                     |
+                              | Step 2:   Enrich.so IP lookup        |
+                              | Step 2.5: MX DNS validation          |
+                              | [Redis cache check — skip if hit]    |
+                              | Step 3:   Enrich.so email person     |
+                              | Step 4:   ContactOut DM              |
+                              | Step 5:   Explorium full enrich      |
+                              |   5a: match_businesses()             |
+                              |   5b: enrich_company_fully()         |
+                              |      - firmographics                 |
+                              |      - funding & acquisition         |
+                              |      - financial indicators          |
+                              |      - technographics (tech stack)   |
+                              |   5c: enrich_linkedin_posts()        |
+                              | Step 5b:  Hunter.io leads            |
+                              | Step 5c:  Clearbit fallback          |
+                              | Step 5.5: IP RDAP (free)             |
+                              | Step 5.6: Domain RDAP (free)         |
+                              | Step 7:   Multi-source agreement     |
+                              | Step 8:   Identity graph store       |
+                              └──────────────────────────────────────┘
+                                                   |
+                              ┌────────────────────┼────────────────────┐
+                              |                    |                    |
+                        [PostgreSQL DB]      [Redis PubSub]       [Webhooks]
+                        visits table         visitors:{org_id}    HMAC-signed
+                        identity_nodes       channel              delivery
+                        companies                                 with retry
 
 
 ================================================================================
- 3. DATABASE SCHEMA (LIVE)
+ 3. END-TO-END DATA FLOW
 ================================================================================
 
--- site_configs: one row per customer org
-CREATE TABLE site_configs (
-    org_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pixel_key      VARCHAR(255) UNIQUE NOT NULL,
-    domain         VARCHAR(255),
-    icp_filters    JSONB DEFAULT '{}',         -- per-org ICP weight overrides
-    webhook_urls   JSONB DEFAULT '[]',
-    webhook_secret VARCHAR(64),                -- auto-generated, HMAC signing
-    isp_allowlist  JSONB DEFAULT '[]',         -- corporate VPN ISP overrides
-    anonymize_ips  BOOLEAN DEFAULT false,      -- GDPR: mask last IP octet
-    gdpr_mode      BOOLEAN DEFAULT false,      -- full GDPR compliance mode
-    created_at     TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+PIXEL LOAD:
+  1. Customer embeds: <script src="https://app.outmate.ai/api/v1/visitors/pixel.js"
+                               data-pixel-key="pk_..."></script>
+  2. pixel.js runs _isConsentDenied() — checks DNT, GPC, Cookiebot, OneTrust.
+     If TCF 2.0 CMP present, defers until Purpose 1+7 consented.
+  3. pixel.js collects: url, referrer, visitor_id (localStorage UUID), browser
+     fingerprint (cyrb53 hash of canvas + WebGL + screen + timezone + UA + etc.),
+     page_title, page_h1, connection_type, viewport, scroll_depth, cta_clicks.
+  4. Sends POST to /api/v1/visitors/track via sendBeacon (or fetch fallback).
 
--- visits: one row per page view
-CREATE TABLE visits (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id           UUID REFERENCES site_configs(org_id) ON DELETE CASCADE,
-    ip               INET NOT NULL,
-    url              TEXT NOT NULL,
-    referrer         TEXT,
-    user_agent       TEXT,
-    intent_score     FLOAT DEFAULT 0.5,
-    resolution       JSONB,                    -- full enrichment result (see §4)
-    matched          BOOLEAN DEFAULT FALSE,
-    enrichment_status VARCHAR(20) NOT NULL DEFAULT 'done',  -- processing|done|failed
-    created_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+TRACK ENDPOINT:
+  5. Next.js proxy route forwards to FastAPI /api/v1/visitors/track.
+  6. FastAPI resolves real IP: cf-connecting-ip → x-real-ip → x-forwarded-for
+  7. Validates pixel_key against SiteConfig (DB lookup, ~2ms)
+  8. Rate limit check: 30 req/min per IP, 1000/min per pixel_key (Redis)
+  9. Deduplication: fingerprint window = 4× normal window (longer dedup for same
+     browser across pages); IP+domain window for non-fingerprinted requests.
+  10. Queues Celery task process_visitor_task with full payload.
+      Fallback: asyncio.create_task() if Celery unavailable.
+  11. Updates Redis sorted set outmate:visitors:active:{org_id} (30-min window)
+  12. Returns {"status": "queued"} in <50ms (non-blocking).
 
--- visitor_sessions: groups page views into logical sessions (30-min gap)
-CREATE TABLE visitor_sessions (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id           TEXT NOT NULL,
-    visitor_id       TEXT NOT NULL,
-    session_start    TIMESTAMP WITH TIME ZONE NOT NULL,
-    session_end      TIMESTAMP WITH TIME ZONE NOT NULL,
-    page_count       INTEGER DEFAULT 1,
-    total_dwell_ms   BIGINT DEFAULT 0,
-    avg_scroll_depth FLOAT DEFAULT 0,
-    total_cta_clicks INTEGER DEFAULT 0,
-    entry_url        TEXT,
-    exit_url         TEXT,
-    referrer         TEXT,
-    predicted_persona TEXT,
-    buying_stage     TEXT,
-    engagement_score INTEGER DEFAULT 0
-);
+CELERY ENRICHMENT:
+  13. Creates stub Visit row (enrichment_status="processing") for UI spinner.
+  14. Calls VisitorEnricher.enrich_ip() — full pipeline (see Section 5).
+  15. Calls predict_persona() — behavioral scoring on last 30 visits.
+  16. Calculates ICP score (0–100) from enrichment completeness + org ICP filters.
+  17. Calls _categorize_and_attach() — matches to known company/prospect records.
+  18. Runs retroactive backfill if visitor submitted email for first time.
+  19. Updates Visit row with full resolution JSONB.
+  20. Publishes enriched record to Redis channel visitors:{org_id}.
+  21. Fires webhook if alert rules match.
 
--- identity_nodes: cross-session identity graph (one node per visitor_id)
-CREATE TABLE identity_nodes (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    visitor_id     VARCHAR(64) UNIQUE,
-    ip             INET,
-    email          VARCHAR(255),
-    full_name      VARCHAR(255),
-    phone          VARCHAR(50),
-    linkedin_url   VARCHAR(512),
-    job_title      VARCHAR(255),
-    company_name   VARCHAR(255),
-    company_domain VARCHAR(255),
-    raw_data       JSONB DEFAULT '{}',         -- stores fingerprint for cross-org matching
-    sources        JSONB DEFAULT '[]',
-    pixel_key      VARCHAR(255),
-    first_seen_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_seen_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- alerts: webhook delivery audit trail
-CREATE TABLE alerts (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    visit_id     UUID REFERENCES visits(id),
-    webhook_type VARCHAR(50),
-    status       VARCHAR(20),                  -- pending|success|failed|failed_final
-    payload      JSONB,
-    created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-PERFORMANCE INDEXES:
-  ix_visits_org_matched_partial    ON visits(org_id, created_at DESC) WHERE matched = true
-  ix_visits_fingerprint_expr       ON visits((resolution->>'fingerprint')) WHERE ...NOT NULL
-  ix_visits_visitor_id_expr        ON visits((resolution->>'visitor_id')) WHERE ...NOT NULL
-  ix_identity_nodes_fingerprint_expr ON identity_nodes((raw_data->>'fingerprint')) WHERE ...NOT NULL
-  ix_identity_nodes_ip_text        ON identity_nodes(ip)
+REAL-TIME DASHBOARD:
+  22. Frontend calls POST /sse-token → gets opaque 64-char token (60s TTL, Redis).
+  23. Frontend opens EventSource(/stream?token=...) → FastAPI SSE endpoint.
+  24. SSE handler validates exchange token from Redis (single-use, deletes on use).
+  25. Subscribes to Redis PubSub channel visitors:{org_id}.
+  26. New visits appear in dashboard table within ~500ms of page load.
+  27. Heartbeat ": heartbeat" sent every 15s to prevent proxy timeouts.
 
 
 ================================================================================
- 4. ENRICHMENT PIPELINE (step-by-step)
+ 4. DATABASE SCHEMA (LIVE)
 ================================================================================
 
-Each step is independent and best-effort (never throws — only warns on failure).
-The pipeline builds a `resolution` JSONB object that is stored in visits.resolution.
+TABLE: visits
+  id                UUID           PRIMARY KEY
+  org_id            UUID           NOT NULL  (FK → SiteConfig.org_id)
+  ip                TEXT           visitor IP (last octet masked if anonymize_ips)
+  url               TEXT           page URL visited
+  referrer          TEXT           HTTP referrer
+  user_agent        TEXT
+  intent_score      FLOAT          0.0–1.0 from URL path analysis
+  matched           BOOLEAN        true if company/person resolved
+  enrichment_status TEXT           'processing' | 'done' | 'failed'
+  resolution        JSONB          full enrichment output (all fields below)
+  created_at        TIMESTAMPTZ    DEFAULT NOW()
 
-resolution shape:
-{
-  "ip":              string,
-  "company":         string | null,       -- canonical company name
-  "domain":          string | null,       -- company domain (e.g. "acme.com")
-  "geo":             { city, region, country, lat, lon, timezone, is_mobile, is_proxy },
-  "confidence":      float (0.0–1.0),
-  "tier":            "person" | "company" | "noise" | "unknown",
-  "bot_score":       int (0–100),
-  "email":           string | null,
-  "full_name":       string | null,
-  "phone":           string | null,
-  "linkedin_url":    string | null,
-  "job_title":       string | null,
-  "decision_makers": [...],              -- ContactOut DMs for the domain
-  "explorium":       { firmographics },
-  "behavioral":      { persona, confidence, engagement_score, buying_stage, ... },
-  "icp_score":       int (0–100),
-  "logo_url":        string | null,
-  "ptr_hostname":    string | null,
-  "source_site":     string | null,
-  "scroll_depth":    float | null,       -- pixel v2.1+
-  "cta_clicks":      int | null,         -- pixel v2.1+
-  "page_title":      string | null,      -- pixel v2.2+
-  "page_h1":         string | null,      -- pixel v2.2+
-  "connection_type": string | null,      -- pixel v2.2+
-  "_sources":        string[],           -- list of sources that contributed data
-  "_mx_unverified":  bool | null,        -- true if domain failed MX check
-  "retrolinked":     bool | null,        -- true if this visit was backfilled
-}
+  resolution JSONB keys:
+    ip, is_private_ip, company, domain, geo, confidence (0.0–1.0),
+    person {full_name, email, phone, linkedin_url, job_title},
+    explorium {name, domain, industry, employee_count_range, employee_count_exact,
+               revenue_range, revenue_exact, funding_stage, funding_total,
+               investors, headquarters_city, headquarters_country, logo_url,
+               linkedin_url, technologies[], linkedin_posts[], linkedin_followers,
+               description, company_type, founded_year, competitors[]},
+    email, phone, full_name, linkedin_url, job_title, logo_url,
+    decision_makers[], employees[], tech_stack[],
+    _sources[], fingerprint, tier, bot_score,
+    intent_score, icp_score, scroll_depth, cta_clicks,
+    page_title, page_h1, connection_type, dwell_time,
+    source_site, visitor_id, behavioral {predicted_persona, engagement_score,
+    buying_stage, persona_confidence, signals_breakdown}
 
-── STEP -1: IDENTITY GRAPH LOOKUP ─────────────────────────────────────────────
-File: visitor_enrich.py → _step_identity_graph_lookup()
+TABLE: identity_nodes
+  id              UUID           PRIMARY KEY
+  org_id          UUID
+  visitor_id      TEXT           client-side localStorage UUID
+  ip              TEXT
+  email           TEXT
+  full_name       TEXT
+  company_name    TEXT
+  company_domain  TEXT
+  phone           TEXT
+  linkedin_url    TEXT
+  job_title       TEXT
+  raw_data        JSONB          {fingerprint: "...", extra fields}
+  created_at      TIMESTAMPTZ
+  updated_at      TIMESTAMPTZ
 
-Resolution cascade (first match wins):
-  1. Exact visitor_id match        — same browser, same org (0.85 confidence)
-  2. Cross-org fingerprint match   — same browser fingerprint seen on any org's
-                                     site before. Raw_data->>'fingerprint' index.
-                                     Re-uses full identity — zero API cost.
-                                     (Confidence: 0.85, marked _cross_org=True)
-  3. /24 subnet match              — different device, same corporate NAT block.
-                                     Returns COMPANY DATA ONLY (not personal).
-                                     Confidence: 0.60
-  4. Exact IP match                — same IP seen before
-  5. Email match                   — email previously captured for this visitor
+TABLE: site_config
+  org_id          UUID           PRIMARY KEY
+  pixel_key       TEXT           UNIQUE — used by pixel.js
+  domain          TEXT           customer's website domain
+  webhook_url     TEXT
+  webhook_secret  TEXT           64-char hex HMAC secret
+  alert_rules     JSONB          trigger conditions
+  icp_filters     JSONB          target industry/headcount/revenue
+  isp_allowlist   JSONB          ISP substrings NOT to filter
+  anonymize_ips   BOOLEAN        mask last IP octet before storing
+  gdpr_mode       BOOLEAN        enable auto-deletion after 30 days
 
-── STEP -0.5: PTR REVERSE DNS ──────────────────────────────────────────────────
-File: visitor_enrich.py → _step_ptr_lookup()
+TABLE: companies (for matching/dedup)
+  domain          TEXT           PRIMARY KEY
+  raw_data        JSONB          full Explorium payload
+  provider_source TEXT
+  created_at / updated_at TIMESTAMPTZ
 
-socket.gethostbyaddr(ip) with 3s timeout.
-Corporate networks frequently set PTR records: "vpn.televentures.com"
-Logic:
-  - Skip if is_isp_or_cloud(hostname) — filters "broad.89.isp.net" noise
-  - Extract registered domain: "vpn.acme.com" → "acme.com"
-  - Extract company hint from subdomain: "vpn.acme.com" → company hint "Acme"
-  - Detects residential patterns via _PTR_RESIDENTIAL_RE (dsl/cable/dhcp/pool)
-  - Detects corporate patterns via _PTR_CORPORATE_RE (vpn/corp/hq/egress) → +0.10 confidence
-Cost: Free, no API. Adds confidence 0.45–0.65
+INDEXES (performance):
+  visits_org_created       (org_id, created_at DESC)  — dashboard list
+  visits_org_ip            (org_id, ip)               — IP dedup
+  visits_resolution_gin    GIN(resolution)            — JSONB search
+  visits_resolution_company (org_id, (resolution->>'company'))
+  visits_resolution_domain  (org_id, (resolution->>'domain'))
+  identity_nodes_fingerprint_expr  ((raw_data->>'fingerprint'))
+     WHERE raw_data->>'fingerprint' IS NOT NULL   — cross-org lookup
+  identity_ip_email        (ip, email)
+  identity_visitor_id      (visitor_id)
 
-── STEP 0: ip-api.com GEO ───────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_ipapi()
 
-Fields: country, city, region, lat/lon, timezone, isp, org (AS), asname, mobile, proxy, hosting
-Extracts company from "AS12345 Company Name" → strips AS prefix.
-Skips result if is_isp_or_cloud() or is_mobile or is_hosting.
-Caches ASN → company in Redis for 24h (avoids repeated lookups for same corporate WAN).
-Rate limit: 45 req/min (free). Confidence: 0.20–0.35
+================================================================================
+ 5. ENRICHMENT PIPELINE (STEP-BY-STEP)
+================================================================================
 
-── STEP 1: IPinfo ───────────────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_ipinfo()
+ENTRY: VisitorEnricher.enrich_ip(ip, url, intent_score, email, visitor_id, fp)
 
-Requires IPINFO_TOKEN. Uses ipinfo-python SDK.
-Returns: org, hostname, country_name. Stores in ipinfo_company for agreement booster.
-Confidence: 0.30–0.55
+Private IP check → returns early (no external lookups for 127.x, 10.x, 192.168.x)
 
-── STEP 2: Enrich.so IP → Company ──────────────────────────────────────────────
-File: visitor_enrich.py → _step_enrich_so_ip()
+Bot pre-filter:
+  - Missing UA: +30 score
+  - Bot keyword in UA (bot/crawler/spider/headless): +50 score
+  - Zero viewport: +30 score
+  - If bot_score ≥ 50: return tier="noise" immediately
 
-GET https://api.enrich.so/v1/api/ip-to-company-lookup?ip=X
-Returns: companyName, domain. Skips ISP/cloud results.
+────────────────────────────────────────────────────────────────────────────────
+STEP -1: IDENTITY GRAPH LOOKUP
+────────────────────────────────────────────────────────────────────────────────
+Five-level cascade (most-specific to least):
+  1. visitor_id exact match (most precise — same localStorage UUID)
+  2. Cross-org fingerprint: expression index on raw_data->>'fingerprint'
+     (same browser seen on ANY org's pixel → instant re-identification)
+  3. /24 subnet match: IPs in same /24 block share company data
+     (corporate NAT — entire office egresses through same block)
+  4. Exact IP match
+  5. Email match (if email provided)
+
+Cache sets confidence=0.85 if hit. Merges: full_name, phone, linkedin_url,
+job_title, email, company, domain into resolution.
+
+────────────────────────────────────────────────────────────────────────────────
+STEP -0.5: PTR REVERSE DNS (FREE)
+────────────────────────────────────────────────────────────────────────────────
+socket.gethostbyaddr(ip) in a thread (3s timeout).
+Corporate hostnames ("vpn.acmecorp.com", "fw.company.net") → extract domain.
+
+Filters:
+  _PTR_RESIDENTIAL_RE: rejects broad/dsl/cable/dhcp/pool/customer patterns
+  _CDN_INFRA_DOMAINS:  rejects cloudfront.net, a-msedge.net, 1e100.net etc.
+  is_isp_or_cloud():   rejects if ISP keyword in org name
+
+_CDN_DOMAIN_TO_COMPANY: Maps CDN domains to parent companies
+  ("a-msedge.net" → ("Microsoft", "microsoft.com"))
+
+_PTR_CORPORATE_RE: boosts confidence if hostname contains vpn/proxy/corp/egress.
+Sets confidence 0.55 (corporate keyword match) or 0.35 (plain domain from PTR).
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 0: ip-api.com (FREE)
+────────────────────────────────────────────────────────────────────────────────
+GET http://ip-api.com/json/{ip}?fields=...
+Returns: city, region, country, ISP (org), AS number, query, mobile, proxy, hosting
+
+Key logic:
+  - ASN cache: Redis key asn:{asnum} TTL=24h → skip API for repeat corporate ASNs
+  - If `org` field is corporate (not ISP): sets company + confidence 0.6
+  - If `proxy`=true or `hosting`=true: sets tier="noise"
+  - Builds geo dict: {city, region, country, isp, mobile, proxy, as_num}
+  - Mobile flag: sets `is_mobile=true` in resolution (mobile users rarely corp)
+
+Note: ip-api.com free tier is HTTP-only, rate limited at 45 req/min.
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 1: IPINFO (PAID PLAN)
+────────────────────────────────────────────────────────────────────────────────
+ipinfo SDK: handler.getDetails(ip) async
+Returns: city, region, country, org (AS name), company.name, company.domain,
+         company.type (business/isp/education/hosting/government)
+
+Only sets company+domain when company.type == "business".
+Skips if type is isp/hosting/education. Sets confidence 0.65 on company hit.
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 2: ENRICH.SO IP LOOKUP
+────────────────────────────────────────────────────────────────────────────────
+POST https://api.enrich.so/v1/person-ip or GET /company-ip
+Returns: company name, domain, employee_count, industry, location
+
 Applies _normalize_company_name() before storing.
-Confidence: 0.70
+Sets confidence 0.70 on company hit.
+Domain validation: skips personal email domains.
 
-── STEP 2.5: MX DOMAIN VALIDATION ──────────────────────────────────────────────
-File: visitor_enrich.py → _validate_mx_domain()
-
+────────────────────────────────────────────────────────────────────────────────
+STEP 2.5: MX VALIDATION (FREE — DNS)
+────────────────────────────────────────────────────────────────────────────────
 dns.resolver.resolve(domain, "MX") with 3s timeout.
-Purpose: PTR and ip-api sometimes return hostnames that look like domains
-  (e.g. "broad.tata.net.in") but have no MX records and aren't real company domains.
-Logic:
-  - If domain has no MX records AND confidence < 0.65 → cap confidence at 0.35,
-    mark _mx_unverified=True
-  - If domain has MX records → boost confidence to 0.55
+Only runs if confidence < 0.65 (domains already confirmed by Explorium don't need it).
 
-── STEP 3: EMAIL ENRICHMENT (form-capture path only) ──────────────────────────
-Files: _step_enrich_so_email() → _step_bettercontact() → _step_contactout_email()
+  - No MX records: sets _mx_unverified=True, caps confidence at 0.35
+    (likely a reverse-DNS hostname, not a real corporate email domain)
+  - MX records found: confirms corporate domain, boosts confidence to 0.55
 
-Only runs when pixel captured an email via identify() or form intercept.
-Never uses login-session emails.
-Chain: Enrich.so person → BetterContact → ContactOut (each fills gaps the previous missed)
-Data: full_name, phone, linkedin_url, job_title, company_domain
-Confidence: 0.75–0.85
+────────────────────────────────────────────────────────────────────────────────
+REDIS DOMAIN CACHE CHECK
+────────────────────────────────────────────────────────────────────────────────
+Key: enrich:domain:{domain}  TTL: 6 hours
+Merges: company, explorium, logo_url, decision_makers, employees from cache.
+Sets confidence=0.65. Skips steps 3–5.6 if cache hit.
 
-── STEP 4: ContactOut DM LOOKUP ────────────────────────────────────────────────
-File: visitor_enrich.py → _step_contactout_dm()
+────────────────────────────────────────────────────────────────────────────────
+STEP 3: ENRICH.SO EMAIL PERSON LOOKUP (email path only)
+────────────────────────────────────────────────────────────────────────────────
+Only runs if email was form-captured (pixel identify() or form submit).
+POST https://api.enrich.so/v1/person?email={email}
+Returns: full_name, phone, linkedin_url, job_title, company, company_domain
 
-domain → decision makers with email + LinkedIn.
-Returns top 5 DMs sorted by seniority (C-suite first).
-Stored in resolution["decision_makers"] — supplementary, never overwrites direct identity.
+Populates resolution person dict. Company from email domain sets confidence 0.75.
 
-── STEP 5: Explorium FIRMOGRAPHICS ─────────────────────────────────────────────
-File: visitor_enrich.py → _step_explorium()
+────────────────────────────────────────────────────────────────────────────────
+STEP 3b: BETTERCONTACT (email path)
+────────────────────────────────────────────────────────────────────────────────
+Async waterfall enrich for email → phone, LinkedIn, job_title.
+Falls back gracefully if no API key configured.
 
-Search by domain (preferred) or company name.
-Returns: industry, employee_count_range, revenue_range, headquarters, linkedin_url, technologies.
-Applies _normalize_company_name() on result.
-Always overwrites weaker company name sources when it fires.
-Confidence: 0.80–0.90
+────────────────────────────────────────────────────────────────────────────────
+STEP 3c: CONTACTOUT EMAIL (email path)
+────────────────────────────────────────────────────────────────────────────────
+ContactOut person lookup by email → LinkedIn profile, phone, current company.
 
-── STEP 5b: Hunter.io ───────────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_hunter_io()
-Fallback: domain → email pattern (when no person email yet).
+────────────────────────────────────────────────────────────────────────────────
+STEP 4: CONTACTOUT DM (domain path)
+────────────────────────────────────────────────────────────────────────────────
+Only runs if domain is known. Fetches top decision-makers at that company.
+Stores in resolution["decision_makers"] as [{name, email, title, linkedin}].
+Used by dashboard to show "You should talk to: [Name, VP Sales]".
 
-── STEP 5c: Clearbit COMPANY ────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_clearbit_company()
-Requires CLEARBIT_API_KEY. Firmographic fallback after Explorium.
-Confidence: 0.75
+────────────────────────────────────────────────────────────────────────────────
+STEP 5: EXPLORIUM FULL ENRICHMENT (3 phases)
+────────────────────────────────────────────────────────────────────────────────
+The single most data-rich step. Uses the full Explorium B2B graph.
 
-── STEP 5.5: IP RDAP ────────────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_rdap_lookup()
+Phase 1 — MATCH:
+  search_companies({domain} or {name}) → internally calls:
+    POST /businesses/match with [{domain, name}]
+    → business_id (Explorium's internal stable identifier)
+    → fetch_businesses({business_id}) for full basic profile
+    → normalize_company() → {name, domain, industry, employee_count_range,
+       employee_count_exact, revenue_range, logo_url, linkedin_url, headquarters...}
 
+  Name ranking: scores candidates by similarity to query name/domain.
+  Excludes mega-brands (google.com, amazon.com) from name-only queries.
+  confidence_bump = 0.9 (domain match) or 0.8 (name match)
+
+Phase 2 — enrich_company_fully(matched_company):
+  Runs 4 sequential Explorium module calls:
+  a. POST /businesses/firmographics/enrich (business_id)
+     → naics, sic, industry, employee_count_range, revenue_range, revenue_exact,
+       logo_url, company_type, HQ city/state/country/zip, linkedin_industry_category
+  b. POST /businesses/funding_and_acquisition/enrich (business_id)
+     → investors[], funding_total, last_funding_date, funding_stage
+  c. POST /businesses/financial_indicators/enrich (business_id)
+     → revenue_exact (yearly), peer_companies (competitors)
+  d. POST /businesses/technographics/enrich (business_id)
+     → full_tech_stack[] (programming languages, frameworks, cloud, databases, etc.)
+
+Phase 3 — LinkedIn Posts:
+  POST /businesses/linkedin_posts/enrich (business_id)
+  → posts[] (last 10), followers count
+  Stored as resolution["explorium"]["linkedin_posts"],
+             resolution["explorium"]["linkedin_followers"]
+
+Propagates to top-level:
+  resolution["company"]       ← Explorium always wins on name
+  resolution["domain"]        ← canonical registered domain (if not set)
+  resolution["linkedin_url"]  ← company LinkedIn URL
+  resolution["logo_url"]      ← company logo
+  resolution["tech_stack"]    ← list of tech names (max 30)
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 5b: HUNTER.IO (domain path, if no person yet)
+────────────────────────────────────────────────────────────────────────────────
+GET https://api.hunter.io/v2/domain-search?domain={domain}&limit=5
+Returns: first/last name, email pattern, seniority, department for top contacts.
+Only runs if no full_name + email already in resolution.
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 5c: CLEARBIT COMPANY (fallback)
+────────────────────────────────────────────────────────────────────────────────
+GET https://company-stream.clearbit.com/v2/companies/domain={domain}
+Returns: description, employee_count, revenue_range, industry, logo.
+Only fills fields not already set. Low-priority fallback if Explorium missed.
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 5.5: IP RDAP (FREE)
+────────────────────────────────────────────────────────────────────────────────
 GET https://rdap.org/ip/{ip}
-Modern replacement for WHOIS. Returns registrant org for the IP block.
-Skips if company already found with confidence >= 0.60.
-Applies _normalize_company_name(). Confidence: 0.50
-Cost: Free, no API key.
+Returns: network name, registrant org from IP block record.
+Only runs if confidence < 0.60. Free, no API key.
+Sets confidence 0.50 on company hit.
 
-── STEP 5.6: DOMAIN RDAP ────────────────────────────────────────────────────────
-File: visitor_enrich.py → _step_domain_rdap()
-
+────────────────────────────────────────────────────────────────────────────────
+STEP 5.6: DOMAIN RDAP (FREE)
+────────────────────────────────────────────────────────────────────────────────
 GET https://rdap.org/domain/{domain}
-Queries the domain registry (not the IP block registry).
-The registrant org IS legally the company — highest-fidelity free source.
-Only runs for MX-verified domains (_mx_unverified is not True).
-Parses vCard fn/org fields from registrant entity.
-Confidence: 0.65. Cost: Free, no API key.
+Extracts registrant org from domain's vCard "fn" or "org" property.
+More authoritative than IP RDAP — domain registrant IS the company.
+Only runs if domain known AND not _mx_unverified.
+Sets confidence 0.65 on company hit.
 
-── STEP 7: MULTI-SOURCE AGREEMENT BOOSTER ───────────────────────────────────────
-File: visitor_enrich.py → _boost_confidence_by_agreement()
+────────────────────────────────────────────────────────────────────────────────
+STEP 7: MULTI-SOURCE AGREEMENT BOOSTER
+────────────────────────────────────────────────────────────────────────────────
+Collects normalised company names from 7 sources:
+  ipapi_org, ptr_company, ipinfo_company, enrich_so_company,
+  rdap_company, domain_rdap_company, explorium_company
 
-Collects normalized company name candidates from all 7 sources:
-  ip-api, IPinfo, IP RDAP, Domain RDAP, Enrich.so, Explorium, Identity graph
+Applies _normalize_company_name() to each (strips Ltd/Inc/LLC/GmbH etc.)
+Counts occurrences:
+  - 3+ sources agree → confidence = max(current, 0.90)
+  - 2 sources agree  → confidence = max(current, 0.78)
+  Uses the most-agreed-upon name as the canonical company.
 
-Uses _normalize_company_name() to strip legal suffixes before comparison
-(so "Televentures Ltd." == "Televentures Limited" == "Televentures").
+────────────────────────────────────────────────────────────────────────────────
+STEP 8: IDENTITY GRAPH STORE
+────────────────────────────────────────────────────────────────────────────────
+Upserts identity_node with:
+  visitor_id, ip, email, full_name, company_name, company_domain,
+  phone, linkedin_url, job_title
+  raw_data = {"fingerprint": fp_hash, ...}
 
-Agreement rules:
-  2 sources agree  → confidence = max(current, 0.78)
-  3+ sources agree → confidence = max(current, 0.90)
-  Canonical name   → picked from highest-priority source (Explorium > Enrich.so > ip-api)
-
-This is the key accuracy booster for company-level identification —
-multiple independent sources agreeing eliminates false positives.
-
-── STEP 8: IDENTITY GRAPH STORE ─────────────────────────────────────────────────
-File: visitor_enrich.py → _step_identity_graph_store()
-
-Upserts identity_nodes with all resolved fields.
-Stores browser fingerprint in raw_data->>'fingerprint' for future cross-org matching.
-On update: fills empty fields only; email from form-capture always wins.
-
-COMPANY NAME NORMALISATION (_normalize_company_name):
-Strips legal suffixes before storing and comparing:
-  "Televentures Ltd." → "Televentures"
-  "ACME CORPORATION" → "ACME"
-  "Foo Pvt. Ltd." → "Foo"
-Patterns covered: Ltd, Limited, Inc, Corp, Corporation, LLC, LLP, GmbH, Pvt Ltd,
-  Pte Ltd, S.A., S.R.L., B.V., A.G., PLC, Co., & Co., Holdings, Group
-
-ASN → COMPANY REDIS CACHE (24h TTL):
-When ip-api returns an AS number for a corporate IP, the resolved company is
-cached at key "asn:{asnum}". Future IPs with the same ASN are identified instantly
-with zero API calls — especially effective for orgs with a dedicated corporate ASN.
-
-REDIS DOMAIN CACHE (72h TTL):
-When full domain-level enrichment succeeds, the result is cached at
-"enrich:domain:{domain}". Future visitors from the same company domain skip
-steps 3–5.6 entirely and get the cached firmographic data immediately.
+TIERING (applied after all steps):
+  "noise"   — bot_score ≥ 40, OR company is an ISP/cloud/residential provider
+  "person"  — confidence ≥ 0.65 AND (email OR person data known)
+  "company" — company or domain known (even if no person)
+  "unknown" — nothing identified
 
 
 ================================================================================
- 5. BEHAVIORAL INTELLIGENCE ENGINE
+ 6. BEHAVIORAL INTELLIGENCE ENGINE
 ================================================================================
 
-File: services/behavioral_scoring.py
+Triggered per visit in _process_visitor_data() after enrichment.
+Reads last 30 visits for this visitor_id from DB.
 
-Predicts the job role (persona) and buying stage of each anonymous visitor
-from their aggregated page journey. Runs per-visitor_id after enrichment.
+SIGNAL DIMENSIONS:
+  1. Page Topic Taxonomy   — URL path segments → weighted persona scores
+     130+ keywords mapped to 7 personas: engineering / sales / executive /
+     marketing / hr / product / finance
+     Fuzzy match: substring matching at 0.6× weight
 
-PERSONAS (8 categories):
-  engineering, sales, executive, marketing, hr, product, finance, unknown
+  2. Page Meta Signals     — page <title> + <h1> text (pixel.js v2.2)
+     12 regex patterns: pricing, api, enterprise, integration, roi, careers,
+     analytics, marketing, product, case-study, demo, finance
+     Worth 70% of URL signal weight
 
-SIGNALS SCORED (10 dimensions):
-  1.  Page Topic Taxonomy    — URL path segments mapped to persona weights
-  2.  Page Meta Signals      — <title> and <h1> text (pixel v2.2+) mapped to 12 B2B patterns
-  3.  Dwell Time Weighting   — deep dwell amplifies topic score (2x for >60s)
-  4.  Scroll Depth           — high scroll (>75%) amplifies topic signal by 40%
-  5.  CTA Click Tracking     — clicks on pricing/demo/contact buttons
-  6.  Visit Frequency        — repeat visits boost engagement
-  7.  Session Depth          — more unique pages = higher intent
-  8.  Form Interaction       — email captured = max buying signal
-  9.  Referrer Signals       — LinkedIn/GitHub/G2 → persona hint
-  10. Time-of-Day Patterns   — business-hours visits weighted higher
+  3. Dwell Time Weighting  — longer time on page amplifies topic signal
+     <5s: noise (weight 0.3), 5-30s: 0.6, 30s-2min: 0.9, >2min: 1.2
 
-NEW in v2.2:
-  - Visit Velocity (pages/hour) — high velocity signals active research mode
-    compute_visit_velocity(): measures pages/hour in last 10 visits
-    Scoring: ≥12 ph → +5pts, ≥6 ph → +3pts, ≥2 ph → +1pt
+  4. Scroll Depth          — deep scroll = genuine interest (>70%: +8 pts)
 
-  - Engagement Time Decay — 14-day half-life exponential decay
-    apply_engagement_decay(): visitors inactive for 2 weeks score 50% lower
-    Stale data never zeroes out (minimum score = 1)
+  5. CTA Click Tracking    — clicks on pricing/demo/signup buttons (+15 pts)
 
-  - Page Meta Classification (classify_page_meta()):
-    Scores page title + h1 text against 12 B2B keyword patterns
-    E.g. "Enterprise Security & Compliance Overview" → executive=0.4, engineering=0.3
-    Meta signals worth 70% of URL signals (supplementary, not primary)
+  6. Visit Frequency       — repeat visitors: +5 per additional visit (cap 15)
 
-ENGAGEMENT SCORE (0–100):
-  Visit frequency:   up to 20 pts
-  Page depth:        up to 15 pts
-  Dwell time:        up to 15 pts
-  Form interaction:  up to 15 pts
-  Recency:           up to 10 pts
-  Referrer quality:  up to  8 pts
-  Scroll depth:      up to  7 pts
-  CTA clicks:        up to  5 pts
-  Visit velocity:    up to  5 pts
-  Business hours:    up to  5 pts
+  7. Session Depth         — pages per session: 3+: +5, 5+: +10, 10+: +15
 
-BUYING STAGE:
-  "decision"      — visited pricing/demo + (form fill or engagement ≥ 60)
-  "consideration" — 3+ visits or engagement ≥ 40
-  "awareness"     — everything else
+  8. Form Interaction      — email submitted on any visit: +20 pts engagement
 
-RECENCY BOOST:
-  Last 5 visits get 1.5× multiplier on all persona scores.
-  Visits 6–10 get 1.2× multiplier.
-  Older visits get 1.0×.
+  9. Referrer Signals      — linkedin.com → executive/sales/hr, github → engineering
+     g2.com / capterra / trustradius → sales/product (review site = active eval)
 
-ICP SCORE (0–100) — per-org configurable:
-  Default weights: company(25) + person(20) + industry(15) + headcount(15) +
-                   revenue(10) + linkedin(10) + domain(5) = 100
-  Per-org overrides via site_configs.icp_filters:
-    w_company, w_person, w_industry, w_headcount, w_revenue, w_linkedin, w_domain
-  Industry filter: ±10 pts bonus/penalty for target industry match
-  Headcount filter: –15 pts if employee count outside min/max range
+  10. Time-of-Day          — business hours (8am–6pm UTC): +3 pts
+      Early AM / late PM: small negative (often bots or non-decision-makers)
+
+  11. UTM Signals          — utm_content/campaign/term classified against 7 patterns
+
+  12. Visit Velocity       — pages/hour in last 10 visits (cap 20 ph)
+      >5 ph: +3 pts, >10 ph: +5 pts (active research mode)
+
+  13. Engagement Decay     — exponential decay with 14-day half-life
+      Days since last visit → score × 0.5^(days/14), minimum 1
+
+JOB TITLE OVERRIDE:
+  If job_title is known (from email enrichment), maps directly to persona.
+  180+ title→persona mappings: CTO→engineering, VP Sales→sales, CEO→executive etc.
+
+BUYING STAGE CLASSIFICATION:
+  "decision":     CTA clicks ≥ 2, OR engagement ≥ 75, OR pricing page visited,
+                  OR demo page visited
+  "consideration": engagement ≥ 45 OR (scroll >50% AND visited features/solutions)
+  "awareness":     default (browsing, early research)
+
+OUTPUT: {predicted_persona, engagement_score (0-100), buying_stage,
+         persona_confidence (0.0-1.0), signals_breakdown}
 
 
 ================================================================================
- 6. IDENTITY GRAPH & CROSS-ORG MATCHING
+ 7. IDENTITY GRAPH & CROSS-ORG MATCHING
 ================================================================================
 
-File: visitor_enrich.py + db/models/identity_graph.py
+The identity graph solves the hardest problem in visitor tracking: the same
+physical person visits multiple unrelated customer sites, using the same browser.
 
-The identity_nodes table is the cross-session memory of the system.
-Every enriched visitor with meaningful data gets one node per visitor_id.
+STORAGE: identity_nodes table (one row per identified visitor per org context)
 
-RESOLUTION CASCADE (Step -1):
-  1. visitor_id    → exact match (most reliable, same browser/org)
-  2. fingerprint   → cross-org match via raw_data->>'fingerprint'
-                     Expression index: ix_identity_nodes_fingerprint_expr
-                     A visitor who filled a form on company A's site is instantly
-                     recognized on company B's site — zero API spend.
-  3. /24 subnet    → corporate NAT clustering
-                     Same /24 block = likely same corporate network.
-                     Returns COMPANY DATA ONLY (not personal — different person).
-                     Index: ix_identity_nodes_ip_text
-  4. exact IP      → same IP seen before
-  5. email         → email match
+LOOKUP CASCADE (5 levels, most → least specific):
+  1. visitor_id exact: same localStorage UUID → definitive match
+  2. Fingerprint cross-org: expression index on raw_data->>'fingerprint'
+     Same cyrb53 hash seen from any org's pixel → re-identified instantly
+  3. /24 subnet: all IPs in same /24 block share company data
+     Handles corporate NAT where entire office uses one public IP range
+  4. Exact IP: single IP match (works for static office IPs)
+  5. Email: if email provided → look up prior enriched data
 
-FINGERPRINT STORAGE:
-  Pixel sends getFingerprintHash() (canvas + audio + screen + fonts hash).
-  Stored in identity_nodes.raw_data->>'fingerprint'.
-  Expression index enables O(log n) cross-org lookups.
+STORAGE (after enrichment):
+  Stores fingerprint hash in raw_data JSONB.
+  Expression index: ON identity_nodes ((raw_data->>'fingerprint'))
+  WHERE raw_data->>'fingerprint' IS NOT NULL
+  → O(log n) lookup for cross-org re-identification
 
-RETROACTIVE BACKFILL (tasks/visitors.py):
-  When a visitor is identified (email/name/company resolved), ALL prior visits
-  from the same visitor_id are retroactively patched via one SQL UPDATE:
-    Fields patched: email, full_name, company, domain, job_title, linkedin_url, logo_url
-  This means: visit history immediately shows full identity, not just the current visit.
-  SQL pattern: iterative jsonb_set() chain built dynamically from resolved fields.
+RETROACTIVE BACKFILL:
+  When visitor submits email for first time, patches ALL prior anonymous visits:
+  email, full_name, company, domain, job_title, linkedin_url, logo_url
+  Uses dynamic JSONB jsonb_set chain to update each column atomically.
 
-
-================================================================================
- 7. COMPANY-LEVEL ACCURACY TECHNIQUES
-================================================================================
-
-Summary of all techniques used to maximize company identification accuracy:
-
-┌─────────────────────────────────────────┬──────────────┬──────────────────────┐
-│ Technique                               │ Cost         │ Confidence Added     │
-├─────────────────────────────────────────┼──────────────┼──────────────────────┤
-│ PTR reverse DNS                         │ Free         │ 0.45–0.65            │
-│ ip-api.com org field (ASN)              │ Free         │ 0.20–0.35            │
-│ ASN → company Redis cache (24h)         │ Free         │ instant (0+ API)     │
-│ IPinfo company                          │ Paid plan    │ 0.30–0.55            │
-│ Enrich.so IP → company                  │ $29/mo       │ 0.70                 │
-│ MX record validation                    │ Free (DNS)   │ filter noise         │
-│ Explorium firmographics                 │ Existing key │ 0.80–0.90            │
-│ Clearbit company (fallback)             │ Free tier    │ 0.75                 │
-│ IP RDAP (rdap.org)                      │ Free         │ 0.50                 │
-│ Domain RDAP (domain registry)           │ Free         │ 0.65                 │
-│ Multi-source agreement booster          │ Free         │ 0.78–0.90            │
-│ Company name normaliser                 │ Free         │ +accuracy (dedup)    │
-│ /24 subnet clustering                   │ Free         │ company-level match  │
-│ Cross-org fingerprint matching          │ Free         │ 0.85 (person-level)  │
-│ Domain Redis cache (72h)                │ Free         │ instant (0 API)      │
-└─────────────────────────────────────────┴──────────────┴──────────────────────┘
-
-COMPANY NAME NORMALISATION:
-  Before comparing across sources and before storage, all company names pass through
-  _normalize_company_name() which strips 20+ legal-entity suffix patterns.
-  Effect: "Televentures Ltd." + "TELEVENTURES LIMITED" + "Televentures" all
-  match as the same company → agreement booster fires → confidence 0.90.
-
-NOISE FILTERING:
-  is_isp_or_cloud(): keyword filter for 100+ ISP/cloud/hosting names
-  Mobile ASN patterns: Jio, Airtel, Vodafone, Vi → is_mobile=True → skip
-  Bot score: UA patterns + zero viewport + cloud ASN → bot_score (0–100)
-  Hosting flag: ip-api "hosting" field → datacenter IP → tier=noise
-  Proxy flag: ip-api "proxy" field → adds to bot_score
-  PTR residential regex: dsl/cable/dhcp/pool + IP-in-hostname pattern → skip
-
-ISP ALLOWLIST (per-org):
-  Corporate VPN exits often look like ISP IPs.
-  site_configs.isp_allowlist: ["cloudflare", "zscaler"] → these are NOT filtered.
-  Passed to every is_isp_or_cloud() call in the pipeline.
+/24 SUBNET LIMITATION:
+  Returns company-level data only (not personal) when matched via /24 subnet.
+  Prevents incorrectly attributing one employee's identity to another.
 
 
 ================================================================================
- 8. PIXEL.JS (v2.2)
+ 8. COMPANY-LEVEL ACCURACY TECHNIQUES
 ================================================================================
 
-Files:
-  Backend/app/static/pixel.js  — served by FastAPI, canonical source
-  Frontend/public/pixel.js     — copy for Next.js dev environment
+Seven-source agreement architecture (no single point of failure):
 
-Embed snippet:
-  <script src="https://app.outmate.ai/static/pixel.js?key=YOUR_PIXEL_KEY" async></script>
+  Source             Type    Cost      Confidence    Coverage
+  ─────────────────────────────────────────────────────────────────────────
+  PTR Reverse DNS    Free    $0        0.35–0.55     ~30% B2B traffic
+  ip-api.com         Free    $0        0.50–0.60     ~60% (has ISP noise)
+  IPinfo             Paid    Low       0.60–0.65     ~55% business IPs
+  Enrich.so          Paid    Medium    0.65–0.70     ~45% B2B IPs
+  Explorium Match    Paid    High      0.80–0.90     ~80% when domain known
+  IP RDAP            Free    $0        0.45–0.50     ~35% (public IPs only)
+  Domain RDAP        Free    $0        0.60–0.65     ~50% (when domain known)
+  ─────────────────────────────────────────────────────────────────────────
 
-CAPABILITIES:
+ASN Cache (Redis, 24h TTL):
+  Corporate ASNs (e.g. APPLE-ENGINEERING, GOOGLE-CORP-NET) are cached.
+  Repeat visitors from same corporate ASN get instant identification.
 
-Fingerprinting (getFingerprintHash()):
-  Canvas pixel rendering + AudioContext output + screen dimensions +
-  installed fonts via measureText. SHA-256 hashed. Stored in localStorage
-  ("_ot_fp"). Sent as "fp" field on every beacon.
+ISP/Cloud Filter (ISP_CLOUD_KEYWORDS):
+  ~200+ keywords covering major ISPs in India, US, UK, EU, Canada, Australia.
+  Prevents residential/mobile IPs from being labelled as companies.
+  Per-org isp_allowlist can exempt specific ISPs (for ISP-employed prospects).
 
-Visitor ID (getVisitorId()):
-  UUID v4 generated once per device. Stored in localStorage ("_ot_vid").
-  Persists across sessions, pages, and referrer changes.
+_normalize_company_name():
+  Strips legal suffixes: Ltd, Inc, LLC, GmbH, Pvt Ltd, Pte Ltd, S.A., S.R.L. etc.
+  Rejects junk names: "Inc", "Holdings", "Technologies", "Solutions" etc.
+  Allows multi-source agreement booster to work correctly across APIs.
 
-Email capture (identify(email)):
-  Customer calls window.outmateTracker.identify(email) on form submit.
-  Email stored in localStorage and appended to next beacon.
-  Triggers Enrich.so + BetterContact + ContactOut email enrichment chain.
-
-CTA click tracking:
-  MutationObserver watches for buttons/links matching pricing/demo/contact/cta patterns.
-  Increments _ctaClicks counter. Reset per page view.
-
-Scroll depth:
-  Passive scroll listener. Tracks max scroll % reached on current page (_maxScrollPct).
-  Reset per page view.
-
-Dwell time:
-  Sent on page unload (visibilitychange → hidden + pagehide).
-  Measured from _pageEntryTime. Sent as "leave" action.
-
-NEW in v2.2 — Page meta signals:
-  page_title:      document.title (first 120 chars)
-  page_h1:         document.querySelector('h1').textContent (first 80 chars)
-  connection_type: navigator.connection.effectiveType (e.g. "4g", "wifi")
-
-PAYLOAD SHAPE (POST /api/v1/visitors/track):
-{
-  action:          "pageview" | "leave",
-  url:             string,
-  referrer:        string,
-  pixel_key:       string,
-  email:           string | null,
-  visitor_id:      string,
-  fp:              string,                 -- fingerprint hash
-  viewport_w:      number,
-  viewport_h:      number,
-  dwell_time:      number | undefined,     -- ms, only on "leave"
-  scroll_depth:    number,                 -- 0–100 %
-  cta_clicks:      number,
-  page_title:      string | undefined,     -- v2.2+
-  page_h1:         string | undefined,     -- v2.2+
-  connection_type: string | undefined,     -- v2.2+
-}
-
-DEDUPLICATION (backend):
-  Redis key: "dedupe:{org_id}:{ip}:{domain}" with 30-min TTL.
-  Prevents processing the same IP+domain more than once per half-hour.
-
-BOT FILTERING (backend, before Celery enqueue):
-  UA missing → +20 bot_score
-  UA contains bot/crawler/spider/headless → +50
-  Zero viewport → +20
-  Cloud ASN → +20
-  Datacenter IP → +15
-  bot_score ≥ 50 → rejected immediately; ≥ 40 → tier=noise
+CDN Domain Mapping:
+  PTR returning a-msedge.net → sets company="Microsoft", domain="microsoft.com"
+  Handles 15 CDN/infra domains with correct parent company mappings.
 
 
 ================================================================================
- 9. BACKEND API ROUTES
+ 9. PIXEL.JS (v2.2)
 ================================================================================
 
-File: app/api/routes/visitors.py  (prefix: /api/v1/visitors)
+SIZE: ~6 KB unminified, ~2.8 KB gzipped (served by FastAPI /api/v1/visitors/pixel.js)
+LOCATION (canonical): Backend/app/static/pixel.js (also mirrored to Frontend/public/)
 
-POST   /track                — pixel beacon receiver (no auth, rate-limited)
-GET    /                     — paginated visit list with filters
-GET    /stats                — analytics: totals, match rate, top pages, top companies
-GET    /site-config          — get/create the org's SiteConfig
-PUT    /site-config          — update webhook_urls, icp_filters, isp_allowlist, etc.
-POST   /test-hit             — send a synthetic test visit (for pixel testing)
-POST   /identify             — manual identify(email) from SDK
-GET    /stream               — SSE stream of real-time visit events
-GET    /export/csv           — CSV export of all visits
-DELETE /visits/{visit_id}    — GDPR: delete a single visit record
+CONSENT GATE (_isConsentDenied):
+  Synchronous checks (bail-out at script load):
+  1. localStorage outmate_optout === '1'
+  2. navigator.doNotTrack === '1' or 'yes' (W3C DNT)
+  3. navigator.globalPrivacyControl === true (GPC — Chrome 94+, Firefox)
+  4. Cookiebot: cb.declined OR (cb.consented AND !statistics AND !marketing)
+  5. OneTrust: window.OnetrustActiveGroups does NOT include 'C0002'
 
-RATE LIMITING on /track:
-  slowapi: 100 requests per minute per IP
+  Async TCF 2.0 (IAB Framework):
+  When window.__tcfapi present, defers ALL tracking until Purpose 1 (storage)
+  AND Purpose 7 (measurement) are both consented.
+  _pendingInitialTrack flag set if TCF check pending at page load.
+  CookiebotOnAccept / CookiebotOnDecline events monitored.
+  OptanonAlertBoxClosed event for OneTrust.
+  _isConsentDenied() re-checked on EVERY track() call (mid-session revocation).
 
-AUTHENTICATION:
-  All routes except /track and /stream require Bearer JWT.
-  /stream uses ?token= query param (main JWT) — SSE exchange token TODO.
+FINGERPRINTING:
+  cyrb53 hash of: canvas toDataURL, WebGL renderer, devicePixelRatio,
+  screen dimensions, timezone, language, UA, platform, cookie enabled,
+  plugin count, hardwareConcurrency, deviceMemory
+  Cached in _fpHashCache (one computation per page load).
 
+SPA TRACKING:
+  Patches history.pushState + history.replaceState.
+  Listens to popstate for back/forward navigation.
+  Fires 'leave' event (with dwell time) before route change.
+  Fires 'pageview' 100ms after new route settles.
+  Tracks visibility changes (tab hidden/shown).
 
-================================================================================
- 10. CELERY TASKS
-================================================================================
+ENGAGEMENT SIGNALS CAPTURED:
+  scroll_depth (0–100%), cta_clicks (count of high-intent button clicks),
+  dwell_time (ms on page for 'leave' events), viewport dimensions,
+  page_title, page_h1, connection_type (effectiveType or type)
 
-File: app/tasks/visitors.py
+EMAIL AUTO-CAPTURE:
+  Intercepts form submit events and button[type=submit] clicks.
+  Searches form for input[type=email] and known email input selectors.
+  Falls back to text inputs that match email regex.
+  Stores captured email in localStorage + cookie (dual persistence for Safari ITP).
 
-process_visitor_task(org_id, data):
-  Bound, max_retries=2, autoretry_for=Exception, retry_backoff=True (max 120s)
-  Creates stub visit (enrichment_status='processing') → enriches → updates to 'done'
-  On unhandled exception → marks enrichment_status='failed'
-  Enrichment status visible in dashboard as spinner/error state.
+PUBLIC API:
+  window.outmate.identify(email) — manual identification
+  window.outmate.optOut()       — sets localStorage opt-out, clears IDs
+  window.outmate.optIn()        — removes opt-out flag
+  window.outmate.reset()        — clears visitor_id + email
+  window.outmate.trackPage()    — manual SPA page track
 
-deliver_webhook(webhook_url, payload, visit_id, alert_id, webhook_secret):
-  Bound, max_retries=3
-  Signs payload with HMAC-SHA256: X-Outmate-Signature: sha256=<hex>
-  Retry schedule: 5s → 60s → 300s
-  Fallback: if Celery unavailable, attempts synchronous httpx delivery
-  Final failure: sets alert.status='failed_final'
+STORAGE:
+  localStorage + Cookie dual-write (cookie fallback for Safari ITP).
+  Cookie: SameSite=Lax, 365-day expiry.
+  Keys: outmate_visitor_id, outmate_visitor_email, outmate_optout
 
+BEACON PRIORITY:
+  navigator.sendBeacon → Blob (survives page unload)
+  fetch(keepalive: true) fallback
 
-================================================================================
- 11. REAL-TIME SSE STREAM
-================================================================================
-
-Endpoint:  GET /api/v1/visitors/stream?token=JWT
-Transport: Server-Sent Events (text/event-stream)
-Channel:   Redis pub/sub on key "visitors:{org_id}"
-
-Event shape:
-{
-  "type": "visit_created",
-  "org_id": string,
-  "visit": {
-    id, ip, url, referrer, intent_score, matched, created_at,
-    resolution, category, company, domain, geo,
-    full_name, email, source_site, industry, employee_count_range
-  }
-}
-
-Reconnection: Frontend uses EventSource with exponential backoff (500ms → 30s max).
-Heartbeat: 30s keepalive comment sent to prevent proxy timeouts.
-Published by: _publish_visit_event() in tasks/visitors.py after each enrichment.
-
-
-================================================================================
- 12. WEBHOOK DELIVERY (HMAC-SIGNED)
-================================================================================
-
-Configured in site_configs.webhook_urls (JSON array of URLs).
-Fired for every visit where matched=True.
-
-HMAC Signature:
-  Secret: site_configs.webhook_secret (auto-generated 32-byte hex on row creation)
-  Header: X-Outmate-Signature: sha256=<HMAC-SHA256(body_bytes, secret.encode())>
-  Body: deterministic JSON (no spaces, sorted separators)
-  Verification by customer: compare expected_sig with header value using hmac.compare_digest()
-
-Webhook payload:
-{
-  "event":      "visitor_identified",
-  "visit_id":   UUID,
-  "ip":         string,
-  "url":        string,
-  "resolution": { ...full resolution object... },
-  "timestamp":  ISO-8601
-}
-
-Retry schedule (Celery):  5s → 60s → 300s (3 attempts total)
-Audit trail: alerts table (status: pending → success | failed | failed_final)
+BOT DETECTION:
+  navigator.webdriver, window._phantom, window.callPhantom
+  outerWidth === 0 AND outerHeight === 0
 
 
 ================================================================================
- 13. PRIVACY & GDPR CONTROLS
+10. BACKEND API ROUTES
 ================================================================================
 
-Per-org settings (site_configs):
+PUBLIC (no auth required):
+  GET  /api/v1/visitors/pixel.js       Serve tracking script
+  POST /api/v1/visitors/track          Accept visit events from pixel.js
+  GET  /api/v1/visitors/stream         SSE real-time stream (exchange token auth)
+  POST /api/v1/visitors/optout         GDPR opt-out for visitor_id
+  DELETE /api/v1/visitors/optout       Revoke opt-out (opt back in)
 
-anonymize_ips (BOOLEAN):
-  When true: last IP octet masked before storage (192.168.1.123 → 192.168.1.0)
-  Applied in _process_visitor_data() before visit record is written.
+AUTHENTICATED (JWT Bearer):
+  GET  /api/v1/visitors                List visits (limit/offset, filtering)
+  GET  /api/v1/visitors/stats          Aggregated stats (total, matched, tiers)
+  GET  /api/v1/visitors/analytics      Analytics (top companies, intent, geo)
+  GET  /api/v1/visitors/site-config    Get/create SiteConfig for current user
+  POST /api/v1/visitors/site-config    Update webhook URL, alert rules, ICP filters
+  GET  /api/v1/visitors/export         CSV export of filtered visits
+  GET  /api/v1/visitors/accounts       Account-level intent scoring endpoint
+  POST /api/v1/visitors/sse-token      Issue 60s exchange token for SSE stream
 
-gdpr_mode (BOOLEAN):
-  Full GDPR compliance mode — future: auto-delete after 30 days, consent check.
+SSE TOKEN LIFECYCLE:
+  1. POST /sse-token with JWT Bearer → Redis setex sse_token:{token} = org_id, TTL 60s
+  2. GET /stream?token={token} → Redis GET + DELETE (single-use) → stream opens
+  3. EventSource auto-reconnects on disconnect (with 1s–60s exponential backoff)
 
-ISP Allowlist (isp_allowlist JSONB array):
-  Corporate VPN exits (e.g. Zscaler, Cloudflare Gateway) look like ISPs.
-  Add ISP keyword substrings here to prevent them being filtered as noise.
+RATE LIMITING (/track):
+  30 req/min per IP (sliding window, Redis INCR + EXPIRE)
+  1000 req/min per pixel_key
+  Fails open (allows) if Redis unavailable
 
-Data deletion:
-  DELETE /api/v1/visitors/visits/{visit_id} — removes single visit record (GDPR right to erasure)
-
-IP storage policy:
-  IPs stored as INET type in PostgreSQL — never logged in plaintext elsewhere.
-  With anonymize_ips=true, the full IP is never written to the DB at all.
-
-
-================================================================================
- 14. FRONTEND DASHBOARD
-================================================================================
-
-File: Frontend/app/(dashboard)/visitors/page.tsx
-
-TABS:
-  Companies — grouped view (one row per company/IP group)
-  People    — flat view (one row per visit)
-  Analytics — charts: match rate, top companies, page funnel, buying stage dist.
-  Settings  — webhook config, ICP filters, pixel embed snippet, test hit
-
-COMPANY TABLE COLUMNS:
-  Avatar + Company name (with logo fallback via Clearbit logo API)
-  Category badge (Company / Person / Noise)
-  ICP Score (progress bar)
-  Intent badge (Hot / Warm / Cold)
-  Pages visited
-  Last seen
-
-DETAIL SIDEBAR (click any row):
-  Full enrichment resolution dump
-  Behavioral Intelligence card: Persona + Engagement score + Buying stage + Role signals
-  Pages Viewed, Intent, Last Seen, Location, Engagement score
-  Contacts section (decision makers)
-
-FILTERS:
-  Search: company name, person name, email, domain
-  Filter tabs: All | Hot (intent ≥ 0.7) | ICP Match (icp_score ≥ 50) | New Today
-  Slider: minimum ICP score
-  Period selector: 24h | 48h | 7d | 30d
-
-REAL-TIME:
-  SSE connection auto-reconnects with exponential backoff.
-  New visits prepended to list with fade-in animation.
-  Live badge shows connection status.
-
-ENRICHMENT STATUS:
-  Processing: spinner shown while Celery task is running
-  Done: full data shown
-  Failed: error badge — retry possible via Test Hit
+DB TIMEOUT: 15s for all DB operations (via ThreadPoolExecutor + asyncio.wait_for)
 
 
 ================================================================================
- 15. CONFIGURATION (SITECONFIG)
+11. CELERY TASKS & BEAT SCHEDULE
 ================================================================================
 
-One SiteConfig per org. Auto-created on first pixel hit if not exists.
+TASKS:
+  process_visitor_task (visitors.py)
+    - max_retries=2, retry_backoff=True, retry_backoff_max=120s
+    - autoretry_for=(Exception,)
+    - Runs full enrichment pipeline (~2–8s depending on API latency)
 
-Fields:
-  pixel_key      — auto-generated UUID, embed in pixel script tag
-  domain         — customer's website domain (for display)
-  webhook_urls   — array of URLs to POST on matched visit
-  webhook_secret — auto-generated 32-byte hex (HMAC key for webhook signing)
-  icp_filters    — JSONB with weight overrides and industry/headcount filters:
-    {
-      "w_company":    25,    // weight for company name resolved
-      "w_person":     20,    // weight for person email/name resolved
-      "w_industry":   15,
-      "w_headcount":  15,
-      "w_revenue":    10,
-      "w_linkedin":   10,
-      "w_domain":      5,
-      "industries":   ["SaaS", "Fintech"],    // bonus/penalty for target industries
-      "min_employees": 50,
-      "max_employees": 5000
-    }
-  isp_allowlist  — array of ISP name substrings to NOT filter (e.g. ["zscaler", "cloudflare"])
-  anonymize_ips  — true/false: mask IP last octet before storage
-  gdpr_mode      — true/false: full GDPR mode
+  deliver_webhook (visitors.py)
+    - max_retries=3
+    - Retry schedule: 5s → 60s → 300s (exponential)
+    - HMAC-SHA256 signed via X-Outmate-Signature header
+    - Updates Alert.status: success / failed / error / failed_final
 
+  gdpr_auto_delete_task (visitors.py)
+    - Schedule: daily at 02:00 UTC (Celery Beat)
+    - For each org with gdpr_mode=True:
+      DELETE visits+sessions older than 30 days
+      DELETE orphaned identity_nodes (no recent visits)
+    - Per-org commit to isolate failures
 
-================================================================================
- 16. PERFORMANCE INDEXES
-================================================================================
+  aggregate_account_intent_task (visitors.py)
+    - Schedule: every hour at :15 (Celery Beat)
+    - For each org: aggregates engagement across all visits grouped by company domain
+    - Formula: peak_engagement×0.40 + min(unique_visitors×5,25) +
+               buying_stage_pts + avg_icp×0.15
+    - Caches JSON in Redis account_intent:{org_id} with 2h TTL
 
--- Fast query: all matched visits for an org, newest first
-CREATE INDEX IF NOT EXISTS ix_visits_org_matched_partial
-  ON visits (org_id, created_at DESC) WHERE matched = true;
-
--- Cross-org fingerprint dedup (identity graph)
-CREATE INDEX IF NOT EXISTS ix_identity_nodes_fingerprint_expr
-  ON identity_nodes ((raw_data->>'fingerprint'))
-  WHERE raw_data->>'fingerprint' IS NOT NULL;
-
--- /24 subnet clustering scans
-CREATE INDEX IF NOT EXISTS ix_identity_nodes_ip_text
-  ON identity_nodes (ip);
-
--- Fast visitor_id resolution within a visit
-CREATE INDEX IF NOT EXISTS ix_visits_visitor_id_expr
-  ON visits ((resolution->>'visitor_id'))
-  WHERE resolution->>'visitor_id' IS NOT NULL;
-
--- Fast fingerprint dedup within visits
-CREATE INDEX IF NOT EXISTS ix_visits_fingerprint_expr
-  ON visits ((resolution->>'fingerprint'))
-  WHERE resolution->>'fingerprint' IS NOT NULL;
-
-All indexes are idempotent (CREATE INDEX IF NOT EXISTS) — safe to run on restart.
-Applied in main.py startup block.
+BEAT SCHEDULE (celery_app.py):
+  gdpr-auto-delete-daily:        crontab(hour=2, minute=0)
+  account-intent-aggregate-hourly: crontab(minute=15)
 
 
 ================================================================================
- 17. ENVIRONMENT VARIABLES
+12. REAL-TIME SSE STREAM
+================================================================================
+
+Architecture: FastAPI StreamingResponse → Redis PubSub
+
+Channel naming: visitors:{org_id}
+Published by: _process_visitor_data() after Visit row updated
+
+Event payload (JSON): full _visit_to_dict() output including all enrichment fields
+
+Reconnection:
+  - On Redis connection loss: exponential backoff (1s → 2s → 4s, max 60s)
+  - Reset RedisManager singleton on error to get fresh connection
+  - Heartbeat ": heartbeat\n\n" every 15s to prevent proxy timeout (nginx default 60s)
+  - request.is_disconnected() polled every 0.1s
+
+Auth paths:
+  1. Exchange token (preferred): ?token={64-char-hex}, single-use, 60s TTL
+  2. JWT fallback: ?token={jwt} (legacy support)
+
+
+================================================================================
+13. WEBHOOK DELIVERY (HMAC-SIGNED)
+================================================================================
+
+Triggers: configured per org in SiteConfig.alert_rules JSONB
+  - "new_company": any matched company visit
+  - "high_intent": intent_score > threshold
+  - "decision_stage": buying_stage == "decision"
+  - Custom field conditions
+
+Signature:
+  X-Outmate-Signature: sha256={hmac_hex}
+  Generated with: hmac.new(webhook_secret, json_body_bytes, sha256).hexdigest()
+
+Delivery (Celery task deliver_webhook):
+  3 attempts: 5s → 60s → 300s
+  Final failure marks Alert.status = "failed_final"
+
+Payload format: {event_type, visit_id, org_id, company, domain, email,
+                 intent_score, persona, buying_stage, enrichment_data}
+
+
+================================================================================
+14. PRIVACY & GDPR CONTROLS
+================================================================================
+
+PIXEL-SIDE:
+  1. _isConsentDenied() at load time — synchronous check (DNT, GPC, Cookiebot, OneTrust)
+  2. TCF 2.0 async deferred consent gate
+  3. outmate.optOut() API + CookiebotOnDecline / OptanonAlertBoxClosed events
+  4. Respects mid-session consent revocation (re-checked on every track() call)
+
+SERVER-SIDE:
+  5. Visitor opt-out stored as Redis key optout:{visitor_id} (checked at /track)
+  6. POST /api/v1/visitors/optout — sets Redis opt-out for visitor_id
+  7. DELETE /api/v1/visitors/optout — revokes opt-out (opt-in endpoint)
+  8. anonymize_ips per SiteConfig — masks last octet: "1.2.3.0"
+  9. gdpr_mode per SiteConfig — enables automatic 30-day deletion via Celery Beat
+  10. Swagger/Redoc disabled in production (ENVIRONMENT=production)
+
+DATA MINIMISATION:
+  - No personal email from login flow — only pixel form-capture
+  - Visitor data scoped strictly to org_id
+  - /24 subnet match returns company data only (not personal)
+
+
+================================================================================
+15. CONFIGURATION (SiteConfig)
+================================================================================
+
+Per-organisation configuration stored in site_config table:
+
+  pixel_key:       Unique key embedded in customer's pixel script tag
+  domain:          Customer's website domain (used for source_site tagging)
+  webhook_url:     HTTPS endpoint for real-time webhook delivery
+  webhook_secret:  64-char HMAC secret for signature verification
+  alert_rules:     JSON trigger conditions for webhooks
+  icp_filters:     {industries[], min_employees, max_employees, w_company,
+                    w_person, w_industry, w_headcount, w_revenue, w_linkedin, w_domain}
+                    ICP score weights and target criteria
+  isp_allowlist:   List of ISP substrings to NOT filter as residential
+                   (e.g. ["Tata Communications"] for ISP-sector customers)
+  anonymize_ips:   Mask last IP octet before storing in DB
+  gdpr_mode:       Enable auto-deletion of visits > 30 days
+
+ICP SCORE FORMULA:
+  score = 0
+  +25 if company identified
+  +20 if person (full_name or email) identified
+  +15 if industry known
+  +15 if employee_count known
+  +10 if revenue range known
+  +10 if LinkedIn URL known
+  +5  if domain known
+  +10 bonus if industry matches target industries
+  -10 penalty if industry known but doesn't match targets
+  -15 penalty if employee count outside min/max range
+  Maximum: 100
+
+
+================================================================================
+16. PERFORMANCE INDEXES
+================================================================================
+
+All critical indexes already applied in main.py startup migrations:
+
+  visits_org_created:         (org_id, created_at DESC)    — list queries
+  visits_org_ip:              (org_id, ip)                 — IP dedup / lookup
+  visits_resolution_gin:      GIN(resolution)              — JSONB full-text
+  visits_resolution_company:  (org_id, (resolution->>'company'))
+  visits_resolution_domain:   (org_id, (resolution->>'domain'))
+  identity_nodes_fingerprint: ((raw_data->>'fingerprint'))  — cross-org lookup
+                               WHERE fingerprint IS NOT NULL
+  identity_ip_email:          (ip, email)
+  identity_visitor_id:        (visitor_id)
+
+
+================================================================================
+17. ENVIRONMENT VARIABLES
 ================================================================================
 
 Required:
-  IPINFO_TOKEN         — IPinfo.io API token (free plan OK)
-  ENRICH_API_KEY       — Enrich.so API key ($29/mo starter)
-  EXPLORIUM_API_KEY    — Explorium B2B API key (existing)
-  DATABASE_URL         — PostgreSQL connection string (Supabase)
-  REDIS_URL            — Redis connection string
+  DATABASE_URL         PostgreSQL connection string (Supabase / self-hosted)
+  REDIS_URL            Redis connection string (rediss:// for TLS — Upstash)
+  JWT_SECRET           Min 64 chars — blocks weak values at startup
+  EXPLORIUM_API_KEY    Explorium B2B data platform
+  EXPLORIUM_BASE_URL   https://api.explorium.ai/v1
 
-Optional:
-  BETTERCONTACT_API_KEY  — BetterContact enrichment
-  CONTACTOUT_API_KEY     — ContactOut DM lookups
-  HUNTER_API_KEY         — Hunter.io domain email lookup
-  CLEARBIT_API_KEY       — Clearbit company firmographics fallback
-
-
-================================================================================
- 18. COST MODEL (per 1,000 visits)
-================================================================================
-
-Source           | Cost/1k visits | Notes
-─────────────────┼────────────────┼──────────────────────────────────────
-ip-api.com       | $0.00          | Free, 45 req/min
-PTR DNS          | $0.00          | Free, pure DNS
-MX validation    | $0.00          | Free, pure DNS
-RDAP (IP+domain) | $0.00          | Free, rdap.org
-IPinfo (free)    | $0.00          | 50k/mo free tier
-Enrich.so        | ~$0.029        | $29/mo = 1,000 lookups
-Explorium        | ~$0.05         | Existing plan (per lookup)
-BetterContact    | ~$0.05         | Email-path only (~20% of visits)
-ContactOut       | ~$0.03         | Email-path + DMs
-Clearbit         | $0.00          | Free tier (limited)
-
-Total estimated: ~$0.15–$0.20 per 1,000 company-level visits
-Redis cache (72h domain TTL) reduces API calls by ~40–60% for repeat visitors.
+Optional (each step gracefully skipped if not configured):
+  IPINFO_TOKEN         IPinfo SDK token (step 1)
+  ENRICH_API_KEY       Enrich.so API key (steps 2, 3)
+  BETTERCONTACT_API_KEY BetterContact person enrichment
+  CONTACTOUT_API_KEY   ContactOut DMs and person lookup
+  HUNTER_API_KEY       Hunter.io domain leads (step 5b)
+  CLEARBIT_API_KEY     Clearbit company fallback (step 5c)
+  VISITOR_DEDUPE_SECONDS Redis deduplication window (default: 300)
 
 
 ================================================================================
- 19. KNOWN LIMITATIONS & ROADMAP
+18. COST MODEL
 ================================================================================
 
-CURRENT LIMITATIONS:
-  - SSE stream uses main JWT in ?token= query param (security: URL logged in proxies)
-    TODO: implement short-lived SSE exchange token (60s TTL)
-  - GDPR mode flag exists but auto-deletion not yet implemented
-  - Celery task visibility in dashboard shows enrichment_status but no retry button
-  - dnspython must be installed for MX validation (pip install dnspython)
-  - RDAP lookups add ~5s latency on cache miss paths (3s timeout each)
+Per 1000 unique B2B visitors:
 
-ROADMAP (not yet implemented):
-  - SSE exchange token endpoint (short-lived, 60s TTL, signed by main JWT)
-  - GDPR auto-deletion job (Celery beat, delete visits older than 30 days when gdpr_mode=True)
-  - Consent opt-out mechanism (pixel respects cookie consent)
-  - Company website tech-stack detection (BuiltWith API)
-  - LinkedIn company page enrichment (without scraping)
-  - Account-level intent scoring aggregated across all employees
-  - Slack/Teams notification integration for hot account alerts
-  - CRM push (HubSpot/Salesforce) on high-ICP match
-  - Pixel CDN hosting (CloudFront) for sub-50ms delivery globally
+  Component             Calls      Est. Cost
+  ─────────────────────────────────────────────────────────
+  PTR + MX + RDAP       1000       $0.00   (DNS / free APIs)
+  ip-api.com            1000       $0.00   (free tier 45/min)
+  IPinfo                1000       ~$0.05  (paid plan)
+  Enrich.so IP          600        ~$0.60  (40% cache hit rate)
+  Enrich.so Email       100        ~$0.15  (only email-path visitors)
+  Explorium match       500        ~$2.00  (50% cache hit rate)
+  Explorium firmographics 400      ~$1.60  (when match succeeds)
+  Explorium technographics 400     ~$0.80
+  Explorium LinkedIn posts 300     ~$0.60
+  Hunter.io             200        ~$0.20  (company domain lookups)
+  Celery infra          1000       ~$0.50  (worker time)
+  Redis ops             10000      ~$0.10  (Upstash per-command)
+  ─────────────────────────────────────────────────────────
+  TOTAL per 1000 B2B visitors:    ~$6.60
+
+  Note: Cache hit rate is the single biggest cost lever.
+  At 60% domain cache hit rate: cost drops to ~$3.80/1000 visitors.
+
+
+================================================================================
+20. DEEP ANALYSIS: PROS, CONS, LIMITATIONS & ACCURACY ASSESSMENT
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+PROS — WHAT WORKS WELL
+────────────────────────────────────────────────────────────────────────────────
+
+P1. MULTI-SOURCE WATERFALL ARCHITECTURE
+    Seven independent enrichment sources with confidence scoring means no single
+    API failure kills identification. PTR → ip-api → IPinfo → Enrich.so → Explorium
+    → RDAP cascade ensures maximum coverage. If Explorium is down, RDAP still works.
+
+P2. CROSS-ORG BROWSER FINGERPRINT IDENTITY
+    The most powerful feature: cyrb53 fingerprint stored across ALL orgs means a
+    visitor who was identified on client A's site (e.g. via email form) is instantly
+    identified when they visit client B's site — at zero additional API cost.
+    Expression index ensures this is O(log n) even at millions of nodes.
+
+P3. /24 SUBNET CORPORATE NAT HANDLING
+    Correctly handles the fact that most corporate offices have a single public IP
+    or a /24 block. When we've identified Acme Corp from 10.20.30.X, all subsequent
+    visits from 10.20.30.* get the company identity instantly.
+
+P4. DEEP ISP FILTER (~200 KEYWORDS)
+    Comprehensive ISP_CLOUD_KEYWORDS list covering India, US, UK, EU, Canada,
+    Australia, Asia, LATAM. Prevents residential/mobile IPs from polluting the
+    dashboard with Jio/Comcast/BT labelled as "companies".
+    Per-org isp_allowlist for edge cases (e.g. customers in ISP industry).
+
+P5. RETROACTIVE BACKFILL ON EMAIL CAPTURE
+    When a visitor finally submits a form, all their prior anonymous visits are
+    retroactively patched with full identity. This turns a history of "unknown"
+    visits into a rich B2B account timeline — a key differentiator vs competitors.
+
+P6. FULL EXPLORIUM FIRMOGRAPHIC DEPTH
+    Single Explorium match unlocks: industry, employee count (exact AND range),
+    revenue (exact AND range), funding stage, investors, tech stack, LinkedIn URL,
+    company logo, HQ location, company type. No other competitor provides this
+    richness from a single matched IP → company identity.
+
+P7. FULL CONSENT COMPLIANCE (PIXEL v2.2)
+    Synchronous DNT + GPC + Cookiebot + OneTrust checks at script load.
+    Async TCF 2.0 deferred consent (IAB framework).
+    Mid-session revocation: _isConsentDenied() checked on every track() call.
+    optOut() / optIn() public API for manual user control.
+    Server-side opt-out stored in Redis (persists across devices).
+
+P8. BEHAVIORAL SCORING DEPTH
+    13 signal dimensions including page meta (title/h1), velocity (pages/hour),
+    engagement decay (14-day half-life), UTM signals, referrer persona affinity.
+    180+ job title→persona mappings for direct role identification.
+    Buying stage (awareness/consideration/decision) for CRM prioritisation.
+
+P9. REDIS ARCHITECTURE (RATE LIMITING + DEDUP + SSE + CACHE)
+    Single Redis instance powers 5 distinct features: rate limiting, dedup,
+    domain enrichment cache, SSE PubSub channel, SSE exchange tokens.
+    Keepalive loop (45s ping) prevents Upstash idle connection resets.
+    reset() now reconnects immediately (not on next request) — avoids double-fail.
+
+P10. ICP SCORING SYSTEM
+     Per-org configurable weights (w_company, w_person, w_industry etc.).
+     Industry match bonus/penalty, employee count range filtering.
+     Allows different orgs to define their own ideal customer profile for
+     prioritised routing: high ICP scores surfaced prominently in dashboard.
+
+
+────────────────────────────────────────────────────────────────────────────────
+CONS & LIMITATIONS
+────────────────────────────────────────────────────────────────────────────────
+
+C1. ENRICHMENT PIPELINE IS FULLY SEQUENTIAL (CRITICAL PERFORMANCE ISSUE)
+    PROBLEM: All 12+ enrichment steps run in serial await chains. A single slow
+    API (Explorium timeout = 15s) blocks the entire pipeline. Total enrichment
+    time can reach 30–60 seconds for cold cache hits with all APIs called.
+    IMPACT: Dashboard shows "processing" spinner for a long time. Late-arriving
+    data is less actionable. High API latency degrades UX significantly.
+    ROOT CAUSE: Each step modifies the shared `resolution` dict, making simple
+    parallelisation unsafe without explicit dependency ordering.
+
+C2. NEW VisitorEnricher() CREATED PER TASK (MEMORY + LATENCY)
+    PROBLEM: Every Celery task instantiates a new VisitorEnricher(), which creates
+    a new ExploriumService(), BetterContactService(), ContactOutService(),
+    FullContactService(), EmployeeDiscoveryService(). Each has its own API key
+    validation and print statements at init time.
+    IMPACT: Wasted memory allocation per task. Debug print() statements run on
+    every enrichment (visible in prod logs). No connection reuse across tasks.
+
+C3. ip-api.com FREE TIER: HTTP + RATE LIMIT
+    PROBLEM: ip-api.com free tier is HTTP-only (no HTTPS) and limited to 45 req/min.
+    At high traffic (>45 concurrent enrichments/min), requests begin failing.
+    HTTP also means the ASN/org data is visible in network transit.
+    IMPACT: Geo accuracy degrades under load. No company data when rate-limited.
+
+C4. DOMAIN CACHE STORES EVERYTHING INCLUDING EXPLORIUM MODULES
+    PROBLEM: The 6-hour domain cache stores the ENTIRE resolution dict including
+    Explorium firmographics, technographics, LinkedIn posts. The cache key is just
+    the domain. If Explorium returns stale/wrong data (e.g. wrong employee count),
+    that error propagates to ALL visitors from that company for 6 hours.
+    IMPACT: Stale enrichment data served for hours. No TTL stratification
+    (fresh Explorium data expires at the same rate as PTR DNS data).
+
+C5. EXPLORIUM enrich_company_fully() IS SEQUENTIAL INSIDE THE STEP
+    PROBLEM: Phase 2 of _step_explorium calls enrich_company_fully() which runs
+    firmographics → funding → financial_indicators → technographics in sequence.
+    4 sequential Explorium API calls at ~500ms each = ~2s minimum.
+    LinkedIn posts is a 5th call (Phase 3). Total Explorium latency: ~2.5–4s.
+    IMPACT: Explorium is already the slowest step; sequential modules make it worse.
+
+C6. NO COMPANY DEDUPLICATION ACROSS VISITS IN REAL-TIME
+    PROBLEM: The same company (e.g. "Tata Consultancy Services") can appear in
+    the visits table under multiple name variants: "TCS", "Tata Consultancy",
+    "Tata Consultancy Services Limited", "TATA CONSULTANCY SERVICES".
+    _normalize_company_name() helps for agreement detection but the stored
+    resolution["company"] field may still have inconsistencies.
+    IMPACT: Dashboard shows the same company 3+ times with different names.
+    Account-level aggregation in /accounts endpoint may split data incorrectly.
+
+C7. BEHAVIORAL SCORING RUNS ON LAST 30 VISITS — NO LONGER WINDOW
+    PROBLEM: predict_persona() only queries last 30 visits. Power users who have
+    visited 100+ times have their early signals ignored.
+    The 14-day engagement decay correctly handles staleness, but a very engaged
+    visitor who made 50 visits last week before this sprint would have their
+    first 20 visits completely invisible to the scoring engine.
+    IMPACT: Underestimated engagement for high-frequency visitors. Buying stage
+    "decision" may not be triggered for visitors who already have strong signals
+    in visit #31+.
+
+C8. BOT DETECTION IS BASIC
+    PROBLEM: Bot filtering only checks UA strings (bot/crawler/spider/headless),
+    viewport 0, and webdriver/Phantom flags at pixel.js level. Headless browsers
+    with random UAs, realistic viewports, and no webdriver flag pass through.
+    Playwright/Puppeteer bots with realistic fingerprints are not caught.
+    IMPACT: Sophisticated crawlers and monitoring tools inflate visit counts.
+    Bot_score from the server-side is capped at 50 max before enrichment, so
+    some borderline bots get through as company-level visits.
+
+C9. PRIVATE IP RETURNS INSTANTLY WITH NO DATA
+    PROBLEM: Private IP detection (127.x, 10.x, 192.168.x, 172.16–31.x) returns
+    early with empty geo and no enrichment. In local development/testing, this
+    means no data is visible in the dashboard.
+    The IPv6 private range (::1) is checked but other IPv6 private ranges (fc00::/7)
+    are NOT checked. IPv6 ULA addresses (fc00:: to fdff::) could sneak through.
+    IMPACT: Incomplete IPv6 handling. May cause unnecessary enrichment attempts
+    for IPv6 addresses that are actually private/link-local.
+
+C10. NO FALLBACK WHEN CELERY IS UNAVAILABLE
+     PROBLEM: When Celery is down, the code falls back to asyncio.create_task()
+     for inline processing. But asyncio.create_task() in a FastAPI request handler
+     context doesn't guarantee the task completes if the process restarts.
+     The task may be lost silently if the server shuts down mid-enrichment.
+     IMPACT: Visit data loss during Celery outages. No dead-letter queue for
+     failed enrichments. No visibility into how many visits were lost.
+
+C11. VISITOR_DEDUPE_SECONDS USES SAME TTL FOR ALL ORGS
+     PROBLEM: VISITOR_DEDUPE_SECONDS is a single global setting. High-traffic orgs
+     need shorter dedup windows (to catch multiple visits from the same company on
+     different pages), while low-traffic orgs benefit from longer dedup windows.
+     The fingerprint dedup window (4× normal) is hardcoded, not configurable.
+     IMPACT: Under-counting at high traffic or over-counting at low traffic
+     depending on the global setting value.
+
+C12. THE IDENTITY GRAPH IS ONLY CHECKED ON COLD CACHE MISSES
+     PROBLEM: Identity graph lookup (Step -1) runs BEFORE the domain cache check.
+     But the domain cache check at Step 2.5 completely skips steps 3–5.6 including
+     the identity graph store (step 8). This means:
+     - If domain is cached: identity graph is still read (correct) but NOT updated.
+     - New person data (email capture) won't propagate to identity_nodes
+       if the domain was recently cached.
+     IMPACT: Identity graph can become stale for frequently-visited domains.
+     Cross-org fingerprint matching may miss updates for high-traffic companies.
+
+C13. CLEARBIT LOGO API USED AS FALLBACK FOR LOGO_URL
+     PROBLEM: resolution["logo_url"] falls back to:
+     f"https://logo.clearbit.com/{domain}" for ALL visits without a logo.
+     This is an undocumented Clearbit endpoint that may have rate limits and
+     no SLA. Clearbit was acquired by HubSpot (2022) and the free logo API
+     could be deprecated at any time.
+     IMPACT: Logo images could break for all visitors if Clearbit removes this
+     free endpoint. No fallback (gravatar, favicon, etc.).
+
+C14. ENRICHMENT STEPS HAVE NO INDIVIDUAL TIMEOUTS
+     PROBLEM: Each enrichment step's httpx.AsyncClient has a global timeout of
+     15s (connect=5s). There is no step-level timeout budget. A slow RDAP server
+     or unresponsive Clearbit can hold the pipeline for 15 full seconds at that
+     one step.
+     IMPACT: Tail-latency on enrichment can be 60s+ if 4 APIs each timeout.
+     No circuit breaker to skip consistently-failing APIs after N failures.
+
+C15. NO WEBHOOK SIGNATURE VERIFICATION EXAMPLE IN DOCS
+     PROBLEM: The system generates HMAC-SHA256 signatures via X-Outmate-Signature
+     but there is no customer-facing documentation or SDK code for verifying the
+     signature in webhook receivers.
+     The Alert table tracks delivery status but the customer has no dashboard
+     view of webhook delivery health or failure logs.
+
+C16. DEDUP DOES NOT HANDLE SAME COMPANY DIFFERENT IPs
+     PROBLEM: The Redis deduplication key is:
+     visits:{org_id}:{ip}:{domain}   (IP-based dedup)
+     visits:{org_id}:fp:{fp}         (fingerprint dedup)
+     If the same company employee visits from two different IPs (e.g. office WiFi
+     and mobile hotspot) within the dedup window, they create two separate visit
+     records, even if the /24 subnet later identifies both as same company.
+     IMPACT: Inflated visit counts for large companies with multiple egress IPs.
+     Account-level intent score may be artificially high due to double-counting.
+
+C17. ACCOUNT-LEVEL INTENT CACHE IS 2 HOURS STALE
+     PROBLEM: aggregate_account_intent_task caches results for 2h in Redis.
+     The /accounts API endpoint reads from this cache. If a company has a burst
+     of high-intent visits in the last 10 minutes, the accounts endpoint won't
+     reflect this for up to 2 hours.
+     IMPACT: /accounts endpoint is unsuitable for real-time sales triggers.
+     The dashboard SSE stream shows individual visits in real-time, but the
+     aggregate account view is always behind.
+
+C18. PIXEL.JS FINGERPRINT HAS CANVAS FINGERPRINT BLOCKING RISK
+     PROBLEM: canvas.toDataURL() fingerprinting is blocked by Firefox's
+     "Enhanced Tracking Protection" (Strict mode) and Brave Browser's
+     fingerprint randomisation. When canvas returns a blank or random result,
+     the fingerprint changes on every page load.
+     IMPACT: Cross-session identity breaks for ~15-20% of privacy-conscious users.
+     Multiple identity_nodes are created for the same physical person.
+     /24 subnet fallback partially mitigates this for corporate IPs.
+
+C19. THE enrich_ip() RUNS EVERY CALL — NO PERSON-LEVEL CACHE
+     PROBLEM: Domain-level results are cached for 6h, but person-level enrichment
+     (Enrich.so email, BetterContact, ContactOut) runs every time an email is
+     seen, even if that exact email was enriched 2 hours ago.
+     IMPACT: Unnecessary API credits spent re-enriching the same email addresses.
+     No email→person cache in Redis. Costs scale linearly with email volume.
+
+C20. SSE STREAM HAS NO BACKFILL MECHANISM
+     PROBLEM: When a user opens the dashboard, they connect to the SSE stream
+     for live updates. But any visits that were enriched BETWEEN the last page
+     refresh and the SSE connection moment are missed.
+     The initial GET /visitors?limit=50 fetch covers this partially, but there
+     is a race window where a visit can be processed, published to Redis PubSub,
+     and consumed by no subscriber — then the user opens the page and sees nothing.
+     IMPACT: "I just visited my own website but don't see myself in the dashboard"
+     user confusion. Requires a manual refresh to see visits from the gap window.
+
+
+================================================================================
+21. IMPROVEMENT ROADMAP (PRIORITISED)
+================================================================================
+
+PRIORITY 1 — CORRECTNESS / ACCURACY (implement immediately)
+
+I1. PARALLELISE INDEPENDENT ENRICHMENT STEPS
+    Current: serial await chain (12+ sequential calls)
+    Fix: asyncio.gather() for independent steps. Dependency groups:
+      Group A (parallel): ptr_lookup + ipapi + ipinfo + enrich_so_ip
+      Group B (after A): MX validation + explorium (needs domain from A)
+      Group C (parallel with B): contactout_dm (needs domain from A)
+      Group D (after B): hunter_io + clearbit + rdap + domain_rdap (fallbacks)
+    Expected speedup: 2.5×–4× (from ~8s → ~2.5s for typical cold enrichment)
+
+I2. PARALLELISE EXPLORIUM MODULE CALLS
+    Current: enrich_company_fully() calls 4 modules in sequence
+    Fix: asyncio.gather(firmographics, funding, technographics) in parallel.
+    linkedin_posts can join this gather too.
+    Expected speedup: 4 sequential calls → 1 parallel call group (~500ms vs ~2s)
+
+I3. STRATIFIED CACHE TTLs
+    Current: all domain enrichment cached for 6 hours flat
+    Fix:
+      enrichment:ptr:{domain} → TTL 1h (DNS changes fast)
+      enrichment:explorium:{business_id} → TTL 24h (firmographics stable)
+      enrichment:mx:{domain} → TTL 2h (MX records rarely change)
+      enrichment:person:{email} → TTL 12h (new person cache layer)
+    Benefit: Fresher data, lower re-enrichment cost, email dedup.
+
+I4. EMAIL-LEVEL PERSON CACHE
+    Current: person enrichment (Enrich.so + BetterContact + ContactOut) repeats
+    for every visit with the same email.
+    Fix: Redis key enrich:person:{email_hash} TTL=12h
+    Store: {full_name, phone, linkedin_url, job_title, company}
+    Check before calling any person API.
+
+I5. COMPANY NAME DEDUPLICATION ON WRITE
+    Current: resolution["company"] stored raw with potential variants.
+    Fix: Apply _normalize_company_name() to ALL company name assignments before
+    any DB write. Also add a db-level trigger or application-level normalization
+    that maps known aliases ("TCS" → "Tata Consultancy Services").
+    Consider: dedicated company_aliases table for manual overrides.
+
+I6. FIX IDENTITY GRAPH NOT UPDATING ON CACHE HIT
+    Current: identity graph store (step 8) only runs when cache is MISSED.
+    Fix: Always run _step_identity_graph_store() regardless of cache status.
+    For cache hits: only store NEW data (fingerprint, visitor_id) that the
+    cached version doesn't have. This ensures cross-org fingerprint matching
+    stays current even for frequently-visited domains.
+
+PRIORITY 2 — SCALABILITY
+
+I7. SINGLETON VisitorEnricher WITH SERVICE REUSE
+    Current: new VisitorEnricher() on every Celery task.
+    Fix: Class-level or module-level singleton for ExploriumService,
+    ContactOutService etc. Remove debug print() from service __init__ methods.
+    Use proper logging.debug() instead of print() in production.
+
+I8. UPGRADE ip-api.com TO PRO (HTTPS + 15k req/min)
+    Current: Free HTTP tier (45 req/min). Single biggest free bottleneck.
+    Fix: ip-api.com Pro plan (~$15/mo) gives HTTPS, 15k req/min.
+    Alternative: Use IPinfo as primary geo source (already paid, more reliable).
+
+I9. PER-VISIT DEDUP BASED ON DOMAIN NOT JUST IP
+    Current: dedup key includes raw IP, so same company from 2 IPs = 2 visits.
+    Fix: After identifying company domain, also dedup at domain level:
+    visits:{org_id}:domain:{domain} with appropriate TTL.
+    Prevents inflated visit counts for large enterprises.
+
+I10. CIRCUIT BREAKER FOR CONSISTENTLY-FAILING APIs
+     Current: every enrichment step retries up to timeout on every request.
+     Fix: Track API failure rate in Redis (failures:ipinfo in last 60s).
+     If failure rate > 50% in past 60s: skip that step with immediate return.
+     Auto-reset after 120s (half-open state). Saves 15s wasted timeout per step.
+
+I11. REAL-TIME /accounts ENDPOINT
+     Current: cached with 2h stale window.
+     Fix: Hybrid approach: cache for 2h but also pub/sub invalidation.
+     When a new high-intent visit arrives via SSE, the client can re-query
+     /accounts for the affected company domain. Backend maintains a
+     dirty:{org_id} Redis set that can be checked before serving cache.
+
+PRIORITY 3 — ROBUSTNESS / GDPR
+
+I12. DEAD-LETTER QUEUE FOR FAILED ENRICHMENTS
+     Current: asyncio.create_task() fallback loses data on server restart.
+     Fix: Write visit stub to DB BEFORE queueing Celery task (already done).
+     Add: Background task to re-enqueue all visits with enrichment_status="processing"
+     older than 10 minutes at startup. This ensures no visit is permanently lost.
+
+I13. IMPROVE BOT DETECTION
+     Current: UA string and viewport check only.
+     Fix: Add server-side checks:
+       - navigator.plugins count = 0 (headless browser signal)
+       - canvas fingerprint consistent with known headless patterns
+       - Suspicious timing: visit received within 50ms of page load (bot speed)
+       - Known datacenter IP ranges (ASN prefix lists)
+       - Honeypot field in pixel.js payload
+
+I14. HANDLE IPv6 PRIVATE/LINK-LOCAL RANGES
+     Current: Only checks ::1 for IPv6 private.
+     Fix: Add fc00::/7 (ULA), fe80::/10 (link-local), ::ffff:0:0/96 (IPv4-mapped)
+     to the private IP detection list.
+
+I15. LOGO FALLBACK STRATEGY
+     Current: Clearbit logo API (undocumented, may be deprecated).
+     Fix:
+       1. Explorium logo_url (already fetched from firmographics)
+       2. https://favicon.im/{domain} (free favicon service)
+       3. https://icons.duckduckgo.com/ip3/{domain}.ico (DuckDuckGo favicon)
+       4. First letter of company name as CSS-generated avatar (always available)
+
+I16. WEBHOOK DELIVERY DASHBOARD
+     Current: Alert.status in DB but no customer-facing view.
+     Fix: Add GET /api/v1/visitors/webhooks/logs endpoint returning recent
+     Alert records with status, timestamps, retry count.
+     Show webhook health in SiteConfig dashboard card.
+
+I17. BEHAVIOURAL SCORING — EXTEND VISIT WINDOW TO 90 VISITS
+     Current: Last 30 visits in predict_persona().
+     Fix: Increase to 90 visits for visitor_id queries. The SQL index on
+     (org_id, resolution->>'visitor_id') makes this fast. The 14-day decay
+     naturally down-weights stale visits, so increasing the window only helps.
+
+I18. ACCOUNT-LEVEL DEDUP FOR SAME-COMPANY MULTI-EMPLOYEE TRACKING
+     Current: Multiple employees from same company each create separate identity
+     nodes and visit records.
+     Fix: Add company_domain grouping to visit dedup logic. When /24 subnet
+     cluster identifies same company, flag as "same account, different user"
+     rather than creating separate unlinked records. Link via company_domain
+     foreign key to a companies table row.
+
+
+================================================================================
+ACCURACY ASSESSMENT: REALISTIC IDENTIFICATION RATES
+================================================================================
+
+Traffic type breakdown (typical B2B SaaS website):
+
+  ~40% of raw visits: Bots/crawlers/monitoring → filtered by bot pre-check
+  ~15% of real visits: Consumer ISP / mobile → filtered by ISP_CLOUD_KEYWORDS
+  ~5% of real visits: VPN / Tor / proxy → filtered (proxy=true from ip-api)
+  ──────────────────────────────────────────────────────��──────────────────
+  ~40% of raw visits reach enrichment pipeline
+
+Of the ~40% that reach enrichment:
+  ~70% get company-level identification (tier="company" or "person")
+  ~30% remain unknown (residential ISPs not in filter list, new cloud IPs)
+
+  Of the ~70% identified:
+    ~55% via ip-api.com org field (first, cheapest source)
+    ~20% incremental from Explorium match (adds firmographic richness)
+    ~15% incremental from PTR + RDAP + Domain RDAP (long tail)
+    ~10% remain unidentified despite multiple sources
+
+  ~8% of all visits get person-level identification (tier="person")
+  These are form-captured emails + retroactive backfill.
+
+EFFECTIVE IDENTIFICATION RATE vs COMPETITORS:
+  rb2b:      claims ~20-40% B2B company match rate
+  warmly.ai: claims ~15-35% B2B company match rate
+  Outmate:   ~28% of all raw traffic = company identified (≈40% of real B2B traffic)
+  Key advantage: retroactive backfill + Explorium depth + cross-org fingerprint
+
+WHERE IDENTIFICATION FAILS:
+  1. Home workers on consumer ISPs (post-COVID: ~35% of remote workforce)
+  2. VPN/Zerotier/corporate proxy users (IP = proxy IP, not office IP)
+  3. Mobile users (cellular IP → assigned to carrier, not company)
+  4. Cloud/AWS users (browsing from EC2 → AWS org, not company)
+  5. ISPs not in our filter list → labelled as "company" incorrectly
+  6. Domain privacy registrars → RDAP returns "Domains by Proxy, LLC" not company
+  7. Companies without PTR records or clean ASN assignments (small businesses)
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

@@ -227,6 +227,10 @@ class Settings(BaseSettings):
         None,
         description="Tavily search API key (optional)"
     )
+    ZENROWS_API_KEY: Optional[str] = Field(
+        None,
+        description="ZenRows scraping API key (optional)"
+    )
     IPINFO_TOKEN: Optional[str] = Field(
         None,
         description="IPinfo API token (optional)"

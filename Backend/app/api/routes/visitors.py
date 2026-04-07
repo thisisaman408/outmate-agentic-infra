@@ -13,6 +13,7 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from collections import Counter, defaultdict
+from pydantic import BaseModel, Field
 
 import uuid as _uuid
 
@@ -20,6 +21,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.core.redis import RedisManager
 from app.db.models.visitor import SiteConfig, Visit
+from app.db.models.company_resolution_alias import CompanyResolutionAlias
 from app.db.models.user import User
 from app.api.deps.auth import get_current_user
 
@@ -126,6 +128,9 @@ def _visit_to_dict(v: Visit) -> dict:
     res = v.resolution or {}
     person = res.get("person") or {}
     exp = res.get("explorium") or {}
+    person_resolution = res.get("person_resolution") or {}
+    person_identification = res.get("person_identification") or {}
+    journey_sequence = res.get("journey_sequence") or {}
     return {
         "id": str(v.id),
         "ip": str(v.ip),
@@ -144,6 +149,18 @@ def _visit_to_dict(v: Visit) -> dict:
         "website": exp.get("website") or res.get("website"),
         "geo": res.get("geo"),
         "confidence": res.get("confidence", 0),
+        "person_resolution_status": person_resolution.get("status"),
+        "person_resolution_confidence": person_resolution.get("confidence"),
+        "person_identification_status": person_identification.get("status"),
+        "person_identification_method": person_identification.get("method"),
+        "sequence_type": journey_sequence.get("sequence_type"),
+        "sequence_score": journey_sequence.get("sequence_score"),
+        "account_stage": person_resolution.get("account_stage"),
+        "account_score": person_resolution.get("account_score"),
+        "account_role_coverage": person_resolution.get("account_role_coverage") or [],
+        "account_unique_visitor_count": person_resolution.get("account_unique_visitor_count"),
+        "predicted_person": res.get("predicted_person"),
+        "person_resolution": person_resolution,
         "email": res.get("email") or person.get("email"),
         "phone": res.get("phone") or person.get("phone") or exp.get("phone"),
         "full_name": res.get("full_name") or person.get("full_name") or person.get("name"),
@@ -164,6 +181,31 @@ def _visit_to_dict(v: Visit) -> dict:
         "source_site": res.get("source_site") or "",
         "enrichment_status": v.enrichment_status,
     }
+
+
+class ServerIdentityEventRequest(BaseModel):
+    visitor_id: Optional[str] = None
+    session_id: Optional[str] = None
+    event_source: str = Field(default="server")
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    domain: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    ip: Optional[str] = None
+
+
+class CompanyAliasRequest(BaseModel):
+    match_type: str
+    match_value: str
+    canonical_company: Optional[str] = None
+    canonical_domain: Optional[str] = None
+    confidence_boost: int = 10
+    notes: Optional[str] = None
+    metadata_json: dict = Field(default_factory=dict)
 
 
 # ── Rate limiting helpers ─────────────────────────────────────────────────────
@@ -350,6 +392,22 @@ async def track_visitor(request: Request):
             "viewport_h": data.get("viewport_h"),
             "scroll_depth": data.get("scroll_depth"),
             "cta_clicks": data.get("cta_clicks"),
+            "session_id": data.get("session_id"),
+            "active_ms": data.get("active_ms"),
+            "outbound_clicks": data.get("outbound_clicks"),
+            "last_outbound_domain": data.get("last_outbound_domain"),
+            "page_type": data.get("page_type"),
+            "form_stage": data.get("form_stage"),
+            "form_fields": data.get("form_fields"),
+            "identity_traits": data.get("identity_traits") if isinstance(data.get("identity_traits"), dict) else {
+                "email": data.get("email"),
+                "first_name": data.get("first_name"),
+                "last_name": data.get("last_name"),
+                "full_name": data.get("full_name"),
+                "job_title": data.get("job_title"),
+                "company_name": data.get("company_name"),
+                "linkedin_url": data.get("linkedin_url"),
+            },
             # Pixel owner's domain — used to label visit source when company
             # cannot be identified from IP enrichment alone.
             "source_site": site_config.domain or "",
@@ -362,6 +420,17 @@ async def track_visitor(request: Request):
             logger.warning("Celery unavailable, processing inline: %s", e)
             queued_via = "inline"
             asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
+
+        # Update real-time active visitor counter (Redis sorted set, 30-min window)
+        try:
+            redis_client = RedisManager.get_client()
+            if redis_client:
+                rt_key = f"outmate:visitors:active:{site_config.org_id}"
+                now_ts = datetime.now(timezone.utc).timestamp()
+                await redis_client.zadd(rt_key, {ip: now_ts})
+                await redis_client.expire(rt_key, 1800)  # 30 min TTL on entire key
+        except Exception as e:
+            logger.debug("Real-time counter update failed: %s", e)
 
         logger.info("Visitor tracked: %s for org %s", ip, site_config.org_id)
         return {"status": "queued", "queued_via": queued_via}
@@ -633,6 +702,126 @@ async def send_test_hit(request: Request, current_user: User = Depends(get_curre
         raise
     except Exception as e:
         logger.error("test-hit error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@router.post("/identify")
+async def identify_visitor_server_side(
+    body: ServerIdentityEventRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Server-side deterministic identity stitching for forms/chat/calendar/app-login.
+    Applies first-party identity to existing visits without creating a new visit row.
+    """
+    try:
+        from app.tasks.visitors import apply_identity_event
+
+        payload = {
+            "visitor_id": body.visitor_id,
+            "session_id": body.session_id,
+            "ip": body.ip,
+            "domain": body.domain,
+            "company": body.company_name,
+            "linkedin_url": body.linkedin_url,
+            "identity_traits": {
+                "email": body.email,
+                "first_name": body.first_name,
+                "last_name": body.last_name,
+                "full_name": body.full_name,
+                "job_title": body.job_title,
+                "company_name": body.company_name,
+                "linkedin_url": body.linkedin_url,
+                "event_source": body.event_source,
+            },
+        }
+        result = await apply_identity_event(str(current_user.id), payload)
+        return result
+    except Exception as e:
+        logger.error("identify_visitor_server_side error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@router.get("/company-aliases")
+async def list_company_aliases(current_user: User = Depends(get_current_user)):
+    def _list():
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(CompanyResolutionAlias)
+                .order_by(CompanyResolutionAlias.updated_at.desc())
+                .limit(200)
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "match_type": row.match_type,
+                    "match_value": row.match_value,
+                    "canonical_company": row.canonical_company,
+                    "canonical_domain": row.canonical_domain,
+                    "confidence_boost": row.confidence_boost,
+                    "is_active": row.is_active,
+                    "notes": row.notes,
+                    "metadata_json": row.metadata_json or {},
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
+    try:
+        return {"aliases": await _run_db(_list)}
+    except Exception as e:
+        logger.error("list_company_aliases error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@router.post("/company-aliases")
+async def create_company_alias(
+    body: CompanyAliasRequest,
+    current_user: User = Depends(get_current_user),
+):
+    def _create():
+        db = SessionLocal()
+        try:
+            match_type = body.match_type.strip().lower()
+            match_value = body.match_value.strip().lower()
+            alias = (
+                db.query(CompanyResolutionAlias)
+                .filter(
+                    CompanyResolutionAlias.match_type == match_type,
+                    CompanyResolutionAlias.match_value == match_value,
+                )
+                .first()
+            )
+            if not alias:
+                alias = CompanyResolutionAlias(match_type=match_type, match_value=match_value)
+                db.add(alias)
+            alias.canonical_company = body.canonical_company
+            alias.canonical_domain = (body.canonical_domain or "").strip().lower() or None
+            alias.confidence_boost = body.confidence_boost
+            alias.notes = body.notes
+            alias.metadata_json = body.metadata_json or {}
+            alias.is_active = True
+            db.commit()
+            db.refresh(alias)
+            return {
+                "id": str(alias.id),
+                "match_type": alias.match_type,
+                "match_value": alias.match_value,
+                "canonical_company": alias.canonical_company,
+                "canonical_domain": alias.canonical_domain,
+                "confidence_boost": alias.confidence_boost,
+                "is_active": alias.is_active,
+                "notes": alias.notes,
+                "metadata_json": alias.metadata_json or {},
+            }
+        finally:
+            db.close()
+    try:
+        return {"alias": await _run_db(_create)}
+    except Exception as e:
+        logger.error("create_company_alias error: %s", e)
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
@@ -990,6 +1179,12 @@ async def get_visitor_analytics(
                 geo_city: Counter = Counter()
                 industry_counts: Counter = Counter()
                 tech_counts: Counter = Counter()
+                person_resolution_status: Counter = Counter()
+                person_identification_status: Counter = Counter()
+                sequence_type_counts: Counter = Counter()
+                account_stage_counts: Counter = Counter()
+                predicted_people = 0
+                verified_people = 0
                 total = matched_count = company_count = prospect_count = 0
 
                 for created_at, ip, url, ref, intent, matched, res, ua in rows:
@@ -1061,6 +1256,19 @@ async def get_visitor_analytics(
                     for tech in (exp.get("technologies") or [])[:5]:
                         tech_counts[tech] += 1
 
+                    prs = ((res.get("person_resolution") or {}).get("status") or "anonymous").lower()
+                    pis = ((res.get("person_identification") or {}).get("status") or "anonymous").lower()
+                    seq = ((res.get("journey_sequence") or {}).get("sequence_type") or "unknown").lower()
+                    acc_stage = ((res.get("person_resolution") or {}).get("account_stage") or "single_visitor").lower()
+                    person_resolution_status[prs] += 1
+                    person_identification_status[pis] += 1
+                    sequence_type_counts[seq] += 1
+                    account_stage_counts[acc_stage] += 1
+                    if pis == "verified":
+                        verified_people += 1
+                    elif pis == "predicted" or prs in {"predicted_high", "predicted_medium"}:
+                        predicted_people += 1
+
                 timeseries = [
                     {
                         "bucket": k,
@@ -1102,6 +1310,8 @@ async def get_visitor_analytics(
                         "bounce_rate": bounce_rate,
                         "total_sessions": total_sessions,
                         "conversions": conversions,
+                        "verified_people": verified_people,
+                        "predicted_people": predicted_people,
                     },
                     "timeseries": timeseries,
                     "top_pages": [{"page": p, "count": c} for p, c in page_counts.most_common(top_n)],
@@ -1111,6 +1321,10 @@ async def get_visitor_analytics(
                     "geo_cities": [{"city": c, "count": n} for c, n in geo_city.most_common(top_n)],
                     "industry_breakdown": [{"industry": i, "count": n} for i, n in industry_counts.most_common(top_n)],
                     "top_technologies": [{"tech": t, "count": n} for t, n in tech_counts.most_common(top_n)],
+                    "person_resolution_breakdown": [{"status": s, "count": n} for s, n in person_resolution_status.most_common()],
+                    "person_identification_breakdown": [{"status": s, "count": n} for s, n in person_identification_status.most_common()],
+                    "sequence_breakdown": [{"sequence_type": s, "count": n} for s, n in sequence_type_counts.most_common(top_n)],
+                    "account_stage_breakdown": [{"stage": s, "count": n} for s, n in account_stage_counts.most_common(top_n)],
                 }
             finally:
                 db.close()
@@ -1245,7 +1459,30 @@ async def get_account_intent(
                     "hot_pages": hot_pages,
                     "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
                     "account_intent_score": account_score,
+                    "account_stage": None,
+                    "account_score": None,
+                    "role_coverage": [],
+                    "active_sequence_types": [],
+                    "revealed_people_count": 0,
                 })
+
+            from app.db.models.company_visitor_memory import CompanyVisitorMemory
+            memories = (
+                db.query(CompanyVisitorMemory)
+                .filter(CompanyVisitorMemory.org_id == org_id)
+                .all()
+            )
+            memory_map = {m.company_domain: m for m in memories if m.company_domain}
+            for account in accounts:
+                mem = memory_map.get(account["domain"])
+                if not mem:
+                    continue
+                intelligence = ((mem.evidence or {}).get("account_intelligence") or {})
+                account["account_stage"] = intelligence.get("stage")
+                account["account_score"] = intelligence.get("account_score")
+                account["role_coverage"] = list(mem.role_coverage or [])[:6]
+                account["active_sequence_types"] = list(mem.active_sequence_types or [])[:6]
+                account["revealed_people_count"] = len(list(mem.revealed_people or []))
 
             # Sort by account_intent_score and enforce limit
             accounts.sort(key=lambda a: a["account_intent_score"], reverse=True)
@@ -1260,6 +1497,93 @@ async def get_account_intent(
         return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
     except Exception as e:
         logger.error("get_account_intent error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+@router.get("/intelligence-insights")
+async def get_visitor_intelligence_insights(
+    hours: int = Query(default=168, ge=1, le=720),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Aggregated diagnostics for visitor intelligence quality and model behavior.
+    Useful for dashboard explainability and tuning.
+    """
+    org_id = current_user.id
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    def _query():
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Visit.resolution, Visit.created_at)
+                .filter(Visit.org_id == org_id, Visit.created_at >= since)
+                .order_by(Visit.created_at.desc())
+                .limit(50000)
+                .all()
+            )
+
+            model_method_counts: Counter = Counter()
+            evidence_counts: Counter = Counter()
+            contradiction_counts: Counter = Counter()
+            account_stage_counts: Counter = Counter()
+            sequence_type_counts: Counter = Counter()
+            confidence_sum = 0.0
+            confidence_n = 0
+            negative_penalty_sum = 0.0
+            promoted_count = 0
+
+            for row in rows:
+                res = row.resolution or {}
+                pr = res.get("person_resolution") or {}
+                method = pr.get("method") or "unknown"
+                model_method_counts[method] += 1
+                for item in (pr.get("evidence") or [])[:10]:
+                    evidence_counts[str(item)] += 1
+                for item in (pr.get("contradictions") or [])[:10]:
+                    contradiction_counts[str(item)] += 1
+                stage = pr.get("account_stage") or "single_visitor"
+                seq = pr.get("sequence_type") or ((res.get("journey_sequence") or {}).get("sequence_type")) or "unknown"
+                account_stage_counts[str(stage)] += 1
+                sequence_type_counts[str(seq)] += 1
+                try:
+                    conf = float(pr.get("confidence") or 0.0)
+                    confidence_sum += conf
+                    confidence_n += 1
+                except Exception:
+                    pass
+                try:
+                    negative_penalty_sum += float(pr.get("negative_learning_penalty") or 0.0)
+                except Exception:
+                    pass
+                if pr.get("promote_to_ui"):
+                    promoted_count += 1
+
+            avg_confidence = round(confidence_sum / confidence_n, 3) if confidence_n else 0.0
+            avg_negative_penalty = round(negative_penalty_sum / confidence_n, 3) if confidence_n else 0.0
+            return {
+                "window_hours": hours,
+                "summary": {
+                    "avg_person_resolution_confidence": avg_confidence,
+                    "avg_negative_learning_penalty": avg_negative_penalty,
+                    "ui_promoted_predictions": promoted_count,
+                    "analyzed_visits": len(rows),
+                },
+                "methods": [{"method": k, "count": v} for k, v in model_method_counts.most_common()],
+                "top_evidence": [{"evidence": k, "count": v} for k, v in evidence_counts.most_common(20)],
+                "top_contradictions": [{"contradiction": k, "count": v} for k, v in contradiction_counts.most_common(20)],
+                "account_stages": [{"stage": k, "count": v} for k, v in account_stage_counts.most_common()],
+                "sequence_types": [{"sequence_type": k, "count": v} for k, v in sequence_type_counts.most_common()],
+            }
+        finally:
+            db.close()
+
+    try:
+        return await _run_db(_query)
+    except (OperationalError, asyncio.TimeoutError):
+        return JSONResponse(status_code=503, content={"error": "Database temporarily unavailable"})
+    except Exception as e:
+        logger.error("get_visitor_intelligence_insights error: %s", e)
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 

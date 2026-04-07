@@ -25,10 +25,16 @@ SEPARATOR = "================================"
 
 from app.db.vector_setup import setup_vector_database
 from app.db.base import Base
-from app.db.session import engine
+from app.db.session import engine, SessionLocal
 from sqlalchemy import inspect, text
 
 from app.db.deps import get_db
+from app.db.models.company_resolution_alias import CompanyResolutionAlias
+from app.db.models.anonymous_visitor_profile import AnonymousVisitorProfile
+from app.db.models.office_ip_cluster import OfficeIpCluster
+from app.db.models.company_visitor_memory import CompanyVisitorMemory
+from app.db.models.person_resolution_learning_stat import PersonResolutionLearningStat
+from app.db.models.visitor_journey_sequence import VisitorJourneySequence
 from app.db.models.user import User
 from app.db.models.watcher import Watcher as WatcherModel  # ensures table is created
 from app.core.redis import RedisManager, start_keepalive
@@ -54,6 +60,7 @@ from app.api.routes import calendly as calendly_router
 from app.api.routes import watchers
 from app.api.routes import dashboard
 from app.api.routes import events_routes
+from app.api.routes import database_finder
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -71,6 +78,52 @@ from app.api.deps.auth import get_current_user
 # Setup logging first (before any logging occurs)
 setup_logging(log_level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
+
+
+def _seed_company_resolution_aliases() -> None:
+    seed_rows = [
+        {"match_type": "asn_org", "match_value": "comcast", "notes": "Suppress residential ISP false positives", "metadata_json": {"action": "suppress", "reason": "isp"}},
+        {"match_type": "asn_org", "match_value": "xfinity", "notes": "Suppress residential ISP false positives", "metadata_json": {"action": "suppress", "reason": "isp"}},
+        {"match_type": "asn_org", "match_value": "verizon", "notes": "Suppress generic telco IP-owner matches", "metadata_json": {"action": "suppress", "reason": "telco"}},
+        {"match_type": "asn_org", "match_value": "charter communications", "notes": "Suppress residential ISP false positives", "metadata_json": {"action": "suppress", "reason": "isp"}},
+        {"match_type": "asn_org", "match_value": "cox communications", "notes": "Suppress residential ISP false positives", "metadata_json": {"action": "suppress", "reason": "isp"}},
+        {"match_type": "asn_org", "match_value": "frontier communications", "notes": "Suppress residential ISP false positives", "metadata_json": {"action": "suppress", "reason": "isp"}},
+        {"match_type": "asn_org", "match_value": "t-mobile", "notes": "Suppress mobile carrier false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "at&t", "notes": "Suppress mobile/broadband carrier false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "reliance jio", "notes": "Suppress mobile carrier false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "bharti airtel", "notes": "Suppress mobile carrier false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "vodafone idea", "notes": "Suppress mobile carrier false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "bsnl", "notes": "Suppress telecom false positives", "metadata_json": {"action": "suppress", "reason": "carrier"}},
+        {"match_type": "asn_org", "match_value": "nordvpn", "notes": "Suppress VPN traffic as company signal", "metadata_json": {"action": "suppress", "reason": "vpn"}},
+        {"match_type": "asn_org", "match_value": "expressvpn", "notes": "Suppress VPN traffic as company signal", "metadata_json": {"action": "suppress", "reason": "vpn"}},
+        {"match_type": "asn_org", "match_value": "surfshark", "notes": "Suppress VPN traffic as company signal", "metadata_json": {"action": "suppress", "reason": "vpn"}},
+        {"match_type": "asn_org", "match_value": "mullvad", "notes": "Suppress VPN traffic as company signal", "metadata_json": {"action": "suppress", "reason": "vpn"}},
+    ]
+
+    db = SessionLocal()
+    try:
+        for row in seed_rows:
+            exists = (
+                db.query(CompanyResolutionAlias)
+                .filter(
+                    CompanyResolutionAlias.match_type == row["match_type"],
+                    CompanyResolutionAlias.match_value == row["match_value"],
+                )
+                .first()
+            )
+            if exists:
+                continue
+            db.add(CompanyResolutionAlias(
+                match_type=row["match_type"],
+                match_value=row["match_value"],
+                notes=row.get("notes"),
+                metadata_json=row.get("metadata_json") or {},
+                is_active=True,
+                confidence_boost=0,
+            ))
+        db.commit()
+    finally:
+        db.close()
 
 # Dependency shortcuts
 auth_dependencies = [Depends(get_current_user)]
@@ -271,6 +324,9 @@ logger.info("Calendly router registered")
 app.include_router(events_routes.router, prefix="/api/v1/events", tags=["events"], dependencies=auth_dependencies)
 logger.info("Events router registered")
 
+app.include_router(database_finder.router, prefix="/api/v1/database", tags=["database"], dependencies=auth_dependencies)
+logger.info("Database Finder router registered")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(SEPARATOR)
@@ -385,6 +441,32 @@ async def startup_event():
 
         Base.metadata.create_all(bind=engine)
         app.state.db_ready = True
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_company_resolution_aliases_active_match "
+                "ON company_resolution_aliases (is_active, match_type, match_value)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_anonymous_visitor_profiles_org_identity "
+                "ON anonymous_visitor_profiles (org_id, visitor_id, fingerprint, session_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_office_ip_clusters_org_domain_prefix "
+                "ON office_ip_clusters (org_id, company_domain, ip_prefix)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_company_visitor_memories_org_domain "
+                "ON company_visitor_memories (org_id, company_domain)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_person_resolution_learning_stats_org_feature "
+                "ON person_resolution_learning_stats (org_id, feature_type, feature_value)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_visitor_journey_sequences_org_identity "
+                "ON visitor_journey_sequences (org_id, visitor_id, fingerprint, session_id)"
+            ))
+        _seed_company_resolution_aliases()
         logger.info("✓ Database tables ensured")
 
         # ── Signal pipeline v1 indexes (idempotent) ──────────────────

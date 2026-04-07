@@ -9,6 +9,8 @@ import { ActiveSignalsCard } from "@/components/dashboard/active-signals-card"
 import { CampaignPerformanceCard } from "@/components/dashboard/campaign-performance-card"
 import { AIAgentActivityCard } from "@/components/dashboard/ai-agent-activity-card"
 import { TimeSeriesChart } from "@/components/dashboard/time-series-chart"
+import { VisitorIntelligence } from "@/components/dashboard/visitor-intelligence"
+import { SequenceAnalytics } from "@/components/dashboard/sequence-analytics"
 import { DailyBriefWidget } from "@/components/copilot/daily-brief-widget"
 import {
   dashboardApi,
@@ -123,6 +125,12 @@ export default function DashboardPage() {
           accent="info"
         />
       </div>
+
+      {/* Visitor Intelligence — full-width, deferred load */}
+      {!isLoading && <VisitorIntelligence />}
+
+      {/* Sequence Analytics — full-width, deferred load */}
+      {!isLoading && <SequenceAnalytics />}
 
       {/* Charts Row */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

@@ -13,8 +13,11 @@ from app.db.models.visitor import Visit, SiteConfig, Alert, VisitorSession
 from datetime import timedelta
 from app.db.repositories.company_repository import CompanyRepository
 from app.db.repositories.prospect_repository import ProspectRepository
-from app.services.visitor_enrich import VisitorEnricher, is_isp_or_cloud
+from app.services.visitor_enrich import VisitorEnricher, is_isp_or_cloud, _normalize_company_name
 from app.services.behavioral_scoring import predict_persona, select_best_decision_maker
+from app.services.person_resolution_engine import PersonResolutionEngine
+from app.services.visitor_learning_service import VisitorLearningService
+from app.services.journey_sequence_service import JourneySequenceService
 import asyncio
 import json
 
@@ -110,6 +113,209 @@ def _normalize_domain(domain: str | None) -> str | None:
     return d.rstrip(".") or None
 
 
+def _normalize_resolution_identity(resolution: Dict[str, Any]) -> Dict[str, Any]:
+    res = dict(resolution or {})
+    normalized_company = _normalize_company_name(res.get("company"))
+    if normalized_company:
+        res["company"] = normalized_company
+
+    domain = _normalize_domain(res.get("domain"))
+    if domain:
+        res["domain"] = domain
+
+    person = res.get("person")
+    if isinstance(person, dict):
+        person = dict(person)
+        if person.get("company_name"):
+            person["company_name"] = _normalize_company_name(person.get("company_name")) or person.get("company_name")
+        if person.get("company_domain"):
+            person["company_domain"] = _normalize_domain(person.get("company_domain"))
+        if person.get("email"):
+            person["email"] = str(person["email"]).strip().lower()
+        res["person"] = person
+
+    if res.get("email"):
+        res["email"] = str(res["email"]).strip().lower()
+
+    predicted = res.get("predicted_person")
+    if isinstance(predicted, dict):
+        predicted = dict(predicted)
+        if predicted.get("email"):
+            predicted["email"] = str(predicted["email"]).strip().lower()
+        res["predicted_person"] = predicted
+
+    return res
+
+
+def _merge_first_party_identity(resolution: Dict[str, Any], identity_traits: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not identity_traits:
+        return resolution
+
+    res = dict(resolution or {})
+    traits = dict(identity_traits or {})
+
+    email = traits.get("email")
+    if email:
+        normalized_email = str(email).strip().lower()
+        if normalized_email:
+            res["email"] = normalized_email
+
+    full_name = traits.get("full_name")
+    if full_name and not res.get("full_name"):
+        res["full_name"] = str(full_name).strip()[:255]
+
+    first_name = traits.get("first_name")
+    last_name = traits.get("last_name")
+    if not res.get("full_name") and (first_name or last_name):
+        res["full_name"] = " ".join(part for part in [str(first_name or "").strip(), str(last_name or "").strip()] if part)[:255]
+
+    job_title = traits.get("job_title")
+    if job_title and not res.get("job_title"):
+        res["job_title"] = str(job_title).strip()[:255]
+
+    company_name = traits.get("company_name")
+    if company_name:
+        normalized_company = _normalize_company_name(company_name) or str(company_name).strip()
+        if normalized_company and not res.get("company"):
+            res["company"] = normalized_company
+
+    linkedin_url = traits.get("linkedin_url")
+    if linkedin_url and not res.get("linkedin_url"):
+        res["linkedin_url"] = str(linkedin_url).strip()[:512]
+
+    person = dict(res.get("person") or {})
+    if res.get("full_name"):
+        person["full_name"] = res.get("full_name")
+    if res.get("email"):
+        person["email"] = res.get("email")
+    if res.get("job_title"):
+        person["job_title"] = res.get("job_title")
+    if res.get("linkedin_url"):
+        person["linkedin_url"] = res.get("linkedin_url")
+    if res.get("company"):
+        person["company_name"] = res.get("company")
+    if res.get("domain"):
+        person["company_domain"] = res.get("domain")
+    if person:
+        res["person"] = person
+
+    if any(res.get(key) for key in ("email", "full_name", "linkedin_url", "job_title")):
+        res["person_identification"] = {
+            "status": "verified",
+            "method": "first_party_identify",
+            "confidence": 0.98,
+            "is_predicted": False,
+        }
+
+    sources = list(res.get("_sources") or [])
+    if "first_party_identify" not in sources:
+        sources.append("first_party_identify")
+    res["_sources"] = sources
+    return res
+
+
+async def apply_identity_event(org_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply a deterministic server-side identity event without creating a new visit.
+    Used by form/chat/calendar/app-login integrations to stitch visitor state.
+    """
+    db = SessionLocal()
+    try:
+        visitor_id = data.get("visitor_id")
+        session_id = data.get("session_id")
+        identity_traits = data.get("identity_traits") or {}
+        identity_traits = {k: v for k, v in identity_traits.items() if v not in (None, "", [])}
+        email = identity_traits.get("email")
+        matched = []
+
+        query = db.query(Visit).filter(Visit.org_id == uuid.UUID(org_id))
+        filters = []
+        if visitor_id:
+            filters.append(Visit.resolution["visitor_id"].astext == str(visitor_id))
+        if session_id:
+            filters.append(Visit.resolution["session_id"].astext == str(session_id))
+        if email:
+            filters.append(Visit.resolution["email"].astext == str(email).strip().lower())
+
+        if filters:
+            from sqlalchemy import or_
+            query = query.filter(or_(*filters))
+            matched = query.order_by(Visit.created_at.desc()).limit(200).all()
+
+        updated = 0
+        learning = VisitorLearningService()
+        person_engine = PersonResolutionEngine()
+        exemplar_resolution: Dict[str, Any] = {}
+        for visit in matched:
+            resolution = _normalize_resolution_identity(visit.resolution or {})
+            resolution = _merge_first_party_identity(resolution, identity_traits)
+            resolution = _categorize_and_attach(db, resolution)
+            resolution = _normalize_resolution_identity(resolution)
+            person_engine.upsert_profile(
+                db,
+                org_id=org_id,
+                data={
+                    "visitor_id": visitor_id,
+                    "session_id": session_id,
+                    "ip": data.get("ip") or resolution.get("ip"),
+                    "user_agent": visit.user_agent or "",
+                    "url": visit.url or "",
+                    "active_ms": (resolution.get("active_ms") or 0),
+                },
+                resolution=resolution,
+                engine_result={
+                    "status": "verified",
+                    "confidence": float((resolution.get("person_identification") or {}).get("confidence") or 0.98),
+                    "likely_persona": None,
+                    "top_candidates": [],
+                },
+                behavioral=(resolution.get("behavioral") or {}),
+            )
+            learning.learn_from_verified_identity(
+                db,
+                org_id=org_id,
+                ip=data.get("ip") or resolution.get("ip"),
+                resolution=resolution,
+                profile_data=(resolution.get("profile_data") or {}),
+                behavioral=(resolution.get("behavioral") or {}),
+                person_resolution=(resolution.get("person_resolution") or {}),
+            )
+            visit.resolution = resolution
+            visit.matched = bool(resolution.get("company") or resolution.get("domain") or resolution.get("email"))
+            exemplar_resolution = resolution
+            updated += 1
+
+        if exemplar_resolution or identity_traits:
+            enricher = VisitorEnricher()
+            store_resolution = _normalize_resolution_identity(exemplar_resolution or {})
+            store_resolution = _merge_first_party_identity(store_resolution, identity_traits)
+            if data.get("domain") and not store_resolution.get("domain"):
+                store_resolution["domain"] = _normalize_domain(data.get("domain"))
+            if data.get("company") and not store_resolution.get("company"):
+                store_resolution["company"] = _normalize_company_name(data.get("company")) or data.get("company")
+            if data.get("linkedin_url") and not store_resolution.get("linkedin_url"):
+                store_resolution["linkedin_url"] = data.get("linkedin_url")
+            await enricher._step_identity_graph_store(
+                ip=data.get("ip") or "",
+                visitor_id=visitor_id,
+                resolution=store_resolution,
+            )
+
+        db.commit()
+        return {
+            "status": "applied",
+            "updated_visits": updated,
+            "visitor_id": visitor_id,
+            "session_id": session_id,
+            "email": identity_traits.get("email"),
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
     """Background coroutine: enrich visitor data and save to DB."""
     db = SessionLocal()
@@ -123,6 +329,7 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         action = data.get("action", "pageview")
         dwell_time = data.get("dwell_time")
         source_site = data.get("source_site") or ""
+        identity_traits = data.get("identity_traits") or {}
 
         if action == "leave" and visitor_id and dwell_time is not None:
             try:
@@ -213,7 +420,23 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
             resolution["page_h1"] = str(data["page_h1"])[:80]
         if data.get("connection_type"):
             resolution["connection_type"] = str(data["connection_type"])[:20]
+        if data.get("session_id"):
+            resolution["session_id"] = str(data["session_id"])[:128]
+        if data.get("active_ms") is not None:
+            resolution["active_ms"] = data["active_ms"]
+        if data.get("outbound_clicks") is not None:
+            resolution["outbound_clicks"] = data["outbound_clicks"]
+        if data.get("last_outbound_domain"):
+            resolution["last_outbound_domain"] = str(data["last_outbound_domain"])[:255]
+        if data.get("page_type"):
+            resolution["page_type"] = str(data["page_type"])[:64]
+        if data.get("form_stage"):
+            resolution["form_stage"] = str(data["form_stage"])[:64]
+        if data.get("form_fields"):
+            resolution["form_fields"] = data["form_fields"]
 
+        resolution = _normalize_resolution_identity(resolution)
+        resolution = _merge_first_party_identity(resolution, identity_traits)
         resolution = _categorize_and_attach(db, resolution)
         category = resolution.get("category", "unknown")
         
@@ -290,9 +513,10 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
             resolution["visitor_id"] = visitor_id
 
         # ── BEHAVIORAL ROLE PREDICTION ────────────────────────────────────────
-        # Query the last 30 visits for this visitor_id to build a behavioral
+        # Query the last 90 visits for this visitor_id to build a behavioral
         # profile, then predict their job role and buying stage.
         behavioral = None
+        sequence_analysis = None
         if visitor_id:
             try:
                 from sqlalchemy import text as sa_text
@@ -312,7 +536,7 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                         WHERE org_id = :org_id
                           AND resolution->>'visitor_id' = :vid
                         ORDER BY created_at DESC
-                        LIMIT 30
+                        LIMIT 90
                     """),
                     {"org_id": org_id, "vid": visitor_id},
                 ).fetchall()
@@ -349,6 +573,25 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                 })
 
                 behavioral = predict_persona(visit_history, referrer=data.get("referrer", ""))
+                sequence_service = JourneySequenceService()
+                current_page_type = resolution.get("page_type") or data.get("page_type")
+                enriched_history = []
+                for item in visit_history:
+                    enriched_history.append({
+                        **item,
+                        "page_type": item.get("page_type") or current_page_type,
+                    })
+                sequence_analysis = sequence_service.analyze_sequence(enriched_history)
+                resolution["journey_sequence"] = sequence_analysis
+                sequence_service.upsert_sequence(
+                    db,
+                    org_id=org_id,
+                    visitor_id=visitor_id,
+                    fingerprint=data.get("fp") or resolution.get("fingerprint"),
+                    session_id=data.get("session_id") or resolution.get("session_id"),
+                    company_domain=resolution.get("domain"),
+                    analysis=sequence_analysis,
+                )
 
                 resolution["behavioral"] = {
                     "predicted_persona": behavioral["predicted_persona"],
@@ -365,12 +608,68 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                 # and fall back to raw decision_makers if employees not available.
                 candidates = resolution.get("employees") or resolution.get("decision_makers") or []
                 if candidates and behavioral["predicted_persona"] != "unknown":
-                    best_dm = select_best_decision_maker(candidates, behavioral["predicted_persona"])
+                    prospect_context = {}
+                    try:
+                        matched_prospect = None
+                        if resolution.get("email"):
+                            matched_prospect = ProspectRepository.get_by_email(db, email=resolution.get("email"))
+                        if matched_prospect and getattr(matched_prospect, "raw_data", None):
+                            raw_data = matched_prospect.raw_data or {}
+                            prospect_context = {
+                                "crm_owner_email": raw_data.get("crm_owner_email") or raw_data.get("owner_email") or raw_data.get("assigned_to"),
+                                "prior_campaign_engagement": raw_data.get("campaign_engagement") or {},
+                            }
+                    except Exception:
+                        prospect_context = {}
+
+                    best_dm = select_best_decision_maker(
+                        candidates,
+                        behavioral["predicted_persona"],
+                        context={
+                            "visitor_country": ((resolution.get("geo") or {}).get("country") or "").lower(),
+                            "visitor_city": ((resolution.get("geo") or {}).get("city") or "").lower(),
+                            "preferred_seniority": "vp" if behavioral["predicted_persona"] in ("sales", "marketing", "product") else (
+                                "director" if behavioral["predicted_persona"] in ("engineering", "finance") else "c_suite"
+                            ),
+                            **prospect_context,
+                        },
+                    )
                     if best_dm:
-                        # Override the heuristic top-DM with the persona-matched DM
-                        for key in ("full_name", "email", "linkedin_url", "job_title"):
-                            if best_dm.get(key) and not resolution.get(key):
-                                resolution[key] = best_dm[key]
+                        predicted_confidence = round(
+                            min(
+                                0.74,
+                                max(
+                                    float(behavioral.get("persona_confidence") or 0.0) * 0.7
+                                    + min(float(behavioral.get("engagement_score") or 0) / 250.0, 0.18),
+                                    0.35,
+                                ),
+                            ),
+                            2,
+                        )
+                        predicted_person = {
+                            "full_name": best_dm.get("full_name"),
+                            "email": best_dm.get("email"),
+                            "linkedin_url": best_dm.get("linkedin_url"),
+                            "job_title": best_dm.get("job_title"),
+                            "method": "behavioral_employee_match",
+                            "confidence": predicted_confidence,
+                            "persona": behavioral["predicted_persona"],
+                        }
+                        resolution["predicted_person"] = predicted_person
+                        if not resolution.get("person_identification") or resolution["person_identification"].get("status") == "anonymous":
+                            if any(best_dm.get(key) for key in ("email", "linkedin_url", "full_name")) and (
+                                behavioral.get("persona_confidence", 0) >= 0.35
+                                and behavioral.get("engagement_score", 0) >= 35
+                            ):
+                                for key in ("full_name", "email", "linkedin_url", "job_title"):
+                                    if best_dm.get(key) and not resolution.get(key):
+                                        resolution[key] = best_dm[key]
+                                resolution["person_identification"] = {
+                                    "status": "predicted",
+                                    "method": "behavioral_employee_match",
+                                    "confidence": predicted_confidence,
+                                    "is_predicted": True,
+                                }
                         resolution["_persona_matched_dm"] = True
                         logger.info(
                             "[Behavioral] Matched DM '%s' (%s) to predicted persona '%s'",
@@ -386,6 +685,93 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                 )
             except Exception as e:
                 logger.warning("Behavioral scoring failed: %s", e)
+
+        resolution = _normalize_resolution_identity(resolution)
+
+        person_engine = PersonResolutionEngine()
+        learning_service = VisitorLearningService()
+        anonymous_profile = person_engine.load_profile(
+            db,
+            org_id=org_id,
+            visitor_id=visitor_id,
+            fingerprint=data.get("fp") or resolution.get("fingerprint"),
+            session_id=data.get("session_id") or resolution.get("session_id"),
+        )
+        company_memory = learning_service.get_company_memory(
+            db,
+            org_id=org_id,
+            company_domain=resolution.get("domain"),
+        )
+        office_cluster = learning_service.get_office_cluster(
+            db,
+            org_id=org_id,
+            ip=ip,
+            company_domain=resolution.get("domain"),
+        )
+        person_engine_result = person_engine.resolve(
+            db=db,
+            org_id=org_id,
+            resolution=resolution,
+            behavioral=behavioral,
+            profile=anonymous_profile,
+            company_memory=company_memory,
+            office_cluster=office_cluster,
+        )
+        resolution["person_resolution"] = person_engine_result
+
+        top_candidate = ((person_engine_result.get("top_candidates") or [None])[0] or None)
+        if top_candidate:
+            existing_predicted = resolution.get("predicted_person") or {}
+            existing_conf = float(existing_predicted.get("confidence") or 0.0)
+            engine_conf = float(person_engine_result.get("confidence") or 0.0)
+            if engine_conf >= existing_conf:
+                resolution["predicted_person"] = {
+                    "full_name": top_candidate.get("full_name"),
+                    "email": top_candidate.get("email"),
+                    "linkedin_url": top_candidate.get("linkedin_url"),
+                    "job_title": top_candidate.get("job_title"),
+                    "method": "person_resolution_engine",
+                    "confidence": round(engine_conf, 2),
+                    "persona": person_engine_result.get("likely_persona"),
+                }
+
+        current_person_id = resolution.get("person_identification") or {}
+        if (
+            current_person_id.get("status") in (None, "", "anonymous")
+            and person_engine_result.get("status") == "predicted_high"
+            and float(person_engine_result.get("confidence") or 0.0) >= 0.78
+        ):
+            resolution["person_identification"] = {
+                "status": "predicted",
+                "method": "person_resolution_engine",
+                "confidence": round(float(person_engine_result.get("confidence") or 0.0), 2),
+                "is_predicted": True,
+            }
+
+        person_engine.upsert_profile(
+            db,
+            org_id=org_id,
+            data=data,
+            resolution=resolution,
+            engine_result=person_engine_result,
+            behavioral=behavioral,
+        )
+        learning_service.observe_visit(
+            db,
+            org_id=org_id,
+            ip=ip,
+            resolution=resolution,
+            person_resolution=person_engine_result,
+        )
+        learning_service.learn_from_verified_identity(
+            db,
+            org_id=org_id,
+            ip=ip,
+            resolution=resolution,
+            profile_data=((anonymous_profile.profile_data if anonymous_profile else {}) or {}),
+            behavioral=behavioral,
+            person_resolution=person_engine_result,
+        )
 
         is_matched = (
             bool(resolution.get("matched_entity"))
@@ -435,19 +821,21 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         if visitor_id and is_matched:
             try:
                 from sqlalchemy import text as _text
+                person_id = resolution.get("person_identification") or {}
+                is_predicted_person = bool(person_id.get("is_predicted")) or person_id.get("status") == "predicted"
                 # Build a JSON patch with every non-empty identity field we resolved
                 patches: dict = {"retrolinked": True}
-                if email:
+                if email and not is_predicted_person:
                     patches["email"] = email
-                if resolution.get("full_name"):
+                if resolution.get("full_name") and not is_predicted_person:
                     patches["full_name"] = resolution["full_name"]
                 if resolution.get("company"):
                     patches["company"] = resolution["company"]
                 if resolution.get("domain"):
                     patches["domain"] = resolution["domain"]
-                if resolution.get("job_title"):
+                if resolution.get("job_title") and not is_predicted_person:
                     patches["job_title"] = resolution["job_title"]
-                if resolution.get("linkedin_url"):
+                if resolution.get("linkedin_url") and not is_predicted_person:
                     patches["linkedin_url"] = resolution["linkedin_url"]
                 if resolution.get("logo_url"):
                     patches["logo_url"] = resolution["logo_url"]
@@ -608,10 +996,17 @@ def _categorize_and_attach(db, resolution: Dict[str, Any]) -> Dict[str, Any]:
     create/link matching DB records (best-effort, never raises).
     """
     res = dict(resolution or {})
+    if res.get("company"):
+        res["company"] = _normalize_company_name(res.get("company")) or res.get("company")
+    if res.get("domain"):
+        res["domain"] = _normalize_domain(res.get("domain"))
     person = res.get("person") or {}
     email = res.get("email") or person.get("email") or person.get("work_email") or person.get("personal_email")
+    if email:
+        email = str(email).strip().lower()
+        res["email"] = email
     domain = _normalize_domain(res.get("domain") or person.get("company_domain"))
-    company_name = res.get("company") or person.get("company_name")
+    company_name = _normalize_company_name(res.get("company") or person.get("company_name")) or res.get("company") or person.get("company_name")
 
     matched_company = None
     matched_prospect = None
