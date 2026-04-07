@@ -7,6 +7,7 @@ import { SlidersHorizontal, Trash2 } from "lucide-react"
 import { FilterSection } from "@/components/leads/companies/filters/filter-section"
 import { FilterInputMultiSelect } from "@/components/leads/companies/filters/filter-input-multi-select"
 import { Badge } from "@/components/ui/badge"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 
 export interface WatcherSidebarFilters {
   status: string[]
@@ -163,6 +164,42 @@ export function WatcherFilterSidebar({ activeTab, onFiltersChange }: WatcherFilt
   const [filters, setFilters] = React.useState<Record<string, any>>({})
   const [watcherStatus, setWatcherStatus] = React.useState<string[]>([])
 
+  // Subscribe to agent-injected filters — select the raw value (not ??\u00a0{}) to avoid
+  // creating a new object reference on every render which causes Zustand's getSnapshot
+  // cache-miss error and infinite loops.
+  const agentFiltersRaw = useCoPilotAgentStore(
+    (state) => state.appliedFilters?.['watcher_list']
+  )
+  const highlightedElement = useCoPilotAgentStore((state) => state.highlightedElement)
+  const isAgentHighlighted = highlightedElement === 'watcher_list-filters-panel'
+
+  // Apply agent-injected filters whenever the agent writes to watcher_list
+  React.useEffect(() => {
+    if (!agentFiltersRaw || Object.keys(agentFiltersRaw).length === 0) return
+
+    const af = agentFiltersRaw as Record<string, any>
+
+    if (af.status) setWatcherStatus(af.status)
+
+    setFilters((prev) => {
+      const next = { ...prev }
+      if (af.event_type)         next.event_type         = af.event_type
+      if (af.funding_stage)      next.funding_stage      = af.funding_stage
+      if (af.job_level)          next.job_level          = af.job_level
+      if (af.department)         next.department         = af.department
+      if (af.company_size)       next.company_size       = af.company_size
+      if (af.trigger_types)      next.trigger_types      = af.trigger_types
+      if (af.account_industry)   next.account_industry   = af.account_industry
+      if (af.lead_trigger_types) next.lead_trigger_types = af.lead_trigger_types
+      if (af.lead_seniority)     next.lead_seniority     = af.lead_seniority
+      if (af.lead_department)    next.lead_department    = af.lead_department
+      return next
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentFiltersRaw])
+
+  // Single emit helper — called explicitly from each handler (no useEffect on onFiltersChange
+  // to avoid infinite loops when the parent passes an inline function reference).
   const emit = React.useCallback((newFilters: Record<string, any>, newStatus: string[]) => {
     onFiltersChange?.({ status: newStatus, ...newFilters })
   }, [onFiltersChange])
@@ -198,7 +235,14 @@ export function WatcherFilterSidebar({ activeTab, onFiltersChange }: WatcherFilt
   ).length + watcherStatus.length
 
   return (
-    <div className="w-80 flex-shrink-0 h-full flex flex-col bg-card border-r border-border shadow-sm z-10">
+    <div
+      id="watcher_list-filters-panel"
+      className={[
+        "w-80 flex-shrink-0 h-full flex flex-col bg-card border-r border-border shadow-sm z-10",
+        "transition-shadow duration-300",
+        isAgentHighlighted ? "ring-2 ring-primary/60 shadow-lg shadow-primary/20" : "",
+      ].join(" ")}
+    >
       {/* Header */}
       <div className="p-4 border-b border-border/40">
         <div className="flex items-center justify-between">

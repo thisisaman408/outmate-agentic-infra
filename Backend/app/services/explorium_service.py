@@ -211,8 +211,7 @@ class ExploriumService:
             "google_category": "google_category",
             "linkedin_category": "linkedin_category",
             "naics_category": "naics_category",
-            "website": "domain",
-            "domain": "domain",
+            "website": "website_keywords",
             "employee_count": "company_size",  # Map frontend employee_count to company_size
             "industry": "linkedin_category",
             "keywords": "website_keywords",
@@ -249,7 +248,7 @@ class ExploriumService:
                     if not norm_sizes:
                         continue
                     mapped[dst] = {"values": norm_sizes}
-                elif dst in ["domain", "website", "country_code"]:
+                elif dst in ["country_code"]:
                     # These filters often do not accept the {"values": [...]} wrap in some Explorium endpoints
                     mapped[dst] = vals
                 elif dst == "events":
@@ -1498,7 +1497,9 @@ class ExploriumService:
                     request=resp.request,
                     response=resp,
                 )
-            return resp.json()
+            result = resp.json()
+            import logging; logging.getLogger(__name__).info("[DEBUG] fetch_business_events payload=%s raw_response=%s", payload, str(result)[:500])
+            return result
 
     async def fetch_prospect_events(
         self,
@@ -1528,7 +1529,9 @@ class ExploriumService:
                     request=resp.request,
                     response=resp,
                 )
-            return resp.json()
+            result = resp.json()
+            import logging; logging.getLogger(__name__).info("[DEBUG] fetch_prospect_events payload=%s raw_response=%s", payload, str(result)[:500])
+            return result
 
     async def enroll_business_events(self, business_ids: List[str], event_types: List[str]) -> Dict[str, Any]:
         payload = {

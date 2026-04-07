@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { motion, AnimatePresence } from "framer-motion"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -74,6 +75,38 @@ export function PredictivePanel() {
   const [companyDomain, setCompanyDomain] = useState("")
   const [industry, setIndustry] = useState("")
   const [country, setCountry] = useState("US")
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['predictive'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.company_name) setCompanyName(f.company_name as string)
+    if (f.domain) setCompanyDomain(f.domain as string)
+    if (f.industry) setIndustry(f.industry as string)
+    if (f.country) setCountry(f.country as string)
+    if (submitSignal > prevSubmitSignal.current && f.company_name) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsScoring(true)
+        setResults([])
+        try {
+          const r = await aiAgentsApi.scoreLeads({
+            name: f.company_name as string,
+            domain: f.domain as string | undefined,
+            industry: f.industry as string | undefined,
+            country: (f.country as string) || 'US',
+          })
+          setResults(r)
+          toast({ title: 'Scoring Complete', description: `Predictive model run on ${f.company_name}.` })
+        } catch (err: any) {
+          toast({ title: 'Scoring Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsScoring(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleScoreLeads = async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null

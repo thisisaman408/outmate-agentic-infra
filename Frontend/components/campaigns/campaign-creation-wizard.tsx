@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,7 @@ import { campaignsApi, type CreateCampaignRequest } from "@/lib/api/campaigns"
 import { transformCompanyToLead, type Lead } from "@/lib/api/leads"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 
 const STEPS = ["Campaign Details", "Select Leads", "Generate Message", "Schedule & Launch"]
 const MAX_LEADS = 3
@@ -42,6 +43,93 @@ export function CampaignCreationWizard() {
   const [sendingRecipients, setSendingRecipients] = useState<Record<number, "email" | "Social">>({})
   const [sentRecipients, setSentRecipients] = useState<Record<number, "email" | "Social" | "both">>({})
   const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
+
+  // ── Automation Agent form injection + autopilot ──
+  const agentForm = useCoPilotAgentStore(
+    (state) => state.copilotForms?.['campaign_creation']
+  )
+  const clearCopilotForm = useCoPilotAgentStore((state) => state.clearCopilotForm)
+
+  const [isAutopilot, setIsAutopilot] = useState(false)
+  const autopilotStartDateRef = useRef<string | undefined>(undefined)
+  const autopilotLeadsSelectedRef = useRef(false)
+  const autopilotGeneratedRef = useRef(false)
+  // Always-current snapshot of formData to avoid stale closures in effects
+  const formDataRef = useRef(formData)
+  useEffect(() => { formDataRef.current = formData }, [formData])
+
+  // Step 0: fill form fields from agent, then advance to Select Leads
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields } = agentForm
+    const f = fields as Record<string, any>
+    setFormData((prev) => ({
+      ...prev,
+      ...(f.name !== undefined ? { name: f.name } : {}),
+      ...(f.objective !== undefined ? { objective: f.objective } : {}),
+      ...(f.signals !== undefined ? { signals: f.signals } : {}),
+    }))
+    autopilotStartDateRef.current = f.start_date
+    autopilotLeadsSelectedRef.current = false
+    autopilotGeneratedRef.current = false
+    clearCopilotForm('campaign_creation')
+    setIsAutopilot(true)
+    setTimeout(() => setCurrentStep(1), 400)
+  }, [agentForm])
+
+  // Step 1: auto-select all available leads then advance to Generate Message
+  useEffect(() => {
+    if (!isAutopilot || currentStep !== 1 || leadPool.length === 0 || autopilotLeadsSelectedRef.current) return
+    autopilotLeadsSelectedRef.current = true
+    const ids = leadPool.slice(0, MAX_LEADS).map((l) => l.id)
+    setFormData((prev) => ({ ...prev, leads: ids }))
+    setTimeout(() => setCurrentStep(2), 600)
+  }, [isAutopilot, currentStep, leadPool])
+
+  // Step 2: auto-generate message using current formDataRef then advance to Schedule
+  useEffect(() => {
+    if (!isAutopilot || currentStep !== 2 || autopilotGeneratedRef.current) return
+    autopilotGeneratedRef.current = true
+    const fd = formDataRef.current
+    if (!fd.objective) return
+    const signals = fd.signals.split(",").map((s: string) => s.trim()).filter(Boolean)
+    setIsGenerating(true)
+    campaignsApi
+      .generateMessage({ objective: fd.objective, leads: fd.leads, signals })
+      .then((generated) => {
+        const fallbackText = (generated.raw || generated.email_body || "").trim()
+        let subject = generated.subject || ""
+        let emailBody = generated.email_body || ""
+        let linkedinMessage = generated.linkedin_message || ""
+        if (fallbackText && (!subject || !linkedinMessage)) {
+          const jsonMatch = fallbackText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[0])
+              subject = subject || parsed.subject || parsed.email_subject || ""
+              emailBody = emailBody || parsed.email_body || parsed.body || ""
+              linkedinMessage = linkedinMessage || parsed.linkedin_message || parsed.linkedin || ""
+            } catch { /* ignore */ }
+          }
+        }
+        setFormData((prev) => ({
+          ...prev,
+          subject: subject || prev.subject,
+          message: emailBody || prev.message,
+          SocialMessage: linkedinMessage || prev.SocialMessage,
+        }))
+        setTimeout(() => {
+          setCurrentStep(3)
+          if (autopilotStartDateRef.current) {
+            setFormData((prev) => ({ ...prev, startDate: autopilotStartDateRef.current! }))
+          }
+        }, 500)
+      })
+      .catch(() => {
+        toast({ title: "Error", description: "Failed to generate message", variant: "destructive" })
+      })
+      .finally(() => setIsGenerating(false))
+  }, [isAutopilot, currentStep])
 
   const handleGenerateMessage = async () => {
     if (!formData.objective) {

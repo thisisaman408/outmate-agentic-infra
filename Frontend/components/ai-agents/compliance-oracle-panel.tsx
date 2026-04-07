@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -26,6 +27,35 @@ export function ComplianceOraclePanel() {
   const [inlineError, setInlineError] = useState<string | null>(null)
   const [clickCount, setClickCount] = useState(0)
   const [lastClickAt, setLastClickAt] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['compliance_oracle'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.outbound_message) setTemplate(f.outbound_message as string)
+    if (f.jurisdictions) setJurisdictions(f.jurisdictions as string)
+    if (submitSignal > prevSubmitSignal.current && f.outbound_message) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsRunning(true)
+        setOutput(null)
+        setInlineError(null)
+        try {
+          const res = await gtmAgentsApi.runComplianceOracle({
+            message_template: f.outbound_message as string,
+            jurisdictions: (f.jurisdictions as string) || 'US, EU, UK',
+          })
+          setOutput(extractResultText(res))
+          toast({ title: 'Compliance Check Complete', description: 'Review your rewritten outreach below.' })
+        } catch (err: any) {
+          toast({ title: 'Compliance Oracle Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsRunning(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleRun = async () => {
     setClickCount((prev) => prev + 1)

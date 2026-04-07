@@ -34,7 +34,9 @@ import {
     CheckCircle2,
     XCircle,
     Zap,
+    Layers,
 } from "lucide-react"
+import Link from "next/link"
 import type { ProspectProfile } from "@/lib/services/prospectService"
 import { getInitials, formatDate, calculateDuration } from "@/lib/services/prospectService"
 
@@ -284,6 +286,12 @@ export default function ProspectProfilePage() {
                                                     : enrichedPhone ? <><Phone className="h-4 w-4" />{enrichedPhone}</>
                                                     : phoneRevealed ? <><Phone className="h-4 w-4" />Not Available</>
                                                     : <><Phone className="h-4 w-4" />View Phone</>}
+                                            </Button>
+                                            <Button asChild variant="outline" className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950/30">
+                                                <Link href={`/copilot/orchestrate?prospect_id=${encodeURIComponent(params.id as string)}&task=${encodeURIComponent(`Prepare everything for my next call with ${profile.name}`)}`}>
+                                                    <Layers className="h-4 w-4" />
+                                                    Run Full Prep
+                                                </Link>
                                             </Button>
                                         </div>
                                     </div>

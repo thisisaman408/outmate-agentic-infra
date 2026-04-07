@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -23,6 +24,34 @@ export function RegimeShifterPanel() {
   const [scenario, setScenario] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['regime_shifter'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.geo_icp_focus) setGeoFocus(f.geo_icp_focus as string)
+    if (f.scenario) setScenario(f.scenario as string)
+    if (submitSignal > prevSubmitSignal.current && f.geo_icp_focus) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsRunning(true)
+        setOutput(null)
+        try {
+          const res = await gtmAgentsApi.runRegimeShifter({
+            geo_focus: f.geo_icp_focus as string,
+            scenario: f.scenario as string | undefined,
+          })
+          setOutput(extractResultText(res))
+          toast({ title: 'ICP Recalibration Generated', description: 'Review geo-specific ICP tweaks and sequences.' })
+        } catch (err: any) {
+          toast({ title: 'Regime Shifter Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsRunning(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleRun = async () => {
     if (!geoFocus.trim()) {

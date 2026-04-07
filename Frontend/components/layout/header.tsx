@@ -1,6 +1,7 @@
 "use client"
 
-import { Bell, Search, ChevronDown, Settings, Building2, Menu } from "lucide-react"
+import { Search, ChevronDown, Settings, Building2, Menu } from "lucide-react"
+import { NotificationDropdown } from "@/components/copilot/notification-dropdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -84,10 +85,7 @@ export function Header() {
           <ThemeToggle />
 
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-lg">
-            <Bell className="h-[1.1rem] w-[1.1rem]" />
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
-          </Button>
+          <NotificationDropdown />
 
           {mounted && user ? (
             // User Menu for authenticated users

@@ -21,6 +21,9 @@ class User(Base):
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     gmail_access_token = Column(Text, nullable=True)
     gmail_refresh_token = Column(Text, nullable=True)
+    google_calendar_channel_id = Column(Text, nullable=True)
+    google_calendar_resource_id = Column(Text, nullable=True)
+    google_calendar_webhook_expiry = Column(DateTime(timezone=True), nullable=True)
     # BYOK (Bring Your Own Key) for AI services
     anthropic_api_key = Column(Text, nullable=True)  # User's own Anthropic API key (encrypted in practice)
     use_byok = Column(Boolean, default=False)  # Flag to use BYOK instead of system credits

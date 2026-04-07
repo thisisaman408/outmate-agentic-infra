@@ -116,6 +116,64 @@ class NotificationService:
     # Slack delivery                                                       #
     # ------------------------------------------------------------------ #
 
+    def send_slack_blocks(self, *, webhook_url: str, blocks: list, text: str) -> None:
+        """Send a Slack Block Kit message. Fixes crash when called from copilot_tasks."""
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(webhook_url, json={"text": text, "blocks": blocks})
+                resp.raise_for_status()
+            logger.info("Slack blocks notification sent to webhook")
+        except Exception as exc:
+            logger.error("Slack blocks delivery failed: %s", exc)
+
+    def send_meeting_brief_slack(
+        self,
+        *,
+        webhook_url: str,
+        brief: dict,
+        meeting_title: str,
+        event_start: str,
+    ) -> None:
+        """Send a pre-call meeting brief to Slack."""
+        context = brief.get("context", "")
+        talking_points = brief.get("talking_points", [])
+        objections = brief.get("objections", [])
+        ask = brief.get("ask", "")
+
+        tp_lines = "\n".join(f"• {tp}" for tp in talking_points[:3])
+        obj_lines = "\n".join(
+            f"• _{o['objection']}_ → {o['rebuttal']}" for o in objections[:2]
+        )
+
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"📋 Meeting Brief: {meeting_title}"},
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Time:* {event_start}\n\n*Context:*\n{context}"},
+            },
+        ]
+        if tp_lines:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Talking Points:*\n{tp_lines}"},
+            })
+        if obj_lines:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Objections & Rebuttals:*\n{obj_lines}"},
+            })
+        if ask:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*The Ask:*\n{ask}"},
+            })
+
+        text_fallback = f":calendar: *Meeting Brief Ready: {meeting_title}* (at {event_start})"
+        self.send_slack_blocks(webhook_url=webhook_url, blocks=blocks, text=text_fallback)
+
     def _send_slack(self, *, webhook_url: str, text: str) -> None:
         try:
             with httpx.Client(timeout=10) as client:

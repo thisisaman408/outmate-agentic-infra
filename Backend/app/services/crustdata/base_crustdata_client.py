@@ -136,7 +136,7 @@ class BaseCrustDataClient:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 # Log full payload for debugging
                 logger.debug(f"Payload sent to CrustData: {payload}")
-                print(f"🚀 [Backend] Payload sent to CrustData: {payload}")  # Explicit print for console visibility
+                print(f"[Backend] Payload sent to CrustData: {payload}")  # Explicit print for console visibility
 
                 response = await client.post(
                     url,
@@ -188,7 +188,7 @@ class BaseCrustDataClient:
                 
                 # Parse and return successful response
                 data = response.json()
-                print(f"✅ [Backend] Valid Response from CrustData: {data.keys() if isinstance(data, dict) else 'List/Other'}")
+                print(f"[Backend] Valid Response from CrustData: {data.keys() if isinstance(data, dict) else 'List/Other'}")
                 return data
                 
         except httpx.TimeoutException as e:

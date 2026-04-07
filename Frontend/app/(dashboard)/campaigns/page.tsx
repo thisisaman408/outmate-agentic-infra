@@ -6,14 +6,20 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Inbox, BarChart3, Shield } from "lucide-react"
+import { Plus, Inbox, BarChart3, Shield, Sparkles, ChevronDown, ChevronUp } from "lucide-react"
 import { CampaignsList } from "@/components/campaigns/campaigns-list"
 import { campaignsApi, type Campaign } from "@/lib/api/campaigns"
 import { useToast } from "@/hooks/use-toast"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
+
 
 export default function CampaignsPage() {
   const router = useRouter()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [showCopilotResults, setShowCopilotResults] = useState(true)
+  const copilotResult = useCoPilotAgentStore(s =>
+    [...s.executionResults].reverse().find(r => r.module === 'campaigns' && r.status === 'success')
+  )
   const [isLoading, setIsLoading] = useState(true)
 
   const { toast } = useToast()
@@ -197,6 +203,26 @@ export default function CampaignsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Copilot automation agent results banner */}
+      {copilotResult && (copilotResult.resultCount ?? 0) > 0 && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium text-primary">
+                Automation Agent found {copilotResult.resultCount} campaign{copilotResult.resultCount !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowCopilotResults(v => !v)} className="h-7 w-7 p-0">
+              {showCopilotResults ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          </div>
+          {showCopilotResults && copilotResult.error && (
+            <p className="mt-2 text-sm text-destructive">{copilotResult.error}</p>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Campaigns</h1>

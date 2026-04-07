@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 import logging
 import asyncio
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.sql import func as sqlfunc
 from app.db.deps import get_db
 
 from app.schemas.prospect_filters import (
@@ -272,8 +274,81 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
             logger.info("Using local database demo prospects fallback due to missing CrustData API key")
             from app.db.models.prospect import Prospect
             from app.db.models.company import Company
-            
-            prospects = db.query(Prospect).limit(effective_limit).all()
+
+            # Build filtered query — ORDER BY RANDOM() so different filter combos return different results
+            prospects_query = db.query(Prospect).order_by(sqlfunc.random())
+
+            # current_title — partial ILIKE match against any provided title
+            if request.current_title:
+                title_conds = [Prospect.job_title.ilike(f"%{t}%") for t in request.current_title]
+                prospects_query = prospects_query.filter(or_(*title_conds))
+
+            # past_title — approximate: check job_title for now (past_employers stored in raw_data)
+            if request.past_title:
+                past_conds = [Prospect.job_title.ilike(f"%{t}%") for t in request.past_title]
+                prospects_query = prospects_query.filter(or_(*past_conds))
+
+            # functions / department
+            if request.functions:
+                func_conds = [Prospect.department.ilike(f"%{f}%") for f in request.functions]
+                prospects_query = prospects_query.filter(or_(*func_conds))
+
+            # seniority_level with include/exclude operator
+            if request.seniority_level:
+                op = (request.seniority_level_operator or "in").lower()
+                if op == "not_in":
+                    prospects_query = prospects_query.filter(
+                        Prospect.seniority_level.notin_(request.seniority_level)
+                    )
+                else:
+                    seniority_conds = [Prospect.seniority_level.ilike(f"%{s}%") for s in request.seniority_level]
+                    prospects_query = prospects_query.filter(or_(*seniority_conds))
+
+            # location — match city, state, or country
+            if request.location:
+                loc_conds = []
+                for loc in request.location:
+                    loc_conds.append(Prospect.city.ilike(f"%{loc}%"))
+                    loc_conds.append(Prospect.state.ilike(f"%{loc}%"))
+                    loc_conds.append(Prospect.country.ilike(f"%{loc}%"))
+                prospects_query = prospects_query.filter(or_(*loc_conds))
+
+            # first_name / last_name
+            if request.first_name:
+                prospects_query = prospects_query.filter(
+                    Prospect.first_name.ilike(f"%{request.first_name}%")
+                )
+            if request.last_name:
+                prospects_query = prospects_query.filter(
+                    Prospect.last_name.ilike(f"%{request.last_name}%")
+                )
+
+            # keyword — full-text across name, title, department
+            if request.keyword:
+                kw = f"%{request.keyword}%"
+                prospects_query = prospects_query.filter(
+                    or_(
+                        Prospect.full_name.ilike(kw),
+                        Prospect.job_title.ilike(kw),
+                        Prospect.department.ilike(kw),
+                    )
+                )
+
+            # company name + employee size — join Company table only when needed
+            if request.company or request.employees:
+                prospects_query = prospects_query.outerjoin(
+                    Company, Prospect.company_id == Company.id
+                )
+                if request.company:
+                    prospects_query = prospects_query.filter(
+                        Company.name.ilike(f"%{request.company}%")
+                    )
+                if request.employees:
+                    prospects_query = prospects_query.filter(
+                        Company.employee_count_range.in_(request.employees)
+                    )
+
+            prospects = prospects_query.limit(effective_limit).all()
             profiles = []
             
             for p in prospects:

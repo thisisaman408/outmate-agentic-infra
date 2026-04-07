@@ -33,5 +33,7 @@ pyjwt>=2.6.0
 passlib[bcrypt]>=1.7.4
 google-auth>=2.0.0
 feedparser>=6.0.0
+# Timezone data (for per-user brief scheduling)
+tzdata>=2024.1
 # Production deployment
 gunicorn>=21.0.0

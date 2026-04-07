@@ -129,6 +129,62 @@ services:
 
 
   # ========================================================================
+  # Celery Worker — executes background tasks (brief gen, notifications)
+  # ========================================================================
+  celery-worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: outmate-celery-worker
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=2 -P solo
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/outmate
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+    env_file:
+      - ./Backend/.env.local
+    volumes:
+      - ./Backend:/app
+      - /app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - outmate-network
+
+
+  # ========================================================================
+  # Celery Beat — fires scheduled tasks (daily brief at 8am, etc.)
+  # ========================================================================
+  celery-beat:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: outmate-celery-beat
+    command: celery -A app.core.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/outmate
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+    env_file:
+      - ./Backend/.env.local
+    volumes:
+      - ./Backend:/app
+      - /app/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - outmate-network
+
+
+  # ========================================================================
   # Next.js Frontend Service
   # ========================================================================
   web:

@@ -142,3 +142,42 @@ def start_keepalive(interval: int = 45) -> asyncio.Task:
     """Schedule the keepalive loop as an asyncio background task.
     Call this inside a FastAPI lifespan startup block."""
     return asyncio.create_task(_keepalive_loop(interval))
+
+
+# ---------------------------------------------------------------------------
+# Notification pub/sub helpers
+# ---------------------------------------------------------------------------
+
+async def publish_notification(user_id: str, payload: dict) -> None:
+    """Publish a notification payload to the user's Redis channel (async)."""
+    import json as _json
+    try:
+        client = RedisManager.get_client()
+        channel = f"notifications:{user_id}"
+        await client.publish(channel, _json.dumps(payload))
+    except Exception as exc:
+        logger.warning("publish_notification failed for user %s: %s", user_id, exc)
+
+
+async def subscribe_notifications(user_id: str):
+    """Async generator that yields raw JSON strings from the user's channel.
+
+    Usage (inside an async generator / SSE route):
+        async for message in subscribe_notifications(user_id):
+            yield f"data: {message}\n\n"
+    """
+    import redis.asyncio as aioredis
+    from app.core.config import settings
+
+    # Each SSE connection needs its own dedicated pubsub object.
+    client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = client.pubsub()
+    channel = f"notifications:{user_id}"
+    await pubsub.subscribe(channel)
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                yield message["data"]
+    finally:
+        await pubsub.unsubscribe(channel)
+        await client.aclose()

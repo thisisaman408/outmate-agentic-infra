@@ -3,6 +3,17 @@ import { authService } from "@/lib/auth"
 
 // ── Types ────────────────────────────────────────────────────
 
+export interface OrchestrateIntentData {
+  source: "db" | "crustdata" | "not_found"
+  prospect_id: string
+  prospect_name: string
+  prospect_title: string
+  prospect_company: string
+  task: string
+  estimated_credits: number
+  context_overrides: Record<string, unknown> | null
+}
+
 export interface Message {
   id: string
   role: "user" | "assistant"
@@ -12,6 +23,7 @@ export interface Message {
   tags?: string[]
   isError?: boolean
   isCreditError?: boolean
+  orchestrateData?: OrchestrateIntentData
 }
 
 export interface ChatSession {
@@ -29,11 +41,28 @@ export interface ChatSession {
  */
 function stripJSONWrapper(raw: string): string {
   let s = raw.trim()
-  if (s.startsWith("{")) s = s.substring(1).trim()
+
+  // If not JSON format, unescape and return as-is
+  if (!s.startsWith("{")) {
+    return s
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\")
+      .replace(/\\r/g, "")
+  }
+
+  // JSON mode — strip the opening brace
+  s = s.substring(1).trim()
 
   const answerKeyPattern = /^"answer"\s*:\s*"/
   const match = s.match(answerKeyPattern)
-  if (match) s = s.substring(match[0].length)
+  if (!match) {
+    // The "answer": " prefix hasn't fully arrived yet — show nothing
+    // rather than flashing raw JSON characters to the user
+    return ""
+  }
+  s = s.substring(match[0].length)
 
   const trailingPatterns = [
     /",\s*"related_links"\s*:/,
@@ -244,7 +273,15 @@ export function useChatbot() {
           try {
             const data = JSON.parse(line.slice(6))
 
-            if (data.type === "token") {
+            if (data.type === "orchestrate_intent") {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, orchestrateData: data.data as OrchestrateIntentData }
+                    : msg
+                )
+              )
+            } else if (data.type === "token") {
               accumulatedContent += data.content
               const displayContent = stripJSONWrapper(accumulatedContent)
               setMessages((prev) =>

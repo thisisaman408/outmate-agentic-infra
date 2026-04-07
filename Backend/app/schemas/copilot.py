@@ -5,7 +5,7 @@ Pydantic schemas for Co-Pilot API request/response models.
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
-from datetime import date
+from datetime import date, datetime
 
 
 # ── Daily Brief ───────────────────────────────────────────────
@@ -13,6 +13,7 @@ from datetime import date
 class DailyBriefResponse(BaseModel):
     id: str
     brief_date: str
+    greeting: Optional[str] = None
     summary: str
     priority_actions: List[Dict[str, Any]]
     new_signals: List[Dict[str, Any]]
@@ -168,6 +169,17 @@ class CopilotPreferencesRequest(BaseModel):
     slack_webhook_url: Optional[str] = None
     pipeline_alerts_enabled: Optional[bool] = None
     alert_severity_threshold: Optional[str] = None
+    signal_score_threshold: Optional[int] = Field(None, ge=50, le=95)
+
+    @field_validator("daily_brief_timezone")
+    @classmethod
+    def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        from zoneinfo import available_timezones
+        if v not in available_timezones():
+            raise ValueError(f"Unknown timezone: {v}")
+        return v
 
 
 # ── Lead Copilot ──────────────────────────────────────────────
@@ -344,6 +356,31 @@ class ChatSessionSummary(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+
+# ── Notifications ─────────────────────────────────────────────
+
+class NotificationCreate(BaseModel):
+    type: str
+    title: str
+    body: str
+    cta_url: str = ""
+    priority: str = "green"
+    company: Optional[str] = None  # used for grouping check
+
+
+class NotificationOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str
+    cta_url: str
+    priority: str
+    is_read: bool
+    grouped_count: int
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
 class ChatSessionFull(BaseModel):
     id: str
     title: str
@@ -351,3 +388,148 @@ class ChatSessionFull(BaseModel):
     message_count: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ── Calendar Auto-Brief ────────────────────────────────────────
+
+class CalendarMeetingBriefResponse(BaseModel):
+    id: str
+    meeting_title: str
+    event_start: str
+    calendar_event_id: str
+    context: str
+    objections: List[Dict[str, str]]
+    talking_points: List[str]
+    ask: str
+    enrichment_used: bool
+    created_at: str
+    viewed_at: Optional[str] = None
+
+
+# ── Orchestrator ───────────────────────────────────────────────
+
+class PlanStep(BaseModel):
+    step_id: str
+    action: str
+    label: str
+    depends_on: List[str] = []
+    input_from: List[str] = []
+    extra_instruction: Optional[str] = None
+
+
+class ExecutionPlan(BaseModel):
+    intent: str
+    steps: List[PlanStep]
+    estimated_credits: int = 0
+    parallel_groups: List[List[str]] = []
+
+
+# ── Automation Agent (Tool Calling) ───────────────────────────
+
+class AgentMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class AgentToolSchema(BaseModel):
+    name: str
+    description: str
+    input_schema: Dict[str, Any]  # Anthropic-format, converted to OpenAI internally
+
+
+class AgentContext(BaseModel):
+    route: Optional[str] = None
+
+
+class AgentChatRequest(BaseModel):
+    messages: List[AgentMessage]
+    tools: List[AgentToolSchema]
+    system: Optional[str] = None
+    context: Optional[AgentContext] = None
+
+
+class AgentToolCall(BaseModel):
+    id: str
+    name: str
+    input: Dict[str, Any]
+
+
+class AgentChatResponse(BaseModel):
+    text: str
+    tool_calls: List[AgentToolCall] = []
+    stop_reason: str = "end_turn"
+
+
+class OrchestratorRequest(BaseModel):
+    prospect_id: str
+    task: str  # Free-form user instruction
+    context_overrides: Optional[Dict[str, Any]] = None  # CrustData prospect data
+
+
+class ArtifactSection(BaseModel):
+    step_id: str
+    label: str
+    action: str
+    result: Dict[str, Any]
+
+
+# ── Signal-to-Sequence ────────────────────────────────────────
+
+class SignalDraftResponse(BaseModel):
+    id: str
+    signal_id: str
+    lead_name: Optional[str]
+    lead_email: Optional[str]
+    lead_role: Optional[str]
+    lead_domain: Optional[str]
+    lead_linkedin_url: Optional[str]
+    draft_email_subject: Optional[str]
+    draft_email_body: Optional[str]
+    optimizer_output: Optional[Dict[str, Any]]
+    signal_score: Optional[int]
+    signal_type: str
+    company_name: Optional[str]
+    company_domain: Optional[str]
+    status: str
+    campaign_id: Optional[str]
+    created_at: datetime
+
+
+class SignalDraftActionRequest(BaseModel):
+    action: str = Field(..., pattern="^(use|dismiss|push_to_campaign)$")
+    # Optional override fields for push_to_campaign
+    campaign_name: Optional[str] = None
+
+
+class OrchestratorArtifact(BaseModel):
+    intent: str
+    summary: str
+    steps_completed: List[str]
+    sections: List[ArtifactSection]
+    credits_used: int
+    duration_ms: int
+
+
+# ── Audit Log ─────────────────────────────────────────────────
+
+class AuditLogEntry(BaseModel):
+    id: str
+    action_type: str
+    user_prompt: Optional[str] = None
+    prospect_id: Optional[str] = None
+    company_name: Optional[str] = None
+    status: str
+    credits_used: int
+    duration_ms: Optional[int] = None
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogEntryFull(AuditLogEntry):
+    plan: Optional[Dict[str, Any]] = None
+    steps_run: Optional[List[Dict[str, Any]]] = None
+    output: Optional[Dict[str, Any]] = None
+    enrichment_sources: Optional[List[str]] = None
+
+    model_config = {"from_attributes": True}

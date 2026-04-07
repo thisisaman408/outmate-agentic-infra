@@ -31,8 +31,13 @@ from app.db.models.person_resolution_learning_stat import PersonResolutionLearni
 from app.db.models.visitor_journey_sequence import VisitorJourneySequence
 from app.db.models.product_knowledge import ProductKnowledge
 from app.db.models.copilot_chat_session import CopilotChatSession
+from app.db.models.copilot_notification import CopilotNotification
+from app.db.models.copilot_audit_log import CopilotAuditLog
 # Signal pipeline
 from app.db.models.signal_event import SignalEvent
+from app.db.models.signal_sequence_draft import SignalSequenceDraft
+# Champion alerts
+from app.db.models.champion_change_event import ChampionChangeEvent
 
 __all__ = [
     "User",
@@ -70,6 +75,11 @@ __all__ = [
     "VisitorJourneySequence",
     "ProductKnowledge",
     "CopilotChatSession",
+    "CopilotNotification",
+    "CopilotAuditLog",
     # Signal pipeline
     "SignalEvent",
+    "SignalSequenceDraft",
+    # Champion alerts
+    "ChampionChangeEvent",
 ]

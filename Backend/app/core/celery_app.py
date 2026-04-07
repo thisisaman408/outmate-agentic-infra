@@ -1,3 +1,4 @@
+import ssl
 from celery import Celery
 from celery.schedules import crontab
 from app.core.config import settings
@@ -9,7 +10,7 @@ celery_app = Celery(
     "outmate_tasks",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.visitors", "app.tasks.copilot_tasks"]
+    include=["app.tasks.visitors", "app.tasks.copilot_tasks", "app.tasks.signal_tasks", "app.tasks.sequence_tasks", "app.tasks.champion_tasks"]
 )
 
 celery_app.conf.update(
@@ -25,9 +26,9 @@ celery_app.conf.update(
     broker_connection_max_retries=3,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
-    # SSL/TLS for Upstash
-    broker_use_ssl=True,
-    redis_backend_use_ssl=True,
+    # SSL/TLS for Upstash — ssl_cert_reqs must be ssl.CERT_NONE constant (not bool, not string)
+    broker_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
+    redis_backend_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
     # ── Celery Beat periodic schedule ─────────────────────────────────────────
     beat_schedule={
         # GDPR auto-deletion: runs every day at 02:00 UTC
@@ -42,6 +43,12 @@ celery_app.conf.update(
         "account-intent-aggregate-hourly": {
             "task": "app.tasks.visitors.aggregate_account_intent_task",
             "schedule": crontab(minute=15),  # :15 every hour
+        },
+        # Champion job-change polling: every 6 hours
+        # Checks lead-type watchers with track_job_changes=True against CrustData
+        "champion-job-change-poll-6h": {
+            "task": "app.tasks.champion_tasks.poll_champion_job_changes",
+            "schedule": crontab(minute=0, hour="*/6"),
         },
     },
 )

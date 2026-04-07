@@ -48,10 +48,12 @@ def watcher_to_dict(w: WatcherModel) -> Dict[str, Any]:
         "accountName":   w.account_name,
         "accountDomain": w.account_domain,
         # Lead
-        "leadName":    w.lead_name,
-        "leadTitle":   w.lead_title,
-        "leadCompany": w.lead_company,
-        "leadEmail":   w.lead_email,
+        "leadName":       w.lead_name,
+        "leadTitle":      w.lead_title,
+        "leadCompany":    w.lead_company,
+        "leadEmail":      w.lead_email,
+        "linkedinUrl":    w.linkedin_url,
+        "trackJobChanges": w.track_job_changes or False,
         "prospect_id": w.prospect_id,
         "business_id": w.business_id,
         "triggers":    w.triggers or [],
@@ -74,6 +76,9 @@ class CreateWatcherRequest(BaseModel):
     leadCompany: Optional[str] = None
     leadEmail: Optional[str] = None
     notificationSettings: Optional[Dict[str, Any]] = None
+    # Champion / job-change tracking
+    linkedinUrl: Optional[str] = None
+    trackJobChanges: Optional[bool] = False
 
 
 @router.get("/")
@@ -171,6 +176,11 @@ async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get
         notification_settings=request.get("notificationSettings") or {"email": True, "slack": False},
         match_count="0",
         recent_updates=[],
+        linkedin_url=request.get("linkedinUrl"),
+        track_job_changes=bool(request.get("trackJobChanges", False)),
+        # Seed snapshots from stored lead data so the first poll has a baseline
+        last_known_company=request.get("leadCompany"),
+        last_known_title=request.get("leadTitle"),
     )
     db.add(db_w); db.commit(); db.refresh(db_w)
     return watcher_to_dict(db_w)
@@ -576,6 +586,65 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
 
         # Trigger notifications
         recent = db_w.recent_updates or []
+        matches = db_w.matches or []
+
+        # In-app notifications
+        try:
+            from app.db.repositories.notification_repository import NotificationRepository
+            _notif_repo = NotificationRepository(db)
+            _user_id = str(db_w.user_id)
+            _watcher_name = db_w.name or "Watcher"
+            _company = getattr(db_w, "account_name", None) or getattr(db_w, "lead_company", None)
+
+            # Priority type map for known Explorium event types
+            _HIGH_PRIORITY = {"new_funding_round", "new_investment", "ipo_announcement",
+                               "merger_and_acquisitions", "acquisition", "champion_move",
+                               "interested_reply"}
+            _INDIGO_PRIORITY = {"team_expansion", "team_reduction", "product_launch",
+                                "job_change", "funding_event"}
+
+            if db_w.type == "event" and matches:
+                # Event watcher — one notification per new match batch
+                _notif_repo.create(
+                    user_id=_user_id,
+                    type="funding_event",
+                    title=f"{len(matches)} New Signal{'s' if len(matches) > 1 else ''}: {_watcher_name}",
+                    body=f"{matches[0]['company']['name']} and {len(matches)-1} other{'s' if len(matches) > 1 else ''} matched your event watcher." if len(matches) > 1 else f"{matches[0]['company']['name']} matched your event watcher.",
+                    cta_url="/watchers",
+                    priority="indigo",
+                    company=matches[0]["company"]["name"] if matches else None,
+                )
+            elif recent:
+                # Account/Lead watcher — map each update to correct notification type
+                for update in recent:
+                    ev_type = update.get("type", "")
+                    description = update.get("description", "New signal detected.")
+                    if ev_type in ("team_expansion", "team_reduction", "job_change"):
+                        notif_type, notif_title, priority = "job_change", f"Buying Committee Move at {_company or _watcher_name}", "indigo"
+                    elif ev_type in ("new_funding_round", "new_investment", "ipo_announcement"):
+                        notif_type, notif_title, priority = "funding_event", f"{_company or _watcher_name} Raised New Funding", "indigo"
+                    elif ev_type in ("merger_and_acquisitions", "acquisition"):
+                        notif_type, notif_title, priority = "funding_event", f"M&A Activity at {_company or _watcher_name}", "indigo"
+                    elif ev_type == "champion_move":
+                        notif_type, notif_title, priority = "champion_move", f"Champion Left {_company or _watcher_name}", "red"
+                    elif ev_type == "interested_reply":
+                        notif_type, notif_title, priority = "interested_reply", f"Interested Reply from {_watcher_name}", "red"
+                    else:
+                        notif_type, notif_title, priority = "hot_signal", f"Signal Detected: {_watcher_name}", "indigo"
+
+                    _notif_repo.create(
+                        user_id=_user_id,
+                        type=notif_type,
+                        title=notif_title,
+                        body=description,
+                        cta_url="/watchers",
+                        priority=priority,
+                        company=_company,
+                    )
+                    break  # one notification per sync (grouping handles repeats)
+        except Exception as _ne:
+            logger.warning("Watcher in-app notification failed (non-fatal): %s", _ne)
+
         if len(recent) > 0:
             await notify_updates(w, db_w)
 

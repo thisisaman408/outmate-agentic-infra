@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -21,8 +22,38 @@ export function ViralityEnginePanel() {
   const { toast } = useToast()
   const [seedCustomers, setSeedCustomers] = useState("Rippling, Figma, Linear")
   const [channels, setChannels] = useState("email, linkedin, in-product")
+  const [additionalNotes, setAdditionalNotes] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+
+  // ── Automation Agent injection ──
+  const agentForm = useCoPilotAgentStore((s) => s.copilotForms?.['virality_engine'])
+  const prevSubmitSignal = useRef(0)
+  useEffect(() => {
+    if (!agentForm) return
+    const { fields, submitSignal } = agentForm
+    const f = fields as Record<string, any>
+    if (f.seed_customers) setSeedCustomers(f.seed_customers as string)
+    if (f.channels) setChannels(f.channels as string)
+    if (f.additional_notes) setAdditionalNotes(f.additional_notes as string)
+    if (submitSignal > prevSubmitSignal.current && f.seed_customers) {
+      prevSubmitSignal.current = submitSignal
+      setTimeout(async () => {
+        setIsRunning(true)
+        setOutput(null)
+        try {
+          const res = await gtmAgentsApi.runViralityEngine({
+            seed_customers: f.seed_customers as string,
+            channels: f.channels as string | undefined,
+          })
+          setOutput(extractResultText(res))
+          toast({ title: 'Virality Plan Generated', description: 'Review referral hooks and multi-channel cascades.' })
+        } catch (err: any) {
+          toast({ title: 'Virality Engine Failed', description: err.message, variant: 'destructive' })
+        } finally { setIsRunning(false) }
+      }, 80)
+    }
+  }, [agentForm])
 
   const handleRun = async () => {
     if (!seedCustomers.trim()) {

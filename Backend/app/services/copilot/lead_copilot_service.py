@@ -205,14 +205,26 @@ class LeadCopilotService:
         }
 
         # Build company dict if linked
+        OWN_DOMAINS = {"outmate.ai", "outmate.com"}
         company_data = None
+
+        # Always read raw CrustData employer data first — it is the source of truth for the
+        # company name shown in the prospects table (current_employers[0].name).
+        raw = prospect.raw_data or {}
+        current_employer = (raw.get("current_employers") or [{}])[0] or {}
+        raw_company_name = current_employer.get("name") or raw.get("company_name")
+        raw_company_domain = current_employer.get("company_website_domain") or current_employer.get("company_domain")
+
         if prospect.company_id:
             company = self.db.query(Company).filter(Company.id == prospect.company_id).first()
-            if company:
+            if company and (company.domain or "").lower().strip() not in OWN_DOMAINS:
                 hq_parts = [p for p in [company.headquarters_city, company.headquarters_state, company.headquarters_country] if p]
+                # Prefer raw CrustData name over DB name — the DB company may have been
+                # created from visitor tracking with a domain string as its name.
+                resolved_name = raw_company_name or company.name
                 company_data = {
                     "id": str(company.id),
-                    "name": company.name,
+                    "name": resolved_name,
                     "domain": company.domain,
                     "industry": company.industry,
                     "employee_count": company.employee_count_exact,
@@ -222,6 +234,23 @@ class LeadCopilotService:
                     "technologies": company.technologies or [],
                     "headquarters": ", ".join(hq_parts) if hq_parts else None,
                     "employee_growth_6m_percent": company.employee_growth_6m_percent,
+                }
+
+        # Fall back to raw_data (CrustData profile) for company name if no DB record
+        if not company_data:
+            if raw_company_name:
+                company_data = {
+                    "id": None,
+                    "name": raw_company_name,
+                    "domain": raw_company_domain,
+                    "industry": current_employer.get("company_linkedin_industry"),
+                    "employee_count": current_employer.get("company_headcount_range"),
+                    "revenue_range": None,
+                    "funding_stage": None,
+                    "funding_total": None,
+                    "technologies": [],
+                    "headquarters": current_employer.get("company_hq_location"),
+                    "employee_growth_6m_percent": None,
                 }
 
         # Enrichment status
@@ -491,9 +520,12 @@ class LeadCopilotService:
         if is_company_entity:
             user_prompt_text = self._build_company_prompt(company, extra=extra)
         else:
-            user_prompt_text = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+            user_prompt_text = self._build_user_prompt(
+                prospect, company, lead_context, extra=extra,
+                context_overrides=context_overrides,
+            )
 
-        max_tokens_map = {"draft_email": 800, "research": 700, "objection_handler": 700, "custom": 700}
+        max_tokens_map = {"draft_email": 900, "research": 700, "objection_handler": 600, "custom": 600}
         temp_map = {"draft_email": 0.4, "research": 0.3, "objection_handler": 0.3, "custom": 0.4}
 
         try:
@@ -530,19 +562,23 @@ class LeadCopilotService:
         is_company = kwargs.get("is_company_entity", False)
         extra = f"USER INSTRUCTION: {prompt}" if prompt else "Write a cold outreach email."
 
+        context_overrides = kwargs.get("context_overrides")
         if is_company:
             user_prompt = self._build_company_prompt(company, extra=extra)
         else:
             lead_context = await LeadEnrichmentService.enrich(
                 name, company_name, role, domain, include_company_data=False,
             )
-            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+            user_prompt = self._build_user_prompt(
+                prospect, company, lead_context, extra=extra,
+                context_overrides=context_overrides,
+            )
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=ANNOTATED_EMAIL_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=700,
+            max_tokens=900,
         )
         return result
 
@@ -569,11 +605,14 @@ class LeadCopilotService:
             return MOCK_RESEARCH
 
         is_company = kwargs.get("is_company_entity", False)
+        context_overrides = kwargs.get("context_overrides")
         if is_company:
             user_prompt = self._build_company_prompt(company)
         else:
             lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
-            user_prompt = self._build_user_prompt(prospect, company, lead_context)
+            user_prompt = self._build_user_prompt(
+                prospect, company, lead_context, context_overrides=context_overrides,
+            )
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=LEAD_RESEARCH_SYSTEM_PROMPT,
@@ -730,6 +769,7 @@ class LeadCopilotService:
             return MOCK_OBJECTION
 
         is_company = kwargs.get("is_company_entity", False)
+        context_overrides = kwargs.get("context_overrides")
         objection_text = prompt or "Not interested right now"
         extra = f"OBJECTION FROM PROSPECT: <user_command>{objection_text}</user_command>"
 
@@ -739,7 +779,9 @@ class LeadCopilotService:
             lead_context = await LeadEnrichmentService.enrich(
                 name, company_name, role, domain, include_company_data=False,
             )
-            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+            user_prompt = self._build_user_prompt(
+                prospect, company, lead_context, extra=extra, context_overrides=context_overrides,
+            )
 
         try:
             result = await self.openrouter.chat_completion_structured(
@@ -778,13 +820,16 @@ class LeadCopilotService:
             raise ValueError("Custom action requires a prompt")
 
         is_company = kwargs.get("is_company_entity", False)
+        context_overrides = kwargs.get("context_overrides")
         extra = f"USER COMMAND: <user_command>{prompt}</user_command>"
 
         if is_company:
             user_prompt = self._build_company_prompt(company, extra=extra)
         else:
             lead_context = await LeadEnrichmentService.enrich(name, company_name, role, domain)
-            user_prompt = self._build_user_prompt(prospect, company, lead_context, extra=extra)
+            user_prompt = self._build_user_prompt(
+                prospect, company, lead_context, extra=extra, context_overrides=context_overrides,
+            )
 
         result = await self.openrouter.chat_completion_structured(
             system_prompt=LEAD_CUSTOM_COMMAND_SYSTEM_PROMPT,
@@ -1089,8 +1134,21 @@ class LeadCopilotService:
 
     # ── Helpers ────────────────────────────────────────────────
 
-    def _build_user_prompt(self, prospect: dict, company: dict, lead_context: Optional[LeadContext] = None, extra: Optional[str] = None) -> str:
-        """Build a structured user prompt with prospect + company + enrichment data."""
+    def _build_user_prompt(
+        self,
+        prospect: dict,
+        company: dict,
+        lead_context: Optional[LeadContext] = None,
+        extra: Optional[str] = None,
+        context_overrides: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Build a structured user prompt with prospect + company + enrichment data.
+
+        When called from the Orchestrator, context_overrides may contain:
+          - "unified_context": pre-assembled UnifiedContext.to_prompt_sections() text
+          - "prior_step_outputs": formatted outputs from dependent steps
+        These are appended *after* the standard profile so they enrich without replacing.
+        """
         sections = []
 
         sections.append(f"=== PROSPECT PROFILE ===\n"
@@ -1115,10 +1173,21 @@ class LeadCopilotService:
                             f"Growth: {company.get('employee_growth_6m_percent', 'N/A')}% (6mo)\n"
                             f"=== END COMPANY ===")
 
+        # Standard per-action enrichment (lower priority than unified_context)
         if lead_context:
             enrichment = lead_context.to_prompt_context()
             if enrichment:
                 sections.append(enrichment)
+
+        # Orchestrator-injected unified context (overrides / supplements per-action enrichment)
+        overrides = context_overrides or {}
+        unified_ctx = overrides.get("unified_context")
+        if unified_ctx:
+            sections.append(f"=== UNIFIED CONTEXT (from ContextEngine) ===\n{unified_ctx}")
+
+        prior_outputs = overrides.get("prior_step_outputs")
+        if prior_outputs:
+            sections.append(f"=== PRIOR STEP OUTPUTS ===\n{prior_outputs}")
 
         if extra:
             sections.append(extra)

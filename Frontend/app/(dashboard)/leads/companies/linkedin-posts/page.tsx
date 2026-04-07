@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -81,6 +82,60 @@ export default function LinkedInPostsPage() {
   const [postTypes, setPostTypes] = useState("repost, original")
   const [maxReactors, setMaxReactors] = useState("100")
   const [maxComments, setMaxComments] = useState("100")
+
+  // ── Copilot automation agent bridge ──────────────────────────────────
+  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['company_social_posts'])
+  const lastCopilotKeyRef = useRef('')
+
+  const handleCopilotPostSearch = async (cf: Record<string, unknown>) => {
+    setLoading(true)
+    setError(null)
+    setPosts([])
+
+    try {
+      const params = new URLSearchParams()
+      if (cf.domain) params.append('company_domain', String(cf.domain))
+      if (cf.company_name) params.append('company_name', String(cf.company_name))
+      if (cf.company_id) params.append('company_id', String(cf.company_id))
+      if (cf.profile_url) params.append('company_linkedin_url', String(cf.profile_url))
+      if (cf.post_url) params.append('linkedin_post_url', String(cf.post_url))
+      if (cf.fields) params.append('fields', String(cf.fields))
+      params.append('page', String(cf.page || '1'))
+      params.append('limit', String(cf.limit || '5'))
+      params.append('post_types', String(cf.post_types || 'repost, original'))
+
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${API}/api/v1/crustdata/linkedin_posts?${params.toString()}`)
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const data = await response.json()
+      setPosts(data.posts || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
+    const key = JSON.stringify(copilotFilters)
+    if (key === lastCopilotKeyRef.current) return
+    lastCopilotKeyRef.current = key
+
+    if (copilotFilters.domain) setDomain(String(copilotFilters.domain))
+    if (copilotFilters.company_name) setCompanyName(String(copilotFilters.company_name))
+    if (copilotFilters.company_id) setCompanyId(String(copilotFilters.company_id))
+    if (copilotFilters.profile_url) setLinkedinUrl(String(copilotFilters.profile_url))
+    if (copilotFilters.post_url) setPostUrl(String(copilotFilters.post_url))
+    if (copilotFilters.fields) setFields(String(copilotFilters.fields))
+    if (copilotFilters.page) setPage(String(copilotFilters.page))
+    if (copilotFilters.limit) setLimit(String(copilotFilters.limit))
+    if (copilotFilters.post_types) setPostTypes(String(copilotFilters.post_types))
+
+    handleCopilotPostSearch(copilotFilters as Record<string, unknown>)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotFilters])
+  // ─────────────────────────────────────────────────────────────────────
 
   const handleSearch = async () => {
     setLoading(true)

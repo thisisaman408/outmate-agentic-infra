@@ -3,11 +3,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useRouter } from "next/navigation"
-import { Workflow, Play, Pause, Settings, Clock, Zap, Database, Bot, Send, Plus, MoreVertical } from "lucide-react"
+import { Workflow, Play, Pause, Settings, Clock, Zap, Database, Bot, Send, Plus, MoreVertical, Sparkles, ChevronDown, ChevronUp } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
+import { useState } from "react"
 
 export default function WorkflowsPage() {
   const router = useRouter()
+  const [showCopilotResults, setShowCopilotResults] = useState(true)
+  const copilotResult = useCoPilotAgentStore(s =>
+    [...s.executionResults].reverse().find(r => r.module === 'workflows' && r.status === 'success')
+  )
   const workflows = [
     {
       id: 1,
@@ -43,6 +49,26 @@ export default function WorkflowsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Copilot automation agent results banner */}
+      {copilotResult && (copilotResult.resultCount ?? 0) > 0 && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium text-primary">
+                Automation Agent found {copilotResult.resultCount} workflow{copilotResult.resultCount !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowCopilotResults(v => !v)} className="h-7 w-7 p-0">
+              {showCopilotResults ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          </div>
+          {showCopilotResults && copilotResult.error && (
+            <p className="mt-2 text-sm text-destructive">{copilotResult.error}</p>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Workflows</h1>

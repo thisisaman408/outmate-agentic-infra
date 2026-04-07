@@ -153,9 +153,9 @@ async def _process_signal_events():
                     signal_type=signal_type,
                 )
 
-                # TODO: Route to Co-Pilot queue
-                # This requires knowing which user owns this signal
-                logger.debug(f"Signal ready for Co-Pilot: {signal_event.id}")
+                # Signal-to-Sequence: check ICP score against each watching user's threshold
+                # and dispatch sequence generation for those who qualify.
+                await _maybe_dispatch_sequences(db, signal_event)
 
                 # Acknowledge signal in stream
                 await event_bus.acknowledge_signal(stream_id)
@@ -246,3 +246,106 @@ def ingest_signal_task(
         return None
     finally:
         db.close()
+
+
+# ─────────────────────────────────────────────────────────────
+# Signal-to-Sequence: threshold check helper
+# ─────────────────────────────────────────────────────────────
+
+# Heuristic scores used when icp_score is NULL (mirrors sequence_tasks.py)
+_SIGNAL_HEURISTIC_SCORES = {
+    "funding": 85,
+    "hiring": 75,
+    "g2_intent": 90,
+    "website_visit": 70,
+    "email_open": 80,
+    "job_change": 65,
+    "linkedin_activity": 60,
+}
+_DEFAULT_HEURISTIC = 65
+
+
+async def _maybe_dispatch_sequences(db, signal_event) -> None:
+    """
+    Find all users who have an account-type watcher matching signal_event.company_domain
+    (or company_name), check each user's signal_score_threshold preference, and dispatch
+    generate_signal_sequence for those whose threshold is met.
+
+    Does NOT raise — failures are logged and swallowed so the main pipeline continues.
+    """
+    try:
+        from app.db.models.watcher import Watcher
+        from app.db.models.copilot_preferences import CopilotUserPreferences
+
+        company_domain = (signal_event.company_domain or "").lower().strip()
+        company_name   = (signal_event.company_name or "").lower().strip()
+
+        if not company_domain and not company_name:
+            return  # nothing to match against
+
+        # Effective ICP score for this signal
+        effective_score = signal_event.icp_score
+        if effective_score is None:
+            effective_score = _SIGNAL_HEURISTIC_SCORES.get(
+                signal_event.signal_type, _DEFAULT_HEURISTIC
+            )
+
+        # Find active account watchers that match this domain or company name
+        watchers_q = db.query(Watcher).filter(Watcher.status == "active")
+        matching_watchers = [
+            w for w in watchers_q
+            if (
+                (company_domain and w.account_domain and
+                 company_domain in w.account_domain.lower())
+                or
+                (company_name and w.account_name and
+                 company_name in w.account_name.lower())
+            )
+        ]
+
+        if not matching_watchers:
+            logger.debug(
+                "No account watchers match signal=%s domain=%s — skipping sequence dispatch",
+                signal_event.id, company_domain,
+            )
+            return
+
+        dispatched_users: set[str] = set()
+        signal_id_str = str(signal_event.id)
+
+        for watcher in matching_watchers:
+            user_id_str = str(watcher.user_id)
+            if user_id_str in dispatched_users:
+                continue  # already dispatched for this user
+
+            # Look up user's threshold preference (default 70)
+            prefs = (
+                db.query(CopilotUserPreferences)
+                .filter(CopilotUserPreferences.user_id == watcher.user_id)
+                .first()
+            )
+            threshold = getattr(prefs, "signal_score_threshold", 70) if prefs else 70
+
+            if effective_score < threshold:
+                logger.debug(
+                    "Signal score %d < threshold %d for user=%s signal=%s — skipping",
+                    effective_score, threshold, user_id_str, signal_id_str,
+                )
+                continue
+
+            # Dispatch the sequence generation task
+            from app.tasks.sequence_tasks import generate_signal_sequence
+            generate_signal_sequence.delay(
+                signal_id=signal_id_str,
+                user_id=user_id_str,
+            )
+            dispatched_users.add(user_id_str)
+            logger.info(
+                "Dispatched generate_signal_sequence: signal=%s user=%s score=%d threshold=%d",
+                signal_id_str, user_id_str, effective_score, threshold,
+            )
+
+    except Exception as exc:
+        logger.warning(
+            "_maybe_dispatch_sequences failed (non-fatal): %s", exc, exc_info=True
+        )
