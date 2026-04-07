@@ -534,8 +534,8 @@ function ProspectsPageContent() {
                 seniority_level: seniorityData?.values || undefined,
                 seniority_level_operator: (seniorityData?.operator || filterOperators.seniority_level || 'in') as 'in' | 'not_in',
                 // New Filters
-                first_name: filters.first_name || undefined,
-                last_name: filters.last_name || undefined,
+                first_name: filters.first_name?.trim() || undefined,
+                last_name: filters.last_name?.trim() || undefined,
                 profile_languages: filters.profile_languages || undefined,
                 company: filters.company || undefined,
                 employees: filters.employees || undefined,

@@ -48,10 +48,12 @@ def watcher_to_dict(w: WatcherModel) -> Dict[str, Any]:
         "accountName":   w.account_name,
         "accountDomain": w.account_domain,
         # Lead
-        "leadName":    w.lead_name,
-        "leadTitle":   w.lead_title,
-        "leadCompany": w.lead_company,
-        "leadEmail":   w.lead_email,
+        "leadName":       w.lead_name,
+        "leadTitle":      w.lead_title,
+        "leadCompany":    w.lead_company,
+        "leadEmail":      w.lead_email,
+        "linkedinUrl":    w.linkedin_url,
+        "trackJobChanges": w.track_job_changes or False,
         "prospect_id": w.prospect_id,
         "business_id": w.business_id,
         "triggers":    w.triggers or [],
@@ -74,6 +76,9 @@ class CreateWatcherRequest(BaseModel):
     leadCompany: Optional[str] = None
     leadEmail: Optional[str] = None
     notificationSettings: Optional[Dict[str, Any]] = None
+    # Champion / job-change tracking
+    linkedinUrl: Optional[str] = None
+    trackJobChanges: Optional[bool] = False
 
 
 @router.get("/")
@@ -171,6 +176,11 @@ async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get
         notification_settings=request.get("notificationSettings") or {"email": True, "slack": False},
         match_count="0",
         recent_updates=[],
+        linkedin_url=request.get("linkedinUrl"),
+        track_job_changes=bool(request.get("trackJobChanges", False)),
+        # Seed snapshots from stored lead data so the first poll has a baseline
+        last_known_company=request.get("leadCompany"),
+        last_known_title=request.get("leadTitle"),
     )
     db.add(db_w); db.commit(); db.refresh(db_w)
     return watcher_to_dict(db_w)

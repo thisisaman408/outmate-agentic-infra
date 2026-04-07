@@ -12,7 +12,7 @@ import {
   Sparkles, Send, RotateCcw, Navigation, Filter, Search,
   CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp,
   ArrowRight, Bot, User, Zap, Undo2, ListChecks,
-  Circle, Square,
+  Circle, Square, Copy,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -264,9 +264,74 @@ function ToolCallPill({ call }: { call: ToolCall }) {
   )
 }
 
+// ── Parse inline suggestions from Claude's response ───────────────────
+
+function parseSuggestions(content: string): { clean: string; suggestions: string[] } {
+  const match = content.match(/```suggestions\n([\s\S]*?)```/)
+  if (!match) return { clean: content, suggestions: [] }
+  const suggestions = match[1]
+    .trim()
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('<'))
+  const clean = content.replace(/```suggestions\n[\s\S]*?```/, '').trim()
+  return { clean, suggestions }
+}
+
+// ── Suggestion chip (clickable + copyable) ─────────────────────────────
+
+function SuggestionChip({
+  text,
+  onSend,
+}: {
+  text: string
+  onSend: (t: string) => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="group flex items-stretch rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50/80 dark:bg-violet-950/20 overflow-hidden hover:border-violet-400 dark:hover:border-violet-600 transition-colors">
+      <button
+        onClick={() => onSend(text)}
+        className="flex-1 flex items-center gap-1.5 px-2.5 py-2 text-left min-h-[34px]"
+      >
+        <ArrowRight className="w-3 h-3 shrink-0 text-violet-500 dark:text-violet-400" />
+        <span className="text-[11px] text-violet-700 dark:text-violet-300 font-medium leading-snug">
+          {text}
+        </span>
+      </button>
+      <button
+        onClick={handleCopy}
+        title="Copy prompt"
+        className="px-2.5 flex items-center border-l border-violet-200 dark:border-violet-800/50 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+      >
+        {copied ? (
+          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+        ) : (
+          <Copy className="w-3 h-3" />
+        )}
+      </button>
+    </div>
+  )
+}
+
 // ── Message bubble ─────────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  onSuggest,
+}: {
+  message: Message
+  onSuggest?: (text: string) => void
+}) {
   const isUser = message.role === 'user'
 
   return (
@@ -293,34 +358,52 @@ function MessageBubble({ message }: { message: Message }) {
 
       <div className={`flex flex-col gap-2 max-w-[88%] sm:max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
         {/* Content bubble */}
-        <div
-          className={`rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed ${
-            isUser
-              ? 'bg-primary text-primary-foreground rounded-tr-sm'
-              : 'bg-muted/60 text-foreground rounded-tl-sm'
-          }`}
-        >
-          {isUser ? (
-            message.content
-          ) : (
-            <ReactMarkdown
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
-                li: ({ children }) => <li className="text-sm">{children}</li>,
-                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                code: ({ children }) => (
-                  <code className="bg-black/10 dark:bg-white/10 px-1 py-0.5 rounded text-xs font-mono">
-                    {children}
-                  </code>
-                ),
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          )}
-        </div>
+        {(() => {
+          const { clean, suggestions } = isUser
+            ? { clean: message.content, suggestions: [] as string[] }
+            : parseSuggestions(message.content)
+          return (
+            <>
+              <div
+                className={`rounded-2xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed ${
+                  isUser
+                    ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                    : 'bg-muted/60 text-foreground rounded-tl-sm'
+                }`}
+              >
+                {isUser ? (
+                  clean
+                ) : (
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+                      li: ({ children }) => <li className="text-sm">{children}</li>,
+                      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                      code: ({ children }) => (
+                        <code className="bg-black/10 dark:bg-white/10 px-1 py-0.5 rounded text-xs font-mono">
+                          {children}
+                        </code>
+                      ),
+                    }}
+                  >
+                    {clean}
+                  </ReactMarkdown>
+                )}
+              </div>
+
+              {/* Inline suggestion chips */}
+              {!isUser && suggestions.length > 0 && onSuggest && (
+                <div className="flex flex-col gap-1 w-full">
+                  {suggestions.map((s, i) => (
+                    <SuggestionChip key={i} text={s} onSend={onSuggest} />
+                  ))}
+                </div>
+              )}
+            </>
+          )
+        })()}
 
         {/* Tool call pills */}
         {message.toolCalls && message.toolCalls.length > 0 && (
@@ -540,7 +623,7 @@ export function AutomationPanel() {
             className="h-full overflow-y-auto px-3 sm:px-4 py-4 space-y-4 sm:space-y-5"
           >
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble key={msg.id} message={msg} onSuggest={sendMessage} />
             ))}
             <AnimatePresence>
               {isLoading && <TypingIndicator />}

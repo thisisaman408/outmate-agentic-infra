@@ -136,6 +136,14 @@ export class ToolHandlers {
           result = await this.toolGetWatcherResults(input)
           break
 
+        case 'get_signal_drafts':
+          result = await this.toolGetSignalDrafts(input)
+          break
+
+        case 'get_champion_alerts':
+          result = await this.toolGetChampionAlerts(input)
+          break
+
         case 'fill_copilot_form':
           result = await this.toolFillCopilotForm(input)
           break
@@ -1255,6 +1263,116 @@ export class ToolHandlers {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to get watcher results'
+      return { status: 'error', message: msg }
+    }
+  }
+
+  /**
+   * TOOL: get_signal_drafts
+   * Fetches pending Signal-to-Sequence outreach drafts for the user.
+   */
+  private async toolGetSignalDrafts(input: ToolInput): Promise<ToolResult> {
+    const { status = 'shown', limit = 10 } = input as { status?: string; limit?: number }
+
+    try {
+      const res = await fetch(`/api/copilot/signal-drafts?status=${status}&limit=${limit}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const drafts = await res.json() as Array<{
+        id: string
+        company_name: string | null
+        signal_type: string
+        lead_name: string | null
+        lead_role: string | null
+        draft_email_subject: string | null
+        signal_score: number | null
+        status: string
+        created_at: string
+      }>
+
+      if (!drafts.length) {
+        return {
+          status: 'success',
+          message: 'No pending signal drafts at the moment.',
+          data: { drafts: [] },
+        }
+      }
+
+      const summary = drafts.map((d) =>
+        `• ${d.company_name ?? 'Unknown'} — ${d.signal_type.replace(/_/g, ' ')} signal` +
+        (d.lead_name ? ` · Contact: ${d.lead_name}${d.lead_role ? `, ${d.lead_role}` : ''}` : '') +
+        (d.draft_email_subject ? ` · Subject: "${d.draft_email_subject}"` : '') +
+        (d.signal_score !== null ? ` · Score: ${d.signal_score}` : '')
+      ).join('\n')
+
+      return {
+        status: 'success',
+        message: `Found ${drafts.length} signal draft${drafts.length !== 1 ? 's' : ''}:\n${summary}\n\nNavigate to /copilot?tab=signal-drafts to review, edit, or add them to a campaign.`,
+        data: { drafts },
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch signal drafts'
+      return { status: 'error', message: msg }
+    }
+  }
+
+  /**
+   * TOOL: get_champion_alerts
+   * Fetches job-change alerts for contacts being tracked.
+   */
+  private async toolGetChampionAlerts(input: ToolInput): Promise<ToolResult> {
+    const { unread_only = false, limit = 20 } = input as { unread_only?: boolean; limit?: number }
+
+    try {
+      const params = new URLSearchParams({ unread_only: String(unread_only), limit: String(limit) })
+      const res = await fetch(`/api/copilot/champion-alerts?${params}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const alerts = await res.json() as Array<{
+        id: string
+        contact_name: string | null
+        prev_company: string | null
+        new_company: string | null
+        prev_title: string | null
+        new_title: string | null
+        change_type: string
+        status: string
+        is_read: boolean
+        detected_at: string
+        suggested_action: string
+      }>
+
+      if (!alerts.length) {
+        return {
+          status: 'success',
+          message: 'No champion alerts at the moment. Enable "Track job changes" on a lead watcher to start detecting job moves.',
+          data: { alerts: [] },
+        }
+      }
+
+      const changeLabels: Record<string, string> = {
+        left_account:   'left account',
+        joined_account: 'joined account',
+        promoted:       'promoted',
+      }
+
+      const summary = alerts.map((a) => {
+        const label = changeLabels[a.change_type] ?? a.change_type
+        return (
+          `• ${a.contact_name ?? 'Unknown'} — ${label}` +
+          (a.prev_company ? ` · ${a.prev_company}` : '') +
+          ' → ' +
+          (a.new_company ?? '?') +
+          (a.new_title ? ` (${a.new_title})` : '') +
+          ` · ${a.suggested_action}`
+        )
+      }).join('\n')
+
+      return {
+        status: 'success',
+        message: `Found ${alerts.length} champion alert${alerts.length !== 1 ? 's' : ''}:\n${summary}\n\nNavigate to /copilot?tab=champion-alerts to review drafts and take action.`,
+        data: { alerts },
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch champion alerts'
       return { status: 'error', message: msg }
     }
   }

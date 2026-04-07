@@ -153,6 +153,9 @@ class CampaignOptimizerService:
         lead_company: str | None = None,
         lead_role: str | None = None,
         lead_domain: str | None = None,
+        # Signal-to-Sequence: injects triggering event into the LLM prompt
+        # e.g. "This prospect's company just raised a Series B"
+        trigger_context: str | None = None,
     ) -> dict:
         from app.db.models.copilot_campaign_analysis import CopilotCampaignAnalysis
 
@@ -179,10 +182,12 @@ class CampaignOptimizerService:
                 analysis = await self._analyze_with_enrichment(
                     subject_line, email_body, target_audience, metrics,
                     lead_name, lead_company, lead_role, lead_domain,
+                    trigger_context=trigger_context,
                 )
             else:
                 analysis = await self._analyze_score_only(
                     subject_line, email_body, target_audience, metrics,
+                    trigger_context=trigger_context,
                 )
 
         record = CopilotCampaignAnalysis(
@@ -208,6 +213,7 @@ class CampaignOptimizerService:
         email_body: str,
         target_audience: str | None,
         metrics: dict | None,
+        trigger_context: str | None = None,
     ) -> dict:
         news_block = ""
         if target_audience:
@@ -229,6 +235,11 @@ class CampaignOptimizerService:
             f"Target audience: {target_audience or 'B2B sales prospects'}"
             f"{metrics_text}\n\n"
         )
+        if trigger_context:
+            user_prompt += (
+                f"SIGNAL CONTEXT (use this as the outreach hook — weave it into the subject and opener):\n"
+                f"{trigger_context}\n\n"
+            )
         if news_block:
             user_prompt += (
                 "Below is REAL industry news about the target audience. "
@@ -258,6 +269,7 @@ class CampaignOptimizerService:
         lead_company: str,
         lead_role: str | None,
         lead_domain: str | None,
+        trigger_context: str | None = None,
     ) -> dict:
         # Run lead enrichment pipeline
         try:
@@ -271,6 +283,7 @@ class CampaignOptimizerService:
             logger.warning("Lead enrichment failed, falling back to score-only: %s", exc)
             return await self._analyze_score_only(
                 subject_line, email_body, target_audience, metrics,
+                trigger_context=trigger_context,
             )
 
         enrichment_block = lead_ctx.to_prompt_context()
@@ -290,6 +303,12 @@ class CampaignOptimizerService:
             f"Company: {lead_company}\n"
             f"Role: {lead_role or 'Unknown'}\n\n"
         )
+
+        if trigger_context:
+            user_prompt += (
+                f"SIGNAL CONTEXT (this is the triggering event — make it the central hook of the opening line):\n"
+                f"{trigger_context}\n\n"
+            )
 
         if enrichment_block:
             user_prompt += (

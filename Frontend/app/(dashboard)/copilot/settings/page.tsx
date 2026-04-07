@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { Loader2, Settings, Calendar, CheckCircle2 } from "lucide-react"
+import { Loader2, Settings, Calendar, CheckCircle2, Zap } from "lucide-react"
+import { Slider } from "@/components/ui/slider"
 import { useCopilotPreferences } from "@/hooks/use-copilot"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
@@ -53,7 +54,7 @@ export default function CopilotSettingsPage() {
     savePreferences({ ...preferences, [key]: value })
   }
 
-  const handleFieldChange = (key: string, value: string) => {
+  const handleFieldChange = (key: string, value: string | number) => {
     if (!preferences) return
     savePreferences({ ...preferences, [key]: value })
   }
@@ -212,6 +213,45 @@ export default function CopilotSettingsPage() {
                 </Button>
               ))}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Signal-to-Sequence */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            Signal-to-Sequence
+          </CardTitle>
+          <CardDescription>
+            Auto-generate personalised outreach when a watched account's ICP score crosses this threshold
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>ICP Score Threshold</Label>
+              <span className="text-sm font-semibold tabular-nums">
+                {preferences?.signal_score_threshold ?? 70}
+              </span>
+            </div>
+            <Slider
+              min={50}
+              max={95}
+              step={5}
+              value={[preferences?.signal_score_threshold ?? 70]}
+              onValueChange={([v]) => handleFieldChange("signal_score_threshold", v)}
+              disabled={isSaving}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>50 — more drafts</span>
+              <span>95 — fewer, higher quality</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Signals below this score are ignored. Default is 70. Max 3 drafts per day.
+            </p>
           </div>
         </CardContent>
       </Card>

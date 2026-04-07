@@ -762,7 +762,7 @@ function AssistantMessage({ msg, onFollowUpAction, isLoading }: { msg: CopilotMe
       </div>
 
       {/* Result card */}
-      <div className="rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 space-y-2 w-full max-w-full overflow-x-hidden break-words">
+      <div className="rounded-xl border border-border/40 bg-muted/30 px-4 py-3 space-y-2 w-full max-w-full overflow-x-hidden break-words">
         {msg.result && (
           <div className="w-full max-w-full overflow-hidden">
             <ActionResult actionType={msg.action_type} result={msg.result} />
@@ -812,20 +812,24 @@ function AssistantMessage({ msg, onFollowUpAction, isLoading }: { msg: CopilotMe
 
 function LeadMarkdown({ content }: { content: string }) {
   return (
-    <div className="text-[12.5px] leading-snug text-foreground/80">
+    <div className="text-[13px] leading-relaxed text-foreground/85 space-y-0.5">
       <ReactMarkdown
         components={{
-          p: ({ children }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
+          p: ({ children }) => <p className="mb-2.5 last:mb-0 break-words">{children}</p>,
           strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          ul: ({ children }) => <ul className="mb-2 ml-3 list-disc space-y-0.5 last:mb-0">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-2 ml-3 list-decimal space-y-0.5 last:mb-0">{children}</ol>,
-          li: ({ children }) => <li className="text-[12px] leading-snug">{children}</li>,
-          h1: ({ children }) => <h3 className="mb-1.5 mt-3 text-[12.5px] font-bold text-foreground tracking-tight first:mt-0">{children}</h3>,
-          h2: ({ children }) => <h3 className="mb-1 mt-2.5 text-xs font-bold text-foreground tracking-tight first:mt-0">{children}</h3>,
-          h3: ({ children }) => <h4 className="mb-1 mt-2 text-[10.5px] font-semibold text-foreground/80 uppercase tracking-widest first:mt-0">{children}</h4>,
+          em: ({ children }) => <em className="italic text-foreground/75">{children}</em>,
+          ul: ({ children }) => <ul className="mb-2.5 ml-4 list-disc space-y-1 last:mb-0">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-2.5 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>,
+          li: ({ children }) => <li className="text-[13px] leading-relaxed">{children}</li>,
+          h1: ({ children }) => <h3 className="mb-2 mt-4 text-[14px] font-bold text-foreground tracking-tight first:mt-0">{children}</h3>,
+          h2: ({ children }) => <h4 className="mb-1.5 mt-3 text-[13px] font-bold text-foreground tracking-tight first:mt-0">{children}</h4>,
+          h3: ({ children }) => <h5 className="mb-1 mt-2.5 text-[12px] font-semibold text-foreground/80 uppercase tracking-wide first:mt-0">{children}</h5>,
+          h4: ({ children }) => <h6 className="mb-1 mt-2 text-[11.5px] font-semibold text-muted-foreground uppercase tracking-wide first:mt-0">{children}</h6>,
           code: ({ children }) => (
-            <code className="rounded bg-muted px-1 py-0.5 text-[10.5px] font-mono">{children}</code>
+            <code className="rounded bg-muted px-1.5 py-0.5 text-[11.5px] font-mono text-foreground/80">{children}</code>
+          ),
+          pre: ({ children }) => (
+            <pre className="rounded-lg bg-muted/60 border border-border/40 p-3 my-2 text-[11.5px] font-mono overflow-x-auto">{children}</pre>
           ),
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors">
@@ -833,8 +837,9 @@ function LeadMarkdown({ content }: { content: string }) {
             </a>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-primary/30 pl-3 my-2 text-foreground/60 italic">{children}</blockquote>
+            <blockquote className="border-l-2 border-primary/40 pl-3 my-2.5 text-foreground/65 italic">{children}</blockquote>
           ),
+          hr: () => <hr className="my-3 border-border/40" />,
         }}
       >
         {content}
@@ -861,15 +866,15 @@ function ActionResult({ actionType, result }: { actionType?: string; result: Rec
   if (actionType === "find_similar" && result.similar_companies) return <FindSimilarResult result={result} />
   if (actionType === "custom" && result.response) {
     return (
-      <div className="space-y-2 w-full max-w-full overflow-hidden">
+      <div className="space-y-2.5 w-full max-w-full overflow-hidden">
         <LeadMarkdown content={result.response} />
         {result.action_items?.length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Action Items</p>
             {result.action_items.map((item: string, i: number) => (
               <div key={i} className="flex gap-2 items-start">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0 mt-1.5" />
-                <p className="text-xs text-foreground/80 leading-snug break-words">{item}</p>
+                <div className="w-1 h-1 rounded-full bg-primary/40 shrink-0 mt-[7px]" />
+                <div className="flex-1 min-w-0"><LeadMarkdown content={item} /></div>
               </div>
             ))}
           </div>
@@ -1036,7 +1041,7 @@ function BattleSectionPanel({ section, points, defaultOpen }: { section: typeof 
           {points.map((pt, i) => (
             <div key={i} className="flex gap-2 items-start">
               <div className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0 mt-[7px]" />
-              <p className="text-[12px] text-foreground/75 leading-snug line-clamp-2">{pt}</p>
+              <div className="flex-1 min-w-0"><LeadMarkdown content={pt} /></div>
             </div>
           ))}
         </div>
@@ -1079,25 +1084,10 @@ function BattleCard({ result }: { result: Record<string, any> }) {
 // ── GTM Action Result (compliance, virality, regime_shift, talent_radar) ──
 
 function GTMActionResult({ result }: { result: Record<string, any> }) {
-  const [expanded, setExpanded] = useState(false)
   const content = result.result || result.battle_card || result.response || ""
-
-  // Preview: first ~400 chars for collapsed view
-  const previewEnd = content.indexOf("\n", 350)
-  const preview = previewEnd > 0 && previewEnd < 500 ? content.slice(0, previewEnd) : content.slice(0, 400)
-  const hasMore = content.length > preview.length
-
   return (
-    <div className="space-y-2 w-full max-w-full overflow-hidden">
-      <LeadMarkdown content={expanded ? content : (hasMore ? preview + "\n\n…" : content)} />
-      {hasMore && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline underline-offset-2 transition-colors"
-        >
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      )}
+    <div className="w-full max-w-full overflow-hidden">
+      <LeadMarkdown content={content} />
     </div>
   )
 }
@@ -1216,8 +1206,8 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Talking Points</p>
           {shown.map((p: string, i: number) => (
             <div key={i} className="flex gap-2 items-start">
-              <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
-              <p className="text-xs text-foreground/80 leading-snug">{p}</p>
+              <div className="w-1 h-1 rounded-full bg-primary/40 shrink-0 mt-[7px]" />
+              <div className="flex-1 min-w-0"><LeadMarkdown content={p} /></div>
             </div>
           ))}
           {!expanded && hiddenCount > 0 && (
@@ -1229,26 +1219,26 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
           {expanded && (
             <>
               {result.engagement_opportunities?.length > 0 && (
-                <div className="pt-1 space-y-1">
+                <div className="pt-1.5 space-y-1.5">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Engagement Opportunities</p>
                   {result.engagement_opportunities.map((o: any, i: number) => (
                     <div key={i} className="flex gap-2 items-start">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
-                      <p className="text-xs text-foreground/80 leading-snug">
-                        <span className="font-medium">{o.type}:</span> {o.detail}
+                      <div className="w-1 h-1 rounded-full bg-primary/40 shrink-0 mt-[7px]" />
+                      <div className="flex-1 min-w-0">
+                        <LeadMarkdown content={`**${o.type}:** ${o.detail}`} />
                         {o.source_url && (
                           <a href={o.source_url} target="_blank" rel="noopener noreferrer"
-                            className="ml-1 text-blue-500 hover:underline">[source]</a>
+                            className="text-[11px] text-primary hover:underline">[source]</a>
                         )}
-                      </p>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
               {result.recommended_approach && (
-                <div className="pt-1">
+                <div className="pt-1.5">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Recommended Approach</p>
-                  <div className="mt-0.5"><LeadMarkdown content={result.recommended_approach} /></div>
+                  <div className="mt-1"><LeadMarkdown content={result.recommended_approach} /></div>
                 </div>
               )}
               <button onClick={() => setExpanded(false)}
@@ -1267,19 +1257,26 @@ function ResearchResult({ result }: { result: Record<string, any> }) {
 
 function ObjectionResult({ result }: { result: Record<string, any> }) {
   return (
-    <div className="space-y-2 w-full max-w-full overflow-hidden">
-      <div className="text-xs text-muted-foreground italic"><LeadMarkdown content={result.objection_analysis} /></div>
+    <div className="space-y-2.5 w-full max-w-full overflow-hidden">
+      {result.objection_analysis && (
+        <div className="italic text-foreground/70"><LeadMarkdown content={result.objection_analysis} /></div>
+      )}
       {result.rebuttals?.map((r: any, i: number) => (
-        <div key={i} className={`p-2.5 rounded-lg border text-xs w-full overflow-hidden transition-colors ${i === result.recommended_rebuttal ? "border-primary/30 bg-primary/[0.04]" : "border-border/40 bg-muted/10"}`}>
-          <Badge variant="outline" className="text-[9px] mb-1.5 font-semibold border-border/50">{r.approach}</Badge>
-          <p className="text-sm break-words whitespace-pre-wrap">{r.response}</p>
-          <p className="text-[10px] text-muted-foreground mt-1 break-words whitespace-pre-wrap">{r.reasoning}</p>
+        <div key={i} className={`p-3 rounded-xl border w-full overflow-hidden transition-colors ${i === result.recommended_rebuttal ? "border-primary/30 bg-primary/[0.04]" : "border-border/40 bg-muted/10"}`}>
+          <Badge variant="outline" className="text-[9px] mb-2 font-semibold border-border/50">{r.approach}</Badge>
+          <LeadMarkdown content={r.response} />
+          {r.reasoning && (
+            <div className="mt-1.5 text-muted-foreground/70 border-t border-border/30 pt-1.5">
+              <LeadMarkdown content={r.reasoning} />
+            </div>
+          )}
         </div>
       ))}
       {result.follow_up_question && (
-        <p className="text-xs break-words whitespace-pre-wrap">
-          <span className="font-medium">Follow up:</span> {result.follow_up_question}
-        </p>
+        <div className="text-foreground/80">
+          <span className="font-semibold text-[12px]">Follow up: </span>
+          <LeadMarkdown content={result.follow_up_question} />
+        </div>
       )}
     </div>
   )
@@ -1323,23 +1320,23 @@ function MeetingPrepResult({ result }: { result: Record<string, any> }) {
         </p>
       )}
       {result.talking_points?.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Talking Points</p>
           {result.talking_points.slice(0, 3).map((p: string, i: number) => (
             <div key={i} className="flex gap-2 items-start">
-              <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
-              <p className="text-xs text-foreground/80 leading-snug">{p}</p>
+              <div className="w-1 h-1 rounded-full bg-primary/40 shrink-0 mt-[7px]" />
+              <div className="flex-1 min-w-0"><LeadMarkdown content={p} /></div>
             </div>
           ))}
         </div>
       )}
       {allQuestions.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Discovery Questions</p>
           {shown.map((q: string, i: number) => (
             <div key={i} className="flex gap-2 items-start">
-              <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
-              <p className="text-xs text-foreground/80 leading-snug">{q}</p>
+              <div className="w-1 h-1 rounded-full bg-primary/40 shrink-0 mt-[7px]" />
+              <div className="flex-1 min-w-0"><LeadMarkdown content={q} /></div>
             </div>
           ))}
           {!expanded && hiddenCount > 0 && (
@@ -1351,9 +1348,10 @@ function MeetingPrepResult({ result }: { result: Record<string, any> }) {
           {expanded && (
             <>
               {result.recommended_approach && (
-                <p className="text-xs text-foreground/80 leading-snug pt-1">
-                  <span className="font-medium">Approach:</span> {result.recommended_approach}
-                </p>
+                <div className="pt-1">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Recommended Approach</p>
+                  <LeadMarkdown content={result.recommended_approach} />
+                </div>
               )}
               <button onClick={() => setExpanded(false)}
                 className="text-[11px] text-muted-foreground hover:text-foreground hover:underline underline-offset-2 transition-colors">

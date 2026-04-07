@@ -10,7 +10,7 @@ celery_app = Celery(
     "outmate_tasks",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.visitors", "app.tasks.copilot_tasks"]
+    include=["app.tasks.visitors", "app.tasks.copilot_tasks", "app.tasks.signal_tasks", "app.tasks.sequence_tasks", "app.tasks.champion_tasks"]
 )
 
 celery_app.conf.update(
@@ -43,6 +43,12 @@ celery_app.conf.update(
         "account-intent-aggregate-hourly": {
             "task": "app.tasks.visitors.aggregate_account_intent_task",
             "schedule": crontab(minute=15),  # :15 every hour
+        },
+        # Champion job-change polling: every 6 hours
+        # Checks lead-type watchers with track_job_changes=True against CrustData
+        "champion-job-change-poll-6h": {
+            "task": "app.tasks.champion_tasks.poll_champion_job_changes",
+            "schedule": crontab(minute=0, hour="*/6"),
         },
     },
 )

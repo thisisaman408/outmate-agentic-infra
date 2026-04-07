@@ -169,6 +169,7 @@ class CopilotPreferencesRequest(BaseModel):
     slack_webhook_url: Optional[str] = None
     pipeline_alerts_enabled: Optional[bool] = None
     alert_severity_threshold: Optional[str] = None
+    signal_score_threshold: Optional[int] = Field(None, ge=50, le=95)
 
     @field_validator("daily_brief_timezone")
     @classmethod
@@ -470,6 +471,34 @@ class ArtifactSection(BaseModel):
     label: str
     action: str
     result: Dict[str, Any]
+
+
+# ── Signal-to-Sequence ────────────────────────────────────────
+
+class SignalDraftResponse(BaseModel):
+    id: str
+    signal_id: str
+    lead_name: Optional[str]
+    lead_email: Optional[str]
+    lead_role: Optional[str]
+    lead_domain: Optional[str]
+    lead_linkedin_url: Optional[str]
+    draft_email_subject: Optional[str]
+    draft_email_body: Optional[str]
+    optimizer_output: Optional[Dict[str, Any]]
+    signal_score: Optional[int]
+    signal_type: str
+    company_name: Optional[str]
+    company_domain: Optional[str]
+    status: str
+    campaign_id: Optional[str]
+    created_at: datetime
+
+
+class SignalDraftActionRequest(BaseModel):
+    action: str = Field(..., pattern="^(use|dismiss|push_to_campaign)$")
+    # Optional override fields for push_to_campaign
+    campaign_name: Optional[str] = None
 
 
 class OrchestratorArtifact(BaseModel):

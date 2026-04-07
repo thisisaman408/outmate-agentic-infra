@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, JSON, Boolean, ForeignKey  # noqa: F401 (Boolean used for champion columns)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -37,3 +37,10 @@ class Watcher(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Champion / job-change tracking
+    linkedin_url = Column(String(512), nullable=True)
+    track_job_changes = Column(Boolean(), nullable=False, default=False)
+    last_known_company = Column(String(255), nullable=True)
+    last_known_title = Column(String(255), nullable=True)
+    last_job_check_at = Column(DateTime(timezone=True), nullable=True)

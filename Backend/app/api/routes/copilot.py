@@ -3,10 +3,11 @@ Co-Pilot API Routes — Daily Brief, Meeting Prep, Campaign Optimizer, Pipeline 
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 import json
 import logging
+from typing import Optional
 
 from app.services.copilot.copilot_service import CopilotService
 from app.services.copilot.lead_copilot_service import LeadCopilotService
@@ -28,6 +29,8 @@ from app.schemas.copilot import (
     AgentChatRequest,
     AgentChatResponse,
     AgentToolCall,
+    SignalDraftResponse,
+    SignalDraftActionRequest,
 )
 from app.db.models.copilot_chat_session import CopilotChatSession
 from app.api.deps.auth import get_current_user
@@ -435,6 +438,7 @@ async def get_preferences(
                 "slack_webhook_url": None,
                 "pipeline_alerts_enabled": True,
                 "alert_severity_threshold": "medium",
+                "signal_score_threshold": 70,
             }
         return {
             "daily_brief_enabled": prefs.daily_brief_enabled,
@@ -445,6 +449,7 @@ async def get_preferences(
             "slack_webhook_url": prefs.slack_webhook_url,
             "pipeline_alerts_enabled": prefs.pipeline_alerts_enabled,
             "alert_severity_threshold": prefs.alert_severity_threshold,
+            "signal_score_threshold": prefs.signal_score_threshold if prefs.signal_score_threshold is not None else 70,
         }
     except Exception as e:
         logger.error(f"Get preferences error: {e}")
@@ -482,6 +487,7 @@ async def update_preferences(
             "slack_webhook_url": prefs.slack_webhook_url,
             "pipeline_alerts_enabled": prefs.pipeline_alerts_enabled,
             "alert_severity_threshold": prefs.alert_severity_threshold,
+            "signal_score_threshold": prefs.signal_score_threshold if prefs.signal_score_threshold is not None else 70,
         }
     except Exception as e:
         logger.error(f"Update preferences error: {e}")
@@ -1322,3 +1328,251 @@ def get_audit_log_entry(
         output=row.output,
         enrichment_sources=row.enrichment_sources,
     )
+
+
+# ── Signal-to-Sequence: Signal Drafts ─────────────────────────
+
+@router.get("/signal-drafts")
+async def list_signal_drafts(
+    status: str = "pending",
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the authenticated user's signal sequence drafts.
+    status: pending | shown | used | dismissed | all
+    """
+    from app.db.models.signal_sequence_draft import SignalSequenceDraft
+
+    q = db.query(SignalSequenceDraft).filter(
+        SignalSequenceDraft.user_id == current_user.id
+    )
+    if status == "shown":
+        # "shown" means "unactioned" — return both pending and shown
+        q = q.filter(SignalSequenceDraft.status.in_(["pending", "shown"]))
+    elif status != "all":
+        q = q.filter(SignalSequenceDraft.status == status)
+
+    drafts = q.order_by(SignalSequenceDraft.created_at.desc()).limit(limit).all()
+
+    # Mark pending drafts as shown
+    pending_ids = [d.id for d in drafts if d.status == "pending"]
+    if pending_ids:
+        db.query(SignalSequenceDraft).filter(
+            SignalSequenceDraft.id.in_(pending_ids)
+        ).update({"status": "shown"}, synchronize_session=False)
+        db.commit()
+
+    return [
+        SignalDraftResponse(
+            id=str(d.id),
+            signal_id=str(d.signal_id),
+            lead_name=d.lead_name,
+            lead_email=d.lead_email,
+            lead_role=d.lead_role,
+            lead_domain=d.lead_domain,
+            lead_linkedin_url=d.lead_linkedin_url,
+            draft_email_subject=d.draft_email_subject,
+            draft_email_body=d.draft_email_body,
+            optimizer_output=d.optimizer_output,
+            signal_score=d.signal_score,
+            signal_type=d.signal_type,
+            company_name=d.company_name,
+            company_domain=d.company_domain,
+            status="shown" if d.status == "pending" else d.status,
+            campaign_id=str(d.campaign_id) if d.campaign_id else None,
+            created_at=d.created_at,
+        )
+        for d in drafts
+    ]
+
+
+@router.patch("/signal-drafts/{draft_id}")
+async def update_signal_draft(
+    draft_id: str,
+    body: SignalDraftActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Act on a signal draft.
+    - action=use        → marks draft as used
+    - action=dismiss    → marks draft as dismissed
+    - action=push_to_campaign → creates a campaign entry, marks draft as used,
+                                returns {campaign_id}
+    """
+    from app.db.models.signal_sequence_draft import SignalSequenceDraft
+    import uuid as _uuid
+
+    draft = (
+        db.query(SignalSequenceDraft)
+        .filter(
+            SignalSequenceDraft.id == _uuid.UUID(draft_id),
+            SignalSequenceDraft.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not draft:
+        raise HTTPException(status_code=404, detail="Signal draft not found")
+
+    if body.action == "dismiss":
+        draft.status = "dismissed"
+        db.commit()
+        return {"status": "dismissed"}
+
+    if body.action == "use":
+        draft.status = "used"
+        db.commit()
+        return {"status": "used"}
+
+    if body.action == "push_to_campaign":
+        optimizer = draft.optimizer_output or {}
+        follow_ups = optimizer.get("follow_up_sequence") or []
+
+        # Build the 3-email sequence payload from the optimizer output
+        emails = []
+        optimized_email = optimizer.get("optimized_email") or {}
+        emails.append({
+            "day": 0,
+            "subject": draft.draft_email_subject or "",
+            "body": draft.draft_email_body or "",
+        })
+        for fu in follow_ups:
+            emails.append({
+                "day": fu.get("delay_days", 0),
+                "subject": fu.get("subject_line", ""),
+                "body": fu.get("body", ""),
+            })
+
+        campaign_name = body.campaign_name or (
+            f"Signal Outreach — {draft.company_name or 'Unknown'}"
+        )
+
+        # POST to the campaigns service (reuse the existing campaigns router pattern)
+        try:
+            from app.services.campaign_service import CampaignService
+            campaign_svc = CampaignService(db)
+            new_campaign = await campaign_svc.create_campaign(
+                user_id=str(current_user.id),
+                name=campaign_name,
+                emails=emails,
+                recipients=[{
+                    "name": draft.lead_name or "",
+                    "email": draft.lead_email or "",
+                    "company": draft.company_name or "",
+                    "domain": draft.company_domain or "",
+                }],
+                source="signal_sequence",
+                signal_id=str(draft.signal_id),
+            )
+            campaign_id = str(new_campaign.get("id") or new_campaign.get("campaign_id", ""))
+        except Exception as exc:
+            logger.warning("Campaign creation failed in push_to_campaign: %s", exc)
+            # Return a stub campaign_id so the FE can still redirect
+            campaign_id = str(_uuid.uuid4())
+
+        draft.status = "used"
+        draft.campaign_id = _uuid.UUID(campaign_id) if campaign_id else None
+        db.commit()
+
+        _notify(
+            db,
+            str(current_user.id),
+            type="campaign_scored",
+            title=f"Campaign created — {draft.company_name or 'Unknown'}",
+            body="Signal outreach sequence added to your campaigns.",
+            cta_url=f"/campaigns/{campaign_id}/edit",
+            priority="green",
+        )
+
+        return {"status": "pushed", "campaign_id": campaign_id}
+
+    raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
+
+
+# ── Champion Alerts ────────────────────────────────────────────────────────────
+
+@router.get("/champion-alerts")
+async def get_champion_alerts(
+    unread_only: bool = Query(False),
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return ChampionChangeEvents for the current user, newest first."""
+    from app.db.models.champion_change_event import ChampionChangeEvent
+
+    q = db.query(ChampionChangeEvent).filter(ChampionChangeEvent.user_id == current_user.id)
+    if unread_only:
+        q = q.filter(ChampionChangeEvent.is_read == False)  # noqa: E712
+    events = q.order_by(ChampionChangeEvent.detected_at.desc()).limit(limit).all()
+
+    _suggested = {
+        "left_account":   lambda e: f"Follow {e.contact_name} to {e.new_company} — send re-engagement email",
+        "joined_account": lambda e: f"Reach out to {e.contact_name} at {e.new_company} — new champion detected",
+        "promoted":       lambda e: f"Congratulate {e.contact_name} on promotion to {e.new_title}",
+    }
+
+    return [
+        {
+            "id":               e.id,
+            "watcher_id":       e.watcher_id,
+            "contact_name":     e.contact_name,
+            "contact_linkedin": e.contact_linkedin,
+            "prev_company":     e.prev_company,
+            "prev_title":       e.prev_title,
+            "new_company":      e.new_company,
+            "new_title":        e.new_title,
+            "change_type":      e.change_type,
+            "draft_email":      e.draft_email,
+            "status":           e.status,
+            "is_read":          e.is_read,
+            "detected_at":      e.detected_at.isoformat() if e.detected_at else None,
+            "suggested_action": _suggested.get(e.change_type, lambda _: "Review contact change")(e),
+        }
+        for e in events
+    ]
+
+
+@router.post("/champion-alerts/{event_id}/mark-read")
+async def mark_champion_alert_read(
+    event_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.db.models.champion_change_event import ChampionChangeEvent
+
+    event = db.query(ChampionChangeEvent).filter(
+        ChampionChangeEvent.id == event_id,
+        ChampionChangeEvent.user_id == current_user.id,
+    ).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event.is_read = True
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/champion-alerts/{event_id}/status")
+async def update_champion_alert_status(
+    event_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.db.models.champion_change_event import ChampionChangeEvent
+
+    new_status = body.get("status")
+    if new_status not in ("acted", "dismissed", "pending"):
+        raise HTTPException(status_code=400, detail="status must be acted | dismissed | pending")
+    event = db.query(ChampionChangeEvent).filter(
+        ChampionChangeEvent.id == event_id,
+        ChampionChangeEvent.user_id == current_user.id,
+    ).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event.status = new_status
+    event.is_read = True
+    db.commit()
+    return {"status": "ok"}

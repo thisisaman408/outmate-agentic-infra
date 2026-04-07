@@ -276,6 +276,12 @@ class Settings(BaseSettings):
         description="Public URL for Google Calendar push notifications (e.g. ngrok tunnel)"
     )
 
+    # Calendly Webhook
+    CALENDLY_WEBHOOK_SIGNING_KEY: str = Field(
+        "",
+        description="Calendly webhook signing key for HMAC-SHA256 verification"
+    )
+
     # Unipile Email Configuration
     UNIPILE_API_KEY: Optional[str] = Field(
         None,

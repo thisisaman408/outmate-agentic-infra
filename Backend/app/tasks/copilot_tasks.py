@@ -571,16 +571,19 @@ External attendees:
     llm_result = {}
     try:
         llm = OpenRouterService()
-        import json
+        import json, re
         raw = await llm.chat_completion_text(
             system_prompt=CALENDAR_MEETING_BRIEF_SYSTEM_PROMPT,
             user_message=user_prompt,
             max_tokens=500,
             temperature=0.3,
         )
-        llm_result = json.loads(raw)
+        logger.info("Meeting brief LLM raw response: %s", raw[:300])
+        # Strip markdown code fences if present
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        llm_result = json.loads(cleaned)
     except Exception as exc:
-        logger.error("LLM call failed for meeting brief: %s", exc)
+        logger.error("LLM call failed for meeting brief: %s | raw=%s", exc, locals().get("raw", ""))
         llm_result = {
             "context": f"Meeting with {meeting_title} at {event_start_str}",
             "objections": [],

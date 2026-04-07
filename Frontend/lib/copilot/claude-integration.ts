@@ -769,6 +769,58 @@ const CLAUDE_TOOLS = [
       required: ['watcher_id'],
     },
   },
+
+  {
+    name: 'get_signal_drafts',
+    description:
+      'Fetch the user\'s pending Signal-to-Sequence draft outreach emails. ' +
+      'These are auto-generated personalised emails triggered when a watched account\'s ICP score crossed the user\'s threshold. ' +
+      'Each draft includes: company name, signal type (funding/hiring/g2_intent/etc.), contact name and role, ' +
+      'a draft subject + body, a 3-email follow-up sequence, and a reply probability score. ' +
+      'Use this when the user asks to see their signal drafts, review AI-generated outreach, ' +
+      'or wants to know which accounts triggered a sequence. ' +
+      'After fetching, summarise each draft in 1-2 sentences and offer to navigate to /copilot?tab=signal-drafts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['shown', 'all'],
+          description: 'shown = pending drafts not yet actioned (default); all = include used/dismissed',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of drafts to return (default 10)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_champion_alerts',
+    description:
+      'Fetch recent job-change alerts for contacts the user is tracking (Champion Alerts). ' +
+      'Returns contacts who left a target account, joined one, or were promoted. ' +
+      'Each alert includes: contact name, before→after company transition, change type ' +
+      '(left_account | joined_account | promoted), a drafted re-engagement email, and a suggested action. ' +
+      'Use this when the user asks about champion moves, job changes in their pipeline, ' +
+      'contacts who changed companies, or wants to act on a re-engagement opportunity. ' +
+      'After fetching, summarise each alert in 1 sentence and offer to navigate to /copilot?tab=champion-alerts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        unread_only: {
+          type: 'boolean',
+          description: 'If true, return only unread alerts. Default false.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max number of alerts to return. Default 20.',
+        },
+      },
+      required: [],
+    },
+  },
 ]
 
 /**
@@ -1046,6 +1098,60 @@ The "Current Session Context" section is appended below this prompt. Use it to:
 - Reference prior results naturally ("Since you found 47 prospects earlier…")
 - Skip navigation if already on the right page
 - Suggest logical next steps based on what was last searched
+
+## Handling Ambiguous, Vague, and Short Queries
+
+ALWAYS make a best guess and execute — never reply "I don't understand" or "Can you clarify?" for sales-related inputs.
+
+**Intent mapping (match these patterns even when incomplete):**
+| User says | What to do |
+|---|---|
+| just a role: "fintech VPs", "CTOs", "Sales Directors" | prospects search, set job_title + infer industry |
+| just a company type: "Series B companies", "SaaS startups" | companies search with matching funding_stage/industry |
+| "outreach to [segment]" | campaign_creation form |
+| "meeting with [company]", "prep for [company]" | meeting_prep form |
+| "research [company]" | fill_ai_agent_form(agent="research") |
+| "[competitor] vs us", "run crossfire on [domain]" | fill_ai_agent_form(agent="crossfire") |
+| "compliance", "GDPR", "CAN-SPAM", "check this email" | fill_ai_agent_form(agent="compliance_oracle") |
+| "similar to [companies]", "lookalike [company]" | fill_ai_agent_form(agent="lookalike") |
+| "score [company]", "predict conversion" | fill_ai_agent_form(agent="predictive") |
+| "virality", "referral chain", "build a viral plan" | fill_ai_agent_form(agent="virality_engine") |
+| "track [company/person]", "watch [company]" | create_watcher |
+| "pipeline", "scan deals", "deal risks" | pipeline_alerts form |
+| "cold email", "email optimizer", "score this email" | email_optimizer form |
+| "intent signals", "who's researching [topic]" | intents search |
+| "website visitors", "who visited" | websights search |
+| "show [page]", "go to [page]", "open [section]" | navigate_to |
+| "how many [X]?" / "how are my [X]?" | search + summarize_results |
+| short fragments like "fintech" alone | assume prospects search with industry="fintech" |
+| "help", "what can you do?" | list 5 example actions as inline suggestions |
+
+If the query has zero recognizable sales context (e.g., "tell me a joke"), respond briefly and still end with the suggestions block.
+
+## Inline Suggestions (REQUIRED — every response)
+
+After EVERY assistant response, you MUST append this block with 2–3 directly actionable follow-up prompts:
+
+\`\`\`suggestions
+<suggestion 1 — start with a verb, under 65 chars>
+<suggestion 2 — different module or action from #1>
+<suggestion 3 — optional multi-step workflow>
+\`\`\`
+
+Rules for good suggestions:
+- **Always start with an action verb**: Find, Research, Create, Score, Run, Track, Optimize, Scan, Watch
+- **Be specific**: "Find Series B SaaS VPs in New York" not "Find some people"
+- **Vary modules**: don't give 3 prospect searches — mix prospects, agents, copilot, campaigns
+- **Reflect context**: suggestions should be logical next steps based on what just happened
+- **Multi-step last**: include one chained action like "Find fintech VPs then create a campaign"
+- Do NOT use placeholder brackets like "<suggestion>" — write actual text
+
+Example (after a prospects search):
+\`\`\`suggestions
+Add these prospects to a campaign called Q2 Outreach
+Research Stripe — deep company intelligence
+Find lookalike companies to Stripe and Brex
+\`\`\`
 
 ## Error Handling
 - No results → suggest broadening criteria, offer to re-run with looser filters

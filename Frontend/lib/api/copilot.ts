@@ -523,6 +523,27 @@ export const copilotApi = {
     )
     return handleResponse(response, "Failed to load audit log entry")
   },
+
+  // ── Signal Drafts ──────────────────────────────────────────────
+
+  getSignalDrafts: async (status = "shown", limit = 20): Promise<unknown[]> => {
+    const response = await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/signal-drafts?status=${status}&limit=${limit}`
+    )
+    return handleResponse(response, "Failed to load signal drafts")
+  },
+
+  updateSignalDraft: async (id: string, action: string, campaignName?: string): Promise<unknown> => {
+    const response = await fetchWithAuth(
+      `${BACKEND_BASE}/api/copilot/signal-drafts/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, campaign_name: campaignName }),
+      }
+    )
+    return handleResponse(response, "Failed to update signal draft")
+  },
 }
 
 // ── Orchestrator types ────────────────────────────────────────
@@ -581,4 +602,48 @@ export interface AuditLogEntryFull extends AuditLogEntry {
   steps_run?: Record<string, unknown>[]
   output?: Record<string, unknown>
   enrichment_sources?: string[]
+}
+
+// ── Champion Alerts ───────────────────────────────────────────────────────────
+
+export interface ChampionChangeEvent {
+  id: string
+  watcher_id: string
+  contact_name: string | null
+  contact_linkedin: string | null
+  prev_company: string | null
+  prev_title: string | null
+  new_company: string | null
+  new_title: string | null
+  change_type: 'left_account' | 'joined_account' | 'promoted'
+  draft_email: string | null
+  status: 'pending' | 'acted' | 'dismissed'
+  is_read: boolean
+  detected_at: string
+  suggested_action: string
+}
+
+export async function getChampionAlerts(unreadOnly = false): Promise<ChampionChangeEvent[]> {
+  const url = `${BACKEND_BASE}/api/copilot/champion-alerts?unread_only=${unreadOnly}`
+  const res = await fetchWithAuth(url)
+  return handleResponse(res, 'Failed to fetch champion alerts')
+}
+
+export async function markChampionAlertRead(eventId: string): Promise<void> {
+  const res = await fetchWithAuth(`${BACKEND_BASE}/api/copilot/champion-alerts/${eventId}/mark-read`, {
+    method: 'POST',
+  })
+  await handleResponse(res, 'Failed to mark alert read')
+}
+
+export async function updateChampionAlertStatus(
+  eventId: string,
+  status: 'acted' | 'dismissed' | 'pending',
+): Promise<void> {
+  const res = await fetchWithAuth(`${BACKEND_BASE}/api/copilot/champion-alerts/${eventId}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  })
+  await handleResponse(res, 'Failed to update alert status')
 }
