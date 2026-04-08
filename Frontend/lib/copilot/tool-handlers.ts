@@ -22,7 +22,7 @@ import {
   syncWatcher,
   type WatcherRecord,
 } from '@/lib/api/watcher-api'
-import { v4 as uuidv4 } from 'uuid'
+const uuidv4 = () => crypto.randomUUID()
 
 /**
  * TOOL I/O TYPES

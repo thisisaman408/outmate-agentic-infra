@@ -89,7 +89,7 @@ class LeadContext:
 
         # Google mentions
         if self.google_mentions:
-            lines = [f"=== RECENT MENTIONS OF {(self.name or "").upper()} (Google) ==="]
+            lines = [f"=== RECENT MENTIONS OF {(self.name or '').upper()} (Google) ==="]
             for item in self.google_mentions[:5]:
                 lines.append(f"- {item.get('title', '')}: {item.get('snippet', '')[:200]}")
             lines.append("=== END MENTIONS ===")
@@ -97,7 +97,7 @@ class LeadContext:
 
         # YouTube appearances
         if self.youtube_appearances:
-            lines = [f"=== YOUTUBE APPEARANCES — {(self.name or "").upper()} ==="]
+            lines = [f"=== YOUTUBE APPEARANCES — {(self.name or '').upper()} ==="]
             for item in self.youtube_appearances[:5]:
                 lines.append(f"- {item.get('title', '')} ({item.get('link', '')})")
             lines.append("=== END YOUTUBE ===")
@@ -105,7 +105,7 @@ class LeadContext:
 
         # LinkedIn posts
         if self.linkedin_posts:
-            lines = [f"=== LINKEDIN ACTIVITY — {(self.name or "").upper()} ==="]
+            lines = [f"=== LINKEDIN ACTIVITY — {(self.name or '').upper()} ==="]
             for item in self.linkedin_posts[:5]:
                 title = item.get("title") or item.get("content", "")[:120]
                 lines.append(f"- {title}")

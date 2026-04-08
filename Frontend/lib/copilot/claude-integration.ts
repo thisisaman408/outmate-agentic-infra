@@ -8,7 +8,7 @@
 
 import { useCoPilotAgentStore, Message, ToolCall } from './agent-store'
 import { getToolHandlers, ToolInput, ToolResult } from './tool-handlers'
-import { v4 as uuidv4 } from 'uuid'
+const uuidv4 = () => crypto.randomUUID()
 
 /**
  * CLAUDE TOOLS DEFINITION
