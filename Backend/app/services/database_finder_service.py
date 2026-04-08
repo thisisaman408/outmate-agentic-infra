@@ -43,7 +43,7 @@ class DatabaseFinderService:
     """
 
     ZENROWS_BASE = "https://api.zenrows.com/v1/"
-    DEFAULT_TIMEOUT = 60.0
+    DEFAULT_TIMEOUT = 120.0
 
     # Characters outside basic Latin + common punctuation → strip them
     # This removes Hindi (Devanagari), Chinese, Arabic, emoji, etc.
@@ -78,57 +78,94 @@ class DatabaseFinderService:
     async def _zenrows_get(
         self,
         url: str,
-        mode: str = "auto",
-        js_render: Optional[bool] = None,
-        premium_proxy: Optional[bool] = None,
-        antibot: Optional[bool] = None,
+        mode: Optional[str] = None,
+        js_render: bool = False,
+        premium_proxy: bool = False,
+        antibot: bool = False,
+        proxy_country: Optional[str] = None,
         autoparse: bool = False,
+        retries: int = 3,
     ) -> str:
-        """Fetch a page through ZenRows proxy.
-
-        By default uses mode=auto which lets ZenRows pick the cheapest
-        working configuration and only charges for the successful attempt.
-        """
+        """Fetch a page through ZenRows proxy with retry logic for 429/5xx."""
         if not self.zenrows_api_key:
             raise DatabaseFinderError("ZENROWS_API_KEY is not configured", 503)
 
-        params: Dict[str, str] = {
+        params: Dict[str, Any] = {
             "apikey": self.zenrows_api_key,
             "url": url,
         }
+        
+        # Determine if we should use mode=auto or specific parameters
+        has_specific_params = any([js_render, premium_proxy, antibot, proxy_country, autoparse])
+        
         if mode:
             params["mode"] = mode
-        # Only set manual params when not using auto mode
-        if not mode:
-            if js_render:
-                params["js_render"] = "true"
-            if premium_proxy:
-                params["premium_proxy"] = "true"
-            if antibot:
-                params["antibot"] = "true"
+        elif not has_specific_params:
+            params["mode"] = "auto"
+            mode = "auto" # for logging
+        
+        # If we have specific params, add them. 
+        # Note: We tend to avoid adding these if mode is explicitly set to something else 
+        # unless necessary, as ZenRows might return 400 on certain combinations.
+        if js_render:
+            params["js_render"] = "true"
+            params["wait"] = 5000 # Increased to 5s for better LinkedIn reliability
+        if premium_proxy:
+            params["premium_proxy"] = "true"
+        if antibot:
+            params["antibot"] = "true"
+        if proxy_country:
+            params["proxy_country"] = proxy_country.upper()
         if autoparse:
             params["autoparse"] = "true"
 
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )
-        }
+        # ZenRows handles headers: do not send custom ones
+        headers = {}
 
-        async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
-            resp = await client.get(self.ZENROWS_BASE, params=params, headers=headers)
-            if resp.status_code >= 400:
-                logger.warning(
-                    f"ZenRows returned {resp.status_code} for {url[:80]} "
-                    f"(mode={mode})"
-                )
-                raise DatabaseFinderError(
-                    f"ZenRows request failed ({resp.status_code})",
-                    status_code=502,
-                )
-            return resp.text
+        last_error = None
+        for attempt in range(retries):
+            try:
+                async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
+                    resp = await client.get(self.ZENROWS_BASE, params=params, headers=headers)
+                    
+                    if resp.status_code == 402:
+                        logger.error(f"ZenRows 402 (Payment Required/Insufficient Credits)! Please check your ZenRows dashboard balance.")
+                        raise DatabaseFinderError(
+                            "ZenRows credits exhausted (402 Payment Required). Please top up your ZenRows account.",
+                            status_code=402
+                        )
+
+                    if resp.status_code == 429:
+                        wait_time = (attempt + 1) * 2
+                        logger.warning(f"ZenRows 429 (Rate Limit) for {url[:50]}. Retrying in {wait_time}s... (Attempt {attempt+1}/{retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+
+                    if resp.status_code >= 400:
+                        params_masked = params.copy()
+                        params_masked["apikey"] = "MASKED"
+                        logger.warning(
+                            f"ZenRows returned {resp.status_code} for {url[:80]}: {resp.text} "
+                            f"(params={params_masked})"
+                        )
+                        raise DatabaseFinderError(
+                            f"ZenRows request failed ({resp.status_code}): {resp.text[:100]}",
+                            status_code=502,
+                        )
+                    return resp.text
+            except httpx.RequestError as e:
+                last_error = e
+                wait_time = (attempt + 1) * 2
+                logger.warning(f"ZenRows connection error: {repr(e)}. Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            except DatabaseFinderError as e:
+                # If it's a 4xx other than 429, don't necessarily retry unless it's 5xx
+                if "failed (5" in str(e):
+                    await asyncio.sleep((attempt + 1) * 2)
+                    continue
+                raise
+
+        raise DatabaseFinderError(f"ZenRows failed after {retries} attempts. Last error: {last_error}", 502)
 
     async def _search_google_linkedin(
         self,
@@ -152,8 +189,8 @@ class DatabaseFinderService:
         except DatabaseFinderError:
             raise
 
-        # Extract LinkedIn profile URLs
-        pattern = r'href="(https://(?:www\.)?linkedin\.com/in/[^"&]+)"'
+        # Extract LinkedIn profile URLs (more lenient regex to capture in.uk. etc subdomains)
+        pattern = r'href="(https://[a-z]{0,3}\.?linkedin\.com/in/[^"&?]+)"'
         matches = re.findall(pattern, html)
 
         unique_urls: List[str] = []
@@ -291,8 +328,26 @@ class DatabaseFinderService:
 
     async def _scrape_linkedin_profile(self, profile_url: str) -> Dict[str, Any]:
         """Scrape a single LinkedIn profile via ZenRows and extract data."""
+        # Detect country from URL to help ZenRows choose the right proxy
+        proxy_country = None
+        if "in.linkedin.com" in profile_url:
+            proxy_country = "IN"
+        elif "uk.linkedin.com" in profile_url:
+            proxy_country = "GB"
+        elif "ca.linkedin.com" in profile_url:
+            proxy_country = "CA"
+        elif "au.linkedin.com" in profile_url:
+            proxy_country = "AU"
+
         try:
-            html = await self._zenrows_get(profile_url)
+            # LinkedIn strictly requires Premium Proxies, JS Rendering, and Antibot bypass to avoid 403s/429s/999s/RESP001
+            html = await self._zenrows_get(
+                profile_url, 
+                mode=None, 
+                js_render=True, 
+                premium_proxy=True,
+                antibot=True
+            )
         except Exception as e:
             logger.warning(f"Failed to scrape {profile_url}: {e}")
             return {"linkedin_url": profile_url}
@@ -703,8 +758,8 @@ class DatabaseFinderService:
                 },
             }
 
-        # Step 2: Scrape each profile (concurrently, max 5 at a time)
-        sem = asyncio.Semaphore(5)
+        # Step 2: Scrape each profile (concurrently, max 1 at a time to avoid plan 429s and keep timeouts low)
+        sem = asyncio.Semaphore(1)
 
         async def scrape_with_limit(url: str) -> Dict[str, Any]:
             async with sem:
