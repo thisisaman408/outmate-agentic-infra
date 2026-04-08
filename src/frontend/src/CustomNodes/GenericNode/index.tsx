@@ -195,7 +195,7 @@ function GenericNode({
                 title: "Error updating Component code",
                 list: [
                   "There was an error updating the Component.",
-                  "If the error persists, please report it on our Discord or GitHub.",
+                  "If the error persists, please try restarting Outmate.",
                 ],
               });
               console.error(error);

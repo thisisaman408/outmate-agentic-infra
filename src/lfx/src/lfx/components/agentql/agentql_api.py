@@ -101,19 +101,20 @@ class AgentQL(Component):
             "X-TF-Request-Origin": "outmate",
         }
 
+        params = {
+            "mode": self.mode,
+            "wait_for": self.wait_for,
+            "is_scroll_to_bottom_enabled": self.is_scroll_to_bottom_enabled,
+            "is_screenshot_enabled": self.is_screenshot_enabled,
+        }
+        if self.is_stealth_mode_enabled:
+            params["browser_profile"] = "stealth"
+
         payload = {
             "url": self.url,
             "query": self.query,
             "prompt": self.prompt,
-            "params": {
-                "mode": self.mode,
-                "wait_for": self.wait_for,
-                "is_scroll_to_bottom_enabled": self.is_scroll_to_bottom_enabled,
-                "is_screenshot_enabled": self.is_screenshot_enabled,
-            },
-            "metadata": {
-                "experimental_stealth_mode_enabled": self.is_stealth_mode_enabled,
-            },
+            "params": params,
         }
 
         if not self.prompt and not self.query:

@@ -38,33 +38,123 @@ export const MarkdownField = ({
         components={{
           p({ node, ...props }) {
             return (
-              <p className="w-fit max-w-full my-1.5 last:mb-0 first:mt-0">
+              <p className="w-fit max-w-full my-1.5 last:mb-0 first:mt-0 leading-relaxed">
                 {props.children}
               </p>
             );
           },
           ol({ node, ...props }) {
-            return <ol className="max-w-full">{props.children}</ol>;
+            return <ol className="max-w-full my-2 space-y-1">{props.children}</ol>;
           },
           ul({ node, ...props }) {
-            return <ul className="max-w-full mb-2">{props.children}</ul>;
+            return <ul className="max-w-full mb-2 space-y-1">{props.children}</ul>;
+          },
+          li({ node, ...props }) {
+            return (
+              <li className="leading-relaxed text-foreground/80">
+                {props.children}
+              </li>
+            );
           },
           pre({ node, ...props }) {
             return <>{props.children}</>;
           },
           hr({ node, ...props }) {
-            return <hr className="w-full mt-3 mb-5 border-border" {...props} />;
+            return <hr className="w-full mt-3 mb-5 border-border/40" {...props} />;
+          },
+          h1({ node, ...props }) {
+            return (
+              <div className="flex items-center gap-2 mt-5 mb-2">
+                <div className="h-6 w-1 rounded-full bg-primary/50" />
+                <h1 className="text-lg font-bold" {...props} />
+              </div>
+            );
+          },
+          h2({ node, ...props }) {
+            return (
+              <div className="flex items-center gap-2 mt-4 mb-2">
+                <div className="h-5 w-1 rounded-full bg-primary/40" />
+                <h2 className="text-base font-semibold" {...props} />
+              </div>
+            );
           },
           h3({ node, ...props }) {
-            return <h3 className={cn("mt-4", props.className)} {...props} />;
+            return (
+              <div className="flex items-center gap-2 mt-3 mb-1.5">
+                <div className="h-4 w-1 rounded-full bg-primary/30" />
+                <h3 className="text-sm font-semibold" {...props} />
+              </div>
+            );
+          },
+          h4({ node, ...props }) {
+            return (
+              <h4 className="text-sm font-medium text-muted-foreground mt-3 mb-1" {...props} />
+            );
+          },
+          strong({ node, ...props }) {
+            return <strong className="font-semibold text-foreground" {...props} />;
+          },
+          a({ node, ...props }) {
+            return (
+              <a
+                {...props}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary/80 hover:text-primary underline underline-offset-2 decoration-primary/30 hover:decoration-primary/60 transition-colors"
+              >
+                {props.children}
+              </a>
+            );
+          },
+          blockquote({ node, ...props }) {
+            return (
+              <blockquote className="border-l-2 border-primary/30 pl-4 py-1 my-2 text-muted-foreground italic">
+                {props.children}
+              </blockquote>
+            );
           },
           table: ({ node, ...props }) => {
             return (
-              <div className="max-w-full overflow-hidden rounded-md border bg-muted">
-                <div className="max-h-[600px] w-full overflow-auto p-4">
-                  <table className="!my-0 w-full">{props.children}</table>
+              <div className="my-3 max-w-full overflow-hidden rounded-xl border border-border/60">
+                <div className="max-h-[600px] w-full overflow-auto">
+                  <table className="!my-0 w-full text-sm">{props.children}</table>
                 </div>
               </div>
+            );
+          },
+          thead: ({ node, ...props }) => {
+            return (
+              <thead className="bg-muted/50 border-b border-border/40">
+                {props.children}
+              </thead>
+            );
+          },
+          th: ({ node, ...props }) => {
+            return (
+              <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {props.children}
+              </th>
+            );
+          },
+          tbody: ({ node, ...props }) => {
+            return (
+              <tbody className="divide-y divide-border/30">
+                {props.children}
+              </tbody>
+            );
+          },
+          tr: ({ node, ...props }) => {
+            return (
+              <tr className="hover:bg-muted/20 transition-colors">
+                {props.children}
+              </tr>
+            );
+          },
+          td: ({ node, ...props }) => {
+            return (
+              <td className="px-4 py-2.5 text-foreground/80">
+                {props.children}
+              </td>
             );
           },
           code: ({ node, className, children, ...props }) => {
@@ -98,7 +188,13 @@ export const MarkdownField = ({
               }
 
               return (
-                <code className={className} {...props}>
+                <code
+                  className={cn(
+                    "rounded bg-muted/60 px-1.5 py-0.5 text-xs font-mono",
+                    className,
+                  )}
+                  {...props}
+                >
                   {content}
                 </code>
               );

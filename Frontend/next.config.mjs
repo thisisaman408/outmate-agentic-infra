@@ -7,6 +7,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Long-running agent endpoints (e.g. social-listening/run) can take 60-120s
+  // for the full Tavily → BrightData → Apollo → Hunter → LLM pipeline.
+  // Default Next.js dev proxy timeout (~30s) was killing these with
+  // ECONNRESET / "socket hang up".  Bumped to 10 minutes.
+  experimental: {
+    proxyTimeout: 600_000,
+  },
   async headers() {
     const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || process.env.GITHUB_SHA || 'unknown'
     return [

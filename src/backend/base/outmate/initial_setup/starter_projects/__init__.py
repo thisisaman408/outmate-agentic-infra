@@ -9,6 +9,7 @@ from .icp_scoring import icp_scoring_graph
 from .memory_chatbot import memory_chatbot_graph
 from .prospect_research import prospect_research_graph
 from .sequential_tasks_agent import sequential_tasks_agent_graph
+from .team_discovery_pipeline import team_discovery_pipeline_graph
 from .vector_store_rag import vector_store_rag_graph
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "memory_chatbot_graph",
     "prospect_research_graph",
     "sequential_tasks_agent_graph",
+    "team_discovery_pipeline_graph",
     "vector_store_rag_graph",
 ]

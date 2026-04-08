@@ -61,6 +61,7 @@ from app.api.routes import watchers
 from app.api.routes import dashboard
 from app.api.routes import events_routes
 from app.api.routes import database_finder
+from app.api.routes import outmate_agentic
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -327,6 +328,13 @@ logger.info("Events router registered")
 app.include_router(database_finder.router, prefix="/api/v1/database", tags=["database"], dependencies=auth_dependencies)
 logger.info("Database Finder router registered")
 
+# Outmate-agentic backed agents (Lead Discovery / Social Listening etc.)
+# Auth + tenant isolation are enforced INSIDE the route module via
+# get_current_user + hard user_id filters on every query, so we deliberately
+# do NOT add auth_dependencies here (the router already requires it).
+app.include_router(outmate_agentic.router)
+logger.info("Outmate-agentic agents router registered")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(SEPARATOR)
@@ -526,13 +534,19 @@ async def startup_event():
     app.state.db_ready = True
     app.state.redis_ready = True
 
-    # Preload embedding model so first chatbot request doesn't pay the load cost
-    try:
-        from app.core.embeddings import get_embedding_model
-        get_embedding_model()
-        logger.info("✓ Embedding model preloaded")
-    except Exception as e:
-        logger.warning(f"⚠ Embedding model preload failed (will load on first request): {e}")
+    # Preload embedding model so first chatbot request doesn't pay the load cost.
+    # Skip if OUTMATE_SKIP_EMBEDDING_PRELOAD=true (used in local dev to bypass a
+    # known abseil/grpc mutex deadlock that hangs SentenceTransformer init on
+    # some Mac configurations).  The model still lazy-loads on first request.
+    if os.getenv("OUTMATE_SKIP_EMBEDDING_PRELOAD", "").lower() == "true":
+        logger.info("⏭ Skipping embedding model preload (OUTMATE_SKIP_EMBEDDING_PRELOAD=true)")
+    else:
+        try:
+            from app.core.embeddings import get_embedding_model
+            get_embedding_model()
+            logger.info("✓ Embedding model preloaded")
+        except Exception as e:
+            logger.warning(f"⚠ Embedding model preload failed (will load on first request): {e}")
 
     logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")

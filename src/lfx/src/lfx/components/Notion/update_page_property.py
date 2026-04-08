@@ -68,7 +68,7 @@ class NotionPageUpdate(LCToolComponent):
         headers = {
             "Authorization": f"Bearer {self.notion_secret}",
             "Content-Type": "application/json",
-            "Notion-Version": "2022-06-28",  # Use the latest supported version
+            "Notion-Version": "2025-09-03",
         }
 
         # Parse properties if it's a string

@@ -199,6 +199,32 @@ MODEL_PROVIDER_METADATA: dict[str, Any] = {
             "model_param": "model",
         },
     },
+    "OpenRouter": {
+        "icon": "OpenRouter",
+        "max_tokens_field_name": "max_tokens",
+        "variables": [
+            {
+                "variable_name": "OpenRouter API Key",
+                "variable_key": "OPENROUTER_API_KEY",
+                "required": True,
+                "is_secret": True,
+                "is_list": False,
+                "options": [],
+                "langchain_param": "api_key",
+                "component_metadata": {
+                    "mapping_field": "api_key",
+                    "required": False,
+                    "advanced": True,
+                    "info": "Falls back to OPENROUTER_API_KEY environment variable",
+                },
+            }
+        ],
+        "api_docs_url": "https://openrouter.ai/docs",
+        "mapping": {
+            "model_class": "ChatOpenAI",
+            "model_param": "model",
+        },
+    },
     "IBM WatsonX": {
         "icon": "WatsonxAI",
         "max_tokens_field_name": "max_tokens",

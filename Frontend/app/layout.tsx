@@ -46,7 +46,10 @@ export default function RootLayout({
           />
         )}
       </head>
-      <body className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}>
+      <body
+        className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}
+        suppressHydrationWarning
+      >
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

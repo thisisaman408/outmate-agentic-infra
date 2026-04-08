@@ -386,11 +386,7 @@ export function FlowSidebarComponent({ isLoading }: FlowSidebarComponentProps) {
 
   const hasResults = useMemo(() => {
     return Object.entries(dataFilter).some(
-      ([category, items]) =>
-        (Object.keys(items).length > 0 &&
-          (CATEGORIES.find((c) => c.name === category) ||
-            BUNDLES.find((b) => b.name === category))) ||
-        (dataFilter["MCP"] && Object.keys(dataFilter["MCP"]).length > 0),
+      ([_category, items]) => Object.keys(items).length > 0,
     );
   }, [dataFilter]);
 
@@ -447,13 +443,13 @@ export function FlowSidebarComponent({ isLoading }: FlowSidebarComponentProps) {
   useEffect(() => {
     const options = {
       keys: [
-        "display_name",
-        "description",
-        "type",
-        "category",
-        "mcpServerName",
+        { name: "display_name", weight: 2 },
+        { name: "description", weight: 1 },
+        { name: "type", weight: 1.5 },
+        { name: "category", weight: 1 },
+        { name: "mcpServerName", weight: 1.5 },
       ],
-      threshold: 0.2,
+      threshold: 0.3,
       includeScore: true,
     };
 

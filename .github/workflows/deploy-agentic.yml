@@ -51,16 +51,25 @@ jobs:
             --image ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
 
       - name: Health check
+        # outmate-agentic ingress is internal-only, so we cannot curl an external
+        # URL.  Instead, ask Azure directly whether the latest revision became
+        # Healthy + Running.  Polls for up to 5 minutes.
         run: |
           sleep 20
-          for i in {1..20}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://outmate-agentic.greenbeach-bf0c913b.eastus.azurecontainerapps.io/health)
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "503" ]; then
-              echo "App responding (HTTP $STATUS)"
+          for i in {1..30}; do
+            STATE=$(az containerapp revision show \
+              --resource-group "${{ env.RESOURCE_GROUP }}" \
+              --name "${{ env.CONTAINER_APP }}" \
+              --revision "$(az containerapp show -n ${{ env.CONTAINER_APP }} -g ${{ env.RESOURCE_GROUP }} --query properties.latestRevisionName -o tsv)" \
+              --query "{health:properties.healthState, running:properties.runningState}" -o tsv 2>/dev/null || echo "  ")
+            HEALTH=$(echo "$STATE" | awk '{print $1}')
+            RUNNING=$(echo "$STATE" | awk '{print $2}')
+            echo "Revision health=$HEALTH running=$RUNNING (poll $i/30)"
+            if [ "$HEALTH" = "Healthy" ] && [ "$RUNNING" = "Running" ]; then
+              echo "✓ Latest revision is Healthy and Running"
               exit 0
             fi
-            echo "Waiting... (HTTP $STATUS)"
-            sleep 5
+            sleep 10
           done
-          echo "Health check failed - app not responding"
+          echo "Health check failed — revision did not become Healthy/Running within 5 min"
           exit 1

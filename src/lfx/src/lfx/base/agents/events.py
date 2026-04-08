@@ -14,6 +14,32 @@ from lfx.schema.log import OnTokenFunctionType, SendMessageFunctionType
 from lfx.schema.message import Message
 
 
+import logging as _logging
+
+_events_logger = _logging.getLogger("outmate.agent_events")
+
+
+async def _safe_stream(agent_executor):
+    """Wrap the agent event stream to handle tool validation errors gracefully.
+
+    Some models (especially free-tier Groq) hallucinate tool names that don't exist,
+    causing the API to reject the request. Instead of crashing the entire agent,
+    we catch these errors and stop the stream cleanly.
+    """
+    try:
+        async for event in agent_executor:
+            yield event
+    except Exception as e:
+        error_str = str(e).lower()
+        if "tool call validation failed" in error_str or "not in request.tools" in error_str:
+            _events_logger.warning("Model hallucinated a tool name: %s. Stopping agent gracefully.", e)
+            return
+        if "browser tool" in error_str:
+            _events_logger.warning("Model tried to use browser tool: %s. Stopping agent gracefully.", e)
+            return
+        raise
+
+
 class ExceptionWithMessageError(Exception):
     def __init__(self, agent_message: Message, message: str):
         self.agent_message = agent_message
@@ -395,7 +421,7 @@ async def process_agent_events(
         had_streaming = False
         start_time = perf_counter()
 
-        async for event in agent_executor:
+        async for event in _safe_stream(agent_executor):
             if event["event"] in TOOL_EVENT_HANDLERS:
                 tool_handler = TOOL_EVENT_HANDLERS[event["event"]]
                 # Use skip_db_update=True during streaming to avoid DB round-trips
@@ -423,6 +449,30 @@ async def process_agent_events(
                     )
 
         agent_message.properties.state = "complete"
+
+        # If agent finished but produced no text, show a helpful message instead of "Message empty"
+        if not agent_message.text or not agent_message.text.strip():
+            # Count tool calls from content blocks
+            tool_count = 0
+            if agent_message.content_blocks:
+                for block in agent_message.content_blocks:
+                    if hasattr(block, "contents"):
+                        tool_count = len([c for c in block.contents if isinstance(c, ToolContent)])
+
+            if tool_count > 0:
+                agent_message.text = (
+                    f"Agent completed {tool_count} tool calls but could not generate a final report. "
+                    "Expand the tool calls above to see the data collected. "
+                    "This usually happens when the model runs out of tokens or hits its iteration limit. "
+                    "Try using a model with higher token limits (e.g., GPT-4o via OpenRouter)."
+                )
+            else:
+                agent_message.text = (
+                    "Agent stopped without producing results. "
+                    "This may be caused by the model hitting token limits or the agent exceeding its iteration count. "
+                    "Try a different model or simplify your query."
+                )
+
         # Final DB update with the complete message (skip_db_update=False by default)
         agent_message = await send_message_callback(message=agent_message)
     except Exception as e:

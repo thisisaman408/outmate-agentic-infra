@@ -11,7 +11,7 @@ from lfx.components.models_and_agents.memory import MemoryComponent
 if TYPE_CHECKING:
     from langchain_core.tools import Tool
 
-from lfx.base.agents.agent import LCToolsAgentComponent
+from lfx.base.agents.agent import DEFAULT_TOOLS_DESCRIPTION, LCToolsAgentComponent
 from lfx.base.agents.events import ExceptionWithMessageError
 from lfx.base.models.unified_models import (
     apply_provider_variable_config_to_build_config,
@@ -512,7 +512,6 @@ class AgentComponent(ToolCallingAgentComponent):
                 "input_value",
                 "add_current_date_tool",
                 "system_prompt",
-                "agent_description",
                 "max_iterations",
                 "handle_parsing_errors",
                 "verbose",
@@ -526,9 +525,7 @@ class AgentComponent(ToolCallingAgentComponent):
     async def _get_tools(self) -> list[Tool]:
         component_toolkit = get_component_toolkit()
         tools_names = self._build_tools_names()
-        agent_description = self.get_tool_description()
-        # TODO: Agent Description Depreciated Feature to be removed
-        description = f"{agent_description}{tools_names}"
+        description = f"{DEFAULT_TOOLS_DESCRIPTION}{tools_names}"
 
         tools = component_toolkit(component=self).get_tools(
             tool_name="Call_Agent",

@@ -121,7 +121,7 @@ class TwelveLabsPegasus(Component):
         # First check if index_id is provided and valid
         if hasattr(self, "_index_id") and self._index_id:
             try:
-                index = client.index.retrieve(id=self._index_id)
+                index = client.indexes.retrieve(id=self._index_id)
                 self.log(f"Found existing index with ID: {self._index_id}")
             except (ValueError, KeyError) as e:
                 self.log(f"Error retrieving index with ID {self._index_id}: {e!s}", "WARNING")
@@ -132,7 +132,7 @@ class TwelveLabsPegasus(Component):
         if hasattr(self, "_index_name") and self._index_name:
             try:
                 # List all indexes and find by name
-                indexes = client.index.list()
+                indexes = client.indexes.list()
                 for idx in indexes:
                     if idx.name == self._index_name:
                         self.log(f"Found existing index: {self._index_name} (ID: {idx.id})")
@@ -140,7 +140,7 @@ class TwelveLabsPegasus(Component):
 
                 # If we get here, index wasn't found - create it
                 self.log(f"Creating new index: {self._index_name}")
-                index = client.index.create(
+                index = client.indexes.create(
                     name=self._index_name,
                     models=[
                         {
@@ -160,7 +160,7 @@ class TwelveLabsPegasus(Component):
         try:
             index_name = f"index_{int(time.time())}"
             self.log(f"Creating new index: {index_name}")
-            index = client.index.create(
+            index = client.indexes.create(
                 name=index_name,
                 models=[
                     {
@@ -203,7 +203,7 @@ class TwelveLabsPegasus(Component):
         while retries < max_retries:
             try:
                 self.log(f"Checking task status (attempt {retries + 1})")
-                result = client.task.retrieve(id=task_id)
+                result = client.tasks.retrieve(id=task_id)
                 consecutive_errors = 0  # Reset error counter on success
 
                 if result.status == "ready":
@@ -331,7 +331,7 @@ class TwelveLabsPegasus(Component):
                 self.status = f"Processing query (w/ video ID): {self._video_id} {self._message}"
                 self.log(self.status)
 
-                response = client.generate.text(
+                response = client.analyze(
                     video_id=self._video_id,
                     prompt=self._message,
                     temperature=self.temperature,
@@ -362,7 +362,7 @@ class TwelveLabsPegasus(Component):
                 return Message(text=f"Failed to get/create index: {e}")
 
             with Path(video_path).open("rb") as video_file:
-                task = client.task.create(index_id=self._index_id, file=video_file)
+                task = client.tasks.create(index_id=self._index_id, file=video_file)
             self._task_id = task.id
 
             # Wait for processing to complete
@@ -379,7 +379,7 @@ class TwelveLabsPegasus(Component):
                 self.status = f"Processing query: {self._message}"
                 self.log(self.status)
 
-                response = client.generate.text(
+                response = client.analyze(
                     video_id=self._video_id,
                     prompt=self._message,
                     temperature=self.temperature,

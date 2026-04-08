@@ -38,8 +38,11 @@ from app.db.models.signal_event import SignalEvent
 from app.db.models.signal_sequence_draft import SignalSequenceDraft
 # Champion alerts
 from app.db.models.champion_change_event import ChampionChangeEvent
+# Outmate-agentic backed agent runs (tenant-isolated)
+from app.db.models.agent_run import AgentRun
 
 __all__ = [
+    "AgentRun",
     "User",
     "DataProvider",
     "Company",

@@ -2,6 +2,7 @@ from langchain.agents import create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 
 from lfx.base.agents.agent import LCToolsAgentComponent
+from lfx.components.gtm_agents._tool_factory import build_tools_from_keys
 from lfx.base.models.unified_models import (
     get_language_model_options,
     get_llm,
@@ -19,70 +20,65 @@ from lfx.io import Output
 from lfx.schema.data import Data
 from lfx.schema.message import Message
 
-DEFAULT_SYSTEM_PROMPT = """You are an elite GTM automation agent with access to data enrichment and search tools.
-Your job is to research a prospect/company using your tools, then write a hyper-personalized cold email using ONLY real data.
+# FULL_SYSTEM_PROMPT — uncomment when you have a bigger model (original prompt preserved in git history)
 
-## CRITICAL RULES — FOLLOW EXACTLY:
+DEFAULT_SYSTEM_PROMPT = """You are a cold email writer. Research the prospect using ALL available tools, then write a hyper-personalized email.
 
-1. NEVER ask the user for more information. The user's message contains the company/person to research.
-2. ALWAYS start by calling your tools immediately. Do NOT respond with text first.
-3. Extract the company domain from the user's message (e.g., "Ramp (ramp.com)" → domain is "ramp.com").
-4. NEVER use placeholder text like [Prospect], [Company], [topic]. Use REAL names and data.
-5. NEVER make up data. If a tool returns no data, say so.
+TOOLS — Use ALL of these in order:
+- apollo_people_enrichment: Get prospect's title, seniority, email, work history. Use organization_name (NOT domain).
+- apollo_org_enrichment: Get company data (size, revenue, industry). Use organization_name (NOT domain).
+- hunter_email_finder: Find/verify email. Use first_name + last_name + company name.
+- neverbounce_email_verify: Verify the email is deliverable (if available).
+- pdl_person_enrichment: Get additional person data — skills, experience (if available).
+- tavily_search: Research the prospect — find LinkedIn posts, interviews, blog articles, recent talks.
+- duckduckgo_search: Find company news — product launches, funding, hiring, press coverage.
 
-## PIPELINE MODE — When receiving research data from upstream agents
-If the input contains prospect research briefs (with role context, company overview, pain points, ICP scores):
-1. Extract the prospect name, company, and domain from the research provided
-2. SKIP company/person research — you already have it from the upstream agent
-3. Focus on: finding their email (hunter_email_finder), verifying it (neverbounce_email_verify or hunter_email_verifier)
-4. Write a hyper-personalized cold email using the research data provided
-5. If the input contains multiple prospects, write a separate email for each one
-6. Use the enrichment data from upstream — do NOT redo research that's already provided
+WORKFLOW — Follow this exact sequence:
+Step 1: Call apollo_people_enrichment to get prospect profile + email
+Step 2: Call apollo_org_enrichment to get company data
+Step 3: Call hunter_email_finder to find/verify email
+Step 4: If neverbounce available, verify the email
+Step 5: Call tavily_search for: "[Prospect Name] [Company] LinkedIn interview blog recent"
+Step 6: Call duckduckgo_search for: "[Company] news product launch funding 2024 2025"
+Step 7: STOP. Write the email using ALL the data collected.
 
-## RESEARCH WORKFLOW — Follow these phases:
+EMAIL RULES:
+- Lead with THEM, not "I" or "We" — reference something specific about them
+- Use a real data point in the opening line (their recent post, company news, product launch)
+- Keep it to the specified length
+- Include subject line
+- End with the specified CTA
+- Never be generic — every sentence should have a reason based on research
+- If MULTIPLE prospects are provided, write a SEPARATE email for EACH prospect
 
-### Phase 1: Company Intelligence
-- Call apollo_org_enrichment (or pdl_company_enrichment) with the domain.
-- Call hunter_domain_search with the domain. NOTE the **email pattern** it returns (e.g., `{f}{last}` means first-initial + lastname@domain).
+IMPORTANT: You MUST use ALL available tools. Do not skip Hunter or DuckDuckGo. The workflow is:
+1. Apollo People (get person data)
+2. Apollo Org (get company data)
+3. Hunter (find/verify email)
+4. Tavily (research prospect — LinkedIn posts, interviews)
+5. DuckDuckGo (company news, product launches)
+6. Write the email
+7. If sendgrid_send_email is available: SEND the email using the tool. Pass to_email, to_name, subject, and the email body.
+   If SendGrid is NOT available: just output the email for the user to copy.
 
-### Phase 2: Find the Target Person
-If the user asks for a specific TITLE (e.g., "VP of Sales") and Hunter didn't return that person:
-- Search DuckDuckGo with the query: `Company "exact title"` (e.g., `Ramp "VP of Sales"`).
-- If that doesn't work, also try: `Company title site:linkedin.com` and `Company appoints title`.
-- READ the DuckDuckGo results carefully — names often appear in the snippets. Extract the full name.
-- NEVER give up after one search. Try at least 2-3 different search queries before concluding a person cannot be found.
+If you skip a tool, the email will be generic and low quality.
 
-If the user gives a specific NAME, skip straight to Phase 3.
+OUTPUT FORMAT — Write for EACH prospect:
 
-### Phase 3: Get & Verify the Email
-Once you have the person's name:
-- Call hunter_email_finder with first_name + last_name + domain.
-- If Hunter doesn't find an email, USE THE EMAIL PATTERN from Phase 1 to construct one yourself. For example, if the pattern is `{f}{last}` and the person is Max Freeman at ramp.com, the email is likely `mfreeman@ramp.com`.
-- Call neverbounce_email_verify (or hunter_email_verifier) to verify the email.
+---
+### Email for [Prospect Name]
 
-### Phase 4: Deep Person Enrichment
-- Call pdl_person_enrichment (or apollo_people_enrichment) with the verified email.
-- This gives you job history, education, social profiles — use these for personalization.
-- If the enrichment tool errors or returns no data, proceed with what you have — do NOT let one tool failure stop the entire workflow.
+**To:** [prospect name] <[email]>
+**Email Verified:** [yes/no/not checked]
+**Subject:** [subject using a real, specific data point]
 
-### Phase 5: Contextual Research
-- Call duckduckgo_search for recent news about the company AND the person.
-- Look for: funding rounds, product launches, role changes, interviews, podcast appearances.
+[email body]
 
-### Phase 6: Write the Email
-ONLY after completing the above phases, write the email using ALL the real data you collected.
+**Research Evidence Used:**
+- [list each real fact and which tool found it]
+---
 
-## IMPORTANT: Never Abandon the Workflow
-- If a tool returns an error or no data, SKIP it and continue with the next phase.
-- You MUST always produce an email at the end, even if some enrichment data is missing.
-- Use whatever real data you successfully collected. Partial data is better than no email.
-
-## Email Writing Rules
-- Reference SPECIFIC real data you found (funding amount, employee count, recent news)
-- Opening line: reference a real fact about the prospect or company
-- Never start with "I" — lead with THEM
-- Write at 8th-grade reading level, no jargon
-- Keep it short and direct"""
+If there are 2 prospects, write 2 separate emails. If 5, write 5."""
 
 
 class HyperPersonalisationAgentComponent(LCToolsAgentComponent):
@@ -109,6 +105,54 @@ class HyperPersonalisationAgentComponent(LCToolsAgentComponent):
             info="Model Provider API key",
             real_time_refresh=True,
             advanced=True,
+        ),
+        SecretStrInput(
+            name="tavily_api_key",
+            display_name="Tavily API Key",
+            info="Tavily key — AI-powered web search for company research. Get it at tavily.com.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="apollo_api_key",
+            display_name="Apollo API Key",
+            info="Apollo.io key — enables people search and company enrichment. Get it at app.apollo.io → Settings → API Keys.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="pdl_api_key",
+            display_name="PDL API Key",
+            info="People Data Labs key — enriches contacts with phone numbers and emails from 2.8B+ profiles. Get it at dashboard.peopledatalabs.com.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="hunter_api_key",
+            display_name="Hunter API Key",
+            info="Hunter.io key — finds emails by company domain. Get it at hunter.io/api-keys.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="neverbounce_api_key",
+            display_name="NeverBounce API Key",
+            info="NeverBounce key — verifies if email addresses are deliverable. Get it at app.neverbounce.com.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="sendgrid_api_key",
+            display_name="SendGrid API Key",
+            info="SendGrid key — lets the agent send emails directly after writing them. Get it at app.sendgrid.com → Settings → API Keys.",
+            required=False,
+            advanced=True,
+        ),
+        MessageTextInput(
+            name="sendgrid_sender_email",
+            display_name="SendGrid Sender Email",
+            info="Your verified sender email in SendGrid (e.g. outreach@outmate.ai). Required if SendGrid key is provided.",
+            required=False,
         ),
         MultilineInput(
             name="prospect_data",
@@ -228,6 +272,30 @@ class HyperPersonalisationAgentComponent(LCToolsAgentComponent):
         logger = logging.getLogger("outmate.gtm_agents.hyper_personalisation")
 
         llm = self._get_llm()
+        # 6-7 tool calls + final email = need room
+        self.max_iterations = 12
+
+        # Build ALL tools from API keys — search + enrichment + sending
+        auto_tools = build_tools_from_keys(
+            tavily_api_key=getattr(self, "tavily_api_key", "") or "",
+            apollo_api_key=getattr(self, "apollo_api_key", "") or "",
+            pdl_api_key=getattr(self, "pdl_api_key", "") or "",
+            hunter_api_key=getattr(self, "hunter_api_key", "") or "",
+            neverbounce_api_key=getattr(self, "neverbounce_api_key", "") or "",
+            sendgrid_api_key=getattr(self, "sendgrid_api_key", "") or "",
+            sendgrid_sender_email=getattr(self, "sendgrid_sender_email", "") or "",
+            # Keep DDG from canvas + Tavily from key — use both
+            include_duckduckgo=not bool(getattr(self, "tavily_api_key", "")),
+            include_apollo_org=True,
+            include_apollo_people=True,
+            include_pdl_person=True,
+            include_hunter_finder=True,
+            include_hunter_domain=False,
+        )
+        # Keep external tools (DDG from canvas) + add internal tools
+        external_tools = list(self.tools or [])
+        self.tools = external_tools + auto_tools
+
         logger.warning(f"[HyperPersonalisation] LLM type: {type(llm).__name__}, model: {getattr(llm, 'model_name', getattr(llm, 'model', 'unknown'))}")
 
         # Log tools

@@ -1,6 +1,7 @@
 from lfx.custom.custom_component.component import Component
 from lfx.io import (
     BoolInput,
+    DropdownInput,
     MultilineInput,
     Output,
     SecretStrInput,
@@ -30,15 +31,12 @@ class FirecrawlMapApi(Component):
             info="List of URLs to create maps from (separated by commas or new lines).",
             tool_mode=True,
         ),
-        BoolInput(
-            name="ignore_sitemap",
-            display_name="Ignore Sitemap",
-            info="When true, the sitemap.xml file will be ignored during crawling.",
-        ),
-        BoolInput(
-            name="sitemap_only",
-            display_name="Sitemap Only",
-            info="When true, only links found in the sitemap will be returned.",
+        DropdownInput(
+            name="sitemap",
+            display_name="Sitemap",
+            options=["include", "skip", "only"],
+            value="include",
+            info="How to handle the sitemap: 'include' uses it normally, 'skip' ignores it, 'only' returns only sitemap links.",
         ),
         BoolInput(
             name="include_subdomains",
@@ -70,8 +68,7 @@ class FirecrawlMapApi(Component):
             raise ValueError(msg)
 
         params = {
-            "ignoreSitemap": self.ignore_sitemap,
-            "sitemapOnly": self.sitemap_only,
+            "sitemap": self.sitemap,
             "includeSubdomains": self.include_subdomains,
         }
 

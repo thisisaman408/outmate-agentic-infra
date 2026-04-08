@@ -95,30 +95,39 @@ function getAuthHeaders(): Record<string, string> {
 // ── Chat History API ─────────────────────────────────────────
 
 async function fetchChatSessions(): Promise<ChatSession[]> {
-  const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
-    headers: getAuthHeaders(),
-  })
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.sessions || []
+  try {
+    const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.sessions || []
+  } catch {
+    // Network failure / CORS / backend down — degrade to empty list silently
+    return []
+  }
 }
 
 async function fetchChatSession(sessionId: string): Promise<{ messages: Message[]; title: string } | null> {
-  const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
-    headers: getAuthHeaders(),
-  })
-  if (!res.ok) return null
-  const data = await res.json()
-  return {
-    messages: (data.messages || []).map((m: any) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      createdAt: m.createdAt,
-      links: m.links || undefined,
-      tags: m.tags || undefined,
-    })),
-    title: data.title,
+  try {
+    const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return {
+      messages: (data.messages || []).map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+        links: m.links || undefined,
+        tags: m.tags || undefined,
+      })),
+      title: data.title,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -127,36 +136,44 @@ async function saveChatSession(
   messages: Message[],
   title?: string
 ): Promise<string | null> {
-  const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
-    method: "POST",
-    headers: {
-      ...getAuthHeaders(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      session_id: sessionId,
-      title,
-      messages: messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        createdAt: m.createdAt,
-        links: m.links || null,
-        tags: m.tags || null,
-      })),
-    }),
-  })
-  if (!res.ok) return null
-  const data = await res.json()
-  return data.id || null
+  try {
+    const res = await fetch(`${API_BASE}/api/copilot/chat-history`, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        session_id: sessionId,
+        title,
+        messages: messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+          links: m.links || null,
+          tags: m.tags || null,
+        })),
+      }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.id || null
+  } catch {
+    return null
+  }
 }
 
 async function deleteChatSession(sessionId: string): Promise<boolean> {
-  const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
-    method: "DELETE",
-    headers: getAuthHeaders(),
-  })
-  return res.ok
+  try {
+    const res = await fetch(`${API_BASE}/api/copilot/chat-history/${sessionId}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 // ── Hook ─────────────────────────────────────────────────────

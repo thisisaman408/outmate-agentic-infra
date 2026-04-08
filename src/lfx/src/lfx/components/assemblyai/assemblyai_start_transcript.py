@@ -78,10 +78,10 @@ class AssemblyAITranscriptionJobCreator(Component):
             name="speech_model",
             display_name="Speech Model",
             options=[
-                "best",
-                "nano",
+                "universal-3-pro",
+                "universal-2",
             ],
-            value="best",
+            value="universal-3-pro",
             info="The speech model to use for the transcription",
             advanced=True,
         ),
@@ -148,7 +148,7 @@ class AssemblyAITranscriptionJobCreator(Component):
         language_code = self.language_code or None
 
         config = aai.TranscriptionConfig(
-            speech_model=self.speech_model,
+            speech_models=[self.speech_model],
             language_detection=self.language_detection,
             language_code=language_code,
             speaker_labels=self.speaker_labels,

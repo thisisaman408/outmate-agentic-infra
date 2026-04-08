@@ -93,6 +93,17 @@ export const updateMessage = (updatedMessage: Message) => {
       }
       // Initialize text if empty
       newMessage.text = newMessage.text || "";
+    } else if (!isStreamingToken && existingMessage) {
+      // Complete message replacing a partial/streamed one.
+      // If the incoming complete message has empty text but the existing
+      // message accumulated text from streaming tokens, preserve it.
+      if (
+        (!newMessage.text || !newMessage.text.trim()) &&
+        existingMessage.text &&
+        existingMessage.text.trim()
+      ) {
+        newMessage.text = existingMessage.text;
+      }
     }
     // For non-streaming messages (add_message), always replace completely - don't accumulate
 

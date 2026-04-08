@@ -8,7 +8,7 @@ import { customDefaultShortcuts } from "../customization/constants";
 import type { languageMap } from "../types/components";
 
 export const DEFAULT_SESSION_NAME = "Default Session";
-export const NEW_SESSION_NAME = "New Session";
+export const NEW_SESSION_NAME = "Chat";
 export const SLIDING_TRANSITION_MS = 300;
 
 const getEnvVar = <T = string | undefined>(
@@ -861,7 +861,7 @@ export const TITLE_ERROR_UPDATING_COMPONENT =
 
 export const EMPTY_INPUT_SEND_MESSAGE = "No input message provided.";
 
-export const EMPTY_OUTPUT_SEND_MESSAGE = "Message empty.";
+export const EMPTY_OUTPUT_SEND_MESSAGE = "No output was generated for this step.";
 
 export const TABS_ORDER = [
   "curl",
@@ -938,7 +938,7 @@ export const DEFAULT_PLACEHOLDER = "Type something...";
 export const DEFAULT_TOOLSET_PLACEHOLDER = "Used as a tool";
 
 export const SAVE_API_KEY_ALERT = "API key saved successfully";
-export const PLAYGROUND_BUTTON_NAME = "Playground";
+export const PLAYGROUND_BUTTON_NAME = "Play";
 export const POLLING_MESSAGES = {
   ENDPOINT_NOT_AVAILABLE: "Endpoint not available",
   STREAMING_NOT_SUPPORTED: "Streaming not supported",

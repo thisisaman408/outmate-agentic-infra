@@ -387,13 +387,15 @@ def run(
         ):
             loop_type = "none"  # Preserve pre-configured WindowsSelectorEventLoopPolicy
 
+        is_dev = os.environ.get("LFX_DEV", "").lower() in ("1", "true") or dev
         uvicorn.run(
             app_spec,
             host=host,
             port=port,
             log_level=log_level,
-            reload=False,
-            workers=get_number_of_workers(workers),
+            reload=bool(is_dev),
+            reload_dirs=["src/lfx/src/lfx", "src/backend/base/outmate"] if is_dev else None,
+            workers=1 if is_dev else get_number_of_workers(workers),
             loop=loop_type,
             factory=True,
         )
@@ -626,48 +628,17 @@ def print_banner(host: str, port: int, protocol: str) -> None:
         arrow = "→"
         status_icon = "🟢"
 
-    info_text = (
-        f"{github_icon} GitHub: Star for updates {arrow} https://github.com/outmate-ai/outmate"
-        f"{discord_icon} Discord: Join for support {arrow} https://discord.com/invite/EqksyE2EX9"
-    )
-    telemetry_text = (
-        (
-            "We collect anonymous usage data to improve Outmate\n"
-            "To opt out, set: [bold]DO_NOT_TRACK=true[/bold] in your environment."
-        )
-        if os.getenv("DO_NOT_TRACK", os.getenv("OUTMATE_DO_NOT_TRACK", "False")).lower() != "true"
-        else (
-            "We are [bold]not[/bold] collecting anonymous usage data to improve Outmate\n"
-            "To contribute, set: [bold]DO_NOT_TRACK=false[/bold] in your environment."
-        )
-    )
     access_host = get_best_access_host(host, port)
-    access_link = f"[bold]{status_icon} Open Outmate{arrow}[/bold] [link={protocol}://{access_host}:{port}]{protocol}://{access_host}:{port}[/link]"
+    access_link = f"[bold]{status_icon} Open Outmate {arrow}[/bold] [link={protocol}://{access_host}:{port}]{protocol}://{access_host}:{port}[/link]"
 
-    message = f"{title}\n{info_text}\n\n{telemetry_text}\n\n{access_link}"
+    message = f"{title}\n{access_link}"
 
-    # Handle Unicode encoding errors on Windows
     try:
-        console.print()  # Add line break before banner
-        console.print(Panel.fit(message, border_style="#7528FC", padding=(1, 2)))
+        console.print()
+        console.print(Panel.fit(message, border_style="#E8614D", padding=(1, 2)))
     except UnicodeEncodeError:
-        # Fallback to a simpler banner without emojis for Windows systems with encoding issues
-        fallback_message = (
-            f"Welcome to {package_name}\n\n"
-            "* GitHub: https://github.com/outmate-ai/outmate"
-            "# Discord: https://discord.com/invite/EqksyE2EX9\n\n"
-            f"{telemetry_text}\n\n"
-            f"[OK] Open Outmate-> {protocol}://{access_host}:{port}"
-        )
-        try:
-            console.print()  # Add line break before fallback banner
-            console.print(Panel.fit(fallback_message, border_style="#7528FC", padding=(1, 2)))
-        except UnicodeEncodeError:
-            # Last resort: use logger instead of print
-            logger.info(f"Welcome to {package_name}")
-            logger.info("GitHub: https://github.com/outmate-ai/outmate")
-            logger.info("Discord: https://discord.com/invite/outmate")
-            logger.info(f"Open Outmate {protocol}://{access_host}:{port}")
+        logger.info(f"Welcome to {package_name}")
+        logger.info(f"Open Outmate {protocol}://{access_host}:{port}")
 
 
 @app.command()

@@ -36,6 +36,18 @@ AWS_MODELS_DETAILED = [
     create_model_metadata(
         provider="Amazon Bedrock", name="anthropic.claude-instant-v1", icon="Amazon", tool_calling=True
     ),
+    create_model_metadata(
+        provider="Amazon Bedrock", name="anthropic.claude-sonnet-4-20250514-v1:0", icon="Amazon", tool_calling=True
+    ),
+    create_model_metadata(
+        provider="Amazon Bedrock", name="anthropic.claude-opus-4-20250514-v1:0", icon="Amazon", tool_calling=True
+    ),
+    create_model_metadata(
+        provider="Amazon Bedrock", name="anthropic.claude-sonnet-4-5-20250929-v1:0", icon="Amazon", tool_calling=True
+    ),
+    create_model_metadata(
+        provider="Amazon Bedrock", name="anthropic.claude-haiku-4-5-20251001-v1:0", icon="Amazon", tool_calling=True
+    ),
     # AI21 Labs Models
     create_model_metadata(provider="Amazon Bedrock", name="ai21.jamba-instruct-v1:0", icon="Amazon", tool_calling=True),
     create_model_metadata(provider="Amazon Bedrock", name="ai21.j2-mid-v1", icon="Amazon", tool_calling=True),
@@ -82,6 +94,9 @@ AWS_MODELS_DETAILED = [
     ),
     create_model_metadata(
         provider="Amazon Bedrock", name="meta.llama3-2-90b-instruct-v1:0", icon="Amazon", tool_calling=True
+    ),
+    create_model_metadata(
+        provider="Amazon Bedrock", name="meta.llama3-3-70b-instruct-v1:0", icon="Amazon", tool_calling=True
     ),
     # Mistral AI Models
     create_model_metadata(

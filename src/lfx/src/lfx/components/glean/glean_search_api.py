@@ -26,7 +26,7 @@ class GleanAPIWrapper(BaseModel):
 
     glean_api_url: str
     glean_access_token: str
-    act_as: str = "Outmate component@datastax.com"  # TODO: Detect this
+    act_as: str = ""
 
     def _prepare_request(
         self,
@@ -43,7 +43,7 @@ class GleanAPIWrapper(BaseModel):
             "url": urljoin(url, "search"),
             "headers": {
                 "Authorization": f"Bearer {self.glean_access_token}",
-                "X-Scio-ActAs": self.act_as,
+                "X-Glean-ActAs": self.act_as,
             },
             "payload": {
                 "query": query,
@@ -111,6 +111,7 @@ class GleanSearchAPIComponent(LCToolComponent):
     inputs = [
         StrInput(name="glean_api_url", display_name="Glean API URL", required=True),
         SecretStrInput(name="glean_access_token", display_name="Glean Access Token", required=True),
+        StrInput(name="act_as", display_name="Act As", required=True, info="Email address to use for Glean's X-Glean-ActAs header."),
         MultilineInput(name="query", display_name="Query", required=True, tool_mode=True),
         IntInput(name="page_size", display_name="Page Size", value=10),
         NestedDictInput(name="request_options", display_name="Request Options", required=False),
@@ -120,6 +121,7 @@ class GleanSearchAPIComponent(LCToolComponent):
         wrapper = self._build_wrapper(
             glean_api_url=self.glean_api_url,
             glean_access_token=self.glean_access_token,
+            act_as=self.act_as,
         )
 
         tool = StructuredTool.from_function(
@@ -157,10 +159,12 @@ class GleanSearchAPIComponent(LCToolComponent):
         self,
         glean_api_url: str,
         glean_access_token: str,
+        act_as: str = "",
     ):
         return GleanAPIWrapper(
             glean_api_url=glean_api_url,
             glean_access_token=glean_access_token,
+            act_as=act_as,
         )
 
     def fetch_content_dataframe(self) -> DataFrame:

@@ -1,9 +1,12 @@
 from langchain_mistralai import ChatMistralAI
 from pydantic.v1 import SecretStr
 
+from lfx.base.models.mistral_constants import MISTRAL_MODELS
+from lfx.base.models.mistral_model_discovery import get_mistral_models
 from lfx.base.models.model import LCModelComponent
 from lfx.field_typing import LanguageModel
 from lfx.io import BoolInput, DropdownInput, FloatInput, IntInput, SecretStrInput, StrInput
+from lfx.log.logger import logger
 
 
 class MistralAIModelComponent(LCModelComponent):
@@ -23,16 +26,12 @@ class MistralAIModelComponent(LCModelComponent):
         DropdownInput(
             name="model_name",
             display_name="Model Name",
+            info="The name of the model to use. Add your Mistral API key to access additional available models.",
             advanced=False,
-            options=[
-                "open-mixtral-8x7b",
-                "open-mixtral-8x22b",
-                "mistral-small-latest",
-                "mistral-medium-latest",
-                "mistral-large-latest",
-                "codestral-latest",
-            ],
-            value="codestral-latest",
+            options=MISTRAL_MODELS,
+            value="mistral-large-latest",
+            refresh_button=True,
+            combobox=True,
         ),
         StrInput(
             name="mistral_api_base",
@@ -48,6 +47,7 @@ class MistralAIModelComponent(LCModelComponent):
             advanced=False,
             required=True,
             value="MISTRAL_API_KEY",
+            real_time_refresh=True,
         ),
         FloatInput(
             name="temperature",
@@ -92,6 +92,56 @@ class MistralAIModelComponent(LCModelComponent):
             value=False,
         ),
     ]
+
+    def get_models(self) -> list[str]:
+        """Get available Mistral models using the dynamic discovery system.
+
+        This method uses the mistral_model_discovery module which:
+        - Fetches models directly from Mistral API (/v1/models)
+        - Caches results for 24 hours
+        - Falls back to hardcoded list if API fails
+
+        Returns:
+            List of available model IDs
+        """
+        try:
+            api_key = self.api_key if hasattr(self, "api_key") and self.api_key else None
+            base_url = self.mistral_api_base or "https://api.mistral.ai"
+            # Strip /v1 suffix if present since the discovery module adds it
+            base_url = base_url.rstrip("/")
+            if base_url.endswith("/v1"):
+                base_url = base_url[:-3]
+
+            models_metadata = get_mistral_models(api_key=api_key, base_url=base_url)
+
+            # Filter out non-LLM models (embeddings, moderation, etc.)
+            model_ids = [
+                model_id for model_id, metadata in models_metadata.items() if not metadata.get("not_supported", False)
+            ]
+
+            logger.info(f"Loaded {len(model_ids)} Mistral models")
+        except (ValueError, KeyError, TypeError, ImportError) as e:
+            logger.exception(f"Error getting Mistral model names: {e}")
+            return MISTRAL_MODELS
+        else:
+            return model_ids
+
+    def update_build_config(self, build_config: dict, field_value: str, field_name: str | None = None):
+        if field_name in {"mistral_api_base", "model_name", "api_key"} and field_value:
+            try:
+                if len(self.api_key) != 0:
+                    try:
+                        ids = self.get_models()
+                    except (ValueError, KeyError, TypeError, ImportError) as e:
+                        logger.exception(f"Error getting Mistral model names: {e}")
+                        ids = MISTRAL_MODELS
+                    build_config.setdefault("model_name", {})
+                    build_config["model_name"]["options"] = ids
+                    build_config["model_name"].setdefault("value", ids[0] if ids else "mistral-large-latest")
+            except (ValueError, KeyError, TypeError, AttributeError) as e:
+                msg = f"Error getting Mistral model names: {e}"
+                raise ValueError(msg) from e
+        return build_config
 
     def build_model(self) -> LanguageModel:  # type: ignore[type-var]
         try:

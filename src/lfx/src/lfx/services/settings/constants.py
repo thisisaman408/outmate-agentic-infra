@@ -36,6 +36,16 @@ VARIABLES_TO_GET_FROM_ENVIRONMENT = [
     "WATSONX_APIKEY",
     "WATSONX_PROJECT_ID",
     "WATSONX_URL",
+    # Outmate sidebar agents (managed by Outmate, not BYOK):
+    # the LeadDiscoveryOutreachAgent flow looks these up via load_from_db=true,
+    # which seeds them into per-user variables on first login from container env.
+    "OPENROUTER_API_KEY",
+    "APOLLO_API_KEY",
+    "HUNTER_API_KEY",
+    "APIFY_API_KEY",
+    "PDL_API_KEY",
+    "BRIGHTDATA_API_KEY",
+    "FIRECRAWL_API_KEY",
 ]
 
 # Agentic experience specific variables

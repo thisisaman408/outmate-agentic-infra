@@ -5,6 +5,9 @@ import { useSendMessage } from "@/components/core/playgroundComponent/chat-view/
 import { useGetFlowId } from "@/components/core/playgroundComponent/hooks/use-get-flow-id";
 import { AnimatedConditional } from "@/components/ui/animated-close";
 import { useSimpleSidebar } from "@/components/ui/simple-sidebar";
+import { useAgentDetection } from "@/components/play/hooks/useAgentDetection";
+import PlayPanel from "@/components/play/PlayPanel";
+import "@/components/play/dashboards/registry";
 import useFlowStore from "@/stores/flowStore";
 import { useMessagesStore } from "@/stores/messagesStore";
 import { useUtilityStore } from "@/stores/utilityStore";
@@ -30,6 +33,7 @@ export function FlowPageSlidingContainerContent({
 }: FlowPageSlidingContainerContentProps) {
   const currentFlowId = useGetFlowId();
   const { setOpen, setWidth } = useSimpleSidebar();
+  const detectedAgent = useAgentDetection();
   const inputs = useFlowStore((state) => state.inputs);
   const nodes = useFlowStore((state) => state.nodes);
   const isBuilding = useFlowStore((state) => state.isBuilding);
@@ -182,6 +186,49 @@ export function FlowPageSlidingContainerContent({
     setCurrentSessionId(sessionId);
     setOpenLogsModal(true);
   };
+
+  const chatUI = (
+    <div className="flex h-full flex-col overflow-hidden">
+      <StickToBottom
+        instance={stickyInstance}
+        className="flex-1 min-h-0 overflow-hidden"
+      >
+        <StickToBottom.Content className="flex flex-col min-h-full overflow-x-hidden">
+          <div className="flex flex-col w-full">
+            <Messages
+              visibleSession={currentSessionId ?? currentFlowId ?? null}
+              playgroundPage={true}
+            />
+          </div>
+        </StickToBottom.Content>
+        <SafariScrollFix />
+      </StickToBottom>
+      <div className="flex-shrink-0 p-4">
+        <ChatInput
+          noInput={noInput}
+          files={files}
+          setFiles={setFiles}
+          isDragging={isDragging}
+          sendMessage={sendMessage}
+        />
+      </div>
+    </div>
+  );
+
+  if (detectedAgent) {
+    return (
+      <div className="h-full w-full muted shadow-lg flex flex-col relative z-[50]">
+        <PlayPanel
+          agent={detectedAgent}
+          flowId={currentFlowId}
+          sessionId={currentSessionId ?? currentFlowId}
+          sendMessage={sendMessage}
+          chatContent={chatUI}
+          onClose={handleClose}
+        />
+      </div>
+    );
+  }
 
   return (
     <div

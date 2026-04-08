@@ -6,7 +6,7 @@ import { ENABLE_DATASTAX_outmate } from "@/customization/feature-flags";
 import useFlowStore from "@/stores/flowStore";
 import useFlowsManagerStore from "@/stores/flowsManagerStore";
 import Convert from "ansi-to-html";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Robot from "../../../../../assets/robot.png";
 import IconComponent, {
     ForwardedIconComponent,
@@ -125,7 +125,57 @@ export default function ChatMessage({
   } catch (_e) {
     // console.error(e);
   }
-  const isEmpty = decodedMessage?.trim() === "";
+  const rawEmpty = decodedMessage?.trim() === "";
+
+  // Count tool calls from content_blocks
+  const toolCallCount =
+    chat.content_blocks?.reduce(
+      (count: number, block: any) =>
+        count +
+        (block.contents
+          ? block.contents.filter((c: any) => c.type === "tool_use").length
+          : 0),
+      0,
+    ) ?? 0;
+
+  // If the message text is empty but tool calls were made,
+  // compile the tool outputs and display them directly.
+  const hasFallback = rawEmpty && toolCallCount > 0;
+  const compiledOutput = useMemo(() => {
+    if (!hasFallback || !chat.content_blocks?.length) return "";
+    const parts: string[] = [];
+    for (const block of chat.content_blocks) {
+      if (!block.contents) continue;
+      for (const content of block.contents as any[]) {
+        if (content.type !== "tool_use") continue;
+        const output = content.output;
+        if (output === null || output === undefined) continue;
+        if (typeof output === "string") {
+          const trimmed = output.trim();
+          if (trimmed) parts.push(trimmed);
+        } else if (typeof output === "object") {
+          try {
+            const lines: string[] = [];
+            for (const [key, value] of Object.entries(output as Record<string, any>)) {
+              if (value === null || value === undefined || value === "") continue;
+              const label = key.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^\w/, (c) => c.toUpperCase());
+              lines.push(`**${label}:** ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+            }
+            if (lines.length > 0) parts.push(lines.join("\n"));
+          } catch {
+            parts.push(JSON.stringify(output, null, 2));
+          }
+        }
+      }
+    }
+    return parts.join("\n\n");
+  }, [hasFallback, chat.content_blocks]);
+  const hasCompiledData = compiledOutput.trim().length > 0;
+  const isEmpty = rawEmpty && !hasFallback;
+  const effectiveMessage = hasFallback
+    ? (hasCompiledData ? compiledOutput : decodedMessage)
+    : decodedMessage;
+
   const { mutate: updateMessageMutation } = useUpdateMessage();
 
   const handleEditMessage = (message: string) => {
@@ -343,16 +393,20 @@ export default function ChatMessage({
                         className="flex w-full flex-col"
                       >
                         {chatMessage === "" && isBuilding && lastMessage ? (
-                          <IconComponent
-                            name="MoreHorizontal"
-                            className="h-8 w-8 animate-pulse"
-                          />
+                          <div className="flex items-center gap-1.5 py-2">
+                            <div className="flex gap-1">
+                              <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:0ms]" />
+                              <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:150ms]" />
+                              <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:300ms]" />
+                            </div>
+                            <span className="text-xs text-muted-foreground/50 ml-1">Thinking...</span>
+                          </div>
                         ) : (
                           <div className="min-h-8 w-full">
                             {editMessage ? (
                               <EditMessageField
                                 key={`edit-message-${chat.id}`}
-                                message={decodedMessage}
+                                message={effectiveMessage}
                                 onEdit={(message) => {
                                   handleEditMessage(message);
                                 }}
@@ -363,7 +417,7 @@ export default function ChatMessage({
                                 isAudioMessage={isAudioMessage}
                                 chat={chat}
                                 isEmpty={isEmpty}
-                                chatMessage={chatMessage}
+                                chatMessage={effectiveMessage}
                                 editedFlag={editedFlag}
                               />
                             )}

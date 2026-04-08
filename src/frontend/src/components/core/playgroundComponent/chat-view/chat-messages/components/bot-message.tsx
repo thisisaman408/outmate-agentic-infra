@@ -3,6 +3,7 @@ import IconComponent, {
     ForwardedIconComponent,
 } from "@/components/common/genericIconComponent";
 import { ContentBlockDisplay } from "@/components/core/chatComponents/ContentBlockDisplay";
+import SmartResultRenderer from "@/components/core/chatComponents/SmartResultRenderer";
 import { useUpdateMessage } from "@/controllers/API/queries/messages";
 import { CustomMarkdownField } from "@/customization/components/custom-markdown-field";
 import useAlertStore from "@/stores/alertStore";
@@ -10,7 +11,7 @@ import useFlowStore from "@/stores/flowStore";
 import useFlowsManagerStore from "@/stores/flowsManagerStore";
 import type { chatMessagePropsType } from "@/types/components";
 import { cn } from "@/utils/utils";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useMessageDuration } from "../hooks/use-message-duration";
 import { useStreamingMessage } from "../hooks/use-streaming-message";
 import {
@@ -18,9 +19,57 @@ import {
     getContentBlockState,
 } from "../utils/content-blocks";
 import { convertFiles } from "../utils/convert-files";
-import { formatSeconds } from "../utils/format";
 import EditMessageField from "./edit-message-field";
 import { EditMessageButton } from "./message-options";
+
+/**
+ * Extracts all tool outputs from content_blocks and compiles them into
+ * a single displayable text. Used when the agent produces tool call data
+ * but no final synthesized message.
+ */
+function compileToolOutputs(contentBlocks: any[] | undefined): string {
+  if (!contentBlocks?.length) return "";
+
+  const parts: string[] = [];
+
+  for (const block of contentBlocks) {
+    if (!block.contents) continue;
+    for (const content of block.contents) {
+      if (content.type !== "tool_use") continue;
+
+      const output = content.output;
+      if (output === null || output === undefined) continue;
+
+      if (typeof output === "string") {
+        const trimmed = output.trim();
+        if (trimmed) parts.push(trimmed);
+      } else if (typeof output === "object") {
+        // For JSON outputs, convert to key-value markdown
+        try {
+          const obj = output as Record<string, any>;
+          const lines: string[] = [];
+          for (const [key, value] of Object.entries(obj)) {
+            if (value === null || value === undefined || value === "") continue;
+            const label = key
+              .replace(/_/g, " ")
+              .replace(/([a-z])([A-Z])/g, "$1 $2")
+              .replace(/^\w/, (c) => c.toUpperCase());
+            if (typeof value === "object") {
+              lines.push(`**${label}:** ${JSON.stringify(value)}`);
+            } else {
+              lines.push(`**${label}:** ${String(value)}`);
+            }
+          }
+          if (lines.length > 0) parts.push(lines.join("\n"));
+        } catch {
+          parts.push(JSON.stringify(output, null, 2));
+        }
+      }
+    }
+  }
+
+  return parts.join("\n\n");
+}
 
 export const BotMessage = memo(
   ({ chat, lastMessage, updateChat, playgroundPage }: chatMessagePropsType) => {
@@ -39,8 +88,33 @@ export const BotMessage = memo(
       updateChat,
     });
 
-    const isEmpty = decodedMessage?.trim() === "";
+    const rawEmpty = decodedMessage?.trim() === "";
     const chatMessage = chat.message ? chat.message.toString() : "";
+
+    // Count tool calls from content_blocks
+    const toolCallCount =
+      chat.content_blocks?.reduce(
+        (count, block) =>
+          count +
+          (block.contents
+            ? block.contents.filter((c) => c.type === "tool_use").length
+            : 0),
+        0,
+      ) ?? 0;
+
+    // If the message text is empty but tool calls were made,
+    // automatically compile and display the tool outputs instead of
+    // hiding them behind the collapsed steps accordion.
+    const hasFallback = rawEmpty && !isStreaming && toolCallCount > 0;
+    const compiledOutput = useMemo(
+      () => (hasFallback ? compileToolOutputs(chat.content_blocks) : ""),
+      [hasFallback, chat.content_blocks],
+    );
+    const hasCompiledData = compiledOutput.trim().length > 0;
+    const isEmpty = rawEmpty && !hasFallback;
+    const effectiveMessage = hasFallback
+      ? (hasCompiledData ? compiledOutput : decodedMessage)
+      : decodedMessage;
     const { mutate: updateMessageMutation } = useUpdateMessage();
 
     const handleEditMessage = (message: string) => {
@@ -127,17 +201,20 @@ export const BotMessage = memo(
 
     return (
       <>
-        <div className="w-full word-break-break-word mt-2">
+        <div className="w-full word-break-break-word mt-3">
           <div
             className={cn(
-              "group relative flex w-full flex-col gap-3 rounded-md px-2 py-3",
-              editMessage ? "" : "hover:bg-muted",
+              "group relative flex w-full flex-col gap-3 rounded-xl px-4 py-4",
+              "bg-gradient-to-b from-muted/20 to-transparent",
+              "border border-border/30",
+              "transition-all duration-200",
+              editMessage ? "" : "hover:border-border/50 hover:shadow-sm",
             )}
           >
             <div className="flex w-full items-start gap-3">
               {(thinkingActive || displayTime > 0 || chatMessage !== "") && (
                 <div
-                  className="relative hidden h-6 w-6 mt-[-1px] flex-shrink-0 items-center justify-center overflow-hidden rounded bg-white text-2xl @[45rem]/chat-panel:!flex border-0"
+                  className="relative hidden h-7 w-7 mt-[-1px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary/10 text-2xl @[45rem]/chat-panel:!flex border-0"
                   style={
                     chat.properties?.background_color
                       ? { backgroundColor: chat.properties.background_color }
@@ -145,29 +222,22 @@ export const BotMessage = memo(
                   }
                 >
                   <div className="flex h-5 w-5 items-center justify-center">
-                    <OutmateLogo className="h-4 w-4 text-black" />
+                    <OutmateLogo className="h-4 w-4 text-primary" />
                   </div>
                 </div>
               )}
 
               <div className="flex w-full flex-col min-w-0">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-0.5">
-                  {!thinkingActive && displayTime > 0 && (
+                {/* Subtle completion indicator — no timing shown to users */}
+                {!thinkingActive && displayTime > 0 && !isBuilding && (
+                  <div className="flex items-center gap-1.5 mb-1">
                     <ForwardedIconComponent
-                      name="Check"
-                      className="h-4 w-4 text-emerald-400"
+                      name="CheckCircle"
+                      className="h-3.5 w-3.5 text-emerald-500"
                     />
-                  )}
-                  <span>
-                    {thinkingActive && displayTime > 0 ? (
-                      <span>Running... {formatSeconds(displayTime)}</span>
-                    ) : !thinkingActive && displayTime > 0 ? (
-                      <span className="text-muted-foreground">
-                        Finished in {formatSeconds(displayTime)}
-                      </span>
-                    ) : null}
-                  </span>
-                </div>
+                    <span className="text-[11px] text-muted-foreground/60">Done</span>
+                  </div>
+                )}
 
                 {((chat.content_blocks && chat.content_blocks.length > 0) ||
                   (isBuilding && lastMessage)) && (
@@ -199,16 +269,20 @@ export const BotMessage = memo(
                           {(chatMessage === "" || (isEmpty && !isStreaming)) &&
                           isBuilding &&
                           lastMessage ? (
-                            <IconComponent
-                              name="MoreHorizontal"
-                              className="h-8 w-8 animate-pulse"
-                            />
+                            <div className="flex items-center gap-1.5 py-2">
+                              <div className="flex gap-1">
+                                <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:0ms]" />
+                                <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:150ms]" />
+                                <span className="h-2 w-2 rounded-full bg-primary/40 animate-bounce [animation-delay:300ms]" />
+                              </div>
+                              <span className="text-xs text-muted-foreground/50 ml-1">Thinking...</span>
+                            </div>
                           ) : (
                             <div className="w-full">
                               {editMessage ? (
                                 <EditMessageField
                                   key={`edit-message-${chat.id}`}
-                                  message={decodedMessage}
+                                  message={effectiveMessage}
                                   onEdit={handleEditMessage}
                                   onCancel={() => setEditMessage(false)}
                                 />
@@ -218,7 +292,7 @@ export const BotMessage = memo(
                                     isAudioMessage={isAudioMessage}
                                     chat={chat}
                                     isEmpty={isEmpty && !isStreaming}
-                                    chatMessage={decodedMessage}
+                                    chatMessage={effectiveMessage}
                                     editedFlag={editedFlag}
                                   />
                                 </>

@@ -93,8 +93,6 @@ class Mem0MemoryComponent(LCChatMemoryComponent):
         try:
             if not self.mem0_api_key:
                 return Memory.from_config(config_dict=dict(self.mem0_config)) if self.mem0_config else Memory()
-            if self.mem0_config:
-                return MemoryClient.from_config(api_key=self.mem0_api_key, config_dict=dict(self.mem0_config))
             return MemoryClient(api_key=self.mem0_api_key)
         except ImportError as e:
             msg = "Mem0 is not properly installed. Please install it with 'pip install -U mem0ai'."
