@@ -43,7 +43,7 @@ class DatabaseFinderService:
     """
 
     ZENROWS_BASE = "https://api.zenrows.com/v1/"
-    DEFAULT_TIMEOUT = 120.0
+    DEFAULT_TIMEOUT = 60.0  # LinkedIn via mode=auto can take 30-50s
 
     # Characters outside basic Latin + common punctuation → strip them
     # This removes Hindi (Devanagari), Chinese, Arabic, emoji, etc.
@@ -86,7 +86,14 @@ class DatabaseFinderService:
         autoparse: bool = False,
         retries: int = 3,
     ) -> str:
-        """Fetch a page through ZenRows proxy with retry logic for 429/5xx."""
+        """Fetch a page through ZenRows proxy.
+
+        Retry policy:
+        - 429 (rate limit): retry with longer backoff (plan concurrency limit)
+        - 5xx / ReadTimeout / ConnectError: retry with backoff
+        - 422/400 (param conflict or unscrapable): fail immediately (permanent)
+        - 402 (credits): fail immediately
+        """
         if not self.zenrows_api_key:
             raise DatabaseFinderError("ZENROWS_API_KEY is not configured", 503)
 
@@ -94,22 +101,15 @@ class DatabaseFinderService:
             "apikey": self.zenrows_api_key,
             "url": url,
         }
-        
-        # Determine if we should use mode=auto or specific parameters
-        has_specific_params = any([js_render, premium_proxy, antibot, proxy_country, autoparse])
-        
+
         if mode:
             params["mode"] = mode
-        elif not has_specific_params:
+        elif not any([js_render, premium_proxy, antibot, proxy_country, autoparse]):
             params["mode"] = "auto"
-            mode = "auto" # for logging
-        
-        # If we have specific params, add them. 
-        # Note: We tend to avoid adding these if mode is explicitly set to something else 
-        # unless necessary, as ZenRows might return 400 on certain combinations.
+
         if js_render:
             params["js_render"] = "true"
-            params["wait"] = 5000 # Increased to 5s for better LinkedIn reliability
+            params["wait"] = 5000
         if premium_proxy:
             params["premium_proxy"] = "true"
         if antibot:
@@ -119,53 +119,55 @@ class DatabaseFinderService:
         if autoparse:
             params["autoparse"] = "true"
 
-        # ZenRows handles headers: do not send custom ones
-        headers = {}
-
-        last_error = None
+        last_error: Optional[Exception] = None
         for attempt in range(retries):
             try:
                 async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
-                    resp = await client.get(self.ZENROWS_BASE, params=params, headers=headers)
-                    
+                    resp = await client.get(self.ZENROWS_BASE, params=params)
+
                     if resp.status_code == 402:
-                        logger.error(f"ZenRows 402 (Payment Required/Insufficient Credits)! Please check your ZenRows dashboard balance.")
                         raise DatabaseFinderError(
-                            "ZenRows credits exhausted (402 Payment Required). Please top up your ZenRows account.",
-                            status_code=402
+                            "ZenRows credits exhausted (402). Top up your account.", 402
+                        )
+
+                    # 422/400 = permanent failure (URL unscrapable or bad params) — don't retry
+                    if resp.status_code in (422, 400):
+                        logger.warning(f"ZenRows {resp.status_code} (permanent) for {url[:70]}")
+                        raise DatabaseFinderError(
+                            f"ZenRows {resp.status_code}: {resp.text[:80]}", 502
                         )
 
                     if resp.status_code == 429:
-                        wait_time = (attempt + 1) * 2
-                        logger.warning(f"ZenRows 429 (Rate Limit) for {url[:50]}. Retrying in {wait_time}s... (Attempt {attempt+1}/{retries})")
-                        await asyncio.sleep(wait_time)
+                        wait = (attempt + 1) * 10  # longer backoff — plan concurrency limit
+                        logger.warning(f"ZenRows 429 for {url[:50]}. Retry in {wait}s ({attempt+1}/{retries})")
+                        await asyncio.sleep(wait)
+                        continue
+
+                    if resp.status_code >= 500:
+                        wait = (attempt + 1) * 2
+                        logger.warning(f"ZenRows {resp.status_code} for {url[:50]}. Retry in {wait}s ({attempt+1}/{retries})")
+                        await asyncio.sleep(wait)
                         continue
 
                     if resp.status_code >= 400:
-                        params_masked = params.copy()
-                        params_masked["apikey"] = "MASKED"
-                        logger.warning(
-                            f"ZenRows returned {resp.status_code} for {url[:80]}: {resp.text} "
-                            f"(params={params_masked})"
-                        )
                         raise DatabaseFinderError(
-                            f"ZenRows request failed ({resp.status_code}): {resp.text[:100]}",
-                            status_code=502,
+                            f"ZenRows {resp.status_code}: {resp.text[:80]}", 502
                         )
+
                     return resp.text
+
+            except httpx.ReadTimeout:
+                last_error = httpx.ReadTimeout("")
+                logger.warning(f"ZenRows timeout for {url[:50]} ({attempt+1}/{retries})")
+                await asyncio.sleep((attempt + 1) * 2)
             except httpx.RequestError as e:
                 last_error = e
-                wait_time = (attempt + 1) * 2
-                logger.warning(f"ZenRows connection error: {repr(e)}. Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-            except DatabaseFinderError as e:
-                # If it's a 4xx other than 429, don't necessarily retry unless it's 5xx
-                if "failed (5" in str(e):
-                    await asyncio.sleep((attempt + 1) * 2)
-                    continue
+                logger.warning(f"ZenRows connection error for {url[:50]}: {type(e).__name__} ({attempt+1}/{retries})")
+                await asyncio.sleep((attempt + 1) * 2)
+            except DatabaseFinderError:
                 raise
 
-        raise DatabaseFinderError(f"ZenRows failed after {retries} attempts. Last error: {last_error}", 502)
+        raise DatabaseFinderError(f"ZenRows failed after {retries} attempts: {last_error}", 502)
 
     async def _search_google_linkedin(
         self,
@@ -328,29 +330,12 @@ class DatabaseFinderService:
 
     async def _scrape_linkedin_profile(self, profile_url: str) -> Dict[str, Any]:
         """Scrape a single LinkedIn profile via ZenRows and extract data."""
-        # Detect country from URL to help ZenRows choose the right proxy
-        proxy_country = None
-        if "in.linkedin.com" in profile_url:
-            proxy_country = "IN"
-        elif "uk.linkedin.com" in profile_url:
-            proxy_country = "GB"
-        elif "ca.linkedin.com" in profile_url:
-            proxy_country = "CA"
-        elif "au.linkedin.com" in profile_url:
-            proxy_country = "AU"
-
         try:
-            # LinkedIn strictly requires Premium Proxies, JS Rendering, and Antibot bypass to avoid 403s/429s/999s/RESP001
-            html = await self._zenrows_get(
-                profile_url, 
-                mode=None, 
-                js_render=True, 
-                premium_proxy=True,
-                antibot=True
-            )
+            # mode=auto lets ZenRows pick the optimal proxy/rendering config for LinkedIn
+            html = await self._zenrows_get(profile_url, mode="auto", retries=3)
         except Exception as e:
-            logger.warning(f"Failed to scrape {profile_url}: {e}")
-            return {"linkedin_url": profile_url}
+            logger.warning(f"Failed to scrape {profile_url[:60]}: {type(e).__name__}")
+            return {"linkedin_url": profile_url, "_scrape_failed": True}
 
         details: Dict[str, Any] = {"linkedin_url": profile_url}
 
@@ -710,6 +695,509 @@ class DatabaseFinderService:
                 )
         return unique[:5]
 
+    # ── Tavily enrichment fallback ──────────────────────────────────────
+
+    async def _tavily_extract_linkedin(self, urls: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Extract LinkedIn profile content via Tavily Extract API.
+
+        Sends up to 5 URLs per request (1 credit per 5 URLs).
+        Returns {url: parsed_fields_dict} for each successfully extracted URL.
+        """
+        if not self.tavily_api_key or not urls:
+            return {}
+
+        payload = {
+            "api_key": self.tavily_api_key,
+            "urls": urls[:5],
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post("https://api.tavily.com/extract", json=payload)
+                if resp.status_code != 200:
+                    logger.warning(f"Tavily Extract returned {resp.status_code}")
+                    return {}
+                data = resp.json()
+        except Exception as e:
+            logger.warning(f"Tavily Extract failed: {e}")
+            return {}
+
+        results: Dict[str, Dict[str, Any]] = {}
+        for item in data.get("results", []):
+            url = item.get("url", "")
+            raw = item.get("raw_content", "")
+            if not url or not raw or len(raw) < 50:
+                logger.debug(f"Skipping extract for {url}: content too short ({len(raw)} chars)")
+                continue
+
+            logger.debug(f"Extracting from {url[:80]}... ({len(raw)} chars)")
+            parsed = self._parse_extract_content(raw, url)
+            if parsed:
+                parsed["_enrichment_source"] = "tavily_enriched"
+                results[url] = parsed
+                logger.debug(f"  → Parsed: {parsed.get('full_name', 'N/A')} | {parsed.get('title', 'N/A')} @ {parsed.get('organization', 'N/A')}")
+
+        if results:
+            logger.info(f"Tavily Extract enriched {len(results)}/{len(urls)} profiles")
+        return results
+
+    def _parse_extract_content(self, raw_content: str, linkedin_url: str) -> Dict[str, Any]:
+        """Parse Tavily Extract raw_content (text/markdown) into profile fields."""
+        details: Dict[str, Any] = {}
+        content = raw_content.strip()
+        lines = [l.strip() for l in content.split("\n") if l.strip()]
+
+        if not lines:
+            return details
+
+        # ── Name from URL slug (baseline) ──
+        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
+        if name_match:
+            slug = self._strip_linkedin_slug_suffix(name_match.group(1))
+            name = slug.replace("-", " ").title()
+            name_words = [w for w in name.split() if re.match(r"^[A-Za-z]+$", w)]
+            if name_words:
+                details["first_name"] = name_words[0]
+                details["last_name"] = " ".join(name_words[1:]) if len(name_words) > 1 else ""
+                details["full_name"] = " ".join(name_words)
+
+        # ── Scan first 20 lines for name override + headline + location ──
+        for i, line in enumerate(lines[:20]):
+            clean = self._clean_text(line)
+            if not clean or len(clean) < 2:
+                continue
+
+            # Check if this line is a headline (contains role/company patterns)
+            role, company = self._split_headline(clean)
+            is_headline = bool(role) and bool(company) and ("at" in clean.lower() or "-" in clean or "|" in clean)
+
+            # If looks like headline with BOTH role and company, extract them
+            if is_headline and role and company:
+                fname = details.get("first_name", "")
+                lname = details.get("last_name", "")
+                if not self._looks_like_name(role, fname, lname):
+                    if not details.get("title"):
+                        details["title"] = self._clean_text(role)
+                if not details.get("organization"):
+                    details["organization"] = self._clean_text(company)
+
+            # Location pattern: "City, State" or "City, Country" or "City, Country Code"
+            loc_match = re.match(r"^([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),\s*([A-Z][A-Za-z]+(?:\s[A-Z][a-z]+)*)$", clean)
+            if loc_match and not details.get("location"):
+                details["location"] = clean
+                details["city"] = loc_match.group(1)
+                details["state"] = loc_match.group(2)
+
+        # ── Section-based extraction from full text ──
+        full_text = "\n".join(lines)
+        full_lower = full_text.lower()
+
+        # About / Summary (more flexible patterns)
+        about_patterns = [
+            r"(?:about|summary)\s*:?\s*\n([\s\S]{20,800}?)(?:\n\n|\n(?:experience|education|skills|activity|$))",
+            r"(?:about|summary)\s*:?\s*([\s\S]{20,500}?)(?:\n(?:experience|education|skills)|\Z)",
+        ]
+        for pattern in about_patterns:
+            about_match = re.search(pattern, full_lower)
+            if about_match:
+                summary_text = full_text[about_match.start(1):about_match.end(1)]
+                summary_clean = self._clean_text(summary_text)
+                if len(summary_clean) > 20:
+                    details["summary"] = summary_clean[:500]
+                    break
+
+        # Experience - extract first role details more thoroughly
+        exp_match = re.search(r"(?:experience|employment)\s*:?\s*\n([\s\S]{20,600}?)(?:\n\n|\n(?:education|skills)|\Z)", full_lower)
+        if exp_match:
+            exp_text = full_text[exp_match.start(1):exp_match.end(1)]
+            exp_lines = [l.strip() for l in exp_text.split("\n") if l.strip()]
+            # First line often has role/company
+            for exp_line in exp_lines[:3]:
+                role, company = self._split_headline(exp_line)
+                if role and not details.get("title"):
+                    details["title"] = self._clean_text(role)
+                if company and not details.get("organization"):
+                    details["organization"] = self._clean_text(company)
+
+        # Education (more flexible)
+        edu_patterns = [
+            r"(?:education|university|school)\s*:?\s*\n([\s\S]{10,400}?)(?:\n\n|\n(?:skills|experience)|\Z)",
+            r"(?:education|university|school)\s*:?\s*([\s\S]{10,200}?)(?:\n(?:skills)|\Z)",
+        ]
+        for pattern in edu_patterns:
+            edu_match = re.search(pattern, full_lower)
+            if edu_match:
+                edu_text = full_text[edu_match.start(1):edu_match.end(1)]
+                edu_clean = self._clean_text(edu_text)
+                if edu_clean and not details.get("education"):
+                    # First line/sentence is usually the school name
+                    first_line = edu_clean.split("\n")[0] or edu_clean.split(".")[0]
+                    details["education"] = first_line[:100]
+
+                # Extract degree
+                degree_patterns = [
+                    r"\b(B\.?[AS]\.?|B\.?E\.?|B\.?Tech|M\.?[AS]\.?|M\.?[CS]\.?|M\.?Tech|MBA|PGDM|Ph\.?D\.?|D\.?M\.?|Bachelor|Master|Doctor|Associate)\b",
+                    r"\b(Bachelor of|Master of|Doctor of)\s+[A-Za-z\s]+",
+                ]
+                for deg_pattern in degree_patterns:
+                    degree_match = re.search(deg_pattern, edu_clean, re.IGNORECASE)
+                    if degree_match and not details.get("education_degree"):
+                        details["education_degree"] = degree_match.group(1)
+                        break
+                break
+
+        # Skills (multi-format support)
+        skills_match = re.search(r"skills\s*:?\s*\n([\s\S]{10,800}?)(?:\n(?:experience|education|activity|interests|$))", full_lower)
+        if not skills_match:
+            # Fallback: skills on same line or followed by text
+            skills_match = re.search(r"skills[:\s]+([\s\S]{10,400}?)(?:\n(?:contact|experience|about|education|$)|\Z)", full_lower)
+
+        if skills_match:
+            skills_text = full_text[skills_match.start(1):skills_match.end(1)]
+            # Split by newline, comma, semicolon, bullet
+            skill_items = [self._clean_text(s)
+                          for s in re.split(r"[\n,;•\-]+", skills_text)
+                          if self._clean_text(s) and 2 < len(self._clean_text(s)) < 50]
+            if skill_items:
+                details["skills"] = skill_items[:30]
+
+        # Industry/Work area from content
+        industry_patterns = [
+            r"(?:industry|sector|field|specialization|focus)\s*:?\s*([^\n]{3,80})",
+            r"works at|works in|industry[:\s]+([A-Za-z\s&]{3,50})",
+        ]
+        for pattern in industry_patterns:
+            industry_match = re.search(pattern, full_text, re.IGNORECASE)
+            if industry_match:
+                ind_text = industry_match.group(1)
+                details["industry"] = self._clean_text(ind_text)
+                break
+
+        # Email (multiple patterns)
+        email_patterns = [
+            r"[a-zA-Z0-9][a-zA-Z0-9._%+\-]*[@](?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}",
+            r"email[:\s]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+        ]
+        for pattern in email_patterns:
+            email_match = re.search(pattern, full_text, re.IGNORECASE)
+            if email_match and not details.get("email"):
+                details["email"] = email_match.group(0).lower() if "@" in email_match.group(0) else email_match.group(1).lower()
+                break
+
+        # Phone (multiple patterns)
+        phone_patterns = [
+            r"phone[:\s]+([\+\d\s\(\)\-\.]{10,25})",
+            r"(\+?[0-9]{1,3}[\s\-\.]?[0-9]{3,4}[\s\-\.]?[0-9]{3,4}[\s\-\.]?[0-9]{0,4})",
+        ]
+        for pattern in phone_patterns:
+            phone_match = re.search(pattern, full_text, re.IGNORECASE)
+            if phone_match and not details.get("phone"):
+                phone_str = phone_match.group(1) if phone_match.lastindex == 1 else phone_match.group(0)
+                # Verify it has enough digits (at least 7)
+                digits = re.sub(r"\D", "", phone_str)
+                if len(digits) >= 7:
+                    details["phone"] = phone_str.strip()
+                    break
+
+        # Connections & Followers
+        conn_patterns = [
+            r"(\d{1,3}(?:,\d{3})*)\s*\+?\s*(?:connections|linked)",
+            r"connections\s*:?\s*(\d{1,3}(?:,\d{3})*)",
+        ]
+        for pattern in conn_patterns:
+            conn_match = re.search(pattern, full_text, re.IGNORECASE)
+            if conn_match and not details.get("connections_count"):
+                try:
+                    count = int(conn_match.group(1).replace(",", ""))
+                    details["connections_count"] = count
+                except:
+                    pass
+                break
+
+        follower_match = re.search(r"(\d{1,3}(?:,\d{3})*)\s*\+?\s*followers", full_text, re.IGNORECASE)
+        if follower_match and not details.get("followers_count"):
+            try:
+                details["followers_count"] = int(follower_match.group(1).replace(",", ""))
+            except:
+                pass
+
+        # Company LinkedIn URL
+        company_li_match = re.search(r"(https://(?:www\.)?linkedin\.com/company/[A-Za-z0-9\-]+)", full_text)
+        if company_li_match and not details.get("company_linkedin_url"):
+            details["company_linkedin_url"] = company_li_match.group(1).rstrip("/")
+
+        logger.debug(f"Extract parsed: name={details.get('full_name', 'N/A')}, title={details.get('title', 'N/A')}, org={details.get('organization', 'N/A')}")
+        return details
+
+    async def _enrich_via_tavily_search(
+        self,
+        name: str,
+        linkedin_url: str,
+        query: str,
+        location: str,
+    ) -> Dict[str, Any]:
+        """Use Tavily Search to fill identity/professional fields for a person.
+
+        Runs 2 targeted searches (2 credits) to maximize field coverage.
+        Returns a dict of populated fields.
+        """
+        if not self.tavily_api_key or not name:
+            return {}
+
+        details: Dict[str, Any] = {"_enrichment_source": "tavily_enriched"}
+
+        # Search 1: Professional identity
+        identity_query = f'"{name}" {query} title company role location'.strip()
+        identity_results = await self._tavily_search(identity_query, max_results=5)
+
+        # Search 2: Education + contact
+        background_query = f'"{name}" {query} education university skills email'.strip()
+        background_results = await self._tavily_search(background_query, max_results=3)
+
+        all_results = identity_results + background_results
+        if not all_results:
+            return details
+
+        self._extract_fields_from_results(details, all_results, name, query)
+        return details
+
+    def _extract_fields_from_results(
+        self,
+        details: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        name: str,
+        query: str,
+    ) -> None:
+        """Extract structured fields from Tavily search results."""
+        all_content = ""
+        company_mentions: Dict[str, int] = {}
+        linkedin_urls: List[str] = []
+
+        for r in results:
+            title = r.get("title", "")
+            content = r.get("content", "")
+            url = r.get("url", "")
+            all_content += f" {title} {content}"
+
+            # Collect LinkedIn URLs (for company_linkedin_url)
+            if "linkedin.com/company" in url.lower():
+                linkedin_urls.append(url)
+            elif "linkedin.com" in url.lower() and "/in/" not in url.lower():
+                linkedin_urls.append(url)
+
+            # Parse result titles — often "Name - Title - Company | LinkedIn"
+            if "linkedin" in url.lower() and title:
+                # Try _parse_title_tag format first
+                role, company = self._parse_title_tag(title)
+                if role and not details.get("title"):
+                    clean_role = self._clean_text(role)
+                    if not self._looks_like_name(clean_role, name.split()[0] if name else "", name.split()[-1] if len((name or "").split()) > 1 else ""):
+                        details["title"] = clean_role
+                if company and not details.get("organization"):
+                    details["organization"] = self._clean_text(company)
+
+                # Also try headline split as fallback
+                if not details.get("title"):
+                    role, company = self._split_headline(title.split("|")[0].strip())
+                    if role:
+                        clean_role = self._clean_text(role)
+                        if not self._looks_like_name(clean_role, name.split()[0] if name else "", ""):
+                            details["title"] = clean_role
+                    if company and not details.get("organization"):
+                        details["organization"] = self._clean_text(company)
+
+            # Count company mentions in content
+            if content:
+                # Look for "at {Company}" patterns
+                at_matches = re.findall(r"(?:at|@|for)\s+([A-Z][A-Za-z0-9\s&.\-,]+?)(?:\s*[,.|;\n]|$)", content)
+                for m in at_matches:
+                    c = m.strip()
+                    if c and len(c) > 2 and c.lower() != (name or "").lower():
+                        company_mentions[c] = company_mentions.get(c, 0) + 1
+
+            # Extract social/website URLs
+            if url and "linkedin.com" not in url.lower():
+                if "twitter.com" in url.lower() or "x.com" in url.lower():
+                    if not details.get("twitter_url"):
+                        details["twitter_url"] = url
+                elif "github.com" in url.lower():
+                    if not details.get("website"):
+                        details["website"] = url
+                elif not details.get("website") and not any(d in url.lower() for d in ["google.", "bing.", "tavily.", "facebook.", "youtube."]):
+                    details["website"] = url
+
+        # Organization: most-mentioned company, or use query as fallback
+        if not details.get("organization") and company_mentions:
+            best = max(company_mentions, key=company_mentions.get)
+            details["organization"] = self._clean_text(best)
+
+        # Company LinkedIn URL from collected URLs
+        if linkedin_urls and not details.get("company_linkedin_url"):
+            # Prefer company URLs over personal unless we have nothing else
+            company_url = next((u for u in linkedin_urls if "linkedin.com/company" in u.lower()), None)
+            if company_url:
+                details["company_linkedin_url"] = company_url.rstrip("/")
+            elif linkedin_urls:
+                details["company_linkedin_url"] = linkedin_urls[0].rstrip("/")
+
+        # Location: scan all content for "City, State/Country" patterns with more context
+        if not details.get("location"):
+            loc_patterns = [
+                r"(?:based in|located in|from|lives in|working in|at)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)*(?:,\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)?)",
+                r"([A-Z][a-z]+),\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)",
+            ]
+            for pattern in loc_patterns:
+                loc = re.search(pattern, all_content)
+                if loc:
+                    if len(loc.groups()) == 1:
+                        details["location"] = loc.group(1)
+                        parts = loc.group(1).split(",")
+                        details["city"] = parts[0].strip()
+                        if len(parts) > 1:
+                            details["state"] = parts[1].strip()
+                    else:
+                        details["location"] = f"{loc.group(1)}, {loc.group(2)}"
+                        details["city"] = loc.group(1)
+                        details["state"] = loc.group(2)
+                    break
+
+        # Email (multiple patterns for different formats)
+        if not details.get("email"):
+            email_patterns = [
+                r"[a-zA-Z0-9][a-zA-Z0-9._%+\-]*@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+",
+                r"email\s*:?\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+                r"contact\s*:?\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+            ]
+            for pattern in email_patterns:
+                email_match = re.search(pattern, all_content, re.IGNORECASE)
+                if email_match:
+                    email_str = email_match.group(0) if "@" in email_match.group(0) else email_match.group(1)
+                    if "@" in email_str:
+                        details["email"] = email_str.lower()
+                        break
+
+        # Education (more comprehensive)
+        if not details.get("education"):
+            edu_patterns = [
+                r"(?:studied at|graduated from|alumni of|university of|college of|institute of|attends?)\s+([A-Z][A-Za-z\s&.',-]+?)(?:\s*[,.|;\n]|$)",
+                r"((?:University|Institute|College|School|Academy)\s+(?:of\s+)?[A-Z][A-Za-z\s&.,-]*?)(?:\s*[,.|;\n]|$)",
+            ]
+            for pattern in edu_patterns:
+                edu = re.search(pattern, all_content, re.IGNORECASE)
+                if edu:
+                    edu_name = self._clean_text(edu.group(1))
+                    if len(edu_name) > 5:
+                        details["education"] = edu_name[:100]
+                        break
+
+        # Education degree
+        if not details.get("education_degree"):
+            degree_patterns = [
+                r"\b(B\.?[AS]\.?|B\.?E\.?|B\.?Tech|M\.?[AS]\.?|M\.?[CS]\.?|M\.?Tech|MBA|PGDM|Ph\.?D\.?|D\.?M\.?|LL\.?B\.?|LL\.?M\.?|BCA|MCA|Bachelor|Master|Doctor|Associate)\b",
+                r"(?:Bachelor|Master|Doctor|Associate)\s+(?:of|in)\s+[A-Za-z\s]+",
+            ]
+            for pattern in degree_patterns:
+                degree_match = re.search(pattern, all_content, re.IGNORECASE)
+                if degree_match:
+                    details["education_degree"] = degree_match.group(1)
+                    break
+
+        # Industry/sector
+        if not details.get("industry"):
+            ind_patterns = [
+                r"(?:industry|sector|field|specialization|focus)[:\s]+([A-Za-z\s&]{3,50}?)(?:\s*[,.|;\n]|$)",
+                r"works in\s+(?:the\s+)?([A-Za-z\s&]+?)(?:\s+(?:industry|sector)|$)",
+            ]
+            for pattern in ind_patterns:
+                ind = re.search(pattern, all_content, re.IGNORECASE)
+                if ind:
+                    details["industry"] = self._clean_text(ind.group(1))
+                    break
+
+        # Company domain from website or organization
+        if not details.get("company_domain"):
+            if details.get("website"):
+                domain_match = re.search(r"https?://(?:www\.)?([^/]+)", details["website"])
+                if domain_match:
+                    details["company_domain"] = domain_match.group(1)
+            elif details.get("organization"):
+                # Generate domain from company name
+                org = details["organization"].lower()
+                domain = re.sub(r"[^a-z0-9]", "", org)
+                if domain:
+                    details["company_domain"] = f"{domain}.com"
+
+        # Summary: collect longer content snippets mentioning the person
+        if not details.get("summary"):
+            summaries = []
+            fname = (name.split()[0] if name else "").lower()
+            for r in results:
+                content = r.get("content", "")
+                if fname and fname in content.lower() and len(content) > 50:
+                    summaries.append(content)
+            if summaries:
+                # Use the longest summary
+                longest = max(summaries, key=len)
+                details["summary"] = self._clean_text(longest[:500])
+
+        # Skills extraction from content (look for "skills include", "expertise", etc)
+        if not details.get("skills"):
+            skills_match = re.search(r"(?:skills|expertise|proficiencies|specialties)[:\s]+([^\n]{20,300})", all_content, re.IGNORECASE)
+            if skills_match:
+                skills_text = skills_match.group(1)
+                skill_items = [self._clean_text(s) for s in re.split(r"[,;•]+", skills_text) if self._clean_text(s) and 2 < len(self._clean_text(s)) < 50]
+                if skill_items:
+                    details["skills"] = skill_items[:20]
+
+        logger.debug(f"Search parsed: title={details.get('title', 'N/A')}, org={details.get('organization', 'N/A')}, email={details.get('email', 'N/A')}, edu={details.get('education', 'N/A')}")
+
+    @staticmethod
+    def _merge_profile_data(
+        primary: Dict[str, Any],
+        secondary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge two profile dicts. Primary (ZenRows) values take precedence.
+
+        String fields: use primary if non-empty, else secondary.
+        List fields: merge and deduplicate.
+        Int fields: use primary if > 0, else secondary.
+        """
+        merged = dict(primary)
+
+        string_fields = [
+            "first_name", "last_name", "full_name", "email", "phone",
+            "twitter_url", "website", "title", "organization", "industry",
+            "education", "education_degree", "summary", "location",
+            "city", "state", "country", "profile_language",
+            "company_linkedin_url", "company_domain",
+        ]
+        for field in string_fields:
+            if not merged.get(field) and secondary.get(field):
+                merged[field] = secondary[field]
+
+        # List fields: merge
+        for field in ["skills"]:
+            primary_list = merged.get(field, []) or []
+            secondary_list = secondary.get(field, []) or []
+            combined = list(dict.fromkeys(primary_list + secondary_list))
+            if combined:
+                merged[field] = combined
+
+        # Int fields
+        for field in ["connections_count", "followers_count"]:
+            if not merged.get(field, 0) and secondary.get(field, 0):
+                merged[field] = secondary[field]
+
+        # Track enrichment source
+        if secondary.get("_enrichment_source"):
+            merged["_enrichment_source"] = secondary["_enrichment_source"]
+
+        # Clear scrape_failed if we now have real data
+        if merged.get("title") and merged.get("organization"):
+            merged.pop("_scrape_failed", None)
+
+        return merged
+
     # ── Main search ──────────────────────────────────────────────────────
 
     async def search(
@@ -758,17 +1246,68 @@ class DatabaseFinderService:
                 },
             }
 
-        # Step 2: Scrape each profile (concurrently, max 1 at a time to avoid plan 429s and keep timeouts low)
+        # Step 2: Scrape profiles sequentially (ZenRows plan has 1 concurrent request limit)
         sem = asyncio.Semaphore(1)
 
         async def scrape_with_limit(url: str) -> Dict[str, Any]:
             async with sem:
-                return await self._scrape_linkedin_profile(url)
+                result = await self._scrape_linkedin_profile(url)
+                await asyncio.sleep(2)  # pause between scrapes to avoid 429s
+                return result
 
         profile_tasks = [scrape_with_limit(u) for u in urls]
         raw_profiles = await asyncio.gather(*profile_tasks, return_exceptions=True)
 
         profiles = [p for p in raw_profiles if isinstance(p, dict)]
+
+        # Step 2.5: Tavily enrichment for profiles missing key data
+        if self.tavily_api_key:
+            needs_enrichment = [
+                p for p in profiles
+                if p.get("_scrape_failed") or not p.get("title")
+            ]
+
+            if needs_enrichment:
+                logger.info(f"Enriching {len(needs_enrichment)}/{len(profiles)} profiles via Tavily")
+
+                # (a) Tavily Extract — batch of 5 URLs = 1 credit
+                enrichment_urls = [p["linkedin_url"] for p in needs_enrichment if p.get("linkedin_url")]
+                extract_results: Dict[str, Dict] = {}
+                for i in range(0, len(enrichment_urls), 5):
+                    batch = enrichment_urls[i:i + 5]
+                    batch_result = await self._tavily_extract_linkedin(batch)
+                    extract_results.update(batch_result)
+
+                # Merge extract results
+                for p in needs_enrichment:
+                    url = p.get("linkedin_url", "")
+                    if url in extract_results:
+                        merged = self._merge_profile_data(p, extract_results[url])
+                        p.update(merged)
+
+                # (b) Tavily Search — only for profiles STILL missing title or org
+                still_needs = [
+                    p for p in needs_enrichment
+                    if not p.get("title") or not p.get("organization")
+                ]
+
+                if still_needs:
+                    logger.info(f"Tavily Search enriching {len(still_needs)} remaining profiles")
+                    search_tasks = [
+                        self._enrich_via_tavily_search(
+                            name=p.get("full_name", ""),
+                            linkedin_url=p.get("linkedin_url", ""),
+                            query=query,
+                            location=location,
+                        )
+                        for p in still_needs
+                    ]
+                    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+                    for p, result in zip(still_needs, search_results):
+                        if isinstance(result, dict):
+                            merged = self._merge_profile_data(p, result)
+                            p.update(merged)
 
         # Step 3: Enrich with Tavily signals (concurrent)
         if include_signals and self.tavily_api_key:
@@ -868,12 +1407,15 @@ class DatabaseFinderService:
         # Infer department from title
         department = self._infer_department(title)
 
-        # Derive domain from company LinkedIn
-        domain = ""
-        company_li = profile.get("company_linkedin_url", "")
-        if company_li:
-            slug = company_li.rstrip("/").split("/")[-1]
-            domain = f"{slug}.com"
+        # Derive domain from company LinkedIn or use extracted domain
+        domain = profile.get("company_domain", "")
+        if not domain:
+            company_li = profile.get("company_linkedin_url", "")
+            if company_li:
+                slug = company_li.rstrip("/").split("/")[-1]
+                domain = f"{slug}.com"
+        else:
+            company_li = profile.get("company_linkedin_url", "")
 
         return {
             # Identity (9 fields)
@@ -917,14 +1459,18 @@ class DatabaseFinderService:
             "recent_activity": "",
             "engagement_score": self._calc_engagement_score(profile),
             # Metadata (5 fields)
-            "source": "zenrows_tavily",
+            "source": profile.get("_enrichment_source", "zenrows_tavily"),
             "search_query": query,
             "quality_score": self._calc_quality_score(profile),
             "discovered_at": datetime.now(timezone.utc).isoformat(),
             "data_completeness": self._calc_completeness(profile),
             # Status (2 fields)
             "status": "new",
-            "enrichment_status": "scraped",
+            "enrichment_status": (
+                "scraped" if not profile.get("_scrape_failed") and title
+                else "tavily_enriched" if profile.get("_enrichment_source") == "tavily_enriched" and title
+                else "partial"
+            ),
         }
 
     # ── Scoring helpers ──────────────────────────────────────────────────
@@ -1104,6 +1650,24 @@ class DatabaseFinderService:
     async def enrich_lead(self, linkedin_url: str) -> Dict[str, Any]:
         """Enrich a single lead by scraping their LinkedIn profile + signals."""
         profile = await self._scrape_linkedin_profile(linkedin_url)
+
+        # Tavily enrichment fallback if scrape failed
+        if profile.get("_scrape_failed") or not profile.get("title"):
+            if self.tavily_api_key:
+                # Try Extract first
+                extract_result = await self._tavily_extract_linkedin([linkedin_url])
+                if linkedin_url in extract_result:
+                    profile = self._merge_profile_data(profile, extract_result[linkedin_url])
+
+                # If still missing key fields, use Search
+                if not profile.get("title") or not profile.get("organization"):
+                    tavily_data = await self._enrich_via_tavily_search(
+                        name=profile.get("full_name", ""),
+                        linkedin_url=linkedin_url,
+                        query=profile.get("organization", ""),
+                        location="",
+                    )
+                    profile = self._merge_profile_data(profile, tavily_data)
 
         full_name = profile.get("full_name", "")
         org = profile.get("organization", "")

@@ -108,5 +108,5 @@ async def service_status(
     return {
         "zenrows_configured": zenrows_ok,
         "tavily_configured": tavily_ok,
-        "ready": zenrows_ok,  # ZenRows is required; Tavily is optional (enrichment)
+        "ready": zenrows_ok or tavily_ok,  # Either ZenRows or Tavily can produce usable leads
     }
