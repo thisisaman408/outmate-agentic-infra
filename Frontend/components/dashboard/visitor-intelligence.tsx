@@ -187,7 +187,7 @@ export function VisitorIntelligence() {
           <Metric
             label="Active Right Now"
             value={String(realtimeCount)}
-            subtitle="30-min window"
+            subtitle="30-minute rolling window"
             icon={Eye}
             accent="text-emerald-500"
             pulse={realtimeCount > 0}
@@ -195,21 +195,21 @@ export function VisitorIntelligence() {
           <Metric
             label="ICP Traffic Ratio"
             value={hasTraffic ? `${data.icp_traffic_ratio}%` : "—"}
-            subtitle={hasTraffic ? `${data.icp_fit_count} of ${data.total_visitors} visitors` : "No traffic yet"}
+            subtitle="Visitors with ICP score 70+"
             icon={Target}
             accent="text-pink-500"
           />
           <Metric
             label="Company ID Rate"
             value={hasTraffic ? `${data.company_id_rate}%` : "—"}
-            subtitle={hasTraffic ? `${data.company_matched_count} companies identified` : "No traffic yet"}
+            subtitle="Resolved to an entity"
             icon={Building2}
             accent="text-blue-500"
           />
           <Metric
-            label="Person ID Rate"
+            label="Person-Level ID Rate"
             value={hasTraffic ? `${data.person_id_rate}%` : "—"}
-            subtitle={hasTraffic ? `${data.person_matched_count} contacts matched` : "No traffic yet"}
+            subtitle="Identified decision-makers"
             icon={UserCheck}
             accent="text-indigo-500"
           />
@@ -217,45 +217,58 @@ export function VisitorIntelligence() {
 
         {/* ── Traffic Trend Chart ───────────────────────────────────────────── */}
         {data.traffic_trend.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5" /> Traffic Trend — Last {days} days
-            </p>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={data.traffic_trend} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-4">
+               <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase flex items-center gap-1.5">
+                <TrendingUp className="h-3.5 w-3.5" /> Traffic Trend — Last {days} days
+              </p>
+              <div className="flex items-center gap-3">
+                 <div className="flex items-center gap-1.5">
+                   <div className="h-1.5 w-1.5 rounded-full" style={{ background: COLORS.visitors }} />
+                   <span className="text-[10px] font-medium text-muted-foreground">All Visitors</span>
+                 </div>
+                 <div className="flex items-center gap-1.5">
+                   <div className="h-1.5 w-3 rounded-full border border-dashed" style={{ borderColor: COLORS.matched }} />
+                   <span className="text-[10px] font-medium text-muted-foreground">Identified</span>
+                 </div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={data.traffic_trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gradVisitors" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.visitors} stopOpacity={0.2} />
+                    <stop offset="5%" stopColor={COLORS.visitors} stopOpacity={0.15} />
                     <stop offset="95%" stopColor={COLORS.visitors} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradIcp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.icpFit} stopOpacity={0.2} />
+                    <stop offset="5%" stopColor={COLORS.icpFit} stopOpacity={0.15} />
                     <stop offset="95%" stopColor={COLORS.icpFit} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: "rgba(255,255,255,0.4)" }}
+                  tick={{ fontSize: 10, fill: "rgba(0,0,0,0.4)" }}
                   axisLine={false}
                   tickLine={false}
-                  interval={days <= 7 ? 0 : days <= 30 ? 4 : 13}
+                  interval={days <= 7 ? 0 : days <= 30 ? 6 : 14}
                 />
                 <YAxis
-                  tick={{ fontSize: 11, fill: "rgba(255,255,255,0.4)" }}
+                  tick={{ fontSize: 10, fill: "rgba(0,0,0,0.4)" }}
                   axisLine={false}
                   tickLine={false}
+                  allowDecimals={false}
                 />
-                <Tooltip content={<TrendTooltip />} cursor={{ stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }} />
+                <Tooltip content={<TrendTooltip />} cursor={{ stroke: "rgba(0,0,0,0.08)", strokeWidth: 1 }} />
                 <Area
                   type="monotone"
                   dataKey="visitors"
                   stroke={COLORS.visitors}
-                  strokeWidth={2}
+                  strokeWidth={2.5}
                   fill="url(#gradVisitors)"
                   dot={false}
                   activeDot={{ r: 4, strokeWidth: 0 }}
-                  name="Visitors"
+                  name="Total Visitors"
                 />
                 <Area
                   type="monotone"
@@ -265,7 +278,7 @@ export function VisitorIntelligence() {
                   fill="url(#gradIcp)"
                   dot={false}
                   activeDot={{ r: 4, strokeWidth: 0 }}
-                  name="ICP Fit"
+                  name="ICP Visitors"
                 />
                 <Line
                   type="monotone"
@@ -275,40 +288,43 @@ export function VisitorIntelligence() {
                   strokeDasharray="4 4"
                   dot={false}
                   activeDot={{ r: 3, strokeWidth: 0 }}
-                  name="Identified"
+                  name="Matched Company"
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         )}
 
-        {/* ── Top Pages by ICP Traffic ──────────────────────────────────────── */}
+        {/* ── Top 10 Pages by ICP Traffic ─────────────────────────────────── */}
         {data.top_pages_by_icp.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">
-              Top Pages by ICP Visitors
+          <div className="pt-2">
+            <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase mb-4">
+              Top 10 Content Pages by ICP Fit Traffic
             </p>
-            <div className="space-y-1.5">
-              {data.top_pages_by_icp.map((entry, i) => {
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
+              {data.top_pages_by_icp.slice(0, 10).map((entry, i) => {
                 const maxCount = data.top_pages_by_icp[0]?.icp_visitors || 1
-                const widthPct = Math.max(8, (entry.icp_visitors / maxCount) * 100)
+                const widthPct = Math.max(5, (entry.icp_visitors / maxCount) * 100)
                 return (
-                  <div key={entry.page} className="flex items-center gap-2 text-xs group">
-                    <span className="text-muted-foreground/60 w-4 text-right tabular-nums">
-                      {i + 1}
+                  <div key={entry.page} className="flex items-center gap-3 text-xs group py-1 border-b border-border/10 last:border-0 md:last:border-b">
+                    <span className="text-muted-foreground/40 w-5 font-bold tabular-nums">
+                      {String(i + 1).padStart(2, '0')}
                     </span>
-                    <div className="flex-1 min-w-0 relative">
-                      <div
-                        className="absolute inset-y-0 left-0 rounded-sm bg-pink-500/10 transition-all"
-                        style={{ width: `${widthPct}%` }}
-                      />
-                      <span className="relative truncate block py-0.5 px-1.5 font-mono text-foreground/80 group-hover:text-foreground transition-colors">
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      <span className="truncate block font-semibold text-foreground/90 group-hover:text-primary transition-colors cursor-help" title={entry.page}>
                         {entry.page}
                       </span>
+                      <div className="h-1 w-full bg-muted/60 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-pink-500/60 transition-all duration-500 ease-out"
+                          style={{ width: `${widthPct}%` }}
+                        />
+                      </div>
                     </div>
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0 tabular-nums">
-                      {entry.icp_visitors}
-                    </Badge>
+                    <div className="flex flex-col items-end shrink-0">
+                      <span className="font-bold tabular-nums text-foreground">{entry.icp_visitors}</span>
+                      <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight">ICP Hits</span>
+                    </div>
                   </div>
                 )
               })}

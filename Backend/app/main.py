@@ -360,10 +360,20 @@ async def startup_event():
                     logger.info(f"Added missing users.{col_name} column")
 
         watcher_columns = {col["name"] for col in inspector.get_columns("watchers")} if inspector.has_table("watchers") else set()
-        if "watchers" in {t for t in inspector.get_table_names()} and "matches" not in watcher_columns:
+        watcher_migrations = [
+            ("matches",            "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"),
+            ("linkedin_url",       "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(512);"),
+            ("track_job_changes",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS track_job_changes BOOLEAN NOT NULL DEFAULT false;"),
+            ("last_known_company", "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_company VARCHAR(255);"),
+            ("last_known_title",   "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_title VARCHAR(255);"),
+            ("last_job_check_at",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_job_check_at TIMESTAMP WITH TIME ZONE;"),
+        ]
+        if inspector.has_table("watchers"):
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"))
-            logger.info("Added missing watchers.matches column")
+                for col_name, ddl in watcher_migrations:
+                    if col_name not in watcher_columns:
+                        conn.execute(text(ddl))
+                        logger.info(f"Added missing watchers.{col_name} column")
 
         # ── Visitor tracker v2 schema migrations (idempotent) ─────────────────
         # site_configs new columns
