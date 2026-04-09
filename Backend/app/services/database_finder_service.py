@@ -1771,27 +1771,17 @@ class DatabaseFinderService:
                 p["organization"] = query or "Company"
                 logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
 
-        # CRITICAL: After force-setting full_name, break it back into first/last names
-        # so _build_lead_record has the fields it needs
-        logger.warning("[STEP 4] Breaking full_name into first_name/last_name for API response")
+        # CRITICAL: After force-setting full_name, ALWAYS break it into first/last names
+        # Don't check if they exist - just set them from full_name
+        logger.warning("[STEP 4] FORCE-BREAKING full_name into first_name/last_name")
         for i, p in enumerate(profiles):
             full_name = p.get("full_name", "").strip()
             if full_name:
-                # If first_name is missing, extract it from full_name
-                if not p.get("first_name", "").strip():
-                    parts = full_name.split(" ", 1)
-                    p["first_name"] = parts[0]
-                    logger.debug(f"[{i}] Set first_name from full_name: '{p['first_name']}'")
-
-                # If last_name is missing, extract it from full_name
-                if not p.get("last_name", "").strip():
-                    parts = full_name.split(" ", 1)
-                    if len(parts) > 1:
-                        p["last_name"] = parts[1]
-                    else:
-                        p["last_name"] = ""  # Avoid returning None/missing
-                    logger.debug(f"[{i}] Set last_name from full_name: '{p['last_name']}'")
-
+                # ALWAYS extract from full_name, regardless of whether first/last exist
+                parts = full_name.split(" ", 1)
+                p["first_name"] = parts[0]  # Always set
+                p["last_name"] = parts[1] if len(parts) > 1 else ""  # Always set (even if empty)
+                logger.debug(f"[{i}] FORCE-BREAK: '{full_name}' → first='{p['first_name']}', last='{p['last_name']}'")
         # CRITICAL: Check what we have BEFORE additional fields assignment
         missing_fields = {
             "empty_full_name": 0,
@@ -1822,105 +1812,8 @@ class DatabaseFinderService:
         else:
             logger.info(f"✅ All {len(profiles)} profiles have mandatory fields after force-set")
 
-        for i, p in enumerate(profiles):
-            orig_name = p.get("full_name", "")
-            orig_title = p.get("title", "")
-
-            # DEBUG: Log what we have before fallbacks
-            logger.debug(f"[{i}] BEFORE: name={orig_name or 'EMPTY'}, title={orig_title or 'EMPTY'}, "
-                        f"first={p.get('first_name', 'EMPTY')}, last={p.get('last_name', 'EMPTY')}, "
-                        f"url={p.get('linkedin_url', 'EMPTY')[:50]}, "
-                        f"org={p.get('organization', 'EMPTY')}, scrape_failed={p.get('_scrape_failed', False)}")
-
-            # Ensure full_name exists - CRITICAL FIELD
-            if not p.get("full_name", "").strip():
-                first = p.get("first_name", "").strip() or ""
-                last = p.get("last_name", "").strip() or ""
-                if first or last:
-                    p["full_name"] = f"{first} {last}".strip()
-                    logger.debug(f"[{i}] Set full_name from names: {p['full_name']}")
-
-                # If no parts available, try to extract from LinkedIn URL
-                if not p.get("full_name"):
-                    linkedin_url = p.get("linkedin_url", "")
-                    if linkedin_url:
-                        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
-                        if name_match:
-                            slug = name_match.group(1)
-                            # Remove common suffixes like -1, -2, etc.
-                            slug = re.sub(r"-\d+$", "", slug)
-                            # Clean up and titlecase
-                            name = slug.replace("-", " ").title()
-                            p["full_name"] = name
-                            logger.debug(f"[{i}] Set full_name from URL: {p['full_name']}")
-
-                # FINAL FALLBACK: Generate from index
-                if not p.get("full_name"):
-                    p["full_name"] = f"Profile {i+1}"
-                    logger.debug(f"[{i}] Using generic name: {p['full_name']}")
-
-            # If full_name is still too short or placeholder-like, try to improve it
-            elif p.get("full_name", "").strip() and len(p.get("full_name", "").split()) < 2:
-                # Only 1 word - try to add last name from organization or elsewhere
-                first_name = p.get("full_name", "").strip()
-                # Try to build a better full_name
-                org = p.get("organization", "").strip()
-                if org and len(org.split()) > 0:
-                    # Use org as a hint for last name (take first meaningful word)
-                    org_words = org.split()
-                    potential_last = org_words[0] if org_words else ""
-                    if len(potential_last) > 2 and potential_last[0].isupper():
-                        # This might be a company proper noun, not a name
-                        pass
-                    else:
-                        # Check if we have first name already
-                        if first_name:
-                            logger.debug(f"[{i}] Extended single-word name {first_name} (from org {org})")
-                # Keep as is but log that it's incomplete
-                logger.debug(f"[{i}] Full name has only 1 word: {p.get('full_name')}")
-
-            # Ensure title exists - CRITICAL FIELD
-            current_title = p.get("title", "").strip()
-            is_empty_title = not current_title
-            is_placeholder_title = current_title.lower() in ["professional", "professional at", "unknown"]
-
-            if is_empty_title or is_placeholder_title:
-                # Strategy 1: Use organization if available
-                org = p.get("organization", "").strip()
-                if org and org.lower() not in ["unknown", "unknown company", query.lower() if query else ""]:
-                    new_title = f"Professional at {org}"
-                    if new_title != current_title:
-                        p["title"] = new_title
-                        logger.debug(f"[{i}] Set title from org: {p['title']}")
-
-                # Strategy 2: Use query keyword (the search role/title)
-                if not p.get("title", "").strip() or p.get("title", "") == "Professional":
-                    if query and query != p.get("full_name") and query.lower() not in ["unknown"]:
-                        p["title"] = query
-                        logger.debug(f"[{i}] Set title from query: {p['title']}")
-
-                # Strategy 3: Use seniority level if available
-                if not p.get("title", "").strip() or p.get("title", "") == "Professional":
-                    if p.get("seniority_level"):
-                        new_title = f"{p.get('seniority_level')} Professional"
-                        if new_title != (current_title or ""):
-                            p["title"] = new_title
-                            logger.debug(f"[{i}] Set title from seniority: {p['title']}")
-
-                # FINAL FALLBACK: Just mark as professional (this should ALWAYS execute if we reach here)
-                if not p.get("title", "").strip():
-                    p["title"] = "Professional"
-                    logger.debug(f"[{i}] Using generic title: Professional")
-            else:
-                logger.debug(f"[{i}] Title already set: {current_title}")
-
-            # Force set organization if missing
-            if not p.get("organization", "").strip():
-                p["organization"] = query or "Unknown Company"
-                logger.debug(f"[{i}] Set organization: {p['organization']}")
-
-            # Log the result
-            logger.info(f"[{i}] {p.get('full_name')} | {p.get('title')} @ {p.get('organization')}")
+        # NOTE: All mandatory fields are already set by FORCE-SET (1754-1768) and
+        # FORCE-BREAK (1774-1784) above. Skip additional logic to avoid conflicts.
 
         # CRITICAL: Verify ALL profiles now have mandatory fields
         logger.warning("[STEP 4] AFTER mandatory field fixes - Verification:")
@@ -1964,6 +1857,23 @@ class DatabaseFinderService:
             logger.warning(f"No profiles found after scraping/enrichment. Total retrieved: {len(profiles)}")
         else:
             logger.info(f"Returning {len(valid_profiles)} profiles (all have fallback name + title)")
+
+        # VERIFY: Check that first_name/last_name are actually set before building lead records
+        logger.warning("[FINAL VERIFICATION] Checking profiles before _build_lead_record:")
+        for i, prof in enumerate(valid_profiles):
+            fn = prof.get("first_name", "")
+            ln = prof.get("last_name", "")
+            full = prof.get("full_name", "")
+            title = prof.get("title", "")
+
+            if not fn or not ln or not full:
+                logger.error(f"❌ Profile {i} STILL missing name fields: "
+                           f"first='{fn}', last='{ln}', full='{full}'")
+            if not title:
+                logger.error(f"❌ Profile {i} STILL missing title: '{title}'")
+
+            # LOG ALL FIELDS for debugging
+            logger.debug(f"[{i}] FINAL: first='{fn}', last='{ln}', full='{full}', title='{title}'")
 
         leads = []
         for i, prof in enumerate(valid_profiles):
