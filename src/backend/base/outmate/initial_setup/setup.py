@@ -880,6 +880,12 @@ async def create_or_update_agentic_flows(session: AsyncSession, user_id: UUID) -
                     if flow_id:
                         db_flow.id = flow_id
 
+                    # FlowCreate has no user_id field, so the flow gets persisted
+                    # with user_id=None.  Without this line, every API call fails
+                    # the check_flow_user_permission test (`flow.user_id != api_key_user.id`)
+                    # with HTTP 403 "You do not have permission to run this flow".
+                    db_flow.user_id = user_id
+
                     session.add(db_flow)
                     flows_created += 1
                 except Exception:  # noqa: BLE001
