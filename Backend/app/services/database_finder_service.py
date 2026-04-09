@@ -1518,7 +1518,10 @@ class DatabaseFinderService:
         if self.tavily_api_key:
             needs_enrichment = [
                 p for p in profiles
-                if p.get("_scrape_failed") or not p.get("title")
+                if p.get("_scrape_failed")
+                or not p.get("title")
+                or not p.get("organization")
+                or not p.get("full_name")
             ]
 
             logger.info(f"[STEP 2.5] {len(needs_enrichment)} profiles need enrichment (out of {len(profiles)})")
@@ -1539,10 +1542,13 @@ class DatabaseFinderService:
                         merged = self._merge_profile_data(p, extract_results[url])
                         p.update(merged)
 
-                # (b) Tavily Search — only for profiles STILL missing title or org
+                # (b) Tavily Search — only for profiles STILL missing critical mandatory fields
                 still_needs = [
                     p for p in needs_enrichment
-                    if not p.get("title") or not p.get("organization")
+                    if not p.get("title")
+                    or not p.get("organization")
+                    or not p.get("full_name")
+                    or (p.get("full_name", "") and len(p.get("full_name", "").strip()) < 3)
                 ]
 
                 if still_needs:
@@ -1652,6 +1658,63 @@ class DatabaseFinderService:
                     if org in dm_results:
                         prof["_company_decision_makers"] = dm_results[org]
 
+        # Step 3.6: Final enrichment pass for profiles STILL missing mandatory fields
+        # This is a safety net to catch any profiles that slipped through enrichment
+        logger.info(f"[STEP 3.6] Final enrichment pass - checking for profiles missing mandatory fields")
+        profiles_needing_final_enrichment = [
+            p for p in profiles
+            if not p.get("full_name", "").strip()
+            or not p.get("title", "").strip()
+            or not p.get("organization", "").strip()
+        ]
+
+        if profiles_needing_final_enrichment and self.tavily_api_key:
+            logger.info(f"[STEP 3.6] {len(profiles_needing_final_enrichment)} profiles still missing mandatory fields - attempting final enrichment")
+
+            # Extract names from LinkedIn URLs for those missing full_name
+            for p in profiles_needing_final_enrichment:
+                if not p.get("full_name", "").strip():
+                    linkedin_url = p.get("linkedin_url", "")
+                    if linkedin_url:
+                        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
+                        if name_match:
+                            slug = name_match.group(1)
+                            slug = re.sub(r"-\d+$", "", slug)
+                            name = slug.replace("-", " ").title()
+                            p["full_name"] = name
+                            p["first_name"] = name.split()[0] if name.split() else ""
+                            p["last_name"] = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
+                            logger.debug(f"[STEP 3.6] Extracted name from URL: {name}")
+
+            # For remaining profiles missing data, do targeted Tavily searches
+            still_empty = [
+                p for p in profiles_needing_final_enrichment
+                if not p.get("full_name", "").strip()
+                or not p.get("title", "").strip()
+            ]
+
+            if still_empty:
+                logger.info(f"[STEP 3.6] Performing targeted Tavily searches for {len(still_empty)} profiles")
+                search_tasks = []
+                for p in still_empty:
+                    name = p.get("full_name", "") or p.get("first_name", "") or "person"
+                    search_tasks.append(
+                        self._enrich_via_tavily_search(
+                            name=name,
+                            linkedin_url=p.get("linkedin_url", ""),
+                            query=query,
+                            location=location,
+                        )
+                    )
+
+                if search_tasks:
+                    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+                    for p, result in zip(still_empty, search_results):
+                        if isinstance(result, dict) and result:
+                            merged = self._merge_profile_data(p, result)
+                            p.update(merged)
+                            logger.debug(f"[STEP 3.6] Final enrichment result for {p.get('full_name', 'unknown')}: {result.get('title', 'N/A')} @ {result.get('organization', 'N/A')}")
+
         # Step 4: Build final lead records with 30-40 fields
         # Ensure all profiles have mandatory fields (Name and Title)
         # AGGRESSIVE FALLBACKS: Never return empty name or title
@@ -1694,25 +1757,60 @@ class DatabaseFinderService:
                     p["full_name"] = f"Profile {i+1}"
                     logger.debug(f"[{i}] Using generic name: {p['full_name']}")
 
+            # If full_name is still too short or placeholder-like, try to improve it
+            elif p.get("full_name", "").strip() and len(p.get("full_name", "").split()) < 2:
+                # Only 1 word - try to add last name from organization or elsewhere
+                first_name = p.get("full_name", "").strip()
+                # Try to build a better full_name
+                org = p.get("organization", "").strip()
+                if org and len(org.split()) > 0:
+                    # Use org as a hint for last name (take first meaningful word)
+                    org_words = org.split()
+                    potential_last = org_words[0] if org_words else ""
+                    if len(potential_last) > 2 and potential_last[0].isupper():
+                        # This might be a company proper noun, not a name
+                        pass
+                    else:
+                        # Check if we have first name already
+                        if first_name:
+                            logger.debug(f"[{i}] Extended single-word name {first_name} (from org {org})")
+                # Keep as is but log that it's incomplete
+                logger.debug(f"[{i}] Full name has only 1 word: {p.get('full_name')}")
+
             # Ensure title exists - CRITICAL FIELD
-            if not p.get("title", "").strip():
+            current_title = p.get("title", "").strip()
+            is_empty_title = not current_title
+            is_placeholder_title = current_title.lower() in ["professional", "professional at", "unknown"]
+
+            if is_empty_title or is_placeholder_title:
                 # Strategy 1: Use organization if available
                 org = p.get("organization", "").strip()
-                if org:
-                    p["title"] = f"Professional at {org}"
-                    logger.debug(f"[{i}] Set title from org: {p['title']}")
+                if org and org.lower() not in ["unknown", "unknown company", query.lower() if query else ""]:
+                    new_title = f"Professional at {org}"
+                    if new_title != current_title:
+                        p["title"] = new_title
+                        logger.debug(f"[{i}] Set title from org: {p['title']}")
+
                 # Strategy 2: Use query keyword (the search role/title)
-                elif query and query != p.get("full_name"):
-                    p["title"] = query
-                    logger.debug(f"[{i}] Set title from query: {p['title']}")
+                if not p.get("title", "").strip() or p.get("title", "") == "Professional":
+                    if query and query != p.get("full_name") and query.lower() not in ["unknown"]:
+                        p["title"] = query
+                        logger.debug(f"[{i}] Set title from query: {p['title']}")
+
                 # Strategy 3: Use seniority level if available
-                elif p.get("seniority_level"):
-                    p["title"] = f"{p.get('seniority_level')} Professional"
-                    logger.debug(f"[{i}] Set title from seniority: {p['title']}")
-                # FINAL FALLBACK: Just mark as professional
-                else:
+                if not p.get("title", "").strip() or p.get("title", "") == "Professional":
+                    if p.get("seniority_level"):
+                        new_title = f"{p.get('seniority_level')} Professional"
+                        if new_title != (current_title or ""):
+                            p["title"] = new_title
+                            logger.debug(f"[{i}] Set title from seniority: {p['title']}")
+
+                # FINAL FALLBACK: Just mark as professional (this should ALWAYS execute if we reach here)
+                if not p.get("title", "").strip():
                     p["title"] = "Professional"
                     logger.debug(f"[{i}] Using generic title: Professional")
+            else:
+                logger.debug(f"[{i}] Title already set: {current_title}")
 
             # Force set organization if missing
             if not p.get("organization", "").strip():
