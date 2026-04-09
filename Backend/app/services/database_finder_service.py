@@ -1767,13 +1767,21 @@ class DatabaseFinderService:
                     p["title"] = "Professional"
                 logger.warning(f"[STEP 4-FORCE] Set title for profile {i}: '{p['title']}'")
 
+            if not p.get("organization", "").strip():
+                p["organization"] = query or "Company"
+                logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
+
         # Safeguard: Verify title is set for all profiles
         for i, p in enumerate(profiles):
             if not p.get("title", "").strip():
                 p["title"] = query or "Professional"
                 logger.warning(f"[SAFEGUARD] Re-set title for profile {i}: '{p['title']}'")
+
+        # Safeguard: Verify organization is set for all profiles
+        for i, p in enumerate(profiles):
+            if not p.get("organization", "").strip():
                 p["organization"] = query or "Company"
-                logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
+                logger.warning(f"[SAFEGUARD] Re-set organization for profile {i}: '{p['organization']}'")
 
         # CRITICAL: After force-setting full_name, ALWAYS break it into first/last names
         # Don't check if they exist - just set them from full_name
