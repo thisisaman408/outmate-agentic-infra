@@ -1720,7 +1720,58 @@ class DatabaseFinderService:
         # AGGRESSIVE FALLBACKS: Never return empty name or title
         logger.info(f"[STEP 4] Processing {len(profiles)} profiles for mandatory fields")
 
-        # CRITICAL: Check what we have BEFORE mandatory field assignment
+        # CRITICAL: First pass - ABSOLUTE FORCE SET for ANY missing mandatory field
+        for i, p in enumerate(profiles):
+            # Absolute minimum: every profile MUST have these 3 fields
+            if not p.get("full_name", "").strip():
+                # Try first_name + last_name
+                first = p.get("first_name", "").strip()
+                last = p.get("last_name", "").strip()
+                if first and last:
+                    p["full_name"] = f"{first} {last}"
+                elif first:
+                    p["full_name"] = first
+                elif last:
+                    p["full_name"] = last
+                else:
+                    # Try to extract from LinkedIn URL
+                    url = p.get("linkedin_url", "")
+                    if url:
+                        try:
+                            match = re.search(r"/in/([A-Za-z0-9\-%]+)", url)
+                            if match:
+                                slug = re.sub(r"-\d+$", "", match.group(1))
+                                name = slug.replace("-", " ").title()
+                                p["full_name"] = name
+                            else:
+                                p["full_name"] = f"Lead {i+1}"
+                        except:
+                            p["full_name"] = f"Lead {i+1}"
+                    else:
+                        p["full_name"] = f"Lead {i+1}"
+                logger.warning(f"[STEP 4-FORCE] Set full_name for profile {i}: '{p['full_name']}'")
+
+            if not p.get("title", "").strip():
+                # Strategy 1: Use organization
+                org = p.get("organization", "").strip()
+                if org:
+                    p["title"] = f"Professional at {org}"
+                # Strategy 2: Use query
+                elif query:
+                    p["title"] = query
+                # Strategy 3: Use seniority
+                elif p.get("seniority_level"):
+                    p["title"] = f"{p['seniority_level']} Professional"
+                # Absolute fallback
+                else:
+                    p["title"] = "Professional"
+                logger.warning(f"[STEP 4-FORCE] Set title for profile {i}: '{p['title']}'")
+
+            if not p.get("organization", "").strip():
+                p["organization"] = query or "Company"
+                logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
+
+        # CRITICAL: Check what we have BEFORE additional fields assignment
         missing_fields = {
             "empty_full_name": 0,
             "empty_title": 0,
@@ -1735,14 +1786,20 @@ class DatabaseFinderService:
 
             if not has_name:
                 missing_fields["empty_full_name"] += 1
+                logger.error(f"🚨 Profile {i} STILL has empty full_name after force-set!")
             if not has_title:
                 missing_fields["empty_title"] += 1
+                logger.error(f"🚨 Profile {i} STILL has empty title after force-set!")
             if not has_org:
                 missing_fields["empty_org"] += 1
+                logger.error(f"🚨 Profile {i} STILL has empty org after force-set!")
             if not has_name and not has_title and not has_org:
                 missing_fields["all_empty"] += 1
 
-        logger.warning(f"[STEP 4] BEFORE mandatory field fixes: {missing_fields}")
+        if sum(missing_fields.values()) > 0:
+            logger.error(f"🚨🚨 BEFORE additional fixes: {missing_fields}")
+        else:
+            logger.info(f"✅ All {len(profiles)} profiles have mandatory fields after force-set")
 
         for i, p in enumerate(profiles):
             orig_name = p.get("full_name", "")
