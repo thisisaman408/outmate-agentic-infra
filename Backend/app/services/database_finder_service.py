@@ -1720,6 +1720,30 @@ class DatabaseFinderService:
         # AGGRESSIVE FALLBACKS: Never return empty name or title
         logger.info(f"[STEP 4] Processing {len(profiles)} profiles for mandatory fields")
 
+        # CRITICAL: Check what we have BEFORE mandatory field assignment
+        missing_fields = {
+            "empty_full_name": 0,
+            "empty_title": 0,
+            "empty_org": 0,
+            "all_empty": 0,
+        }
+
+        for i, p in enumerate(profiles):
+            has_name = bool(p.get("full_name", "").strip())
+            has_title = bool(p.get("title", "").strip())
+            has_org = bool(p.get("organization", "").strip())
+
+            if not has_name:
+                missing_fields["empty_full_name"] += 1
+            if not has_title:
+                missing_fields["empty_title"] += 1
+            if not has_org:
+                missing_fields["empty_org"] += 1
+            if not has_name and not has_title and not has_org:
+                missing_fields["all_empty"] += 1
+
+        logger.warning(f"[STEP 4] BEFORE mandatory field fixes: {missing_fields}")
+
         for i, p in enumerate(profiles):
             orig_name = p.get("full_name", "")
             orig_title = p.get("title", "")
@@ -1820,6 +1844,38 @@ class DatabaseFinderService:
             # Log the result
             logger.info(f"[{i}] {p.get('full_name')} | {p.get('title')} @ {p.get('organization')}")
 
+        # CRITICAL: Verify ALL profiles now have mandatory fields
+        logger.warning("[STEP 4] AFTER mandatory field fixes - Verification:")
+        still_missing = {
+            "empty_full_name": [],
+            "empty_title": [],
+            "empty_org": [],
+        }
+
+        for i, p in enumerate(profiles):
+            if not p.get("full_name", "").strip():
+                still_missing["empty_full_name"].append(i)
+            if not p.get("title", "").strip():
+                still_missing["empty_title"].append(i)
+            if not p.get("organization", "").strip():
+                still_missing["empty_org"].append(i)
+
+        logger.warning(f"[STEP 4] Profiles still missing after fixes: {still_missing}")
+
+        if any(still_missing.values()):
+            logger.error(f"🚨 CRITICAL: {len([x for v in still_missing.values() for x in v])} profiles STILL have empty mandatory fields!")
+            # FORCE set them now as absolute last resort
+            for i, p in enumerate(profiles):
+                if not p.get("full_name", "").strip():
+                    p["full_name"] = f"Lead {i+1}"
+                    logger.error(f"[FORCE] Set full_name for profile {i}: {p['full_name']}")
+                if not p.get("title", "").strip():
+                    p["title"] = f"{query or 'Professional'}"
+                    logger.error(f"[FORCE] Set title for profile {i}: {p['title']}")
+                if not p.get("organization", "").strip():
+                    p["organization"] = query or "Company"
+                    logger.error(f"[FORCE] Set organization for profile {i}: {p['organization']}")
+
         logger.info(f"[STEP 4 COMPLETE] All {len(profiles)} profiles have name + title")
 
         # IMPORTANT: Don't filter! Return all profiles that have been enriched
@@ -1834,6 +1890,10 @@ class DatabaseFinderService:
         leads = []
         for i, prof in enumerate(valid_profiles):
             lead = self._build_lead_record(prof, query, location, i)
+            # Verify lead has mandatory fields
+            if not lead.get("full_name") or not lead.get("title"):
+                logger.error(f"🚨 Lead {i} missing mandatory fields after build_lead_record: "
+                           f"full_name={lead.get('full_name')}, title={lead.get('title')}")
             leads.append(lead)
 
         elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
