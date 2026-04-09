@@ -175,50 +175,122 @@ class DatabaseFinderService:
         location: str = "United States",
         num_results: int = 20,
     ) -> List[str]:
-        """Google search via ZenRows → extract LinkedIn profile URLs."""
+        """Google search via ZenRows → extract LinkedIn profile URLs.
+
+        Uses multiple search strategies to maximize URL discovery:
+        1. Exact match with location
+        2. Exact match without location
+        3. Partial word match
+        """
+        unique_urls: List[str] = []
+
+        # Strategy 1: Exact match with location
         search_query = f'site:linkedin.com/in "{query}" {location}'
         search_url = (
             f"https://www.google.com/search?q={quote_plus(search_query)}"
-            f"&num={min(num_results * 2, 100)}&hl=en&gl=us"
+            f"&num={min(num_results * 3, 100)}&hl=en&gl=us"
         )
 
-        logger.info(f"ZenRows Google search: {query} in {location}")
+        logger.info(f"[SEARCH 1] ZenRows Google exact match: '{query}' in {location}")
 
-        # Use mode=auto — ZenRows picks the cheapest working config
-        # and only charges for the successful attempt
         try:
             html = await self._zenrows_get(search_url, mode="auto")
-        except DatabaseFinderError:
-            raise
+            pattern = r'href="(https://[a-z]{0,3}\.?linkedin\.com/in/[^"&?]+)"'
+            matches = re.findall(pattern, html)
 
-        # Extract LinkedIn profile URLs (more lenient regex to capture in.uk. etc subdomains)
-        pattern = r'href="(https://[a-z]{0,3}\.?linkedin\.com/in/[^"&?]+)"'
-        matches = re.findall(pattern, html)
+            for match in matches:
+                cleaned = match.split("&")[0].split("?")[0].split("#")[0]
+                slug_match = re.search(r"(https://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                if slug_match:
+                    cleaned = slug_match.group(1).rstrip("/")
+                if cleaned not in unique_urls and "/in/" in cleaned:
+                    unique_urls.append(cleaned)
+                if len(unique_urls) >= num_results:
+                    logger.info(f"[SEARCH 1] Found {len(unique_urls)} URLs (reached limit)")
+                    return unique_urls
 
-        unique_urls: List[str] = []
-        for match in matches:
-            # Strip query params, fragments, and URL-encoded tracking junk
-            cleaned = match.split("&")[0].split("?")[0].split("#")[0]
-            # Extract just the /in/slug part — discard anything after slug
-            slug_match = re.search(r"(https://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
-            if slug_match:
-                cleaned = slug_match.group(1).rstrip("/")
-            if cleaned not in unique_urls and "/in/" in cleaned:
-                unique_urls.append(cleaned)
-            if len(unique_urls) >= num_results:
-                break
+            logger.info(f"[SEARCH 1] Found {len(unique_urls)} URLs")
+        except Exception as e:
+            logger.warning(f"[SEARCH 1] Failed: {e}")
 
-        logger.info(f"Found {len(unique_urls)} LinkedIn URLs for '{query}'")
+        # Strategy 2: Exact match WITHOUT location (expand results)
+        if len(unique_urls) < num_results // 2:
+            search_query = f'site:linkedin.com/in "{query}"'
+            search_url = (
+                f"https://www.google.com/search?q={quote_plus(search_query)}"
+                f"&num={min(num_results * 3, 100)}&hl=en&gl=us"
+            )
+
+            logger.info(f"[SEARCH 2] ZenRows Google exact match (no location): '{query}'")
+
+            try:
+                html = await self._zenrows_get(search_url, mode="auto")
+                pattern = r'href="(https://[a-z]{0,3}\.?linkedin\.com/in/[^"&?]+)"'
+                matches = re.findall(pattern, html)
+
+                for match in matches:
+                    cleaned = match.split("&")[0].split("?")[0].split("#")[0]
+                    slug_match = re.search(r"(https://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                    if slug_match:
+                        cleaned = slug_match.group(1).rstrip("/")
+                    if cleaned not in unique_urls and "/in/" in cleaned:
+                        unique_urls.append(cleaned)
+                    if len(unique_urls) >= num_results:
+                        logger.info(f"[SEARCH 2] Found {len(unique_urls)} URLs total (reached limit)")
+                        return unique_urls
+
+                logger.info(f"[SEARCH 2] Found {len(unique_urls)} URLs total")
+            except Exception as e:
+                logger.warning(f"[SEARCH 2] Failed: {e}")
+
+        # Strategy 3: Partial match (split query into parts)
+        if len(unique_urls) < num_results // 2:
+            query_parts = query.split()
+            if len(query_parts) > 1:
+                partial_query = query_parts[0]  # Use first part only
+                search_query = f'site:linkedin.com/in {partial_query}'
+                search_url = (
+                    f"https://www.google.com/search?q={quote_plus(search_query)}"
+                    f"&num={min(num_results * 2, 100)}&hl=en&gl=us"
+                )
+
+                logger.info(f"[SEARCH 3] ZenRows Google partial: '{partial_query}'")
+
+                try:
+                    html = await self._zenrows_get(search_url, mode="auto")
+                    pattern = r'href="(https://[a-z]{0,3}\.?linkedin\.com/in/[^"&?]+)"'
+                    matches = re.findall(pattern, html)
+
+                    for match in matches:
+                        cleaned = match.split("&")[0].split("?")[0].split("#")[0]
+                        slug_match = re.search(r"(https://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                        if slug_match:
+                            cleaned = slug_match.group(1).rstrip("/")
+                        if cleaned not in unique_urls and "/in/" in cleaned:
+                            unique_urls.append(cleaned)
+                        if len(unique_urls) >= num_results:
+                            logger.info(f"[SEARCH 3] Found {len(unique_urls)} URLs total (reached limit)")
+                            return unique_urls
+
+                    logger.info(f"[SEARCH 3] Found {len(unique_urls)} URLs total")
+                except Exception as e:
+                    logger.warning(f"[SEARCH 3] Failed: {e}")
+
+        logger.info(f"[GOOGLE SEARCH COMPLETE] Total unique URLs: {len(unique_urls)}/{num_results}")
         return unique_urls
 
     async def _search_tavily_linkedin(self, query: str, location: str = "United States", num_results: int = 20) -> List[str]:
-        """Fallback: Tavily search for LinkedIn profile URLs."""
+        """Fallback: Tavily search for LinkedIn profile URLs with multiple strategies."""
         if not self.tavily_api_key:
             return []
 
+        unique_urls: List[str] = []
+
+        # Strategy 1: Exact match with location
         search_query = f'site:linkedin.com/in "{query}" {location}'.strip()
+        logger.info(f"[TAVILY 1] Searching: '{search_query}'")
+
         results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
-        urls: List[str] = []
         for r in results:
             url = r.get("url", "")
             if "linkedin.com/in/" not in url:
@@ -227,13 +299,67 @@ class DatabaseFinderService:
             slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
             if slug_match:
                 cleaned = slug_match.group(1).rstrip("/")
-            if cleaned not in urls:
-                urls.append(cleaned)
-            if len(urls) >= num_results:
-                break
-        if urls:
-            logger.info(f"Tavily fallback found {len(urls)} LinkedIn URLs for '{query}'")
-        return urls
+            if cleaned not in unique_urls:
+                unique_urls.append(cleaned)
+            if len(unique_urls) >= num_results:
+                logger.info(f"[TAVILY 1] Found {len(unique_urls)} URLs (reached limit)")
+                return unique_urls
+
+        if unique_urls:
+            logger.info(f"[TAVILY 1] Found {len(unique_urls)} URLs")
+
+        # Strategy 2: Without location
+        if len(unique_urls) < num_results // 2:
+            search_query = f'site:linkedin.com/in "{query}"'.strip()
+            logger.info(f"[TAVILY 2] Searching (no location): '{search_query}'")
+
+            results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
+            for r in results:
+                url = r.get("url", "")
+                if "linkedin.com/in/" not in url:
+                    continue
+                cleaned = url.split("?")[0].split("#")[0].rstrip("/")
+                slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                if slug_match:
+                    cleaned = slug_match.group(1).rstrip("/")
+                if cleaned not in unique_urls:
+                    unique_urls.append(cleaned)
+                if len(unique_urls) >= num_results:
+                    logger.info(f"[TAVILY 2] Found {len(unique_urls)} URLs total (reached limit)")
+                    return unique_urls
+
+            if unique_urls:
+                logger.info(f"[TAVILY 2] Found {len(unique_urls)} URLs total")
+
+        # Strategy 3: Partial match
+        if len(unique_urls) < num_results // 2:
+            query_parts = query.split()
+            if len(query_parts) > 1:
+                partial_query = query_parts[0]
+                search_query = f'site:linkedin.com/in {partial_query}'.strip()
+                logger.info(f"[TAVILY 3] Searching partial: '{partial_query}'")
+
+                results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
+                for r in results:
+                    url = r.get("url", "")
+                    if "linkedin.com/in/" not in url:
+                        continue
+                    cleaned = url.split("?")[0].split("#")[0].rstrip("/")
+                    slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                    if slug_match:
+                        cleaned = slug_match.group(1).rstrip("/")
+                    if cleaned not in unique_urls:
+                        unique_urls.append(cleaned)
+                    if len(unique_urls) >= num_results:
+                        logger.info(f"[TAVILY 3] Found {len(unique_urls)} URLs total (reached limit)")
+                        return unique_urls
+
+                if unique_urls:
+                    logger.info(f"[TAVILY 3] Found {len(unique_urls)} URLs total")
+
+        if unique_urls:
+            logger.info(f"[TAVILY FALLBACK COMPLETE] Total URLs: {len(unique_urls)}/{num_results}")
+        return unique_urls
 
     @staticmethod
     def _split_headline(raw: str) -> tuple:
