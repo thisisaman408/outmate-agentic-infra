@@ -230,4 +230,30 @@ export const dashboardApi = {
     const response = await fetchWithAuth(`/api/v1/dashboard/sequence-analytics?days=${days}`)
     return parseJson<SequenceAnalytics>(response)
   },
+
+  // ── Revenue Analytics ───────────────────────────────────────────────────
+  getRevenueAnalytics: async (days: number = 30): Promise<RevenueAnalytics> => {
+    const response = await fetchWithAuth(`/api/v1/dashboard/revenue-analytics?days=${days}`)
+    return parseJson<RevenueAnalytics>(response)
+  },
+}
+
+export interface RevenueAnalytics {
+  sql_count: number
+  cac: number
+  deal_velocity: number
+  revenue_influenced: number
+  funnel: {
+    stage: string
+    count: number
+    drop_off_pct: number
+  }[]
+  trends: {
+    date: string
+    revenue: number
+    sqls: number
+  }[]
+  attribution_type: string
+  last_sync: string
+  currency: string
 }
