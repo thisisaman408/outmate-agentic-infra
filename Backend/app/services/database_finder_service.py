@@ -1023,6 +1023,37 @@ class DatabaseFinderService:
         company_mentions: Dict[str, int] = {}
         linkedin_urls: List[str] = []
 
+        # Extract full_name from search results (from title or content)
+        if not details.get("full_name") and name:
+            # Try to find full name in search results
+            for r in results:
+                title = r.get("title", "")
+                content = r.get("content", "")
+                url = r.get("url", "")
+
+                # LinkedIn titles often have format: "Name - Title - Company | LinkedIn"
+                if "linkedin.com" in url.lower():
+                    # Extract name from LinkedIn title
+                    parts = title.split("-")
+                    if parts:
+                        potential_name = parts[0].strip()
+                        # Filter out just junk like "LinkedIn" or single words
+                        name_parts = potential_name.split()
+                        if len(name_parts) >= 2:
+                            details["full_name"] = potential_name
+                            details["first_name"] = name_parts[0]
+                            details["last_name"] = " ".join(name_parts[1:])
+                            break
+
+            # If not found in title, use the search query name
+            if not details.get("full_name"):
+                details["full_name"] = name
+                name_parts = name.split()
+                if name_parts:
+                    details["first_name"] = name_parts[0]
+                    if len(name_parts) > 1:
+                        details["last_name"] = " ".join(name_parts[1:])
+
         for r in results:
             title = r.get("title", "")
             content = r.get("content", "")
@@ -1051,10 +1082,33 @@ class DatabaseFinderService:
                     role, company = self._split_headline(title.split("|")[0].strip())
                     if role:
                         clean_role = self._clean_text(role)
-                        if not self._looks_like_name(clean_role, name.split()[0] if name else "", ""):
+                        # Only skip if it's definitely a name
+                        fname = details.get("first_name", "").split()[0] if details.get("first_name") else ""
+                        lname = details.get("last_name", "").split()[-1] if details.get("last_name") else ""
+                        if not self._looks_like_name(clean_role, fname, lname):
                             details["title"] = clean_role
                     if company and not details.get("organization"):
                         details["organization"] = self._clean_text(company)
+
+                # Third fallback: extract first reasonable token from title (usually the job title)
+                if not details.get("title"):
+                    # Remove "| LinkedIn" and similar junk
+                    clean_title = re.sub(r"\|\s*LinkedIn.*$", "", title, flags=re.IGNORECASE).strip()
+                    # Try to get word clusters separated by dashes
+                    segments = [s.strip() for s in clean_title.split("-") if s.strip()]
+                    for segment in segments[1:]:  # Skip first segment (likely name)
+                        if segment and len(segment) > 2 and segment.lower() != "linkedin":
+                            # Check this segment has job-like keywords
+                            if any(kw in segment.lower() for kw in ["manager", "director", "engineer", "developer",
+                                                                     "vp", "ceo", "cto", "analyst", "consultant",
+                                                                     "lead", "head", "officer", "president", "sales",
+                                                                     "marketing", "senior", "junior", "architect"]):
+                                details["title"] = self._clean_text(segment)
+                                break
+                            # Or if it looks like a reasonable title (capitalized, not too long)
+                            elif 3 <= len(segment) <= 60 and segment[0].isupper() and " at " not in segment.lower():
+                                details["title"] = self._clean_text(segment)
+                                break
 
             # Count company mentions in content
             if content:
@@ -1461,6 +1515,33 @@ class DatabaseFinderService:
                         prof["_company_decision_makers"] = dm_results[org]
 
         # Step 4: Build final lead records with 30-40 fields
+        # Ensure all profiles have mandatory fields (Name and Title)
+        for p in profiles:
+            # Ensure full_name exists
+            if not p.get("full_name", "").strip():
+                first = p.get("first_name", "").strip() or ""
+                last = p.get("last_name", "").strip() or ""
+                if first or last:
+                    p["full_name"] = f"{first} {last}".strip()
+                # If no parts available, generate from LinkedIn URL
+                if not p.get("full_name"):
+                    linkedin_url = p.get("linkedin_url", "")
+                    if linkedin_url:
+                        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
+                        if name_match:
+                            slug = name_match.group(1).split("-")[0]  # Take first part before dashes/numbers
+                            p["full_name"] = slug.replace("-", " ").title()
+
+            # Ensure title exists - fallback to query keyword
+            if not p.get("title", "").strip():
+                # Try to extract from organization or use query as fallback
+                org = p.get("organization", "").strip()
+                if org:
+                    p["title"] = f"Professional at {org}"
+                else:
+                    # Use query keyword as title (e.g., "VP Sales", "Developer")
+                    p["title"] = query
+
         # Filter: Only include profiles with mandatory fields (Name and Title)
         valid_profiles = [
             p for p in profiles
@@ -1469,6 +1550,8 @@ class DatabaseFinderService:
 
         if not valid_profiles:
             logger.warning(f"No profiles with mandatory fields (Name + Title) after enrichment. Total profiles: {len(profiles)}")
+        else:
+            logger.info(f"Valid profiles with name + title: {len(valid_profiles)}/{len(profiles)}")
 
         leads = []
         for i, prof in enumerate(valid_profiles):
