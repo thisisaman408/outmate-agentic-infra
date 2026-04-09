@@ -88,7 +88,7 @@ class YouTubeTranscriptsComponent(Component):
                     transcript = transcript_list.find_generated_transcript(["en"])
 
             # Fetch the transcript data
-            transcript_data = api.fetch(transcript.video_id, [transcript.language_code])
+            transcript_data = transcript.fetch()
 
         except (TranscriptsDisabled, NoTranscriptFound) as e:
             error_type = type(e).__name__

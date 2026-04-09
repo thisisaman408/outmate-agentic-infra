@@ -16,7 +16,7 @@ from lfx.inputs.inputs import (
     SliderInput,
 )
 
-XAI_DEFAULT_MODELS = ["grok-2-latest"]
+XAI_DEFAULT_MODELS = ["grok-3", "grok-3-mini", "grok-2-latest"]
 
 
 class XAIModelComponent(LCModelComponent):

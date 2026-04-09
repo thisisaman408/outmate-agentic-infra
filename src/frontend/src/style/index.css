@@ -6,52 +6,43 @@
 
 @layer base {
   :root {
-    --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
+    --font-sans: "Inter", sans-serif;
     --font-mono: "JetBrains Mono", monospace;
     --font-chivo: "Chivo", sans-serif;
 
-    --background: 225 33% 98%;
-    --foreground: 225 21% 8%;
-    --card: 0 0% 100%;
-    --card-foreground: 225 21% 8%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 225 21% 8%;
-    --primary: 250 100% 68%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 230 31% 95%;
-    --secondary-foreground: 221 39% 11%;
-    --muted: 224 33% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 72 100% 50%;
-    --accent-foreground: 66 100% 6%;
-    --destructive: 358 75% 59%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 228 24% 92%;
-    --input: 229 31% 95%;
-    --ring: 250 100% 68%;
-    --sidebar: 228 33% 97%;
-    --sidebar-foreground: 228 27% 7%;
-    --sidebar-primary: 250 100% 68%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 230 31% 95%;
-    --sidebar-accent-foreground: 221 39% 11%;
-    --sidebar-border: 228 24% 92%;
-    --sidebar-ring: 250 100% 68%;
-    --radius: 0.75rem;
-
-    --accent-amber: 45 93% 47%;
-    --accent-amber-foreground: 45 93% 20%;
-    --primary-hover: 250 100% 60%;
-    --secondary-hover: 230 31% 90%;
-    --placeholder-foreground: 215 16% 65%;
-    --canvas: 225 33% 98%;
-    --canvas-dot: 228 24% 85%;
-    --accent-emerald: 142 70% 90%;
-    --accent-emerald-foreground: 142 76% 20%;
-    --accent-emerald-hover: 142 70% 85%;
-    --accent-indigo: 250 100% 95%;
-    --accent-indigo-foreground: 250 100% 68%;
-    --accent-red-foreground: 358 75% 59%;
+    /* Outmate brand: warm cream backgrounds, coral accent */
+    --foreground: 230 15% 15%; /* deep navy text */
+    --background: 40 20% 98%; /* warm cream */
+    --muted: 38 15% 95%; /* warm gray */
+    --muted-foreground: 225 8% 42%; /* muted slate */
+    --card: 40 25% 99%; /* warm white card */
+    --card-foreground: 230 15% 15%; /* navy text */
+    --popover: 40 25% 99%; /* warm white */
+    --popover-foreground: 230 15% 15%; /* navy text */
+    --border: 35 12% 90%; /* warm border */
+    --input: 35 12% 90%; /* warm input border */
+    --primary-foreground: 0 0% 100%; /* white on coral */
+    --primary: 15 85% 50%; /* Outmate coral */
+    --secondary: 40 20% 98%; /* cream */
+    --secondary-foreground: 230 12% 20%; /* dark navy */
+    --accent: 38 15% 95%; /* warm hover */
+    --accent-foreground: 230 15% 15%; /* navy text */
+    --destructive: 0 72% 51%; /* hsl(0, 72%, 51%) */
+    --destructive-foreground: 0 0% 100%; /* hsl(0, 0%, 100%) */
+    --accent-amber: 26 90% 37%; /* hsl(26, 90%, 37%) */
+    --accent-amber-foreground: 26 90% 37%; /* hsl(26, 90%, 37%) */
+    --ring: 15 85% 50%; /* coral ring */
+    --primary-hover: 15 80% 42%; /* darker coral hover */
+    --secondary-hover: 35 12% 90%; /* warm hover */
+    --placeholder-foreground: 225 8% 58%; /* muted slate */
+    --canvas: 38 15% 96%; /* warm canvas */
+    --canvas-dot: 225 8% 72%; /* warm dots */
+    --accent-emerald: 149 80% 90%; /* hsl(149, 80%, 90%) */
+    --accent-emerald-foreground: 161 94% 30%; /* hsl(161, 94%, 30%) */
+    --accent-emerald-hover: 152.4 76% 80.4%; /* hsl(152.4, 76%, 80.4%) */
+    --accent-indigo: 226 100% 94%; /* hsl(226, 100%, 94%) */
+    --accent-indigo-foreground: 243 75% 59%; /* hsl(243, 75%, 59%) */
+    --accent-red-foreground: 0 72% 51%; /* hsl(0, 72%, 51%) */
 
     --accent-blue: 217 91% 60%; /* hsl(217, 91%, 60%) — blue-500 */
     --accent-blue-foreground: 217 91% 60%; /* hsl(217, 91%, 60%) */
@@ -148,7 +139,7 @@
     --placeholder: 240 5% 64.9%;
     --hard-zinc: 240 5.2% 33.9%;
     --smooth-red: 0 93.3% 94.1%;
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
     --datatype-pink: 333.3 71.4% 50.6%;
     --datatype-pink-foreground: 325.7 77.8% 94.7%;
@@ -216,30 +207,31 @@
   }
 
   .dark {
-    --background: 240 34% 6%;
-    --foreground: 234 100% 98%;
-    --card: 234 20% 9%;
-    --card-foreground: 234 100% 98%;
-    --popover: 234 20% 9%;
-    --popover-foreground: 234 100% 98%;
-    --primary: 250 100% 68%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 231 22% 13%;
-    --secondary-foreground: 234 100% 98%;
-    --muted: 231 22% 13%;
-    --muted-foreground: 223 15% 73%;
-    --accent: 72 100% 50%;
-    --accent-foreground: 66 100% 6%;
-    --destructive: 0 100% 68%;
-    --destructive-foreground: 0 0% 100%;
-    --ring: 250 100% 68%;
-    --border: 231 24% 16%;
-    --input: 231 22% 13%;
-    --primary-hover: 250 100% 60%;
-    --secondary-hover: 231 22% 18%;
-    --placeholder-foreground: 215 16% 45%;
-    --canvas: 240 34% 4%;
-    --canvas-dot: 231 24% 25%;
+    /* Outmate brand: rich navy backgrounds, warm coral accent */
+    --foreground: 40 10% 95%; /* warm white */
+    --background: 230 18% 11%; /* rich navy */
+    --muted: 230 14% 16%; /* elevated navy */
+    --muted-foreground: 225 10% 58%; /* soft slate */
+    --card: 230 16% 13%; /* card navy */
+    --card-foreground: 40 10% 95%; /* warm white */
+    --popover: 230 16% 13%; /* popover navy */
+    --popover-foreground: 40 10% 95%; /* warm white */
+    --border: 228 12% 22%; /* subtle navy edge */
+    --input: 228 10% 28%; /* input navy */
+    --primary-foreground: 230 18% 11%; /* navy on coral */
+    --primary: 15 85% 55%; /* Outmate coral */
+    --secondary: 230 18% 11%; /* navy */
+    --secondary-foreground: 225 15% 85%; /* light slate */
+    --accent: 230 14% 18%; /* elevated navy hover */
+    --accent-foreground: 40 10% 95%; /* warm white */
+    --destructive: 0 84% 60%; /* hsl(0, 84%, 60%) */
+    --destructive-foreground: 0 0% 100%; /* hsl(0, 0%, 100%) */
+    --ring: 15 85% 55%; /* coral ring */
+    --primary-hover: 15 80% 48%; /* darker coral hover */
+    --secondary-hover: 230 14% 18%; /* navy hover */
+    --placeholder-foreground: 225 8% 42%; /* muted slate */
+    --canvas: 230 20% 8%; /* deep navy canvas */
+    --canvas-dot: 228 12% 22%; /* navy dots */
 
     --accent-emerald: 164 86% 16%; /* hsl(164, 86%, 16%) */
     --accent-emerald-foreground: 158 64% 52%; /* hsl(158, 64%, 52%) */
@@ -413,14 +405,14 @@
     --chat-bot-icon: #235d70;
     --chat-user-icon: #4f3d6e;
 
-    --sidebar: 240 29% 5%;
-    --sidebar-foreground: 234 80% 95%;
-    --sidebar-primary: 250 100% 68%;
+    --sidebar-background: 230 20% 9%;
+    --sidebar-foreground: 40 10% 90%;
+    --sidebar-primary: 15 85% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 231 25% 11%;
-    --sidebar-accent-foreground: 234 100% 98%;
-    --sidebar-border: 231 24% 14%;
-    --sidebar-ring: 250 100% 68%;
+    --sidebar-accent: 230 14% 16%;
+    --sidebar-accent-foreground: 40 10% 90%;
+    --sidebar-border: 228 12% 18%;
+    --sidebar-ring: 15 85% 55%;
     --placeholder: 240 5% 64.9%;
     --hard-zinc: 240 5.2% 33.9%;
     --smooth-red: 0 74.7% 15.5%;
@@ -477,39 +469,5 @@
     --accent-amber-foreground: 45.9 96.7% 64.5%;
     --red-foreground: 0 72.2% 50.6%;
     --indigo-foreground: 234.5 89.5% 73.9%;
-  }
-}
-
-@layer utilities {
-  .glass-effect {
-    background-color: hsl(var(--card) / 0.4);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-  }
-
-  .text-gradient {
-    background: linear-gradient(to right, hsl(var(--primary)), hsl(var(--primary) / 0.8), hsl(var(--primary) / 0.5));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  .hover-lift {
-    transition: all 0.3s ease-in-out;
-  }
-
-  .hover-lift:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  }
-
-  .card-elevated {
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-  }
-
-  .ai-gradient-bg {
-    background: radial-gradient(circle at 50% 50%, hsla(var(--primary), 0.1) 0%, transparent 50%);
   }
 }

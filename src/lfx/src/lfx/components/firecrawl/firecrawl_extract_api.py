@@ -107,10 +107,6 @@ class FirecrawlExtractApi(Component):
         params = {
             "prompt": enhanced_prompt,
             "enableWebSearch": self.enable_web_search,
-            # Optional parameters - not essential for basic extraction
-            "ignoreSitemap": self.ignore_sitemap,
-            "includeSubdomains": self.include_subdomains,
-            "showSources": self.show_sources,
             "timeout": 300,
         }
 

@@ -10,7 +10,7 @@ from lfx.io import DropdownInput, IntInput, SecretStrInput
 
 
 class TwelveLabsVideoEmbeddings(Embeddings):
-    def __init__(self, api_key: str, model_name: str = "Marengo-retrieval-2.7") -> None:
+    def __init__(self, api_key: str, model_name: str = "marengo3.0") -> None:
         self.client = TwelveLabs(api_key=api_key)
         self.model_name = model_name
 
@@ -90,8 +90,8 @@ class TwelveLabsVideoEmbeddingsComponent(LCEmbeddingsModel):
             name="model_name",
             display_name="Model",
             advanced=False,
-            options=["Marengo-retrieval-2.7"],
-            value="Marengo-retrieval-2.7",
+            options=["marengo3.0"],
+            value="marengo3.0",
         ),
         IntInput(name="request_timeout", display_name="Request Timeout", advanced=True),
     ]

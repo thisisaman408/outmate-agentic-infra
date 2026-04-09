@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ForwardedIconComponent from "@/components/common/genericIconComponent";
 import ShadTooltip from "@/components/common/shadTooltipComponent";
 import { useUpdateSessionName } from "@/controllers/API/queries/messages/use-rename-session";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -22,6 +23,15 @@ export interface SessionSelectorProps {
   handleRename?: (oldSessionId: string, newSessionId: string) => Promise<void>;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
+}
+
+/**
+ * Returns a friendly display name for a session.
+ * "Default Session" for the flow ID session, and cleans up "Chat X" names.
+ */
+function getDisplayName(session: string, currentFlowId: string): string {
+  if (session === currentFlowId) return "Default Chat";
+  return session;
 }
 
 export function SessionSelector({
@@ -55,7 +65,6 @@ export function SessionSelector({
     const trimmed = newSessionId.trim();
     if (!trimmed || trimmed === session) return;
 
-    // Use handleRename if provided (from sidebar), otherwise use mutation directly (from header)
     if (handleRename) {
       await handleRename(session, trimmed);
       updateVisibleSession(trimmed);
@@ -67,12 +76,10 @@ export function SessionSelector({
         setSelectedView({ type: "Session", id: trimmed });
       }
     } else {
-      // Wait for the mutation to complete before updating visible session
       await updateSessionName(
         { old_session_id: session, new_session_id: trimmed },
         {
           onSuccess: () => {
-            // Update visible session after rename is complete
             updateVisibleSession(trimmed);
             if (
               selectedView?.type === "Session" &&
@@ -87,17 +94,16 @@ export function SessionSelector({
     }
   };
 
-  // Default session (flowId) cannot be renamed, but can be deleted if it has messages
   const isDefaultSession = session === currentFlowId;
-
   const hasMessages = useSessionHasMessages({
     sessionId: session,
     flowId: currentFlowId,
   });
-
   const canModifySession = !isDefaultSession;
   const canDeleteSession = hasMessages;
   const canRenameSession = canModifySession && hasMessages;
+
+  const displayName = getDisplayName(session, currentFlowId);
 
   return (
     <div
@@ -108,12 +114,23 @@ export function SessionSelector({
         else toggleVisibility();
       }}
       className={cn(
-        "file-component-accordion-div group cursor-pointer rounded-md text-left text-mmd hover:bg-accent",
-        isVisible ? "bg-accent font-semibold" : "font-normal",
+        "group cursor-pointer rounded-lg text-left transition-all duration-150",
+        isVisible
+          ? "bg-primary/8 border border-primary/15"
+          : "hover:bg-muted/50 border border-transparent",
       )}
     >
-      <div className="flex h-8 items-center justify-between overflow-hidden w-full">
-        <div className="flex w/full min-w-0 items-center px-2">
+      <div className="flex h-9 items-center justify-between overflow-hidden w-full">
+        <div className="flex w-full min-w-0 items-center gap-2 px-2.5">
+          {/* Chat icon */}
+          <ForwardedIconComponent
+            name={isVisible ? "MessageSquare" : "MessageSquareDashed"}
+            className={cn(
+              "h-3.5 w-3.5 flex-shrink-0 transition-colors",
+              isVisible ? "text-primary/70" : "text-muted-foreground/40",
+            )}
+          />
+
           {isEditing ? (
             <div
               onClick={(e) => e.stopPropagation()}
@@ -130,10 +147,17 @@ export function SessionSelector({
               />
             </div>
           ) : (
-            <ShadTooltip styleClasses="z-50" content={session}>
+            <ShadTooltip styleClasses="z-50" content={displayName}>
               <div className="relative w-full overflow-hidden">
-                <span className="w-full truncate bg-transparent text-mmd">
-                  {isDefaultSession ? "Default Session" : session}
+                <span
+                  className={cn(
+                    "w-full truncate text-[13px] transition-colors",
+                    isVisible
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  {displayName}
                 </span>
               </div>
             </ShadTooltip>

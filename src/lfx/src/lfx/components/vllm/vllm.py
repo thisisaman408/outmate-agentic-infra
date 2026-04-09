@@ -1,12 +1,14 @@
 from typing import Any
+from urllib.parse import urljoin
 
+import httpx
 from langchain_openai import ChatOpenAI
 from pydantic.v1 import SecretStr
 
 from lfx.base.models.model import LCModelComponent
 from lfx.field_typing import LanguageModel
 from lfx.field_typing.range_spec import RangeSpec
-from lfx.inputs.inputs import BoolInput, DictInput, IntInput, SecretStrInput, SliderInput, StrInput
+from lfx.inputs.inputs import BoolInput, DictInput, DropdownInput, IntInput, SecretStrInput, SliderInput, StrInput
 from lfx.log.logger import logger
 
 
@@ -15,6 +17,39 @@ class VllmComponent(LCModelComponent):
     description = "Generates text using vLLM models via OpenAI-compatible API."
     icon = "vLLM"
     name = "vLLMModel"
+
+    async def update_build_config(self, build_config: dict, field_value: Any, field_name: str | None = None):  # noqa: ARG002
+        if field_name == "model_name":
+            base_url_dict = build_config.get("api_base", {})
+            base_url_load_from_db = base_url_dict.get("load_from_db", False)
+            base_url_value = base_url_dict.get("value")
+            if base_url_load_from_db:
+                base_url_value = await self.get_variables(base_url_value, field_name)
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(urljoin(base_url_value, "/v1/models"), timeout=2.0)
+                    response.raise_for_status()
+            except httpx.HTTPError:
+                msg = "Could not access the vLLM server. Please, make sure the server is running and the 'vLLM API Base' URL is correct."
+                self.log(msg)
+                return build_config
+            build_config["model_name"]["options"] = await self.get_models(base_url_value)
+
+        return build_config
+
+    @staticmethod
+    async def get_models(base_url_value: str) -> list[str]:
+        try:
+            url = urljoin(base_url_value, "/v1/models")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+
+                return [model["id"] for model in data.get("data", [])]
+        except Exception as e:
+            msg = "Could not retrieve models. Please, make sure the vLLM server is running."
+            raise ValueError(msg) from e
 
     inputs = [
         *LCModelComponent.get_base_inputs(),
@@ -37,12 +72,13 @@ class VllmComponent(LCModelComponent):
             advanced=True,
             info="If True, it will output JSON regardless of passing a schema.",
         ),
-        StrInput(
+        DropdownInput(
             name="model_name",
             display_name="Model Name",
             advanced=False,
-            info="The name of the vLLM model to use (e.g., 'ibm-granite/granite-3.3-8b-instruct').",
-            value="ibm-granite/granite-3.3-8b-instruct",
+            info="The name of the vLLM model to use. Click refresh to discover models from the server.",
+            refresh_button=True,
+            combobox=True,
         ),
         StrInput(
             name="api_base",
@@ -135,7 +171,3 @@ class VllmComponent(LCModelComponent):
             if message:
                 return message
         return None
-
-    def update_build_config(self, build_config: dict, field_value: Any, field_name: str | None = None) -> dict:  # noqa: ARG002
-        # vLLM models support all parameters, so no special handling needed
-        return build_config

@@ -39,8 +39,6 @@ export function ChatSidebar({
   const visibleSession = currentSessionId;
 
   const handleDeleteSession = (session: string) => {
-    // Delegate to parent which handles the full delete flow
-    // (API call, cache clearing, session switching)
     onDeleteSession?.(session);
   };
 
@@ -49,37 +47,52 @@ export function ChatSidebar({
   };
 
   return (
-    <div className="flex flex-col pb-4 gap-2">
-      <div className="flex flex-col">
-        <div className="flex h-4 items-center justify-between">
-          <div className="px-2 text-xs font-semibold leading-4 text-muted-foreground">
-            Sessions
-          </div>
-          <ShadTooltip
-            styleClasses="z-50"
-            content="New Chat"
-            side={isShareablePlayground ? "bottom" : "top"}
-          >
-            <Button
-              data-testid="new-chat"
-              variant="ghost"
-              className="flex h-8 w-8 items-center justify-center !p-0 hover:bg-secondary-hover"
-              onClick={onNewChat}
-            >
-              <ForwardedIconComponent
-                name="Plus"
-                className="h-[18px] w-[18px] text-ring"
-              />
-            </Button>
-          </ShadTooltip>
+    <div className="flex flex-col pb-4 gap-3">
+      {/* Header with new chat button */}
+      <div className="flex items-center justify-between px-2">
+        <div className="flex items-center gap-1.5">
+          <ForwardedIconComponent
+            name="MessagesSquare"
+            className="h-3.5 w-3.5 text-muted-foreground/60"
+          />
+          <span className="text-xs font-semibold text-muted-foreground">
+            Chats
+          </span>
         </div>
+        <ShadTooltip
+          styleClasses="z-50"
+          content="New Chat"
+          side={isShareablePlayground ? "bottom" : "top"}
+        >
+          <Button
+            data-testid="new-chat"
+            variant="ghost"
+            className="flex h-7 w-7 items-center justify-center !p-0 rounded-lg hover:bg-primary/10 transition-colors"
+            onClick={onNewChat}
+          >
+            <ForwardedIconComponent
+              name="Plus"
+              className="h-4 w-4 text-primary/70"
+            />
+          </Button>
+        </ShadTooltip>
       </div>
+
+      {/* Session list */}
       {sessionIds.length === 0 ? (
-        <div className="p-4 text-sm text-muted-foreground">
-          No sessions yet.
+        <div className="flex flex-col items-center gap-2 p-6 text-center">
+          <div className="h-10 w-10 rounded-full bg-muted/50 flex items-center justify-center">
+            <ForwardedIconComponent
+              name="MessageSquarePlus"
+              className="h-5 w-5 text-muted-foreground/40"
+            />
+          </div>
+          <span className="text-xs text-muted-foreground/60">
+            No chats yet. Start a new one!
+          </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-0.5">
           {sessionIds.map((session) => (
             <SessionSelector
               key={session}

@@ -51,22 +51,22 @@ Specifications
 #FF3276 -> #F480FF
 #1A0250 -> #2F10FE
 #98F4FE -> #9BFEAA
-#F480FF -> #7528FC
+#F480FF -> #E8614D
 #F480FF -> #9BFEAA
 #2F10FE -> #9BFEAA
 #BB277F -> #050154
-#7528FC -> #9BFEAA
+#E8614D -> #9BFEAA
 #2F10FE -> #98F4FE
 */
 export const flowGradients = [
   "linear-gradient(90deg, #FF3276 0%, #F480FF 100%)",
   "linear-gradient(90deg, #1A0250 0%, #2F10FE 100%)",
   "linear-gradient(90deg, #98F4FE 0%, #9BFEAA 100%)",
-  "linear-gradient(90deg, #F480FF 0%, #7528FC 100%)",
+  "linear-gradient(90deg, #F480FF 0%, #E8614D 100%)",
   "linear-gradient(90deg, #F480FF 0%, #9BFEAA 100%)",
   "linear-gradient(90deg, #2F10FE 0%, #9BFEAA 100%)",
   "linear-gradient(90deg, #BB277F 0%, #050154 100%)",
-  "linear-gradient(90deg, #7528FC 0%, #9BFEAA 100%)",
+  "linear-gradient(90deg, #E8614D 0%, #9BFEAA 100%)",
   "linear-gradient(90deg, #2F10FE 0%, #98F4FE 100%)",
 ];
 
@@ -110,7 +110,7 @@ export const nodeColors: { [char: string]: string } = {
   Notion: "#000000",
   AssemblyAI: "#213ED7",
   assemblyai: "#213ED7",
-  gtm_agents: "#E85D04",
+  gtm_agents: "#E8614D",
   helpers: "#31A3CC",
   prototypes: "#E6277A",
   astra_assistants: "#272541",
@@ -132,6 +132,46 @@ export const nodeColors: { [char: string]: string } = {
   Agent: "#903BBE",
   AgentExecutor: "#903BBE",
   Tool: "#00fbfc",
+  // Bundle categories
+  FAISS: "#AA8742",
+  agentql: "#903BBE",
+  apollo: "#E85D04",
+  bing: "#198BF6",
+  builtwith: "#31A3CC",
+  cleanlab: "#10B981",
+  clickhouse: "#FE7500",
+  cloudflare: "#F5B85A",
+  cohere: "#903BBE",
+  glean: "#198BF6",
+  huggingface: "#FE7500",
+  hunter: "#E85D04",
+  icosacomputing: "#6344BE",
+  jigsawstack: "#4367BF",
+  langwatch: "#42BAA7",
+  lmstudio: "#ab11ab",
+  mongodb: "#10B981",
+  needle: "#198BF6",
+  neverbounce: "#42BAA7",
+  notdiamond: "#6344BE",
+  nvidia: "#10B981",
+  olivya: "#00413B",
+  outmate_agents: "#E85D04",
+  peopledatalabs: "#198BF6",
+  redis: "#DB2C2C",
+  twelvelabs: "#903BBE",
+  upstash: "#10B981",
+  vectara: "#198BF6",
+  vllm: "#ab11ab",
+  vlmrun: "#4367BF",
+  // New integrations
+  googlesheets: "#0F9D58",
+  googledocs: "#4285F4",
+  hubspot: "#FF7A59",
+  salesforce: "#00A1E0",
+  zoho: "#DC2626",
+  kimi: "#6344BE",
+  linkedin: "#0A66C2",
+  meta: "#1877F2",
 };
 
 export const nodeColorsName: { [char: string]: string } = {
@@ -278,61 +318,77 @@ export const FILE_ICONS = {
 };
 
 export const SIDEBAR_CATEGORIES = [
+  { display_name: "GTM Agents", name: "gtm_agents", icon: "Rocket" },
   { display_name: "Saved", name: "saved_components", icon: "GradientSave" },
+  { display_name: "Models & Agents", name: "models_and_agents", icon: "Bot" },
   { display_name: "Input & Output", name: "input_output", icon: "Cable" },
   { display_name: "Data Sources", name: "data_source", icon: "Database" },
-  { display_name: "Models & Agents", name: "models_and_agents", icon: "Bot" },
-  {
-    display_name: "LLM Operations",
-    name: "llm_operations",
-    icon: "BrainCircuit",
-  },
   {
     display_name: ENABLE_KNOWLEDGE_BASES ? "Files & Knowledge" : "Files",
     name: "files_and_knowledge",
     icon: "Layers",
   },
-  { display_name: "Processing", name: "processing", icon: "ListFilter" },
   {
-    display_name: "Flow Control",
+    display_name: "Logic & Processing",
     name: "flow_controls",
     icon: "ArrowRightLeft",
   },
   { display_name: "Utilities", name: "utilities", icon: "Wand2" },
-  { display_name: "GTM Agents", name: "gtm_agents", icon: "Rocket" },
+  /* Merged into other categories — hidden from sidebar but still loadable */
+  { display_name: "LLM Operations", name: "llm_operations", icon: "BrainCircuit" },
+  { display_name: "Processing", name: "processing", icon: "ListFilter" },
 ];
 
 export const SIDEBAR_BUNDLES = [
+  // ── GTM & Enrichment (top priority) ────────────────────────
+  { display_name: "Apollo", name: "apollo", icon: "Apollo" },
+  { display_name: "Hunter", name: "hunter", icon: "Mail" },
+  { display_name: "People Data Labs", name: "peopledatalabs", icon: "Peopledatalabs" },
+  { display_name: "NeverBounce", name: "neverbounce", icon: "MailCheck" },
+  { display_name: "BuiltWith", name: "builtwith", icon: "Globe" },
+  // ── CRM ────────────────────────────────────────────────────
+  { display_name: "HubSpot", name: "hubspot", icon: "CircleDot" },
+  { display_name: "Salesforce", name: "salesforce", icon: "Cloud" },
+  { display_name: "Zoho CRM", name: "zoho", icon: "Building" },
+  // ── Integrations ───────────────────────────────────────────
+  { display_name: "Gmail", name: "gmail", icon: "Gmail" },
+  { display_name: "Google Sheets", name: "googlesheets", icon: "Googlesheets" },
+  { display_name: "Google Docs", name: "googledocs", icon: "Googledocs" },
+  { display_name: "LinkedIn", name: "linkedin", icon: "Linkedin" },
+  { display_name: "Meta", name: "meta", icon: "Meta" },
+  { display_name: "Notion", name: "Notion", icon: "Notion" },
+  { display_name: "Confluence", name: "confluence", icon: "Confluence" },
+  // ── Search & Scraping ──────────────────────────────────────
+  { display_name: "Tavily", name: "tavily", icon: "TavilyIcon" },
+  { display_name: "Firecrawl", name: "firecrawl", icon: "FirecrawlCrawlApi" },
+  { display_name: "DuckDuckGo", name: "duckduckgo", icon: "DuckDuckGo" },
+  { display_name: "Serper", name: "serper", icon: "Serper" },
+  // ── AI Models ──────────────────────────────────────────────
   { display_name: "OpenAI", name: "openai", icon: "OpenAI" },
   { display_name: "Anthropic", name: "anthropic", icon: "Anthropic" },
   { display_name: "Google", name: "google", icon: "Google" },
   { display_name: "Groq", name: "groq", icon: "Groq" },
+  { display_name: "OpenRouter", name: "openrouter", icon: "OpenRouter" },
   { display_name: "DeepSeek", name: "deepseek", icon: "DeepSeek" },
   { display_name: "MistralAI", name: "mistral", icon: "MistralAI" },
   { display_name: "Ollama", name: "ollama", icon: "Ollama" },
   { display_name: "Amazon", name: "amazon", icon: "Amazon" },
   { display_name: "Azure", name: "azure", icon: "Azure" },
-  { display_name: "Composio", name: "composio", icon: "Composio" },
-  { display_name: "CrewAI", name: "crewai", icon: "CrewAI" },
-  { display_name: "Gmail", name: "gmail", icon: "Gmail" },
-  { display_name: "Notion", name: "Notion", icon: "Notion" },
-  { display_name: "Confluence", name: "confluence", icon: "Confluence" },
-  { display_name: "Tavily", name: "tavily", icon: "TavilyIcon" },
-  { display_name: "Serper", name: "serper", icon: "Serper" },
-  { display_name: "SearchApi", name: "searchapi", icon: "SearchAPI" },
-  { display_name: "SerpApi", name: "serpapi", icon: "SerpSearch" },
-  { display_name: "DuckDuckGo", name: "duckduckgo", icon: "DuckDuckGo" },
-  { display_name: "Firecrawl", name: "firecrawl", icon: "FirecrawlCrawlApi" },
-  { display_name: "ScrapeGraph AI", name: "scrapegraph", icon: "ScrapeGraph" },
-  { display_name: "YouTube", name: "youtube", icon: "YouTube" },
-  { display_name: "Wikipedia", name: "wikipedia", icon: "Wikipedia" },
-  { display_name: "LangChain", name: "langchain_utilities", icon: "LangChain" },
-  { display_name: "OpenRouter", name: "openrouter", icon: "OpenRouter" },
   { display_name: "Perplexity", name: "perplexity", icon: "Perplexity" },
   { display_name: "xAI", name: "xai", icon: "xAI" },
-  { display_name: "Vertex AI", name: "vertexai", icon: "VertexAI" },
-  { display_name: "Agentics", name: "agentics", icon: "Agentics" },
+  { display_name: "Kimi", name: "kimi", icon: "Moon" },
   { display_name: "LiteLLM", name: "litellm", icon: "LiteLLM" },
+  // ── Agent Frameworks ───────────────────────────────────────
+  { display_name: "LangChain", name: "langchain_utilities", icon: "LangChain" },
+  { display_name: "CrewAI", name: "crewai", icon: "CrewAI" },
+  // ── Data & Storage ─────────────────────────────────────────
+  { display_name: "MongoDB", name: "mongodb", icon: "MongoDB" },
+  { display_name: "Redis", name: "redis", icon: "Redis" },
+  { display_name: "FAISS", name: "FAISS", icon: "Layers" },
+  // ── Misc ───────────────────────────────────────────────────
+  { display_name: "Tools", name: "tools", icon: "Hammer" },
+  { display_name: "Embeddings", name: "embeddings", icon: "Binary" },
+  { display_name: "Vector Stores", name: "vectorstores", icon: "Layers" },
 ];
 
 export const categoryIcons: Record<string, string> = {

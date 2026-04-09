@@ -52,7 +52,7 @@ class NotionPageContent(LCToolComponent):
         blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100"
         headers = {
             "Authorization": f"Bearer {self.notion_secret}",
-            "Notion-Version": "2022-06-28",
+            "Notion-Version": "2025-09-03",
         }
         try:
             blocks_response = requests.get(blocks_url, headers=headers, timeout=10)

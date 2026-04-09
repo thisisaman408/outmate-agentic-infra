@@ -22,6 +22,7 @@ from lfx.base.models.model_metadata import MODEL_PROVIDER_METADATA, get_provider
 from lfx.base.models.model_utils import _to_str, replace_with_live_models
 from lfx.base.models.ollama_constants import OLLAMA_EMBEDDING_MODELS_DETAILED, OLLAMA_MODELS_DETAILED
 from lfx.base.models.openai_constants import OPENAI_EMBEDDING_MODELS_DETAILED, OPENAI_MODELS_DETAILED
+from lfx.base.models.openrouter_constants import OPENROUTER_MODELS_DETAILED
 from lfx.base.models.watsonx_constants import WATSONX_MODELS_DETAILED
 from lfx.log.logger import logger
 from lfx.services.deps import get_variable_service, session_scope
@@ -171,6 +172,7 @@ def get_models_detailed():
         GOOGLE_GENERATIVE_AI_MODELS_DETAILED,
         GOOGLE_GENERATIVE_AI_EMBEDDING_MODELS_DETAILED,
         GROQ_MODELS_DETAILED,
+        OPENROUTER_MODELS_DETAILED,
         OLLAMA_MODELS_DETAILED,
         OLLAMA_EMBEDDING_MODELS_DETAILED,
         WATSONX_MODELS_DETAILED,
@@ -1455,6 +1457,9 @@ def get_llm(
             )
             raise ValueError(msg)
         # else: neither provided - let ChatWatsonx handle it (will fail with its own error)
+    elif provider == "OpenRouter":
+        # OpenRouter uses ChatOpenAI with a custom base_url
+        kwargs["openai_api_base"] = "https://openrouter.ai/api/v1"
     elif provider == "Ollama":
         # For Ollama, handle custom base_url with database > component > env var fallback
         base_url_param = metadata.get("base_url_param", "base_url")

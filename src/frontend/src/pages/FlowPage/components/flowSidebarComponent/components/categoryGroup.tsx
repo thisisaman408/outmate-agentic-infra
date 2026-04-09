@@ -6,7 +6,6 @@ import {
   SidebarMenu,
 } from "@/components/ui/sidebar";
 import { ENABLE_NEW_SIDEBAR } from "@/customization/feature-flags";
-import { SIDEBAR_BUNDLES } from "@/utils/styleUtils";
 import type { CategoryGroupProps } from "../types";
 import { CategoryDisclosure } from "./categoryDisclouse";
 import { SearchConfigTrigger } from "./searchConfigTrigger";
@@ -40,8 +39,8 @@ export const CategoryGroup = memo(function CategoryGroup({
           {Object.entries(dataFilter)
             .filter(
               ([categoryName, items]) =>
-                // filter out bundles and MCP
-                !SIDEBAR_BUNDLES.some((cat) => cat.name === categoryName) &&
+                // Only show categories that are explicitly in SIDEBAR_CATEGORIES
+                CATEGORIES.some((cat) => cat.name === categoryName) &&
                 categoryName !== "custom_component" &&
                 categoryName !== "MCP" &&
                 Object.keys(items).length > 0,

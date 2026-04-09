@@ -331,6 +331,50 @@ class Settings(BaseSettings):
     APIFY_API_KEY: str = Field("", description="Apify API key for LinkedIn company employee scraping")
 
     # ========================================================================
+    # OUTMATE AGENTIC INFRA — internal stateless execution engine
+    # ========================================================================
+    # The agentic infra (outmate-agentic Container App) runs the actual agent
+    # Python code.  In production it sits on the internal Container Apps network
+    # and is only reachable from outmate-api.  Authentication is a long-lived
+    # service-account API key that proves "this caller is outmate-api".
+    # User-level tenant isolation lives ENTIRELY in this Backend — the agentic
+    # infra has no concept of which Outmate user is making a call.
+    AGENTIC_INFRA_URL: str = Field(
+        "http://localhost:7860",
+        description=(
+            "Base URL of the outmate-agentic execution engine. "
+            "Defaults to localhost for dev. In production set to the internal "
+            "Container Apps FQDN (https://outmate-agentic.internal...)."
+        ),
+    )
+    AGENTIC_INFRA_API_KEY: str = Field(
+        "",
+        description=(
+            "Service-account API key minted on the agentic infra for outmate-api "
+            "to call /api/v1/run/{flow_id} with. Sent as the x-api-key header. "
+            "Empty in dev — falls back to header-less auto-login bypass."
+        ),
+    )
+    AGENTIC_INFRA_SOCIAL_LISTENING_FLOW_ID: str = Field(
+        "6999aee9-76ed-4683-92b2-5eb6cd13c1d9",
+        description=(
+            "Flow ID on the agentic infra wrapping the LeadDiscoveryOutreachAgent. "
+            "Stable ID baked into the starter project JSON loaded on every cold start."
+        ),
+    )
+    AGENTIC_INFRA_SOCIAL_LISTENING_NODE_ID: str = Field(
+        "LeadDiscoveryOutreachAgent-99gLF",
+        description=(
+            "Node ID of the LeadDiscoveryOutreachAgent component within the flow above. "
+            "Used as the key in the `tweaks` payload to override per-call inputs."
+        ),
+    )
+    AGENTIC_INFRA_TIMEOUT_SECONDS: int = Field(
+        420,
+        description="HTTP timeout for synchronous calls to the agentic infra (7 min)",
+    )
+
+    # ========================================================================
     # VALIDATORS - Ensure configuration is valid
     # ========================================================================
 

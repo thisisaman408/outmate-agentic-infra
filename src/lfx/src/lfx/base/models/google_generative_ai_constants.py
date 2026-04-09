@@ -79,6 +79,7 @@ GOOGLE_GENERATIVE_AI_MODELS_DETAILED = [
         icon="GoogleGenerativeAI",
         tool_calling=True,
         preview=True,
+        deprecated=True,
     ),
     create_model_metadata(
         provider="Google Generative AI",

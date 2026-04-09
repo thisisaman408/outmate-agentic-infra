@@ -880,6 +880,12 @@ async def create_or_update_agentic_flows(session: AsyncSession, user_id: UUID) -
                     if flow_id:
                         db_flow.id = flow_id
 
+                    # FlowCreate has no user_id field, so the flow gets persisted
+                    # with user_id=None.  Without this line, every API call fails
+                    # the check_flow_user_permission test (`flow.user_id != api_key_user.id`)
+                    # with HTTP 403 "You do not have permission to run this flow".
+                    db_flow.user_id = user_id
+
                     session.add(db_flow)
                     flows_created += 1
                 except Exception:  # noqa: BLE001
@@ -887,11 +893,11 @@ async def create_or_update_agentic_flows(session: AsyncSession, user_id: UUID) -
 
         if flows_created > 0 or flows_updated > 0:
             await session.commit()
-            await logger.adebug(
-                f"Successfully created {flows_created} and skipped {flows_updated} existing agentic flows"
+            await logger.ainfo(
+                f"[agentic flows] created={flows_created} skipped_existing={flows_updated} for user_id={user_id}"
             )
         else:
-            await logger.adebug("No agentic flows to create")
+            await logger.ainfo("[agentic flows] none loaded — directory empty or all skipped")
 
     except Exception:  # noqa: BLE001
         await logger.aexception("Error in create_or_update_agentic_flows")
@@ -1207,6 +1213,11 @@ async def initialize_auto_login_default_superuser() -> None:
 
         if get_settings_service().settings.agentic_experience:
             await initialize_agentic_user_variables(super_user.id, async_session)
+            # Load any JSON flows shipped under src/backend/base/outmate/agentic/flows/
+            # into the superuser's OutmateAssistant folder.  Preserves the `id` field
+            # so flow UUIDs (e.g. the Social Listening Agent at 6999aee9-...) stay
+            # stable across cold starts of stateless container revisions.
+            await create_or_update_agentic_flows(async_session, super_user.id)
         _ = await get_or_create_default_folder(async_session, super_user.id)
     await logger.adebug("Super user initialized")
 

@@ -14,7 +14,7 @@ from lfx.base.agents.events import ExceptionWithMessageError, process_agent_even
 from lfx.base.agents.utils import get_chat_output_sender_name
 from lfx.custom.custom_component.component import Component, _get_component_toolkit
 from lfx.field_typing import Tool
-from lfx.inputs.inputs import InputTypes, MultilineInput
+from lfx.inputs.inputs import InputTypes
 from lfx.io import BoolInput, HandleInput, IntInput, MessageInput
 from lfx.log.logger import logger
 from lfx.memory import delete_message
@@ -47,26 +47,21 @@ class LCAgentComponent(Component):
             display_name="Handle Parse Errors",
             value=True,
             advanced=True,
-            info="Should the Agent fix errors when reading user input for better processing?",
+            info="When ON, the agent automatically recovers from errors instead of crashing. Keep this ON for best results.",
         ),
-        BoolInput(name="verbose", display_name="Verbose", value=True, advanced=True),
+        BoolInput(
+            name="verbose",
+            display_name="Verbose",
+            value=True,
+            advanced=True,
+            info="When ON, shows detailed step-by-step logs of what the agent is doing. Useful for debugging, turn OFF for cleaner output.",
+        ),
         IntInput(
             name="max_iterations",
             display_name="Max Iterations",
             value=15,
             advanced=True,
-            info="The maximum number of attempts the agent can make to complete its task before it stops.",
-        ),
-        MultilineInput(
-            name="agent_description",
-            display_name="Agent Description [Deprecated]",
-            info=(
-                "The description of the agent. This is only used when in Tool Mode. "
-                f"Defaults to '{DEFAULT_TOOLS_DESCRIPTION}' and tools are added dynamically. "
-                "This feature is deprecated and will be removed in future versions."
-            ),
-            advanced=True,
-            value=DEFAULT_TOOLS_DESCRIPTION,
+            info="How many steps the agent can take before stopping. Higher = more thorough but slower. 15 is a good default, increase to 25+ for complex research tasks.",
         ),
     ]
 
@@ -89,6 +84,27 @@ class LCAgentComponent(Component):
         """Run the agent and return the response."""
         agent = self.build_agent()
         message = await self.run_agent(agent=agent)
+
+        # Final safety net: NEVER return an empty message
+        if message and (not message.text or not message.text.strip()):
+            tool_names = []
+            if hasattr(message, "content_blocks") and message.content_blocks:
+                for block in message.content_blocks:
+                    if hasattr(block, "contents"):
+                        for c in block.contents:
+                            if hasattr(c, "header") and c.header:
+                                tool_names.append(str(c.header.get("title", "")))
+            if tool_names:
+                message.text = (
+                    f"Agent made {len(tool_names)} tool calls: {', '.join(tool_names[:5])}. "
+                    "But the model could not generate a final report (likely hit token or iteration limits). "
+                    "Expand the tool calls above to see the raw data collected."
+                )
+            else:
+                message.text = (
+                    "Agent stopped without producing output. "
+                    "Try using a stronger model with higher token limits."
+                )
 
         self.status = message
         return message
@@ -113,6 +129,7 @@ class LCAgentComponent(Component):
         agent_kwargs = {
             "handle_parsing_errors": self.handle_parsing_errors,
             "max_iterations": self.max_iterations,
+            "early_stopping_method": "force",
         }
         if flatten:
             return {
@@ -160,6 +177,7 @@ class LCAgentComponent(Component):
                 handle_parsing_errors=handle_parsing_errors,
                 verbose=verbose,
                 max_iterations=max_iterations,
+                early_stopping_method="force",
             )
         # Convert input_value to proper format for agent
         lc_message = None
@@ -275,15 +293,22 @@ class LCAgentComponent(Component):
             )
         except ExceptionWithMessageError as e:
             logger.error(f"ExceptionWithMessageError: {e}")
-            # Only delete message from database if it has an ID (was stored)
-            if hasattr(e, "agent_message"):
-                msg_id = e.agent_message.get_id()
-                if msg_id:
-                    await delete_message(id_=msg_id)
-            await self._send_message_event(e.agent_message, category="remove_message")
-            raise
+            error_msg = str(e.message) if hasattr(e, "message") else str(e)
+            # Return a message with the error instead of deleting everything
+            error_result = await Message.create(
+                text=(
+                    f"**Agent encountered an error:** {error_msg[:300]}\n\n"
+                    "The tool calls above completed successfully — expand them to see the data collected. "
+                    "To get the full synthesized report, use a model with higher token limits."
+                ),
+                sender=MESSAGE_SENDER_AI,
+                sender_name=sender_name,
+                session_id=session_id or uuid.uuid4(),
+            )
+            if self._event_manager:
+                self.status = error_result
+            return error_result
         except Exception as e:
-            # Log or handle any other exceptions
             logger.error(f"Error: {e}")
             raise
 
@@ -337,7 +362,7 @@ class LCToolsAgentComponent(LCAgentComponent):
         return self.display_name or "Agent"
 
     def get_tool_description(self) -> str:
-        return self.agent_description or DEFAULT_TOOLS_DESCRIPTION
+        return DEFAULT_TOOLS_DESCRIPTION
 
     def _build_tools_names(self):
         tools_names = ""
@@ -368,9 +393,7 @@ class LCToolsAgentComponent(LCAgentComponent):
     async def _get_tools(self) -> list[Tool]:
         component_toolkit = _get_component_toolkit()
         tools_names = self._build_tools_names()
-        agent_description = self.get_tool_description()
-        # TODO: Agent Description Depreciated Feature to be removed
-        description = f"{agent_description}{tools_names}"
+        description = f"{DEFAULT_TOOLS_DESCRIPTION}{tools_names}"
 
         tools = component_toolkit(component=self).get_tools(
             tool_name=self.get_tool_name(),

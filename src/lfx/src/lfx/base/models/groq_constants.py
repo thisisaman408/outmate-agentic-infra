@@ -29,6 +29,8 @@ GROQ_MODELS_DETAILED = [
     create_model_metadata(provider="Groq", name="meta-llama/llama-4-scout-17b-16e-instruct", icon="Groq", tool_calling=True),
     create_model_metadata(provider="Groq", name="meta-llama/llama-4-maverick-17b-128e-instruct", icon="Groq", tool_calling=True),
     create_model_metadata(provider="Groq", name="compound-beta", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="compound-beta-mini", icon="Groq", tool_calling=True),
+    create_model_metadata(provider="Groq", name="groq/compound", icon="Groq", tool_calling=False),
     # ===== DEPRECATED MODELS =====
     # Keep these for backwards compatibility - users may have flows using them
     # These will appear in the list but show as deprecated in the UI

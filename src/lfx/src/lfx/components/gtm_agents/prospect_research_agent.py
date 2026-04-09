@@ -2,6 +2,7 @@ from langchain.agents import create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 
 from lfx.base.agents.agent import LCToolsAgentComponent
+from lfx.components.gtm_agents._tool_factory import build_tools_from_keys
 from lfx.base.models.unified_models import (
     get_language_model_options,
     get_llm,
@@ -18,47 +19,71 @@ from lfx.io import Output
 from lfx.schema.data import Data
 from lfx.schema.message import Message
 
-DEFAULT_SYSTEM_PROMPT = """You are an elite B2B sales research analyst with access to web search and data tools.
-Your job is to build a comprehensive, actionable prospect brief that a sales rep can use before a call or to craft personalized outreach.
 
-You MUST use the available tools to search for real, current information. Do NOT make up facts — if you can't find something, say so.
+DEFAULT_SYSTEM_PROMPT = """You are a B2B prospect research analyst. Your job is to collect data using the available tools, then write a polished prospect brief.
 
-## Pipeline Mode
-If the input contains ICP-scored leads (with scores, match factors, and priority tiers):
-1. Identify the leads marked as "Hot" or scoring 70+
-2. Research EACH hot lead using the process below
-3. Generate a prospect brief for each hot lead
-4. Include the ICP score from the upstream data in your output
+TOOL USAGE RULES:
+- apollo_people_enrichment: Use first_name, last_name, and organization_name (NOT domain). Example: first_name="Vidit", last_name="Paliwal", organization_name="BigStep Technologies"
+- apollo_org_enrichment: Use organization_name (NOT domain). Example: organization_name="BigStep Technologies"
+- hunter_email_finder: Use first_name, last_name, and domain. Guess the domain from company name (e.g. "bigsteptech.com" for BigStep Technologies).
+- Search tools: You may have BOTH tavily_search AND duckduckgo_search. Use them for DIFFERENT queries. ALWAYS use the FULL company name in quotes.
+- Call each enrichment tool AT MOST once. You may call search tools TWICE total (one query each, or two on one tool).
 
-If you receive a single prospect name and company, use the standard research process below.
+WORKFLOW — Follow this exact sequence:
+Step 1: Call apollo_people_enrichment to get the prospect's profile
+Step 2: Call apollo_org_enrichment to get company data
+Step 3: Call hunter_email_finder to verify/find their email
+Step 4: Call tavily_search (if available) for: "[Company Name] revenue employees crunchbase tracxn zoominfo" — to VERIFY Apollo's data
+Step 5: Call duckduckgo_search (if available) for: "[Company Name] news acquisitions 2024 2025" — for recent signals
+  (If only one search tool is available, call it twice with both queries)
+Step 6: STOP calling tools. Write the brief below.
 
-## Research Process
-1. Search for the prospect's LinkedIn profile, recent posts, and career history
-2. Search for the company — what they do, funding, recent news, tech stack, competitors
-3. Search for industry trends and challenges relevant to the prospect's role
-4. Synthesize everything into a structured brief
+IMPORTANT DATA RULES:
+- ALWAYS include the prospect's email in the brief. If Apollo found it, use it. If Hunter found it, use it. Include BOTH if different.
+- If search results show different revenue/employee numbers than Apollo, mention BOTH and note the discrepancy.
+- Apollo data can be outdated — always cross-reference with search results.
+- Include LinkedIn URL if found.
 
-## Output Format — Generate these sections:
+MANDATORY OUTPUT — After steps 1-5, you MUST write this as your final message:
+
+## Prospect Brief: [Full Name]
 
 ### 1. Role Context
-- What this person owns, their likely KPIs, who they report to
+- **Name:** [full name]
+- **Email:** [email from Apollo or Hunter — NEVER omit this]
+- **LinkedIn:** [URL if available]
+- **Title:** [title]
+- **Location:** [city, state, country]
+- **Department:** [department]
+- **Likely KPIs:** [infer 3-4 KPIs from their role]
 
 ### 2. Company Overview
-- What the company does, stage, size, funding, competitors, market position
+- **Company:** [name]
+- **Website:** [url]
+- **Industry:** [industry]
+- **Employees:** [count — note if sources disagree]
+- **Founded:** [year]
+- **Revenue:** [amount — note source and if sources disagree]
+- **Funding:** [stage and details]
+- **Description:** [2-3 sentence overview]
 
 ### 3. Pain Points & Challenges
-- Top 3-5 pain points for someone in this role at this type of company
+[3-5 bullet points — specific to their industry, company size, and role]
 
 ### 4. Recent Activity & Signals
-- Recent news, hiring patterns, product launches, trigger events
+[Any news, acquisitions, funding, product launches, hiring signals from search results. Include source URLs.]
 
-### 5. Tech Stack (Likely)
-- Tools and platforms the company likely uses
+### 5. Conversation Starters (Top 5)
+[5 personalized openers referencing real data points — be specific, not generic]
 
-### 6. Conversation Starters (Top 5)
-- 5 specific, personalized opening lines referencing real data you found
+### 6. Sources & Confidence
+- Person data: [source]
+- Company data: [source] — note if cross-verified
+- Email: [source and confidence]
+- News: [source with URLs]
+- ⚠️ Flag any data that could not be verified or where sources disagree
 
-Be specific and cite your sources. Avoid generic filler."""
+CRITICAL: Never leave the output empty. Never omit the email. Always write the full brief with sources."""
 
 
 class ProspectResearchAgentComponent(LCToolsAgentComponent):
@@ -84,6 +109,27 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
             display_name="API Key",
             info="Model Provider API key",
             real_time_refresh=True,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="tavily_api_key",
+            display_name="Tavily API Key",
+            info="Tavily key — AI-powered web search for company research. Get it at tavily.com.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="apollo_api_key",
+            display_name="Apollo API Key",
+            info="Apollo.io key — enables people search and company enrichment. Get it at app.apollo.io → Settings → API Keys.",
+            required=False,
+            advanced=True,
+        ),
+        SecretStrInput(
+            name="hunter_api_key",
+            display_name="Hunter API Key",
+            info="Hunter.io key — finds emails by company domain. Get it at hunter.io/api-keys.",
+            required=False,
             advanced=True,
         ),
         MessageTextInput(
@@ -159,6 +205,29 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
 
     def create_agent_runnable(self):
         llm = self._get_llm()
+        # 5 tool calls (people + org + hunter + 2 searches) + final answer, with buffer
+        self.max_iterations = 12
+
+        tavily_key = getattr(self, "tavily_api_key", "") or ""
+        apollo_key = getattr(self, "apollo_api_key", "") or ""
+        hunter_key = getattr(self, "hunter_api_key", "") or ""
+
+        # Build internal tools from API keys
+        auto_tools = build_tools_from_keys(
+            tavily_api_key=tavily_key,
+            apollo_api_key=apollo_key,
+            hunter_api_key=hunter_key,
+            # Only add DDG if no Tavily key AND no external search tool on canvas
+            include_duckduckgo=not bool(tavily_key),
+            include_apollo_org=True,
+            include_apollo_people=True,
+            include_hunter_finder=True,
+        )
+
+        # Merge external tools (from canvas) with internal auto_tools.
+        # Keep BOTH search tools if available — DDG for one task, Tavily for another.
+        external_tools = list(self.tools or [])
+        self.tools = external_tools + auto_tools
 
         # Build the user query from the prospect inputs
         prospect_name = self.prospect_name or ""
@@ -168,13 +237,36 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
 
         # Standalone mode: specific prospect provided
         if prospect_name.strip() or company_name.strip():
-            role_line = f", Role: {prospect_role}" if prospect_role.strip() else ""
-            context_line = f"\nAdditional Context: {additional_context}" if additional_context.strip() else ""
+            # Split name for tool hints
+            name_parts = prospect_name.strip().split()
+            first_name = name_parts[0] if name_parts else ""
+            last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
+            role_line = f"\n- Role: {prospect_role}" if prospect_role.strip() else ""
+            context_line = f"\n- Additional Context: {additional_context}" if additional_context.strip() else ""
+
+            # Build available tools list for the prompt — use both search tools
+            available_tools = []
+            if apollo_key:
+                available_tools.append(f"- apollo_people_enrichment(first_name=\"{first_name}\", last_name=\"{last_name}\", organization_name=\"{company_name}\")")
+                available_tools.append(f"- apollo_org_enrichment(organization_name=\"{company_name}\")")
+            if hunter_key:
+                available_tools.append(f"- hunter_email_finder(first_name=\"{first_name}\", last_name=\"{last_name}\", company=\"{company_name}\")")
+            # Use Tavily for data verification, DDG for news (or vice versa)
+            if tavily_key:
+                available_tools.append(f'- tavily_search(query="\"{company_name}\" revenue employees funding crunchbase tracxn zoominfo")')
+            available_tools.append(f'- duckduckgo_search(query="\"{company_name}\" news acquisitions funding 2024 2025")')
+
+            tools_hint = "\n".join(available_tools)
+
             self.input_value = Message(
-                text=f"Research this prospect and build a complete brief:\n"
+                text=f"Research this prospect and write a complete prospect brief:\n"
                 f"- Name: {prospect_name}\n"
-                f"- Company: {company_name}{role_line}"
-                f"{context_line}"
+                f"- Company: {company_name}{role_line}{context_line}\n\n"
+                f"Call these tools in order (copy the exact parameters):\n{tools_hint}\n\n"
+                f"IMPORTANT: Include the prospect's EMAIL in the brief (from Apollo or Hunter). "
+                f"Cross-verify Apollo's revenue data with search results — if they disagree, note both figures. "
+                f"After all tool calls complete, write the full Prospect Brief."
             )
         # Pipeline mode: don't override input_value — let upstream scored leads flow through
 

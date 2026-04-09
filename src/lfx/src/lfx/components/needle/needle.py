@@ -79,7 +79,7 @@ class NeedleComponent(Component):
                 top_k=top_k,
             )
 
-            docs = retriever.get_relevant_documents(actual_query)
+            docs = retriever.invoke(actual_query)
 
             # Format the response
             if not docs:

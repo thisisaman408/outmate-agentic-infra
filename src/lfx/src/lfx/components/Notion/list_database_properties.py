@@ -52,7 +52,7 @@ class NotionDatabaseProperties(LCToolComponent):
         url = f"https://api.notion.com/v1/databases/{database_id}"
         headers = {
             "Authorization": f"Bearer {self.notion_secret}",
-            "Notion-Version": "2022-06-28",  # Use the latest supported version
+            "Notion-Version": "2025-09-03",
         }
         try:
             response = requests.get(url, headers=headers, timeout=10)

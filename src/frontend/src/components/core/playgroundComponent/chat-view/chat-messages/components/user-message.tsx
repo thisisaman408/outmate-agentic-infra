@@ -106,11 +106,12 @@ export const UserMessage = memo(
 
     return (
       <>
-        <div className="w-full py-4 word-break-break-word">
+        <div className="w-full py-2 word-break-break-word">
           <div
             className={cn(
-              "group relative flex w-full gap-4 rounded-md px-2 py-3 bg-muted @[45rem]/chat-panel:bg-transparent @[45rem]/chat-panel:px-2 @[45rem]/chat-panel:py-3",
-              editMessage ? "" : "hover:bg-muted",
+              "group relative flex w-full gap-3 rounded-xl px-4 py-3 transition-all duration-150",
+              "bg-primary/5 border border-primary/10",
+              editMessage ? "" : "hover:border-primary/20",
             )}
           >
             {/* Avatar */}

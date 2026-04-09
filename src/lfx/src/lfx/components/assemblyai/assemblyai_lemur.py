@@ -30,8 +30,11 @@ class AssemblyAILeMUR(Component):
         DropdownInput(
             name="final_model",
             display_name="Final Model",
-            options=["claude3_5_sonnet", "claude3_opus", "claude3_haiku", "claude3_sonnet"],
-            value="claude3_5_sonnet",
+            options=[
+                "anthropic/claude-sonnet-4-20250514",
+                "anthropic/claude-opus-4-20250514",
+            ],
+            value="anthropic/claude-sonnet-4-20250514",
             info="The model that is used for the final prompt after compression is performed",
             advanced=True,
         ),
@@ -168,16 +171,15 @@ class AssemblyAILeMUR(Component):
             msg = f"Endpoint not supported: {endpoint}"
             raise ValueError(msg)
 
-        return result.dict()
+        return result.model_dump()
 
-    def get_final_model(self, model_name: str) -> aai.LemurModel:
-        if model_name == "claude3_5_sonnet":
-            return aai.LemurModel.claude3_5_sonnet
-        if model_name == "claude3_opus":
-            return aai.LemurModel.claude3_opus
-        if model_name == "claude3_haiku":
-            return aai.LemurModel.claude3_haiku
-        if model_name == "claude3_sonnet":
-            return aai.LemurModel.claude3_sonnet
+    def get_final_model(self, model_name: str) -> str:
+        """Return the model identifier string for the LeMUR API."""
+        valid_models = {
+            "anthropic/claude-sonnet-4-20250514",
+            "anthropic/claude-opus-4-20250514",
+        }
+        if model_name in valid_models:
+            return model_name
         msg = f"Model name not supported: {model_name}"
         raise ValueError(msg)

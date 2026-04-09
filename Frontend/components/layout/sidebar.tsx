@@ -39,10 +39,18 @@ type NavItem = {
   href: string
   icon: any
   external?: boolean
+  badge?: string
   children?: { name: string; href: string; icon?: any }[]
 }
 
-const AGENTIC_INFRA_URL = process.env.NEXT_PUBLIC_AGENTIC_URL || (process.env.NODE_ENV === "production" ? "https://outmate-agentic.greenbeach-bf0c913b.eastus.azurecontainerapps.io" : "http://localhost:7860")
+// The agentic infra canvas is intentionally NOT publicly reachable in
+// production — it lives on the internal Container Apps network and is only
+// callable by outmate-api via a service-account key.  We only show the
+// "AI Agents Infra" sidebar link in environments where a public canvas URL
+// has been explicitly provided via NEXT_PUBLIC_AGENTIC_URL.
+const AGENTIC_INFRA_URL =
+  process.env.NEXT_PUBLIC_AGENTIC_URL ||
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:7860")
 
 const navItems: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -77,7 +85,11 @@ const navItems: NavItem[] = [
   { name: "Workflows", href: "/workflows", icon: Workflow },
   { name: "Co-Pilot", href: "/copilot", icon: Sparkles },
   { name: "AI Agents", href: "/ai-agents", icon: Bot },
-  { name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true },
+  { name: "Social Agent", href: "/social-agent", icon: Radar, badge: "New" },
+  // Only render the canvas link when a URL is configured (dev only by default).
+  ...(AGENTIC_INFRA_URL
+    ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
+    : []),
   { name: "Integrations", href: "/integrations", icon: Plug },
   { name: "Settings", href: "/settings", icon: Settings },
 ]
@@ -268,10 +280,20 @@ export function Sidebar() {
                         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
                       )}
                       <Icon className={cn("h-5 w-5 shrink-0", isActive && "text-primary")} />
-                      {!sidebarCollapsed && <span className="tracking-tight">{item.name}</span>}
+                      {!sidebarCollapsed && (
+                        <>
+                          <span className="tracking-tight flex-1">{item.name}</span>
+                          {item.badge && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                              {item.badge}
+                            </span>
+                          )}
+                        </>
+                      )}
                       {sidebarCollapsed && (
                         <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
                           {item.name}
+                          {item.badge && ` · ${item.badge}`}
                         </div>
                       )}
                     </div>

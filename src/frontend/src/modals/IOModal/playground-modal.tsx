@@ -22,6 +22,10 @@ import { useMessagesStore } from "../../stores/messagesStore";
 import type { IOModalPropsType } from "../../types/components";
 import { cn, getNumberFromString } from "../../utils/utils";
 import BaseModal from "../baseModal";
+import { useAgentDetection } from "@/components/play/hooks/useAgentDetection";
+import PlayPanel from "@/components/play/PlayPanel";
+// Ensure the dashboard registry is loaded (side-effect import)
+import "@/components/play/dashboards/registry";
 import { ChatViewWrapper } from "./components/chat-view-wrapper";
 import { createNewSessionName } from "./components/chatView/chatInput/components/voice-assistant/helpers/create-new-session-name";
 import { SelectedViewField } from "./components/selected-view-field";
@@ -75,6 +79,7 @@ export default function IOModal({
   const setSuccessData = useAlertStore((state) => state.setSuccessData);
   const deleteSession = useMessagesStore((state) => state.deleteSession);
   const currentFlowId = useGetFlowId();
+  const detectedAgent = useAgentDetection();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const { mutate: deleteSessionFunction } = useDeleteSession();
@@ -138,7 +143,7 @@ export default function IOModal({
             .map((msg) => msg.id);
 
           if (messageIdsToRemove.length > 0) {
-            removeMessages(messageIdsToRemove);
+            removeMessages(messageIdsToRemove.filter((id): id is string => id !== null));
           }
 
           setSuccessData({
@@ -452,37 +457,53 @@ export default function IOModal({
               </div>
             )}
             <div className="flex h-full min-w-96 flex-grow bg-background">
-              {selectedViewField && !sessionsLoading && (
-                <SelectedViewField
-                  selectedViewField={selectedViewField}
-                  setSelectedViewField={setSelectedViewField}
-                  haveChat={haveChat}
-                  inputs={filteredInputs}
-                  outputs={filteredOutputs}
-                  sessions={sessions}
-                  currentFlowId={currentFlowId}
-                  nodes={filteredNodes}
-                />
+              {detectedAgent ? (
+                <div className="flex h-full w-full flex-col">
+                  <PlayPanel
+                    agent={detectedAgent}
+                    flowId={currentFlowId}
+                    sessionId={sessionId}
+                    sendMessage={async ({ inputValue, files }) => {
+                      if (inputValue) setChatValue(inputValue);
+                      await sendMessage({ repeat: 1, files });
+                    }}
+                  />
+                </div>
+              ) : (
+                <>
+                  {selectedViewField && !sessionsLoading && (
+                    <SelectedViewField
+                      selectedViewField={selectedViewField}
+                      setSelectedViewField={setSelectedViewField}
+                      haveChat={haveChat}
+                      inputs={filteredInputs}
+                      outputs={filteredOutputs}
+                      sessions={sessions}
+                      currentFlowId={currentFlowId}
+                      nodes={filteredNodes as any}
+                    />
+                  )}
+                  <ChatViewWrapper
+                    playgroundPage={playgroundPage}
+                    selectedViewField={selectedViewField}
+                    visibleSession={visibleSession}
+                    sessions={sessions}
+                    sidebarOpen={sidebarOpen}
+                    currentFlowId={currentFlowId}
+                    setSidebarOpen={setSidebarOpen}
+                    isPlayground={isPlayground}
+                    setvisibleSession={setvisibleSession}
+                    setSelectedViewField={setSelectedViewField}
+                    haveChat={haveChat}
+                    messagesFetched={messagesFetched}
+                    sessionId={sessionId}
+                    sendMessage={sendMessage}
+                    canvasOpen={canvasOpen}
+                    setOpen={setOpen}
+                    playgroundTitle={PlaygroundTitle}
+                  />
+                </>
               )}
-              <ChatViewWrapper
-                playgroundPage={playgroundPage}
-                selectedViewField={selectedViewField}
-                visibleSession={visibleSession}
-                sessions={sessions}
-                sidebarOpen={sidebarOpen}
-                currentFlowId={currentFlowId}
-                setSidebarOpen={setSidebarOpen}
-                isPlayground={isPlayground}
-                setvisibleSession={setvisibleSession}
-                setSelectedViewField={setSelectedViewField}
-                haveChat={haveChat}
-                messagesFetched={messagesFetched}
-                sessionId={sessionId}
-                sendMessage={sendMessage}
-                canvasOpen={canvasOpen}
-                setOpen={setOpen}
-                playgroundTitle={PlaygroundTitle}
-              />
             </div>
           </div>
         )}

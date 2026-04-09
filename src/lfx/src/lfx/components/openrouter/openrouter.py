@@ -97,7 +97,7 @@ class OpenRouterComponent(LCModelComponent):
         if self.site_url:
             headers["HTTP-Referer"] = self.site_url
         if self.app_name:
-            headers["X-Title"] = self.app_name
+            headers["X-OpenRouter-Title"] = self.app_name
         if headers:
             kwargs["default_headers"] = headers
 

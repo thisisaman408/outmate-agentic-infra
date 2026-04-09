@@ -1,0 +1,1387 @@
+{
+  "data": {
+    "edges": [
+      {
+        "animated": false,
+        "className": "",
+        "data": {
+          "sourceHandle": {
+            "dataType": "ChatInput",
+            "id": "ChatInput-GL4Qo",
+            "name": "message",
+            "output_types": [
+              "Message"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "input_value",
+            "id": "TAMDiscoveryAgentComponent-Jg8bm",
+            "inputTypes": [
+              "Message"
+            ],
+            "type": "str"
+          }
+        },
+        "id": "reactflow__edge-ChatInput-GL4Qo{œdataTypeœ: œChatInputœ, œidœ: œChatInput-GL4Qoœ, œnameœ: œmessageœ, œoutput_typesœ: [œMessageœ]}-TAMDiscoveryAgentComponent-Jg8bm{œfieldNameœ: œinput_valueœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œinputTypesœ: [œMessageœ], œtypeœ: œFieldTypes.TEXTœ}",
+        "selected": false,
+        "source": "ChatInput-GL4Qo",
+        "sourceHandle": "{œdataTypeœ: œChatInputœ, œidœ: œChatInput-GL4Qoœ, œnameœ: œmessageœ, œoutput_typesœ: [œMessageœ]}",
+        "target": "TAMDiscoveryAgentComponent-Jg8bm",
+        "targetHandle": "{œfieldNameœ: œinput_valueœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}"
+      },
+      {
+        "animated": false,
+        "className": "",
+        "data": {
+          "sourceHandle": {
+            "dataType": "DuckDuckGoSearchTool",
+            "id": "DuckDuckGoSearchToolComponent-JQ7IH",
+            "name": "api_build_tool",
+            "output_types": [
+              "Tool"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "tools",
+            "id": "TAMDiscoveryAgentComponent-Jg8bm",
+            "inputTypes": [
+              "Tool"
+            ],
+            "type": "other"
+          }
+        },
+        "id": "reactflow__edge-DuckDuckGoSearchToolComponent-JQ7IH{œdataTypeœ: œDuckDuckGoSearchToolœ, œidœ: œDuckDuckGoSearchToolComponent-JQ7IHœ, œnameœ: œapi_build_toolœ, œoutput_typesœ: [œToolœ]}-TAMDiscoveryAgentComponent-Jg8bm{œfieldNameœ: œtoolsœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œinputTypesœ: [œToolœ], œtypeœ: œFieldTypes.OTHERœ}",
+        "selected": false,
+        "source": "DuckDuckGoSearchToolComponent-JQ7IH",
+        "sourceHandle": "{œdataTypeœ: œDuckDuckGoSearchToolœ, œidœ: œDuckDuckGoSearchToolComponent-JQ7IHœ, œnameœ: œapi_build_toolœ, œoutput_typesœ: [œToolœ]}",
+        "target": "TAMDiscoveryAgentComponent-Jg8bm",
+        "targetHandle": "{œfieldNameœ: œtoolsœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œinputTypesœ: [œToolœ], œtypeœ: œotherœ}"
+      },
+      {
+        "animated": false,
+        "className": "",
+        "data": {
+          "sourceHandle": {
+            "dataType": "TAMDiscoveryAgent",
+            "id": "TAMDiscoveryAgentComponent-Jg8bm",
+            "name": "response",
+            "output_types": [
+              "Message"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "input_value",
+            "id": "ChatOutput-QG3bV",
+            "inputTypes": [
+              "Data",
+              "DataFrame",
+              "Message"
+            ],
+            "type": "other"
+          }
+        },
+        "id": "reactflow__edge-TAMDiscoveryAgentComponent-Jg8bm{œdataTypeœ: œTAMDiscoveryAgentœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œnameœ: œresponseœ, œoutput_typesœ: [œMessageœ]}-ChatOutput-QG3bV{œfieldNameœ: œinput_valueœ, œidœ: œChatOutput-QG3bVœ, œinputTypesœ: [œDataœ, œDataFrameœ, œMessageœ], œtypeœ: œFieldTypes.OTHERœ}",
+        "selected": false,
+        "source": "TAMDiscoveryAgentComponent-Jg8bm",
+        "sourceHandle": "{œdataTypeœ: œTAMDiscoveryAgentœ, œidœ: œTAMDiscoveryAgentComponent-Jg8bmœ, œnameœ: œresponseœ, œoutput_typesœ: [œMessageœ]}",
+        "target": "ChatOutput-QG3bV",
+        "targetHandle": "{œfieldNameœ: œinput_valueœ, œidœ: œChatOutput-QG3bVœ, œinputTypesœ: [œDataœ, œDataFrameœ, œMessageœ], œtypeœ: œotherœ}"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "id": "ChatInput-GL4Qo",
+          "node": {
+            "base_classes": [
+              "Message"
+            ],
+            "beta": false,
+            "conditional_paths": [],
+            "custom_fields": {},
+            "description": "Get chat inputs from the Playground.",
+            "display_name": "Chat Input",
+            "documentation": "https://docs.outmate.org/chat-input-and-output",
+            "edited": false,
+            "field_order": [],
+            "frozen": false,
+            "icon": "MessagesSquare",
+            "legacy": false,
+            "metadata": {
+              "code_hash": "4bb2acde140c",
+              "dependencies": {
+                "dependencies": [
+                  {
+                    "name": "lfx",
+                    "version": null
+                  }
+                ],
+                "total_dependencies": 1
+              },
+              "module": "lfx.components.input_output.chat.ChatInput"
+            },
+            "minimized": true,
+            "output_types": [],
+            "outputs": [
+              {
+                "allows_loop": false,
+                "cache": true,
+                "display_name": "Chat Message",
+                "group_outputs": false,
+                "method": "message_response",
+                "name": "message",
+                "selected": "Message",
+                "tool_mode": true,
+                "types": [
+                  "Message"
+                ],
+                "value": "__UNDEFINED__"
+              }
+            ],
+            "pinned": false,
+            "template": {
+              "_type": "Component",
+              "code": {
+                "advanced": true,
+                "dynamic": true,
+                "fileTypes": [],
+                "file_path": "",
+                "info": "",
+                "list": false,
+                "load_from_db": false,
+                "multiline": true,
+                "name": "code",
+                "password": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "type": "code",
+                "value": "from lfx.base.data.utils import IMG_FILE_TYPES, TEXT_FILE_TYPES\nfrom lfx.base.io.chat import ChatComponent\nfrom lfx.inputs.inputs import BoolInput\nfrom lfx.io import (\n    DropdownInput,\n    FileInput,\n    MessageTextInput,\n    MultilineInput,\n    Output,\n)\nfrom lfx.schema.message import Message\nfrom lfx.utils.constants import (\n    MESSAGE_SENDER_AI,\n    MESSAGE_SENDER_NAME_USER,\n    MESSAGE_SENDER_USER,\n)\n\n\nclass ChatInput(ChatComponent):\n    display_name = \"Chat Input\"\n    description = \"Get chat inputs from the Playground.\"\n    documentation: str = \"https://docs.outmate.org/chat-input-and-output\"\n    icon = \"MessagesSquare\"\n    name = \"ChatInput\"\n    minimized = True\n\n    inputs = [\n        MultilineInput(\n            name=\"input_value\",\n            display_name=\"Input Text\",\n            value=\"\",\n            info=\"Message to be passed as input.\",\n            input_types=[],\n        ),\n        BoolInput(\n            name=\"should_store_message\",\n            display_name=\"Store Messages\",\n            info=\"Store the message in the history.\",\n            value=True,\n            advanced=True,\n        ),\n        DropdownInput(\n            name=\"sender\",\n            display_name=\"Sender Type\",\n            options=[MESSAGE_SENDER_AI, MESSAGE_SENDER_USER],\n            value=MESSAGE_SENDER_USER,\n            info=\"Type of sender.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"sender_name\",\n            display_name=\"Sender Name\",\n            info=\"Name of the sender.\",\n            value=MESSAGE_SENDER_NAME_USER,\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"The session ID of the chat. If empty, the current session ID parameter will be used.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"context_id\",\n            display_name=\"Context ID\",\n            info=\"The context ID of the chat. Adds an extra layer to the local memory.\",\n            value=\"\",\n            advanced=True,\n        ),\n        FileInput(\n            name=\"files\",\n            display_name=\"Files\",\n            file_types=TEXT_FILE_TYPES + IMG_FILE_TYPES,\n            info=\"Files to be sent with the message.\",\n            advanced=True,\n            is_list=True,\n            temp_file=True,\n        ),\n    ]\n    outputs = [\n        Output(display_name=\"Chat Message\", name=\"message\", method=\"message_response\"),\n    ]\n\n    async def message_response(self) -> Message:\n        # Ensure files is a list and filter out empty/None values\n        files = self.files if self.files else []\n        if files and not isinstance(files, list):\n            files = [files]\n        # Filter out None/empty values\n        files = [f for f in files if f is not None and f != \"\"]\n\n        session_id = self.session_id or self.graph.session_id or \"\"\n        message = await Message.create(\n            text=self.input_value,\n            sender=self.sender,\n            sender_name=self.sender_name,\n            session_id=session_id,\n            context_id=self.context_id,\n            files=files,\n        )\n        if session_id and isinstance(message, Message) and self.should_store_message:\n            stored_message = await self.send_message(\n                message,\n            )\n            self.message.value = stored_message\n            message = stored_message\n\n        self.status = message\n        return message\n"
+              },
+              "context_id": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Context ID",
+                "dynamic": false,
+                "info": "The context ID of the chat. Adds an extra layer to the local memory.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "context_id",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "files": {
+                "_input_type": "FileInput",
+                "advanced": true,
+                "display_name": "Files",
+                "dynamic": false,
+                "fileTypes": [
+                  "csv",
+                  "json",
+                  "pdf",
+                  "txt",
+                  "md",
+                  "mdx",
+                  "yaml",
+                  "yml",
+                  "xml",
+                  "html",
+                  "htm",
+                  "docx",
+                  "py",
+                  "sh",
+                  "sql",
+                  "js",
+                  "ts",
+                  "tsx",
+                  "jpg",
+                  "jpeg",
+                  "png",
+                  "bmp",
+                  "image"
+                ],
+                "file_path": "",
+                "info": "Files to be sent with the message.",
+                "list": true,
+                "list_add_label": "Add More",
+                "name": "files",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "temp_file": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "file",
+                "value": ""
+              },
+              "input_value": {
+                "_input_type": "MultilineInput",
+                "advanced": false,
+                "ai_enabled": false,
+                "copy_field": false,
+                "display_name": "Input Text",
+                "dynamic": false,
+                "info": "Message to be passed as input.",
+                "input_types": [],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "multiline": true,
+                "name": "input_value",
+                "override_skip": false,
+                "password": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "sender": {
+                "_input_type": "DropdownInput",
+                "advanced": true,
+                "combobox": false,
+                "dialog_inputs": {},
+                "display_name": "Sender Type",
+                "dynamic": false,
+                "external_options": {},
+                "info": "Type of sender.",
+                "name": "sender",
+                "options": [
+                  "Machine",
+                  "User"
+                ],
+                "options_metadata": [],
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "toggle": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "str",
+                "value": "User"
+              },
+              "sender_name": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Sender Name",
+                "dynamic": false,
+                "info": "Name of the sender.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "sender_name",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "User"
+              },
+              "session_id": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Session ID",
+                "dynamic": false,
+                "info": "The session ID of the chat. If empty, the current session ID parameter will be used.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "session_id",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "should_store_message": {
+                "_input_type": "BoolInput",
+                "advanced": true,
+                "display_name": "Store Messages",
+                "dynamic": false,
+                "info": "Store the message in the history.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "should_store_message",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "value": true
+              }
+            },
+            "tool_mode": false
+          },
+          "type": "ChatInput"
+        },
+        "dragging": false,
+        "id": "ChatInput-GL4Qo",
+        "measured": {
+          "height": 600,
+          "width": 320
+        },
+        "position": {
+          "x": 100,
+          "y": 350
+        },
+        "selected": false,
+        "type": "genericNode"
+      },
+      {
+        "data": {
+          "id": "ChatOutput-QG3bV",
+          "node": {
+            "base_classes": [
+              "Message"
+            ],
+            "beta": false,
+            "conditional_paths": [],
+            "custom_fields": {},
+            "description": "Display a chat message in the Playground.",
+            "display_name": "Chat Output",
+            "documentation": "https://docs.outmate.org/chat-input-and-output",
+            "edited": false,
+            "field_order": [],
+            "frozen": false,
+            "icon": "MessagesSquare",
+            "legacy": false,
+            "metadata": {
+              "code_hash": "a59aab980c40",
+              "dependencies": {
+                "dependencies": [
+                  {
+                    "name": "orjson",
+                    "version": null
+                  },
+                  {
+                    "name": "fastapi",
+                    "version": null
+                  },
+                  {
+                    "name": "lfx",
+                    "version": null
+                  }
+                ],
+                "total_dependencies": 3
+              },
+              "module": "lfx.components.input_output.chat_output.ChatOutput"
+            },
+            "minimized": true,
+            "output_types": [],
+            "outputs": [
+              {
+                "allows_loop": false,
+                "cache": true,
+                "display_name": "Output Message",
+                "group_outputs": false,
+                "method": "message_response",
+                "name": "message",
+                "selected": "Message",
+                "tool_mode": true,
+                "types": [
+                  "Message"
+                ],
+                "value": "__UNDEFINED__"
+              }
+            ],
+            "pinned": false,
+            "template": {
+              "_type": "Component",
+              "clean_data": {
+                "_input_type": "BoolInput",
+                "advanced": true,
+                "display_name": "Basic Clean Data",
+                "dynamic": false,
+                "info": "Whether to clean data before converting to string.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "clean_data",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "value": true
+              },
+              "code": {
+                "advanced": true,
+                "dynamic": true,
+                "fileTypes": [],
+                "file_path": "",
+                "info": "",
+                "list": false,
+                "load_from_db": false,
+                "multiline": true,
+                "name": "code",
+                "password": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "type": "code",
+                "value": "from collections.abc import Generator\nfrom typing import Any\n\nimport orjson\nfrom fastapi.encoders import jsonable_encoder\n\nfrom lfx.base.io.chat import ChatComponent\nfrom lfx.helpers.data import safe_convert\nfrom lfx.inputs.inputs import BoolInput, DropdownInput, HandleInput, MessageTextInput\nfrom lfx.schema.data import Data\nfrom lfx.schema.dataframe import DataFrame\nfrom lfx.schema.message import Message\nfrom lfx.schema.properties import Source\nfrom lfx.template.field.base import Output\nfrom lfx.utils.constants import (\n    MESSAGE_SENDER_AI,\n    MESSAGE_SENDER_NAME_AI,\n    MESSAGE_SENDER_USER,\n)\n\n\nclass ChatOutput(ChatComponent):\n    display_name = \"Chat Output\"\n    description = \"Display a chat message in the Playground.\"\n    documentation: str = \"https://docs.outmate.org/chat-input-and-output\"\n    icon = \"MessagesSquare\"\n    name = \"ChatOutput\"\n    minimized = True\n\n    inputs = [\n        HandleInput(\n            name=\"input_value\",\n            display_name=\"Inputs\",\n            info=\"Message to be passed as output.\",\n            input_types=[\"Data\", \"DataFrame\", \"Message\"],\n            required=True,\n        ),\n        BoolInput(\n            name=\"should_store_message\",\n            display_name=\"Store Messages\",\n            info=\"Store the message in the history.\",\n            value=True,\n            advanced=True,\n        ),\n        DropdownInput(\n            name=\"sender\",\n            display_name=\"Sender Type\",\n            options=[MESSAGE_SENDER_AI, MESSAGE_SENDER_USER],\n            value=MESSAGE_SENDER_AI,\n            advanced=True,\n            info=\"Type of sender.\",\n        ),\n        MessageTextInput(\n            name=\"sender_name\",\n            display_name=\"Sender Name\",\n            info=\"Name of the sender.\",\n            value=MESSAGE_SENDER_NAME_AI,\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"The session ID of the chat. If empty, the current session ID parameter will be used.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"context_id\",\n            display_name=\"Context ID\",\n            info=\"The context ID of the chat. Adds an extra layer to the local memory.\",\n            value=\"\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"data_template\",\n            display_name=\"Data Template\",\n            value=\"{text}\",\n            advanced=True,\n            info=\"Template to convert Data to Text. If left empty, it will be dynamically set to the Data's text key.\",\n        ),\n        BoolInput(\n            name=\"clean_data\",\n            display_name=\"Basic Clean Data\",\n            value=True,\n            advanced=True,\n            info=\"Whether to clean data before converting to string.\",\n        ),\n    ]\n    outputs = [\n        Output(\n            display_name=\"Output Message\",\n            name=\"message\",\n            method=\"message_response\",\n        ),\n    ]\n\n    def _build_source(self, id_: str | None, display_name: str | None, source: str | None) -> Source:\n        source_dict = {}\n        if id_:\n            source_dict[\"id\"] = id_\n        if display_name:\n            source_dict[\"display_name\"] = display_name\n        if source:\n            # Handle case where source is a ChatOpenAI object\n            if hasattr(source, \"model_name\"):\n                source_dict[\"source\"] = source.model_name\n            elif hasattr(source, \"model\"):\n                source_dict[\"source\"] = str(source.model)\n            else:\n                source_dict[\"source\"] = str(source)\n        return Source(**source_dict)\n\n    async def message_response(self) -> Message:\n        # First convert the input to string if needed\n        text = self.convert_to_string()\n\n        # Get source properties\n        source, _, display_name, source_id = self.get_properties_from_source_component()\n\n        # Create or use existing Message object\n        if isinstance(self.input_value, Message) and not self.is_connected_to_chat_input():\n            message = self.input_value\n            # Update message properties\n            message.text = text\n            # Preserve existing session_id from the incoming message if it exists\n            existing_session_id = message.session_id\n        else:\n            message = Message(text=text)\n            existing_session_id = None\n\n        # Set message properties\n        message.sender = self.sender\n        message.sender_name = self.sender_name\n        # Preserve session_id from incoming message, or use component/graph session_id\n        message.session_id = (\n            self.session_id or existing_session_id or (self.graph.session_id if hasattr(self, \"graph\") else None) or \"\"\n        )\n        message.context_id = self.context_id\n        message.flow_id = self.graph.flow_id if hasattr(self, \"graph\") else None\n        message.properties.source = self._build_source(source_id, display_name, source)\n\n        # Store message if needed\n        if message.session_id and self.should_store_message:\n            stored_message = await self.send_message(message)\n            self.message.value = stored_message\n            message = stored_message\n\n        self.status = message\n        return message\n\n    def _serialize_data(self, data: Data) -> str:\n        \"\"\"Serialize Data object to JSON string.\"\"\"\n        # Convert data.data to JSON-serializable format\n        serializable_data = jsonable_encoder(data.data)\n        # Serialize with orjson, enabling pretty printing with indentation\n        json_bytes = orjson.dumps(serializable_data, option=orjson.OPT_INDENT_2)\n        # Convert bytes to string and wrap in Markdown code blocks\n        return \"```json\\n\" + json_bytes.decode(\"utf-8\") + \"\\n```\"\n\n    def _validate_input(self) -> None:\n        \"\"\"Validate the input data and raise ValueError if invalid.\"\"\"\n        if self.input_value is None:\n            msg = \"Input data cannot be None\"\n            raise ValueError(msg)\n        if isinstance(self.input_value, list) and not all(\n            isinstance(item, Message | Data | DataFrame | str) for item in self.input_value\n        ):\n            invalid_types = [\n                type(item).__name__\n                for item in self.input_value\n                if not isinstance(item, Message | Data | DataFrame | str)\n            ]\n            msg = f\"Expected Data or DataFrame or Message or str, got {invalid_types}\"\n            raise TypeError(msg)\n        if not isinstance(\n            self.input_value,\n            Message | Data | DataFrame | str | list | Generator | type(None),\n        ):\n            type_name = type(self.input_value).__name__\n            msg = f\"Expected Data or DataFrame or Message or str, Generator or None, got {type_name}\"\n            raise TypeError(msg)\n\n    def convert_to_string(self) -> str | Generator[Any, None, None]:\n        \"\"\"Convert input data to string with proper error handling.\"\"\"\n        self._validate_input()\n        if isinstance(self.input_value, list):\n            clean_data: bool = getattr(self, \"clean_data\", False)\n            return \"\\n\".join([safe_convert(item, clean_data=clean_data) for item in self.input_value])\n        if isinstance(self.input_value, Generator):\n            return self.input_value\n        return safe_convert(self.input_value)\n"
+              },
+              "context_id": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Context ID",
+                "dynamic": false,
+                "info": "The context ID of the chat. Adds an extra layer to the local memory.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "context_id",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "data_template": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Data Template",
+                "dynamic": false,
+                "info": "Template to convert Data to Text. If left empty, it will be dynamically set to the Data's text key.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "data_template",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "{text}"
+              },
+              "input_value": {
+                "_input_type": "HandleInput",
+                "advanced": false,
+                "display_name": "Inputs",
+                "dynamic": false,
+                "info": "Message to be passed as output.",
+                "input_types": [
+                  "Data",
+                  "DataFrame",
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "input_value",
+                "override_skip": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "other",
+                "value": ""
+              },
+              "sender": {
+                "_input_type": "DropdownInput",
+                "advanced": true,
+                "combobox": false,
+                "dialog_inputs": {},
+                "display_name": "Sender Type",
+                "dynamic": false,
+                "external_options": {},
+                "info": "Type of sender.",
+                "name": "sender",
+                "options": [
+                  "Machine",
+                  "User"
+                ],
+                "options_metadata": [],
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "toggle": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "str",
+                "value": "Machine"
+              },
+              "sender_name": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Sender Name",
+                "dynamic": false,
+                "info": "Name of the sender.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "sender_name",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "AI"
+              },
+              "session_id": {
+                "_input_type": "MessageTextInput",
+                "advanced": true,
+                "display_name": "Session ID",
+                "dynamic": false,
+                "info": "The session ID of the chat. If empty, the current session ID parameter will be used.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "session_id",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "should_store_message": {
+                "_input_type": "BoolInput",
+                "advanced": true,
+                "display_name": "Store Messages",
+                "dynamic": false,
+                "info": "Store the message in the history.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "should_store_message",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "value": true
+              }
+            },
+            "tool_mode": false
+          },
+          "type": "ChatOutput"
+        },
+        "dragging": false,
+        "id": "ChatOutput-QG3bV",
+        "measured": {
+          "height": 600,
+          "width": 320
+        },
+        "position": {
+          "x": 1700,
+          "y": 350
+        },
+        "selected": false,
+        "type": "genericNode"
+      },
+      {
+        "data": {
+          "id": "TAMDiscoveryAgentComponent-Jg8bm",
+          "node": {
+            "base_classes": [
+              "Message"
+            ],
+            "beta": false,
+            "conditional_paths": [],
+            "custom_fields": {},
+            "description": "Discovers and maps your Total Addressable Market — searches for companies matching your ICP, enriches them with real data, segments into tiers, and calculates TAM/SAM/SOM.",
+            "display_name": "TAM Discovery Agent",
+            "documentation": "",
+            "edited": false,
+            "field_order": [],
+            "frozen": false,
+            "icon": "Globe",
+            "legacy": false,
+            "metadata": {
+              "code_hash": "df2c9e523312",
+              "dependencies": {
+                "dependencies": [
+                  {
+                    "name": "langchain",
+                    "version": null
+                  },
+                  {
+                    "name": "langchain_core",
+                    "version": null
+                  },
+                  {
+                    "name": "lfx",
+                    "version": null
+                  }
+                ],
+                "total_dependencies": 3
+              },
+              "module": "lfx.components.gtm_agents.tam_discovery_agent.TAMDiscoveryAgentComponent"
+            },
+            "minimized": false,
+            "output_types": [],
+            "outputs": [
+              {
+                "allows_loop": false,
+                "cache": true,
+                "display_name": "TAM Report",
+                "group_outputs": false,
+                "method": "message_response",
+                "name": "response",
+                "selected": "Message",
+                "tool_mode": true,
+                "types": [
+                  "Message"
+                ],
+                "value": "__UNDEFINED__"
+              }
+            ],
+            "pinned": false,
+            "template": {
+              "_type": "Component",
+              "api_key": {
+                "_input_type": "SecretStrInput",
+                "advanced": true,
+                "display_name": "API Key",
+                "dynamic": false,
+                "info": "Model Provider API key",
+                "input_types": [],
+                "load_from_db": true,
+                "name": "api_key",
+                "override_skip": false,
+                "password": true,
+                "placeholder": "",
+                "real_time_refresh": true,
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "apollo_api_key": {
+                "_input_type": "SecretStrInput",
+                "advanced": false,
+                "display_name": "Apollo API Key",
+                "dynamic": false,
+                "info": "Apollo.io key — enables people search and company enrichment. Get it at app.apollo.io → Settings → API Keys.",
+                "input_types": [],
+                "load_from_db": true,
+                "name": "apollo_api_key",
+                "override_skip": false,
+                "password": true,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "average_deal_size": {
+                "_input_type": "MessageTextInput",
+                "advanced": false,
+                "display_name": "Average Deal Size ($)",
+                "dynamic": false,
+                "info": "Estimated average annual contract value for TAM calculation",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "average_deal_size",
+                "override_skip": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "25000"
+              },
+              "chat_history": {
+                "_input_type": "DataInput",
+                "advanced": true,
+                "display_name": "Chat Memory",
+                "dynamic": false,
+                "info": "Chat history for multi-turn conversations.",
+                "input_types": [
+                  "Data"
+                ],
+                "list": true,
+                "list_add_label": "Add More",
+                "name": "chat_history",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "other",
+                "value": ""
+              },
+              "code": {
+                "advanced": true,
+                "dynamic": true,
+                "fileTypes": [],
+                "file_path": "",
+                "info": "",
+                "list": false,
+                "load_from_db": false,
+                "multiline": true,
+                "name": "code",
+                "password": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "type": "code",
+                "value": "from langchain.agents import create_tool_calling_agent\nfrom langchain_core.prompts import ChatPromptTemplate\n\nfrom lfx.base.agents.agent import LCToolsAgentComponent\nfrom lfx.components.gtm_agents._tool_factory import build_tools_from_keys\nfrom lfx.base.models.unified_models import (\n    get_language_model_options,\n    get_llm,\n    update_model_options_in_build_config,\n)\nfrom lfx.inputs.inputs import (\n    DataInput,\n    DropdownInput,\n    MessageTextInput,\n    ModelInput,\n    MultilineInput,\n    SecretStrInput,\n)\nfrom lfx.io import Output\nfrom lfx.schema.data import Data\nfrom lfx.schema.message import Message\n\n# FULL_SYSTEM_PROMPT — uncomment and use as DEFAULT_SYSTEM_PROMPT when you have a bigger model\n# \"\"\"You are an expert B2B market analyst and TAM (Total Addressable Market) strategist with access to search, enrichment, and data tools.\n# Your job is to discover, map, and size a total addressable market based on ICP criteria — using REAL data from your tools.\n#\n# ## CRITICAL RULES\n# 1. NEVER guess or fabricate company names, revenue, or employee counts. Use your tools to find real data.\n# 2. ALWAYS start by searching immediately. Do NOT respond with text first.\n# 3. Use MULTIPLE search queries to maximize coverage — one search is never enough.\n# 4. For each company found, attempt enrichment to get verified data.\n#\n# ## DISCOVERY WORKFLOW\n#\n# ### Phase 1: Market Search (Cast a Wide Net)\n# - Run 3-5 different search queries based on the ICP criteria\n# - Vary search terms: industry keywords, company size descriptors, geography, funding stage\n# - Example queries: \"Series B fintech companies US 2024 2025\", \"mid-market SaaS companies healthcare\", etc.\n# - Extract company names and domains from search results\n#\n# ### Phase 2: Company Enrichment\n# - For each discovered company, call enrichment tools (apollo_org_enrichment, pdl_company_enrichment) with the domain\n# - Collect: employee count, revenue signals, industry, funding stage, location, tech stack\n#\n# ### Phase 3: ICP Scoring & Segmentation\n# - Score each company against the provided ICP criteria\n# - Segment into tiers:\n#   - **Tier 1 (90-100):** Perfect ICP fit — prioritize for outbound\n#   - **Tier 2 (70-89):** Strong fit — include in pipeline\n#   - **Tier 3 (50-69):** Moderate fit — nurture\n#   - **Below 50:** Exclude from TAM\n#\n# ### Phase 4: TAM Calculation\n# - Count companies per tier\n# - Estimate deal value per tier based on company size\n# - Calculate:\n#   - **TAM** (Total Addressable Market): All discovered companies x average deal size\n#   - **SAM** (Serviceable Addressable Market): Tier 1 + Tier 2 companies x deal size\n#   - **SOM** (Serviceable Obtainable Market): Tier 1 companies x deal size x realistic win rate (15-25%)\n#\n# ### Phase 5: Output\n# Present a structured market report with:\n# 1. Executive summary (TAM/SAM/SOM numbers)\n# 2. Company list with enrichment data, organized by tier\n# 3. Market segments and patterns identified\n# 4. Recommended outbound targets (Tier 1 companies)\n# 5. Data quality notes (which companies had verified vs estimated data)\n#\n# Be thorough — the more companies you discover and enrich, the more accurate the TAM estimate.\"\"\"\n\nDEFAULT_SYSTEM_PROMPT = \"\"\"You are a TAM analyst. Find, enrich, and STRICTLY VALIDATE companies against the ICP.\n\nCRITICAL RULES:\n- You may search up to 5 times to find enough companies. Use VARIED search queries each time.\n- You MUST call apollo_org_enrichment (with the company domain) for EVERY company you find. Do NOT skip enrichment.\n- After enrichment, you MUST CHECK the real data against EVERY ICP constraint (employee count, funding stage, geography, industry). If a company VIOLATES any hard constraint, DISCARD it — do NOT include it in the report.\n- NEVER guess or fabricate data. If enrichment returns no data, discard the company.\n- If Apollo returns a wrong company (e.g. different industry, different country), discard it.\n- After enrichment + validation, write your final report. Do NOT search again after that.\n\nWORKFLOW:\n1. SEARCH: Run 3-5 different search queries to find companies matching the ICP. Vary terms: try industry keywords, \"Series A/B/C\", employee range, geography, competitor lists, funding announcements.\n2. ENRICH: For each company found, call apollo_org_enrichment with their website domain (e.g. \"qualified.com\"). If Apollo has no data, try pdl_company_enrichment.\n3. VALIDATE: After enrichment, check EACH company against the ICP hard constraints:\n   - Employee count within the specified range? If ICP says 50-500 and company has 1500 → DISCARD.\n   - Funding stage matches? If ICP says Series A-C and company is Series E → DISCARD.\n   - Geography matches? If ICP says US and company is in Canada → DISCARD.\n   - Industry matches? If ICP says B2B SaaS and company is an agency/consultancy → DISCARD.\n   Mark each company as PASS or FAIL with the reason.\n4. SCORE: If UPSTREAM ICP SCORES are provided, use those scores as-is — do NOT re-score. Otherwise, score ONLY companies that PASSED validation, 0-100 against ICP fit. Tier 1: 80+, Tier 2: 60-79, Tier 3: 40-59.\n5. REPORT: List all validated companies with enrichment data sorted by score. Then calculate:\n   - TAM = total validated companies x deal size\n   - SAM = Tier 1 + Tier 2 companies x deal size\n   - SOM = Tier 1 companies x deal size x 20%\n   Also list discarded companies with the reason they failed validation.\n\nOUTPUT FORMAT:\n## Validated Companies (sorted by score)\nFor each: Company Name | Website | Industry | Employees | Funding Stage | Location | Score | Tier\n\n## Discarded Companies\nFor each: Company Name | Reason for discard\n\n## TAM/SAM/SOM\nTAM: $X (N companies x $deal_size)\nSAM: $X (N Tier 1+2 x $deal_size)\nSOM: $X (N Tier 1 x $deal_size x 20%)\"\"\"\n\n\nclass TAMDiscoveryAgentComponent(LCToolsAgentComponent):\n    display_name = \"TAM Discovery Agent\"\n    description = (\n        \"Discovers and maps your Total Addressable Market — searches for companies matching your ICP, \"\n        \"enriches them with real data, segments into tiers, and calculates TAM/SAM/SOM.\"\n    )\n    icon = \"Globe\"\n    name = \"TAMDiscoveryAgent\"\n\n    inputs = [\n        *LCToolsAgentComponent.get_base_inputs(),\n        ModelInput(\n            name=\"model\",\n            display_name=\"Language Model\",\n            info=\"Select your model provider (supports OpenAI, Anthropic, Groq, Google, Ollama, etc.)\",\n            real_time_refresh=True,\n            required=True,\n        ),\n        SecretStrInput(\n            name=\"api_key\",\n            display_name=\"API Key\",\n            info=\"Model Provider API key\",\n            real_time_refresh=True,\n            advanced=True,\n        ),\n        SecretStrInput(\n            name=\"tavily_api_key\",\n            display_name=\"Tavily API Key\",\n            info=\"Tavily key — AI-powered web search for company research. Get it at tavily.com.\",\n            required=False,\n            advanced=True,\n        ),\n        SecretStrInput(\n            name=\"apollo_api_key\",\n            display_name=\"Apollo API Key\",\n            info=\"Apollo.io key — enables people search and company enrichment. Get it at app.apollo.io → Settings → API Keys.\",\n            required=False,\n            advanced=True,\n        ),\n        SecretStrInput(\n            name=\"pdl_api_key\",\n            display_name=\"PDL API Key\",\n            info=\"People Data Labs key — enriches contacts with phone numbers and emails from 2.8B+ profiles. Get it at dashboard.peopledatalabs.com.\",\n            required=False,\n            advanced=True,\n        ),\n        MultilineInput(\n            name=\"icp_criteria\",\n            display_name=\"ICP Criteria\",\n            info=\"Define your Ideal Customer Profile for TAM discovery — industry, company size, geography, funding stage, tech stack, etc.\",\n            value=(\n                \"Industry: B2B SaaS\\n\"\n                \"Company Size: 50-500 employees\\n\"\n                \"Funding Stage: Series A to Series C\\n\"\n                \"Geography: United States\\n\"\n                \"Signals: Recently hired sales/marketing roles, using CRM tools\"\n            ),\n            required=True,\n        ),\n        MessageTextInput(\n            name=\"average_deal_size\",\n            display_name=\"Average Deal Size ($)\",\n            info=\"Estimated average annual contract value for TAM calculation\",\n            value=\"25000\",\n            required=True,\n        ),\n        DropdownInput(\n            name=\"market_scope\",\n            display_name=\"Market Scope\",\n            info=\"How broad should the search be?\",\n            options=[\"Focused (20-30 companies)\", \"Standard (30-50 companies)\", \"Broad (50-100 companies)\"],\n            value=\"Standard (30-50 companies)\",\n        ),\n        MultilineInput(\n            name=\"upstream_icp_scores\",\n            display_name=\"ICP Scores (from upstream agent)\",\n            info=(\n                \"Optional — connect ICP Scoring Agent's output here. \"\n                \"If provided, TAM Discovery skips its own scoring and uses these scores directly.\"\n            ),\n            required=False,\n            tool_mode=True,\n        ),\n        MultilineInput(\n            name=\"exclusions\",\n            display_name=\"Exclusions (Optional)\",\n            info=\"Companies or segments to exclude from TAM analysis\",\n            required=False,\n            advanced=True,\n        ),\n        MultilineInput(\n            name=\"system_prompt\",\n            display_name=\"Agent Instructions\",\n            info=\"System prompt that guides the TAM discovery behavior.\",\n            value=DEFAULT_SYSTEM_PROMPT,\n            advanced=True,\n        ),\n        DataInput(\n            name=\"chat_history\",\n            display_name=\"Chat Memory\",\n            is_list=True,\n            advanced=True,\n            info=\"Chat history for multi-turn conversations.\",\n        ),\n    ]\n\n    outputs = [\n        Output(display_name=\"TAM Report\", name=\"response\", method=\"message_response\"),\n    ]\n\n    def _get_llm(self):\n        return get_llm(\n            model=self.model,\n            user_id=self.user_id,\n            api_key=getattr(self, \"api_key\", None),\n        )\n\n    def update_build_config(self, build_config: dict, field_value: str, field_name: str | None = None) -> dict:\n        def get_tool_calling_model_options(user_id=None):\n            return get_language_model_options(user_id=user_id, tool_calling=True)\n\n        return update_model_options_in_build_config(\n            component=self,\n            build_config=build_config,\n            cache_key_prefix=\"language_model_options_tool_calling\",\n            get_options_func=get_tool_calling_model_options,\n            field_name=field_name,\n            field_value=field_value,\n        )\n\n    def get_chat_history_data(self) -> list[Data] | None:\n        return self.chat_history\n\n    def create_agent_runnable(self):\n        llm = self._get_llm()\n        self.max_iterations = 12  # GTM agents need more steps for search → enrich → score pipeline\n\n        icp_criteria = self.icp_criteria or \"\"\n        deal_size = self.average_deal_size or \"25000\"\n        scope = getattr(self, \"market_scope\", \"Standard (30-50 companies)\") or \"Standard (30-50 companies)\"\n        exclusions = getattr(self, \"exclusions\", \"\") or \"\"\n        upstream_scores = getattr(self, \"upstream_icp_scores\", \"\") or \"\"\n\n        exclusion_section = f\"\\n\\nExclusions: {exclusions}\" if exclusions.strip() else \"\"\n\n        if upstream_scores.strip():\n            score_section = (\n                f\"\\n\\n## UPSTREAM ICP SCORES (from ICP Scoring Agent)\\n\"\n                f\"An upstream ICP Scoring Agent has already scored and validated these companies. \"\n                f\"DO NOT re-score them. Use these scores as-is for tiering and TAM calculation. \"\n                f\"Only enrich companies that are missing data.\\n\\n{upstream_scores}\"\n            )\n        else:\n            score_section = \"\"\n\n        self.system_prompt = (\n            f\"{self.system_prompt}{exclusion_section}{score_section}\\n\\n\"\n            f\"## TAM Parameters\\n\"\n            f\"- Average Deal Size: ${deal_size}/year\\n\"\n            f\"- Market Scope: {scope}\\n\"\n            f\"- ICP Criteria:\\n{icp_criteria}\\n\"\n        )\n\n        # Auto-create tools from API keys provided on this component\n        auto_tools = build_tools_from_keys(\n            tavily_api_key=getattr(self, \"tavily_api_key\", \"\") or \"\",\n            apollo_api_key=getattr(self, \"apollo_api_key\", \"\") or \"\",\n            pdl_api_key=getattr(self, \"pdl_api_key\", \"\") or \"\",\n            include_duckduckgo=True,\n            include_apollo_org=True,\n            include_pdl_company=True,\n        )\n        # Merge auto-tools into self.tools so AgentExecutor also sees them\n        if auto_tools:\n            self.tools = list(self.tools or []) + auto_tools\n\n        messages = [\n            (\"system\", \"{system_prompt}\"),\n            (\"placeholder\", \"{chat_history}\"),\n            (\"human\", \"{input}\"),\n            (\"placeholder\", \"{agent_scratchpad}\"),\n        ]\n\n        prompt = ChatPromptTemplate.from_messages(messages)\n        self.validate_tool_names()\n\n        return create_tool_calling_agent(llm, self.tools or [], prompt)\n"
+              },
+              "exclusions": {
+                "_input_type": "MultilineInput",
+                "advanced": true,
+                "ai_enabled": false,
+                "copy_field": false,
+                "display_name": "Exclusions (Optional)",
+                "dynamic": false,
+                "info": "Companies or segments to exclude from TAM analysis",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "multiline": true,
+                "name": "exclusions",
+                "override_skip": false,
+                "password": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "handle_parsing_errors": {
+                "_input_type": "BoolInput",
+                "advanced": true,
+                "display_name": "Handle Parse Errors",
+                "dynamic": false,
+                "info": "When ON, the agent automatically recovers from errors instead of crashing. Keep this ON for best results.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "handle_parsing_errors",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "value": true
+              },
+              "icp_criteria": {
+                "_input_type": "MultilineInput",
+                "advanced": false,
+                "ai_enabled": false,
+                "copy_field": false,
+                "display_name": "ICP Criteria",
+                "dynamic": false,
+                "info": "Define your Ideal Customer Profile for TAM discovery — industry, company size, geography, funding stage, tech stack, etc.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "multiline": true,
+                "name": "icp_criteria",
+                "override_skip": false,
+                "password": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "Industry: B2B SaaS\nCompany Size: 50-500 employees\nFunding Stage: Series A to Series C\nGeography: United States\nSignals: Recently hired sales/marketing roles, using CRM tools"
+              },
+              "input_value": {
+                "_input_type": "MessageInput",
+                "advanced": false,
+                "display_name": "Input",
+                "dynamic": false,
+                "info": "The input provided by the user for the agent to process.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "input_value",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": true,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": {
+                  "category": "message",
+                  "content_blocks": [],
+                  "context_id": "",
+                  "data": {
+                    "category": "message",
+                    "content_blocks": [],
+                    "context_id": "",
+                    "duration": null,
+                    "edit": false,
+                    "error": false,
+                    "files": [],
+                    "flow_id": null,
+                    "properties": {
+                      "allow_markdown": false,
+                      "edited": false,
+                      "source": {
+                        "display_name": null,
+                        "id": null,
+                        "source": null
+                      },
+                      "state": "complete",
+                      "targets": []
+                    },
+                    "sender": null,
+                    "sender_name": null,
+                    "session_id": "",
+                    "text": "",
+                    "timestamp": "2026-03-14 18:53:03 UTC"
+                  },
+                  "default_value": "",
+                  "edit": false,
+                  "error": false,
+                  "files": [],
+                  "properties": {
+                    "allow_markdown": false,
+                    "edited": false,
+                    "source": {
+                      "display_name": null,
+                      "id": null,
+                      "source": null
+                    },
+                    "state": "complete",
+                    "targets": []
+                  },
+                  "session_id": "",
+                  "text": "",
+                  "text_key": "text",
+                  "timestamp": "2026-03-14T18:53:03+00:00"
+                }
+              },
+              "market_scope": {
+                "_input_type": "DropdownInput",
+                "advanced": false,
+                "combobox": false,
+                "dialog_inputs": {},
+                "display_name": "Market Scope",
+                "dynamic": false,
+                "external_options": {},
+                "info": "How broad should the search be?",
+                "name": "market_scope",
+                "options": [
+                  "Focused (20-30 companies)",
+                  "Standard (30-50 companies)",
+                  "Broad (50-100 companies)"
+                ],
+                "options_metadata": [],
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "toggle": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "str",
+                "value": "Standard (30-50 companies)"
+              },
+              "max_iterations": {
+                "_input_type": "IntInput",
+                "advanced": true,
+                "display_name": "Max Iterations",
+                "dynamic": false,
+                "info": "How many steps the agent can take before stopping. Higher = more thorough but slower. 15 is a good default, increase to 25+ for complex research tasks.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "max_iterations",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "int",
+                "value": 15
+              },
+              "model": {
+                "_input_type": "ModelInput",
+                "advanced": false,
+                "display_name": "Language Model",
+                "dynamic": false,
+                "external_options": {
+                  "fields": {
+                    "data": {
+                      "node": {
+                        "display_name": "Connect other models",
+                        "icon": "CornerDownLeft",
+                        "name": "connect_other_models"
+                      }
+                    }
+                  }
+                },
+                "info": "Select your model provider (supports OpenAI, Anthropic, Groq, Google, Ollama, etc.)",
+                "input_types": [
+                  "LanguageModel"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "model_type": "language",
+                "name": "model",
+                "override_skip": false,
+                "placeholder": "Setup Provider",
+                "real_time_refresh": true,
+                "refresh_button": true,
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "track_in_telemetry": false,
+                "type": "model",
+                "value": ""
+              },
+              "pdl_api_key": {
+                "_input_type": "SecretStrInput",
+                "advanced": false,
+                "display_name": "PDL API Key",
+                "dynamic": false,
+                "info": "People Data Labs key — enriches contacts with phone numbers and emails from 2.8B+ profiles. Get it at dashboard.peopledatalabs.com.",
+                "input_types": [],
+                "load_from_db": true,
+                "name": "pdl_api_key",
+                "override_skip": false,
+                "password": true,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "system_prompt": {
+                "_input_type": "MultilineInput",
+                "advanced": true,
+                "ai_enabled": false,
+                "copy_field": false,
+                "display_name": "Agent Instructions",
+                "dynamic": false,
+                "info": "System prompt that guides the TAM discovery behavior.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "multiline": true,
+                "name": "system_prompt",
+                "override_skip": false,
+                "password": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": "You are an expert B2B lead scoring analyst with access to web search and research tools.\nYour job is to score leads against an Ideal Customer Profile (ICP) using REAL data — not assumptions.\n\nYou MUST use the available tools to verify information about each lead before scoring. Search for:\n- The lead's company (industry, size, funding, revenue signals)\n- The lead's role and seniority\n- Recent company news, hiring patterns, tech stack indicators\n- Any signals that match or contradict the ICP criteria\n\n## Scoring Scale (0-100)\n- 90-100: Perfect fit — matches all key ICP criteria (verified)\n- 70-89: Strong fit — matches most criteria, minor gaps\n- 50-69: Moderate fit — some alignment but notable mismatches\n- 30-49: Weak fit — few matching criteria\n- 0-29: Poor fit — does not match ICP\n\n## For EACH lead, provide:\n1. **ICP Score** (0-100)\n2. **Match Factors** — what aligns with the ICP (cite sources)\n3. **Mismatch Flags** — what doesn't align\n4. **Recommended Action** — \"Route to Sequence\", \"Nurture\", \"Deprioritize\", or \"Disqualify\"\n5. **Priority Tier** — \"Hot\", \"Warm\", or \"Cold\"\n6. **Evidence** — what you found via search that informed the score\n\nSort results by score (highest first). Be rigorous — flag uncertainty when data is unavailable."
+              },
+              "tavily_api_key": {
+                "_input_type": "SecretStrInput",
+                "advanced": false,
+                "display_name": "Tavily API Key",
+                "dynamic": false,
+                "info": "Tavily key — AI-powered web search for company research. Get it at tavily.com.",
+                "input_types": [],
+                "load_from_db": true,
+                "name": "tavily_api_key",
+                "override_skip": false,
+                "password": true,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "tools": {
+                "_input_type": "HandleInput",
+                "advanced": false,
+                "display_name": "Tools",
+                "dynamic": false,
+                "info": "These are the tools that the agent can use to help with tasks.",
+                "input_types": [
+                  "Tool"
+                ],
+                "list": true,
+                "list_add_label": "Add More",
+                "name": "tools",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "other",
+                "value": ""
+              },
+              "upstream_icp_scores": {
+                "_input_type": "MultilineInput",
+                "advanced": false,
+                "ai_enabled": false,
+                "copy_field": false,
+                "display_name": "ICP Scores (from upstream agent)",
+                "dynamic": false,
+                "info": "Optional — connect ICP Scoring Agent's output here. If provided, TAM Discovery skips its own scoring and uses these scores directly.",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "multiline": true,
+                "name": "upstream_icp_scores",
+                "override_skip": false,
+                "password": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": true,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "verbose": {
+                "_input_type": "BoolInput",
+                "advanced": true,
+                "display_name": "Verbose",
+                "dynamic": false,
+                "info": "When ON, shows detailed step-by-step logs of what the agent is doing. Useful for debugging, turn OFF for cleaner output.",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "verbose",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "value": true
+              }
+            },
+            "tool_mode": false
+          },
+          "type": "TAMDiscoveryAgent"
+        },
+        "dragging": false,
+        "id": "TAMDiscoveryAgentComponent-Jg8bm",
+        "measured": {
+          "height": 600,
+          "width": 320
+        },
+        "position": {
+          "x": 850,
+          "y": 250
+        },
+        "selected": false,
+        "type": "genericNode"
+      },
+      {
+        "data": {
+          "id": "DuckDuckGoSearchToolComponent-JQ7IH",
+          "node": {
+            "base_classes": [
+              "Data",
+              "Tool"
+            ],
+            "beta": false,
+            "conditional_paths": [],
+            "custom_fields": {},
+            "description": "Free web search tool using DuckDuckGo. No API key required. Connect to any agent's Tools input.",
+            "display_name": "DuckDuckGo Search Tool",
+            "documentation": "",
+            "edited": false,
+            "field_order": [],
+            "frozen": false,
+            "icon": "DuckDuckGo",
+            "legacy": false,
+            "metadata": {
+              "code_hash": "717f2a9aed30",
+              "dependencies": {
+                "dependencies": [
+                  {
+                    "name": "langchain_community",
+                    "version": null
+                  },
+                  {
+                    "name": "lfx",
+                    "version": null
+                  }
+                ],
+                "total_dependencies": 2
+              },
+              "module": "lfx.components.duckduckgo.duck_duck_go_search_tool.DuckDuckGoSearchToolComponent"
+            },
+            "minimized": false,
+            "output_types": [],
+            "outputs": [
+              {
+                "allows_loop": false,
+                "cache": true,
+                "display_name": "Data",
+                "group_outputs": false,
+                "method": "run_model",
+                "name": "api_run_model",
+                "selected": "Data",
+                "tool_mode": true,
+                "types": [
+                  "Data"
+                ],
+                "value": "__UNDEFINED__"
+              },
+              {
+                "allows_loop": false,
+                "cache": true,
+                "display_name": "Tool",
+                "group_outputs": false,
+                "method": "build_tool",
+                "name": "api_build_tool",
+                "selected": "Tool",
+                "tool_mode": true,
+                "types": [
+                  "Tool"
+                ],
+                "value": "__UNDEFINED__"
+              }
+            ],
+            "pinned": false,
+            "template": {
+              "_type": "Component",
+              "code": {
+                "advanced": true,
+                "dynamic": true,
+                "fileTypes": [],
+                "file_path": "",
+                "info": "",
+                "list": false,
+                "load_from_db": false,
+                "multiline": true,
+                "name": "code",
+                "password": false,
+                "placeholder": "",
+                "required": true,
+                "show": true,
+                "title_case": false,
+                "type": "code",
+                "value": "from typing import cast\n\nfrom langchain_community.tools import DuckDuckGoSearchRun\n\nfrom lfx.base.langchain_utilities.model import LCToolComponent\nfrom lfx.field_typing import Tool\nfrom lfx.inputs.inputs import IntInput, MessageTextInput\nfrom lfx.schema.data import Data\n\n\nclass DuckDuckGoSearchToolComponent(LCToolComponent):\n    \"\"\"DuckDuckGo web search as a Tool — no API key required.\n\n    Connect this to any agent's Tools input to give it free web search capabilities.\n    \"\"\"\n\n    display_name = \"DuckDuckGo Search Tool\"\n    description = \"Free web search tool using DuckDuckGo. No API key required. Connect to any agent's Tools input.\"\n    icon = \"DuckDuckGo\"\n    name = \"DuckDuckGoSearchTool\"\n\n    inputs = [\n        MessageTextInput(\n            name=\"input_value\",\n            display_name=\"Search Query\",\n            info=\"The search query (used when running this component directly, not needed when used as a tool)\",\n            tool_mode=True,\n        ),\n        IntInput(\n            name=\"max_results\",\n            display_name=\"Max Results\",\n            value=5,\n            required=False,\n            advanced=True,\n            info=\"Maximum number of search results to return\",\n        ),\n    ]\n\n    def run_model(self) -> list[Data]:\n        wrapper = DuckDuckGoSearchRun()\n        result = wrapper.run(self.input_value or \"\")\n        snippets = [s.strip() for s in result.split(\"\\n\") if s.strip()][: self.max_results]\n        data = [Data(text=snippet, data={\"content\": snippet}) for snippet in snippets]\n        self.status = data\n        return data\n\n    def build_tool(self) -> Tool:\n        return cast(\"Tool\", DuckDuckGoSearchRun())\n"
+              },
+              "input_value": {
+                "_input_type": "MessageTextInput",
+                "advanced": false,
+                "display_name": "Search Query",
+                "dynamic": false,
+                "info": "The search query (used when running this component directly, not needed when used as a tool)",
+                "input_types": [
+                  "Message"
+                ],
+                "list": false,
+                "list_add_label": "Add More",
+                "load_from_db": false,
+                "name": "input_value",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": true,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "track_in_telemetry": false,
+                "type": "str",
+                "value": ""
+              },
+              "max_results": {
+                "_input_type": "IntInput",
+                "advanced": true,
+                "display_name": "Max Results",
+                "dynamic": false,
+                "info": "Maximum number of search results to return",
+                "list": false,
+                "list_add_label": "Add More",
+                "name": "max_results",
+                "override_skip": false,
+                "placeholder": "",
+                "required": false,
+                "show": true,
+                "title_case": false,
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "track_in_telemetry": true,
+                "type": "int",
+                "value": 5
+              }
+            },
+            "tool_mode": false
+          },
+          "selected_output": "api_build_tool",
+          "type": "DuckDuckGoSearchTool"
+        },
+        "dragging": false,
+        "id": "DuckDuckGoSearchToolComponent-JQ7IH",
+        "measured": {
+          "height": 600,
+          "width": 320
+        },
+        "position": {
+          "x": 600,
+          "y": 50
+        },
+        "selected": false,
+        "type": "genericNode"
+      }
+    ]
+  },
+  "description": "GTM Agent: Discovers and maps your Total Addressable Market — searches for companies matching ICP, enriches with real data, segments into tiers, calculates TAM/SAM/SOM.",
+  "gradient": null,
+  "icon": null,
+  "icon_bg_color": null,
+  "name": "TAM Discovery Agent",
+  "tags": [
+    "tam-analysis",
+    "market-sizing",
+    "agents"
+  ]
+}

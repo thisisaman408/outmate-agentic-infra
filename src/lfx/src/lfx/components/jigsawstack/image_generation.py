@@ -5,11 +5,12 @@ from lfx.schema.data import Data
 
 class JigsawStackImageGenerationComponent(Component):
     display_name = "Image Generation"
-    description = "Generate an image based on the given text by employing AI models like Flux, \
-        Stable Diffusion, and other top models."
+    description = "(Deprecated) Generate an image based on the given text by employing AI models like Flux, \
+        Stable Diffusion, and other top models. This API has been deprecated by JigsawStack."
     documentation = "https://jigsawstack.com/docs/api-reference/ai/image-generation"
     icon = "JigsawStack"
     name = "JigsawStackImageGeneration"
+    legacy = True
 
     inputs = [
         SecretStrInput(
@@ -113,7 +114,7 @@ class JigsawStackImageGenerationComponent(Component):
             from jigsawstack import JigsawStack, JigsawStackError
         except ImportError as e:
             jigsawstack_import_error = (
-                "JigsawStack package not found. Please install it using: pip install jigsawstack>=0.2.7"
+                "JigsawStack package not found. Please install it using: pip install jigsawstack>=0.4.0"
             )
             raise ImportError(jigsawstack_import_error) from e
 

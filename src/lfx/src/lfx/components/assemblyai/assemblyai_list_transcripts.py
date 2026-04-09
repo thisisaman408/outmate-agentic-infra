@@ -68,7 +68,7 @@ class AssemblyAIListTranscripts(Component):
             transcriber = aai.Transcriber()
 
             def convert_page_to_data_list(page):
-                return [Data(**t.dict()) for t in page.transcripts]
+                return [Data(**t.model_dump()) for t in page.transcripts]
 
             if self.limit == 0:
                 # paginate over all pages

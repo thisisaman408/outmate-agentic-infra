@@ -84,7 +84,7 @@ class PegasusIndexVideo(Component):
         # First check if index_id is provided and valid
         if hasattr(self, "index_id") and self.index_id:
             try:
-                index = client.index.retrieve(id=self.index_id)
+                index = client.indexes.retrieve(id=self.index_id)
             except (ValueError, KeyError) as e:
                 if not hasattr(self, "index_name") or not self.index_name:
                     error_msg = "Invalid index ID provided and no index name specified for fallback"
@@ -96,13 +96,13 @@ class PegasusIndexVideo(Component):
         if hasattr(self, "index_name") and self.index_name:
             try:
                 # List all indexes and find by name
-                indexes = client.index.list()
+                indexes = client.indexes.list()
                 for idx in indexes:
                     if idx.name == self.index_name:
                         return idx.id, idx.name
 
                 # If we get here, index wasn't found - create it
-                index = client.index.create(
+                index = client.indexes.create(
                     name=self.index_name,
                     models=[
                         {
@@ -141,7 +141,7 @@ class PegasusIndexVideo(Component):
 
         Makes a single API call to check the status of a task.
         """
-        task = client.task.retrieve(id=task_id)
+        task = client.tasks.retrieve(id=task_id)
         self.on_task_update(task, video_path)
         return task
 
@@ -203,7 +203,7 @@ class PegasusIndexVideo(Component):
         video_name = Path(video_path).name
         with Path(video_path).open("rb") as video_file:
             self.status = f"Uploading {video_name} to index {index_id}..."
-            task = client.task.create(index_id=index_id, file=video_file)
+            task = client.tasks.create(index_id=index_id, file=video_file)
             task_id = task.id
             self.status = f"Upload complete for {video_name}. Task ID: {task_id}"
             return task_id

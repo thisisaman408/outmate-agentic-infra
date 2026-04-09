@@ -10,7 +10,7 @@ class FirecrawlCrawlApi(Component):
     description: str = "Crawls a URL and returns the results."
     name = "FirecrawlCrawlApi"
 
-    documentation: str = "https://docs.firecrawl.dev/v1/api-reference/endpoint/crawl-post"
+    documentation: str = "https://docs.firecrawl.dev/api-reference/endpoint/crawl-post"
 
     inputs = [
         SecretStrInput(
@@ -66,12 +66,12 @@ class FirecrawlCrawlApi(Component):
         if scrape_options_dict:
             params["scrapeOptions"] = scrape_options_dict
 
-        # Set default values for new parameters in v1
-        params.setdefault("maxDepth", 2)
+        # Set default values for parameters (v2 API)
+        params.setdefault("maxDiscoveryDepth", 2)
         params.setdefault("limit", 10000)
         params.setdefault("allowExternalLinks", False)
-        params.setdefault("allowBackwardLinks", False)
-        params.setdefault("ignoreSitemap", False)
+        params.setdefault("crawlEntireDomain", False)
+        params.setdefault("sitemap", "include")
         params.setdefault("ignoreQueryParameters", False)
 
         # Ensure onlyMainContent is explicitly set if not provided

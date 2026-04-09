@@ -46,7 +46,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })
       const finalInit = { ...init, headers }
-      const response = await originalFetch(input, finalInit)
+
+      let response: Response
+      try {
+        response = await originalFetch(input, finalInit)
+      } catch (err) {
+        // Re-throw so the caller's own try/catch handles it.  We just don't
+        // want this to surface as an "unhandledRejection" sourced inside the
+        // global fetch patch — the original error already carries the right
+        // stack frame for the caller.
+        throw err
+      }
 
       // Handle 401 — token expired or invalid
       if (response.status === 401 && !hasHandledExpiry.current) {

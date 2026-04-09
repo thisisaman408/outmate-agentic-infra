@@ -26,35 +26,14 @@ export default function CrashErrorComponent({
             <CardContent className="grid">
               <div>
                 <p>
-                  Please report errors with detailed tracebacks on the{" "}
-                  <a
-                    href="https://github.com/outmate-ai/outmate/issues"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium hover:underline"
-                  >
-                    GitHub Issues
-                  </a>{" "}
-                  page.
-                  <br></br>
-                  Thank you!
+                  An unexpected error occurred. Please restart to continue.
                 </p>
               </div>
             </CardContent>
 
             <CardFooter>
               <div className="m-auto mt-4 flex justify-center">
-                <Button onClick={resetErrorBoundary}>Restart outmate</Button>
-
-                <a
-                  href="https://github.com/outmate-ai/outmate/issues/new"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button className="ml-3" ignoreTitleCase variant={"outline"}>
-                    Report on GitHub
-                  </Button>
-                </a>
+                <Button onClick={resetErrorBoundary}>Restart Outmate</Button>
               </div>
             </CardFooter>
           </Card>
