@@ -938,7 +938,10 @@ class DatabaseFinderService:
     ) -> Dict[str, Any]:
         """Use Tavily Search to fill identity/professional fields for a person.
 
-        Runs 2 targeted searches (2 credits) to maximize field coverage.
+        Runs 3 targeted searches to maximize field coverage:
+        1. Professional identity (title, company)
+        2. Education & university background
+        3. Contact info & social media
         Returns a dict of populated fields.
         """
         if not self.tavily_api_key or not name:
@@ -950,11 +953,15 @@ class DatabaseFinderService:
         identity_query = f'"{name}" {query} title company role location'.strip()
         identity_results = await self._tavily_search(identity_query, max_results=5)
 
-        # Search 2: Education + contact
-        background_query = f'"{name}" {query} education university skills email'.strip()
-        background_results = await self._tavily_search(background_query, max_results=3)
+        # Search 2: Education + University background
+        education_query = f'"{name}" {query} university college education degree alumni'.strip()
+        education_results = await self._tavily_search(education_query, max_results=4)
 
-        all_results = identity_results + background_results
+        # Search 3: Contact + Email + Social media
+        contact_query = f'"{name}" {query} email contact phone social media'.strip()
+        contact_results = await self._tavily_search(contact_query, max_results=4)
+
+        all_results = identity_results + education_results + contact_results
         if not all_results:
             return details
 
@@ -1364,8 +1371,17 @@ class DatabaseFinderService:
                 prof["signals_count"] = len(all_sigs)
 
         # Step 4: Build final lead records with 30-40 fields
+        # Filter: Only include profiles with mandatory fields (Name and Title)
+        valid_profiles = [
+            p for p in profiles
+            if p.get("full_name", "").strip() and p.get("title", "").strip()
+        ]
+
+        if not valid_profiles:
+            logger.warning(f"No profiles with mandatory fields (Name + Title) after enrichment. Total profiles: {len(profiles)}")
+
         leads = []
-        for i, prof in enumerate(profiles):
+        for i, prof in enumerate(valid_profiles):
             lead = self._build_lead_record(prof, query, location, i)
             leads.append(lead)
 
@@ -1402,6 +1418,7 @@ class DatabaseFinderService:
 
         # Infer seniority from title
         title = profile.get("title", "")
+        title = self._clean_title(title)  # Remove years and junk
         seniority = self._infer_seniority(title)
 
         # Infer department from title
@@ -1439,6 +1456,8 @@ class DatabaseFinderService:
             "education": profile.get("education", ""),
             "education_degree": profile.get("education_degree", ""),
             "summary": profile.get("summary", ""),
+            # Decision Making (1 field)
+            "is_decision_maker": self._is_decision_maker(title, seniority),
             # Skills (1 field)
             "skills": profile.get("skills", []),
             # Location (5 fields)
@@ -1644,6 +1663,39 @@ class DatabaseFinderService:
         filled = sum(1 for f in fields if profile.get(f))
         return round(filled / len(fields) * 100, 1)
 
+    @staticmethod
+    def _clean_title(title: str) -> str:
+        """Remove years, numbers, and junk from title."""
+        if not title:
+            return ""
+        # Remove 4-digit years (2020, 2024, etc.)
+        cleaned = re.sub(r'\b(19|20)\d{2}\b', '', title)
+        # Remove leading/trailing numbers and special chars
+        cleaned = re.sub(r'^[\d\s\-.,|]+', '', cleaned)
+        cleaned = re.sub(r'[\d\s\-.,|]+$', '', cleaned)
+        # Clean up whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned if cleaned else title
+
+    @staticmethod
+    def _is_decision_maker(title: str, seniority: str) -> bool:
+        """Determine if person is likely a decision maker based on title/seniority."""
+        if not title:
+            return False
+
+        decision_maker_keywords = [
+            r"\bceo\b", r"\bcto\b", r"\bcfo\b", r"\bcoo\b", r"\bcio\b", r"\bcmo\b",
+            r"\bfounder\b", r"\bco-founder\b", r"\bpresident\b", r"\bowner\b",
+            r"\bvp\b", r"\bvice president\b", r"\bsvp\b", r"\bevp\b", r"\bavp\b",
+            r"\bdirector\b", r"\bhead of\b", r"\bgeneral manager\b",
+            r"\bmanaging director\b", r"\bchairman\b", r"\bboard\b",
+        ]
+
+        title_lower = title.lower()
+        is_keyword_match = any(re.search(p, title_lower) for p in decision_maker_keywords)
+        is_senior = seniority in ["C-Suite", "VP", "Director"]
+
+        return is_keyword_match or is_senior
 
     # ── Single-lead enrichment ───────────────────────────────────────────
 
