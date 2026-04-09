@@ -957,9 +957,9 @@ class DatabaseFinderService:
         education_query = f'"{name}" {query} university college education degree alumni'.strip()
         education_results = await self._tavily_search(education_query, max_results=4)
 
-        # Search 3: Contact + Email + Social media
-        contact_query = f'"{name}" {query} email contact phone social media'.strip()
-        contact_results = await self._tavily_search(contact_query, max_results=4)
+        # Search 3: Contact + Email + Social media (prioritize contact info)
+        contact_query = f'"{name}" {query} email contact phone social media linkedin'.strip()
+        contact_results = await self._tavily_search(contact_query, max_results=5)
 
         all_results = identity_results + education_results + contact_results
         if not all_results:
@@ -967,6 +967,49 @@ class DatabaseFinderService:
 
         self._extract_fields_from_results(details, all_results, name, query)
         return details
+
+    async def _search_decision_makers(
+        self,
+        company_name: str,
+        location: str = "",
+    ) -> List[str]:
+        """Search for decision makers (executives, leaders) in a company.
+
+        Returns list of decision maker names found for the company.
+        """
+        if not self.tavily_api_key or not company_name:
+            return []
+
+        search_query = f'{company_name} executives leadership team CEO CTO CFO VP director'.strip()
+        try:
+            results = await self._tavily_search(search_query, max_results=8)
+            decision_makers = set()
+
+            for r in results:
+                title = r.get("title", "")
+                content = r.get("content", "")
+                combined = f"{title} {content}"
+
+                # Extract names that appear with decision maker titles
+                # Pattern: "Name - Title" or "Name, Title at Company"
+                patterns = [
+                    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*(?:-|,)\s*(?:CEO|CTO|CFO|COO|VP|President|Director|Head)",
+                    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is|was|serves as|as)\s+(?:the\s+)?(?:CEO|CTO|CFO|COO|VP|President|Director|Head)",
+                ]
+
+                for pattern in patterns:
+                    matches = re.findall(pattern, combined, re.IGNORECASE)
+                    for name in matches:
+                        name_clean = name.strip()
+                        if len(name_clean) > 3 and len(name_clean) < 50:
+                            decision_makers.add(name_clean)
+
+            logger.debug(f"Found {len(decision_makers)} decision makers for {company_name}")
+            return list(decision_makers)[:10]  # Return top 10
+
+        except Exception as e:
+            logger.warning(f"Decision maker search failed for {company_name}: {e}")
+            return []
 
     def _extract_fields_from_results(
         self,
@@ -1071,81 +1114,96 @@ class DatabaseFinderService:
         # Email (multiple patterns for different formats)
         if not details.get("email"):
             email_patterns = [
+                # Direct email format
                 r"[a-zA-Z0-9][a-zA-Z0-9._%+\-]*@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+",
-                r"email\s*:?\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
-                r"contact\s*:?\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+                # "email: xxx@yyy.com" or "contact at xxx@yyy"
+                r"(?:email|contact|reach|email address)[:\s]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+                # Look for name@company pattern
+                r"(\w+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
             ]
             for pattern in email_patterns:
                 email_match = re.search(pattern, all_content, re.IGNORECASE)
                 if email_match:
-                    email_str = email_match.group(0) if "@" in email_match.group(0) else email_match.group(1)
-                    if "@" in email_str:
+                    if email_match.lastindex and email_match.lastindex >= 1:
+                        email_str = email_match.group(1)
+                    else:
+                        email_str = email_match.group(0)
+
+                    if "@" in email_str and email_str.count("@") == 1:
                         details["email"] = email_str.lower()
+                        logger.debug(f"Email extracted: {email_str}")
                         break
 
-        # Education (more comprehensive)
+        # Education (aggressive extraction - look for many patterns)
         if not details.get("education"):
             edu_patterns = [
-                r"(?:studied at|graduated from|alumni of|university of|college of|institute of|attends?)\s+([A-Z][A-Za-z\s&.',-]+?)(?:\s*[,.|;\n]|$)",
-                r"((?:University|Institute|College|School|Academy)\s+(?:of\s+)?[A-Z][A-Za-z\s&.,-]*?)(?:\s*[,.|;\n]|$)",
+                # "studied at/graduated from/attended X"
+                r"(?:studied at|graduated from|attended|alumni of|alumni of|attends|alumnus|alumna of)\s+([A-Z][A-Za-z\s&.',-]{4,100}?)(?:\s*[,.|;\n]|$)",
+                # "University/College of X" or just "X University"
+                r"((?:University|Institute|College|School|Academy|Business School)\s+(?:of\s+)?[A-Z][A-Za-z\s&.',-]*?)(?:\s*[,.|;\n]|$)",
+                # Common top universities (explicit list for better accuracy)
+                r"\b(Stanford|Harvard|MIT|Berkeley|Yale|Princeton|Oxford|Cambridge|Carnegie Mellon|Northwestern|Duke|University of Pennsylvania|Penn|Cornell|Columbia|NYU|Texas|UCLA|Michigan|Illinois|Ohio State|Wisconsin)\b",
+                # "Bachelor/Master/PhD from X"
+                r"(?:Bachelor|Master|PhD|Doctorate|Associate)\s+(?:of|in|from)\s+([A-Za-z\s&,'.-]{5,100}?)(?:\s*[,.|;\n]|$)",
             ]
             for pattern in edu_patterns:
                 edu = re.search(pattern, all_content, re.IGNORECASE)
                 if edu:
-                    edu_name = self._clean_text(edu.group(1))
-                    if len(edu_name) > 5:
+                    # Handle group properly
+                    if edu.lastindex and edu.lastindex >= 1:
+                        edu_name = self._clean_text(edu.group(1))
+                    else:
+                        edu_name = self._clean_text(edu.group(0))
+
+                    if len(edu_name) > 3 and len(edu_name) < 200:
                         details["education"] = edu_name[:100]
+                        logger.debug(f"Education extracted: {edu_name}")
                         break
 
-        # Education degree
-        if not details.get("education_degree"):
-            degree_patterns = [
-                r"\b(B\.?[AS]\.?|B\.?E\.?|B\.?Tech|M\.?[AS]\.?|M\.?[CS]\.?|M\.?Tech|MBA|PGDM|Ph\.?D\.?|D\.?M\.?|LL\.?B\.?|LL\.?M\.?|BCA|MCA|Bachelor|Master|Doctor|Associate)\b",
-                r"(?:Bachelor|Master|Doctor|Associate)\s+(?:of|in)\s+[A-Za-z\s]+",
-            ]
-            for pattern in degree_patterns:
-                degree_match = re.search(pattern, all_content, re.IGNORECASE)
-                if degree_match:
-                    details["education_degree"] = degree_match.group(1)
-                    break
-
-        # Industry/sector
-        if not details.get("industry"):
-            ind_patterns = [
-                r"(?:industry|sector|field|specialization|focus)[:\s]+([A-Za-z\s&]{3,50}?)(?:\s*[,.|;\n]|$)",
-                r"works in\s+(?:the\s+)?([A-Za-z\s&]+?)(?:\s+(?:industry|sector)|$)",
-            ]
-            for pattern in ind_patterns:
-                ind = re.search(pattern, all_content, re.IGNORECASE)
-                if ind:
-                    details["industry"] = self._clean_text(ind.group(1))
-                    break
-
-        # Company domain from website or organization
-        if not details.get("company_domain"):
-            if details.get("website"):
-                domain_match = re.search(r"https?://(?:www\.)?([^/]+)", details["website"])
-                if domain_match:
-                    details["company_domain"] = domain_match.group(1)
-            elif details.get("organization"):
-                # Generate domain from company name
-                org = details["organization"].lower()
-                domain = re.sub(r"[^a-z0-9]", "", org)
-                if domain:
-                    details["company_domain"] = f"{domain}.com"
-
-        # Summary: collect longer content snippets mentioning the person
+        # Summary (multiple aggressive strategies)
         if not details.get("summary"):
             summaries = []
             fname = (name.split()[0] if name else "").lower()
+
+            # Strategy 1: Content that mentions the person's first name
+            if fname:
+                for r in results:
+                    content = r.get("content", "")
+                    if fname in content.lower() and len(content) > 80:
+                        summaries.append(content)
+
+            # Strategy 2: Look for paragraphs with professional keywords
+            professional_keywords = [
+                "experienced", "leads", "manages", "specializes", "focused on",
+                "expertise in", "works with", "passionate about", "skilled in",
+                "proficient in", "background in", "years of experience",
+                "role as", "position as", "works as", "employed as"
+            ]
             for r in results:
                 content = r.get("content", "")
-                if fname and fname in content.lower() and len(content) > 50:
+                if any(kw in content.lower() for kw in professional_keywords) and len(content) > 80:
                     summaries.append(content)
+
+            # Strategy 3: Just use content from LinkedIn search results
+            for r in results:
+                if "linkedin.com" in r.get("url", "").lower():
+                    content = r.get("content", "")
+                    if len(content) > 100:
+                        summaries.append(content)
+
+            # Strategy 4: Use any substantial content from results
+            for r in results:
+                content = r.get("content", "")
+                if len(content) > 120:
+                    summaries.append(content)
+
+            # Pick the best summary (longest that's reasonable)
             if summaries:
-                # Use the longest summary
-                longest = max(summaries, key=len)
-                details["summary"] = self._clean_text(longest[:500])
+                best = max(summaries, key=len)
+                clean_summary = self._clean_text(best[:550])
+                if len(clean_summary) > 30:
+                    details["summary"] = clean_summary
+                    logger.debug(f"Summary extracted: {clean_summary[:100]}...")
 
         # Skills extraction from content (look for "skills include", "expertise", etc)
         if not details.get("skills"):
@@ -1679,22 +1737,41 @@ class DatabaseFinderService:
 
     @staticmethod
     def _is_decision_maker(title: str, seniority: str) -> bool:
-        """Determine if person is likely a decision maker based on title/seniority."""
+        """Determine if person is likely a decision maker based on title/seniority.
+
+        Decision makers include:
+        - C-Suite (CEO, CTO, CFO, etc.)
+        - VPs and SVPs
+        - Directors and above
+        - Heads of departments
+        - Founders and co-founders
+        - Board members
+        """
         if not title:
             return False
 
         decision_maker_keywords = [
-            r"\bceo\b", r"\bcto\b", r"\bcfo\b", r"\bcoo\b", r"\bcio\b", r"\bcmo\b",
-            r"\bfounder\b", r"\bco-founder\b", r"\bpresident\b", r"\bowner\b",
+            # C-Suite
+            r"\bceo\b", r"\bcto\b", r"\bcfo\b", r"\bcoo\b", r"\bcio\b", r"\bcmo\b", r"\bcpo\b",
+            r"\bchief\b", r"\bfounder\b", r"\bco-founder\b", r"\bcofounder\b",
+            # President, Owner, Partner
+            r"\bpresident\b", r"\bowner\b", r"\bpartner\b",
+            # VP and above
             r"\bvp\b", r"\bvice president\b", r"\bsvp\b", r"\bevp\b", r"\bavp\b",
-            r"\bdirector\b", r"\bhead of\b", r"\bgeneral manager\b",
-            r"\bmanaging director\b", r"\bchairman\b", r"\bboard\b",
+            # Director and Head roles
+            r"\bdirector\b", r"\bhead of\b", r"\bhead,\b", r"\bgeneral manager\b",
+            r"\bmanaging director\b", r"\bd\s*i\b",  # Director of...
+            # Board and governance
+            r"\bboard\b", r"\bchairman\b", r"\bchairwoman\b", r"\bchairperson\b",
+            # Senior management (manager+ with senior/lead)
+            r"\bsenior\s+manager\b", r"\blead\b", r"\bteam lead\b",
         ]
 
         title_lower = title.lower()
         is_keyword_match = any(re.search(p, title_lower) for p in decision_maker_keywords)
         is_senior = seniority in ["C-Suite", "VP", "Director"]
 
+        # More inclusive: either keyword match OR senior seniority level
         return is_keyword_match or is_senior
 
     # ── Single-lead enrichment ───────────────────────────────────────────
