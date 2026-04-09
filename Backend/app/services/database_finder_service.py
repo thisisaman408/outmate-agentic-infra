@@ -1771,6 +1771,27 @@ class DatabaseFinderService:
                 p["organization"] = query or "Company"
                 logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
 
+        # CRITICAL: After force-setting full_name, break it back into first/last names
+        # so _build_lead_record has the fields it needs
+        logger.warning("[STEP 4] Breaking full_name into first_name/last_name for API response")
+        for i, p in enumerate(profiles):
+            full_name = p.get("full_name", "").strip()
+            if full_name:
+                # If first_name is missing, extract it from full_name
+                if not p.get("first_name", "").strip():
+                    parts = full_name.split(" ", 1)
+                    p["first_name"] = parts[0]
+                    logger.debug(f"[{i}] Set first_name from full_name: '{p['first_name']}'")
+
+                # If last_name is missing, extract it from full_name
+                if not p.get("last_name", "").strip():
+                    parts = full_name.split(" ", 1)
+                    if len(parts) > 1:
+                        p["last_name"] = parts[1]
+                    else:
+                        p["last_name"] = ""  # Avoid returning None/missing
+                    logger.debug(f"[{i}] Set last_name from full_name: '{p['last_name']}'")
+
         # CRITICAL: Check what we have BEFORE additional fields assignment
         missing_fields = {
             "empty_full_name": 0,
