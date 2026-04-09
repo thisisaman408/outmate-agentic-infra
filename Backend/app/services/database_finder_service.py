@@ -1428,6 +1428,38 @@ class DatabaseFinderService:
                 prof["signals_summary"] = " | ".join(sig_texts[:5]) if sig_texts else ""
                 prof["signals_count"] = len(all_sigs)
 
+        # Step 3.5: Search for decision makers in target companies (concurrent)
+        if self.tavily_api_key:
+            companies_to_search = {}
+            for prof in profiles:
+                org = prof.get("organization", "").strip()
+                if org and org not in companies_to_search:
+                    companies_to_search[org] = []
+
+            if companies_to_search:
+                logger.info(f"Searching decision makers for {len(companies_to_search)} companies")
+                dm_tasks = {
+                    org: self._search_decision_makers(org, location)
+                    for org in companies_to_search
+                }
+
+                dm_results = {}
+                if dm_tasks:
+                    results = await asyncio.gather(
+                        *dm_tasks.values(), return_exceptions=True
+                    )
+                    for org, result in zip(dm_tasks.keys(), results):
+                        dm_list = result if isinstance(result, list) else []
+                        dm_results[org] = dm_list
+                        if dm_list:
+                            logger.info(f"Found {len(dm_list)} decision makers for {org}")
+
+                # Add decision maker info to profiles
+                for prof in profiles:
+                    org = prof.get("organization", "").strip()
+                    if org in dm_results:
+                        prof["_company_decision_makers"] = dm_results[org]
+
         # Step 4: Build final lead records with 30-40 fields
         # Filter: Only include profiles with mandatory fields (Name and Title)
         valid_profiles = [
@@ -1516,6 +1548,8 @@ class DatabaseFinderService:
             "summary": profile.get("summary", ""),
             # Decision Making (1 field)
             "is_decision_maker": self._is_decision_maker(title, seniority),
+            # Company Info (1 field)
+            "company_decision_makers": profile.get("_company_decision_makers", []),
             # Skills (1 field)
             "skills": profile.get("skills", []),
             # Location (5 fields)
