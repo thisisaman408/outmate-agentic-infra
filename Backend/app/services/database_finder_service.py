@@ -1523,6 +1523,7 @@ class DatabaseFinderService:
 
             logger.info(f"[STEP 2.5] {len(needs_enrichment)} profiles need enrichment (out of {len(profiles)})")
 
+            if needs_enrichment:
                 # (a) Tavily Extract — batch of 5 URLs = 1 credit
                 enrichment_urls = [p["linkedin_url"] for p in needs_enrichment if p.get("linkedin_url")]
                 extract_results: Dict[str, Dict] = {}
@@ -1545,7 +1546,7 @@ class DatabaseFinderService:
                 ]
 
                 if still_needs:
-                    logger.info(f"Tavily Search enriching {len(still_needs)} remaining profiles")
+                    logger.info(f"[STEP 2.5] Tavily Search enriching {len(still_needs)} remaining profiles")
                     search_tasks = [
                         self._enrich_via_tavily_search(
                             name=p.get("full_name", ""),
@@ -1561,6 +1562,7 @@ class DatabaseFinderService:
                         if isinstance(result, dict):
                             merged = self._merge_profile_data(p, result)
                             p.update(merged)
+
 
         # Step 3: Enrich with Tavily signals (concurrent)
         logger.info(f"[STEP 3] Adding signals (include_signals={include_signals})")
@@ -1658,6 +1660,12 @@ class DatabaseFinderService:
         for i, p in enumerate(profiles):
             orig_name = p.get("full_name", "")
             orig_title = p.get("title", "")
+
+            # DEBUG: Log what we have before fallbacks
+            logger.debug(f"[{i}] BEFORE: name={orig_name or 'EMPTY'}, title={orig_title or 'EMPTY'}, "
+                        f"first={p.get('first_name', 'EMPTY')}, last={p.get('last_name', 'EMPTY')}, "
+                        f"url={p.get('linkedin_url', 'EMPTY')[:50]}, "
+                        f"org={p.get('organization', 'EMPTY')}, scrape_failed={p.get('_scrape_failed', False)}")
 
             # Ensure full_name exists - CRITICAL FIELD
             if not p.get("full_name", "").strip():
