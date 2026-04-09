@@ -1767,7 +1767,11 @@ class DatabaseFinderService:
                     p["title"] = "Professional"
                 logger.warning(f"[STEP 4-FORCE] Set title for profile {i}: '{p['title']}'")
 
-            if not p.get("organization", "").strip():
+        # Safeguard: Verify title is set for all profiles
+        for i, p in enumerate(profiles):
+            if not p.get("title", "").strip():
+                p["title"] = query or "Professional"
+                logger.warning(f"[SAFEGUARD] Re-set title for profile {i}: '{p['title']}'")
                 p["organization"] = query or "Company"
                 logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
 
@@ -1782,7 +1786,12 @@ class DatabaseFinderService:
                 p["first_name"] = parts[0]  # Always set
                 p["last_name"] = parts[1] if len(parts) > 1 else ""  # Always set (even if empty)
                 logger.debug(f"[{i}] FORCE-BREAK: '{full_name}' → first='{p['first_name']}', last='{p['last_name']}'")
-        # CRITICAL: Check what we have BEFORE additional fields assignment
+            else:
+                # Safeguard: If full_name is somehow empty, set first/last to at least "Lead N"
+                p["first_name"] = p.get("first_name", "") or f"Lead {i+1}"
+                p["last_name"] = p.get("last_name", "")
+                logger.error(f"[{i}] SAFEGUARD: full_name was empty! Set first_name='{p['first_name']}'")
+
         missing_fields = {
             "empty_full_name": 0,
             "empty_title": 0,
