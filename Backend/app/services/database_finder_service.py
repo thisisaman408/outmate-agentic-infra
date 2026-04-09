@@ -1343,6 +1343,9 @@ class DatabaseFinderService:
         except DatabaseFinderError as e:
             logger.warning(f"ZenRows search failed ({e.message}), falling back to Tavily")
             urls = []
+
+        logger.info(f"[STEP 1] Found {len(urls)} URLs from Google search")
+
         if len(urls) < limit:
             fallback = await self._search_tavily_linkedin(query, location, limit - len(urls))
             for u in fallback:
@@ -1350,6 +1353,8 @@ class DatabaseFinderService:
                     urls.append(u)
                 if len(urls) >= limit:
                     break
+
+        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
 
         if not urls:
             return {
@@ -1366,6 +1371,7 @@ class DatabaseFinderService:
             }
 
         # Step 2: Scrape profiles sequentially (ZenRows plan has 1 concurrent request limit)
+        logger.info(f"[STEP 2] Scraping {len(urls)} profiles...")
         sem = asyncio.Semaphore(1)
 
         async def scrape_with_limit(url: str) -> Dict[str, Any]:
@@ -1378,16 +1384,18 @@ class DatabaseFinderService:
         raw_profiles = await asyncio.gather(*profile_tasks, return_exceptions=True)
 
         profiles = [p for p in raw_profiles if isinstance(p, dict)]
+        logger.info(f"[STEP 2 COMPLETE] Scraped {len(profiles)} profiles (from {len(raw_profiles)} attempts)")
 
         # Step 2.5: Tavily enrichment for profiles missing key data
+        logger.info(f"[STEP 2.5] Starting enrichment (Tavily API available: {bool(self.tavily_api_key)})")
+
         if self.tavily_api_key:
             needs_enrichment = [
                 p for p in profiles
                 if p.get("_scrape_failed") or not p.get("title")
             ]
 
-            if needs_enrichment:
-                logger.info(f"Enriching {len(needs_enrichment)}/{len(profiles)} profiles via Tavily")
+            logger.info(f"[STEP 2.5] {len(needs_enrichment)} profiles need enrichment (out of {len(profiles)})")
 
                 # (a) Tavily Extract — batch of 5 URLs = 1 credit
                 enrichment_urls = [p["linkedin_url"] for p in needs_enrichment if p.get("linkedin_url")]
@@ -1429,6 +1437,8 @@ class DatabaseFinderService:
                             p.update(merged)
 
         # Step 3: Enrich with Tavily signals (concurrent)
+        logger.info(f"[STEP 3] Adding signals (include_signals={include_signals})")
+
         if include_signals and self.tavily_api_key:
             # Collect company signals (deduplicated by company name)
             companies_seen: Dict[str, List[Dict]] = {}
@@ -1517,13 +1527,19 @@ class DatabaseFinderService:
         # Step 4: Build final lead records with 30-40 fields
         # Ensure all profiles have mandatory fields (Name and Title)
         # AGGRESSIVE FALLBACKS: Never return empty name or title
+        logger.info(f"[STEP 4] Processing {len(profiles)} profiles for mandatory fields")
+
         for i, p in enumerate(profiles):
+            orig_name = p.get("full_name", "")
+            orig_title = p.get("title", "")
+
             # Ensure full_name exists - CRITICAL FIELD
             if not p.get("full_name", "").strip():
                 first = p.get("first_name", "").strip() or ""
                 last = p.get("last_name", "").strip() or ""
                 if first or last:
                     p["full_name"] = f"{first} {last}".strip()
+                    logger.debug(f"[{i}] Set full_name from names: {p['full_name']}")
 
                 # If no parts available, try to extract from LinkedIn URL
                 if not p.get("full_name"):
@@ -1537,12 +1553,12 @@ class DatabaseFinderService:
                             # Clean up and titlecase
                             name = slug.replace("-", " ").title()
                             p["full_name"] = name
+                            logger.debug(f"[{i}] Set full_name from URL: {p['full_name']}")
 
-                # FINAL FALLBACK: Generate from index + organization
+                # FINAL FALLBACK: Generate from index
                 if not p.get("full_name"):
-                    org = p.get("organization", "").strip() or query
-                    p["full_name"] = f"Lead {i+1}"  # Generic but ensures we don't lose the lead
-                    logger.warning(f"Generated generic name for lead {i+1} from {org}")
+                    p["full_name"] = f"Profile {i+1}"
+                    logger.debug(f"[{i}] Using generic name: {p['full_name']}")
 
             # Ensure title exists - CRITICAL FIELD
             if not p.get("title", "").strip():
@@ -1550,20 +1566,29 @@ class DatabaseFinderService:
                 org = p.get("organization", "").strip()
                 if org:
                     p["title"] = f"Professional at {org}"
+                    logger.debug(f"[{i}] Set title from org: {p['title']}")
                 # Strategy 2: Use query keyword (the search role/title)
                 elif query and query != p.get("full_name"):
                     p["title"] = query
+                    logger.debug(f"[{i}] Set title from query: {p['title']}")
                 # Strategy 3: Use seniority level if available
                 elif p.get("seniority_level"):
                     p["title"] = f"{p.get('seniority_level')} Professional"
+                    logger.debug(f"[{i}] Set title from seniority: {p['title']}")
                 # FINAL FALLBACK: Just mark as professional
                 else:
                     p["title"] = "Professional"
-                    logger.warning(f"Using generic title for {p.get('full_name', 'Unknown')}")
+                    logger.debug(f"[{i}] Using generic title: Professional")
 
             # Force set organization if missing
             if not p.get("organization", "").strip():
                 p["organization"] = query or "Unknown Company"
+                logger.debug(f"[{i}] Set organization: {p['organization']}")
+
+            # Log the result
+            logger.info(f"[{i}] {p.get('full_name')} | {p.get('title')} @ {p.get('organization')}")
+
+        logger.info(f"[STEP 4 COMPLETE] All {len(profiles)} profiles have name + title")
 
         # IMPORTANT: Don't filter! Return all profiles that have been enriched
         # We've added fallbacks above, so all profiles should have name + title now
