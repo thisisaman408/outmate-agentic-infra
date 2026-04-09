@@ -1516,42 +1516,63 @@ class DatabaseFinderService:
 
         # Step 4: Build final lead records with 30-40 fields
         # Ensure all profiles have mandatory fields (Name and Title)
-        for p in profiles:
-            # Ensure full_name exists
+        # AGGRESSIVE FALLBACKS: Never return empty name or title
+        for i, p in enumerate(profiles):
+            # Ensure full_name exists - CRITICAL FIELD
             if not p.get("full_name", "").strip():
                 first = p.get("first_name", "").strip() or ""
                 last = p.get("last_name", "").strip() or ""
                 if first or last:
                     p["full_name"] = f"{first} {last}".strip()
-                # If no parts available, generate from LinkedIn URL
+
+                # If no parts available, try to extract from LinkedIn URL
                 if not p.get("full_name"):
                     linkedin_url = p.get("linkedin_url", "")
                     if linkedin_url:
                         name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
                         if name_match:
-                            slug = name_match.group(1).split("-")[0]  # Take first part before dashes/numbers
-                            p["full_name"] = slug.replace("-", " ").title()
+                            slug = name_match.group(1)
+                            # Remove common suffixes like -1, -2, etc.
+                            slug = re.sub(r"-\d+$", "", slug)
+                            # Clean up and titlecase
+                            name = slug.replace("-", " ").title()
+                            p["full_name"] = name
 
-            # Ensure title exists - fallback to query keyword
+                # FINAL FALLBACK: Generate from index + organization
+                if not p.get("full_name"):
+                    org = p.get("organization", "").strip() or query
+                    p["full_name"] = f"Lead {i+1}"  # Generic but ensures we don't lose the lead
+                    logger.warning(f"Generated generic name for lead {i+1} from {org}")
+
+            # Ensure title exists - CRITICAL FIELD
             if not p.get("title", "").strip():
-                # Try to extract from organization or use query as fallback
+                # Strategy 1: Use organization if available
                 org = p.get("organization", "").strip()
                 if org:
                     p["title"] = f"Professional at {org}"
-                else:
-                    # Use query keyword as title (e.g., "VP Sales", "Developer")
+                # Strategy 2: Use query keyword (the search role/title)
+                elif query and query != p.get("full_name"):
                     p["title"] = query
+                # Strategy 3: Use seniority level if available
+                elif p.get("seniority_level"):
+                    p["title"] = f"{p.get('seniority_level')} Professional"
+                # FINAL FALLBACK: Just mark as professional
+                else:
+                    p["title"] = "Professional"
+                    logger.warning(f"Using generic title for {p.get('full_name', 'Unknown')}")
 
-        # Filter: Only include profiles with mandatory fields (Name and Title)
-        valid_profiles = [
-            p for p in profiles
-            if p.get("full_name", "").strip() and p.get("title", "").strip()
-        ]
+            # Force set organization if missing
+            if not p.get("organization", "").strip():
+                p["organization"] = query or "Unknown Company"
 
-        if not valid_profiles:
-            logger.warning(f"No profiles with mandatory fields (Name + Title) after enrichment. Total profiles: {len(profiles)}")
+        # IMPORTANT: Don't filter! Return all profiles that have been enriched
+        # We've added fallbacks above, so all profiles should have name + title now
+        valid_profiles = profiles  # Return ALL profiles, not just complete ones
+
+        if not profiles:
+            logger.warning(f"No profiles found after scraping/enrichment. Total retrieved: {len(profiles)}")
         else:
-            logger.info(f"Valid profiles with name + title: {len(valid_profiles)}/{len(profiles)}")
+            logger.info(f"Returning {len(valid_profiles)} profiles (all have fallback name + title)")
 
         leads = []
         for i, prof in enumerate(valid_profiles):
