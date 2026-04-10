@@ -1463,24 +1463,16 @@ class DatabaseFinderService:
         """
         start = datetime.now(timezone.utc)
 
-        # Step 1: Google→LinkedIn URL discovery
+        # Step 1: Tavily search (skip ZenRows due to account limits)
+        logger.info(f"[STEP 1] Using Tavily to search for: '{query}' in {location}")
+        urls = []
+
         try:
-            urls = await self._search_google_linkedin(query, location, limit)
-        except DatabaseFinderError as e:
-            logger.warning(f"ZenRows search failed ({e.message}), falling back to Tavily")
+            urls = await self._search_tavily_linkedin(query, location, limit)
+            logger.info(f"[STEP 1] Tavily found {len(urls)} URLs")
+        except Exception as e:
+            logger.warning(f"[STEP 1] Tavily search failed: {e}")
             urls = []
-
-        logger.info(f"[STEP 1] Found {len(urls)} URLs from Google search")
-
-        if len(urls) < limit:
-            fallback = await self._search_tavily_linkedin(query, location, limit - len(urls))
-            for u in fallback:
-                if u not in urls:
-                    urls.append(u)
-                if len(urls) >= limit:
-                    break
-
-        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
 
         # Fallback: If no results found, try searching as a company name
         if not urls:
@@ -1497,6 +1489,8 @@ class DatabaseFinderService:
             except Exception as e:
                 logger.warning(f"[FALLBACK] Fallback search failed: {e}")
 
+        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
+
         if not urls:
             return {
                 "leads": [],
@@ -1511,21 +1505,37 @@ class DatabaseFinderService:
                 },
             }
 
-        # Step 2: Scrape profiles sequentially (ZenRows plan has 1 concurrent request limit)
-        logger.info(f"[STEP 2] Scraping {len(urls)} profiles...")
-        sem = asyncio.Semaphore(1)
+        # Step 2: Use Tavily to extract profile details (skip ZenRows scraping)
+        logger.info(f"[STEP 2] Using Tavily Extract for {len(urls)} profiles...")
 
-        async def scrape_with_limit(url: str) -> Dict[str, Any]:
-            async with sem:
-                result = await self._scrape_linkedin_profile(url)
-                await asyncio.sleep(2)  # pause between scrapes to avoid 429s
-                return result
+        profiles = []
 
-        profile_tasks = [scrape_with_limit(u) for u in urls]
-        raw_profiles = await asyncio.gather(*profile_tasks, return_exceptions=True)
+        # Use Tavily Extract to get detailed profile information
+        if self.tavily_api_key and urls:
+            extract_results = await self._tavily_extract_linkedin(urls[:limit])
 
-        profiles = [p for p in raw_profiles if isinstance(p, dict)]
-        logger.info(f"[STEP 2 COMPLETE] Scraped {len(profiles)} profiles (from {len(raw_profiles)} attempts)")
+            for url in urls[:limit]:
+                if url in extract_results:
+                    profile = extract_results[url]
+                    profile["linkedin_url"] = url
+                    profiles.append(profile)
+                else:
+                    # Minimal profile if extraction failed
+                    profiles.append({
+                        "linkedin_url": url,
+                        "full_name": "Unknown",
+                        "_scrape_failed": True
+                    })
+        else:
+            # Fallback: create minimal profiles from URLs if Tavily not available
+            for url in urls[:limit]:
+                profiles.append({
+                    "linkedin_url": url,
+                    "full_name": "Unknown",
+                    "_scrape_failed": True
+                })
+
+        logger.info(f"[STEP 2 COMPLETE] Extracted {len(profiles)} profiles using Tavily")
 
         # Step 2.5: Tavily enrichment for profiles missing key data
         logger.info(f"[STEP 2.5] Starting enrichment (Tavily API available: {bool(self.tavily_api_key)})")
