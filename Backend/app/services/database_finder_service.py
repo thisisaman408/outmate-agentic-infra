@@ -1497,7 +1497,7 @@ class DatabaseFinderService:
             except Exception as e:
                 logger.warning(f"[FALLBACK] Fallback search failed: {e}")
 
-        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
+        if not urls:
             return {
                 "leads": [],
                 "meta": {
