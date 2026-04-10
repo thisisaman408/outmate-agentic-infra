@@ -1482,7 +1482,22 @@ class DatabaseFinderService:
 
         logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
 
+        # Fallback: If no results found, try searching as a company name
         if not urls:
+            logger.warning(f"[FALLBACK] No URLs for '{query}', trying company-based search...")
+            try:
+                # Try variation: search for people mentioning the company name in their profile
+                alt_query = f'{query} LinkedIn employees OR staff OR team'
+                logger.info(f"[FALLBACK] Searching with: '{alt_query}'")
+
+                fallback_urls = await self._search_tavily_linkedin(alt_query, location, limit)
+                if fallback_urls:
+                    urls.extend(fallback_urls)
+                    logger.info(f"[FALLBACK] Found {len(fallback_urls)} URLs from fallback search")
+            except Exception as e:
+                logger.warning(f"[FALLBACK] Fallback search failed: {e}")
+
+        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
             return {
                 "leads": [],
                 "meta": {
