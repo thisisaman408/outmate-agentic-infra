@@ -1506,21 +1506,64 @@ class DatabaseFinderService:
             }
 
         # Step 2: Use Tavily to extract profile details (skip ZenRows scraping)
-        logger.info(f"[STEP 2] Using Tavily Extract for {len(urls)} profiles...")
+        logger.info(f"[STEP 2] Extracting data for {len(urls)} profiles using Tavily Search...")
 
         profiles = []
 
-        # Use Tavily Extract to get detailed profile information
+        # Use Tavily Search to get detailed information about each profile
         if self.tavily_api_key and urls:
-            extract_results = await self._tavily_extract_linkedin(urls[:limit])
-
             for url in urls[:limit]:
-                if url in extract_results:
-                    profile = extract_results[url]
-                    profile["linkedin_url"] = url
+                try:
+                    # Search for information about the LinkedIn profile
+                    search_query = f'"{url}" OR site:linkedin.com profile'
+                    response = await self._tavily_search(search_query)
+
+                    results = response.get("results", [])
+
+                    profile = {
+                        "linkedin_url": url,
+                        "full_name": "Unknown",
+                        "_scrape_failed": True
+                    }
+
+                    # Extract name and info from search results
+                    if results:
+                        first_result = results[0]
+                        content = first_result.get("content", "") or first_result.get("title", "")
+
+                        # Try to extract name from content
+                        name_patterns = [
+                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:at|is a|works at|from)',
+                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*-\s*(?:LinkedIn|Profile)',
+                            r'Profile of ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+                        ]
+
+                        for pattern in name_patterns:
+                            match = re.search(pattern, content)
+                            if match:
+                                profile["full_name"] = match.group(1)
+                                break
+
+                        # Try to extract title and organization
+                        title_patterns = [
+                            r'(?:as|is|works as a?)\s+([A-Za-z0-9\s&-]+?)\s+(?:at|@|for)',
+                            r'([A-Za-z0-9\s&-]+?)\s+at\s+([A-Za-z\s&-]+?)(?:\s+\||\.|\n)',
+                        ]
+
+                        for pattern in title_patterns:
+                            match = re.search(pattern, content)
+                            if match:
+                                if len(match.groups()) >= 2:
+                                    profile["title"] = match.group(1).strip()
+                                    profile["organization"] = match.group(2).strip()
+                                else:
+                                    profile["title"] = match.group(1).strip()
+                                break
+
                     profiles.append(profile)
-                else:
-                    # Minimal profile if extraction failed
+
+                except Exception as e:
+                    logger.warning(f"Failed to search for {url}: {e}")
                     profiles.append({
                         "linkedin_url": url,
                         "full_name": "Unknown",
@@ -1535,23 +1578,36 @@ class DatabaseFinderService:
                     "_scrape_failed": True
                 })
 
-        logger.info(f"[STEP 2 COMPLETE] Extracted {len(profiles)} profiles using Tavily")
+        logger.info(f"[STEP 2 COMPLETE] Extracted {len(profiles)} profiles using Tavily Search")
 
-        # Step 2.5: Tavily enrichment for profiles missing key data
-        logger.info(f"[STEP 2.5] Starting enrichment (Tavily API available: {bool(self.tavily_api_key)})")
+        # Step 2.5: Tavily enrichment - use search results to get actual data
+        logger.info(f"[STEP 2.5] Starting enrichment with Tavily Search results...")
 
         if self.tavily_api_key:
-            needs_enrichment = [
-                p for p in profiles
-                if p.get("_scrape_failed")
-                or not p.get("title")
-                or not p.get("organization")
-                or not p.get("full_name")
-            ]
+            # Search for each person to extract real names and details
+            enrichment_tasks = []
+            for i, p in enumerate(profiles):
+                if p.get("_scrape_failed") or p.get("full_name") == "Unknown":
+                    url = p.get("linkedin_url", "")
+                    if url:
+                        # Search for this specific LinkedIn profile
+                        task = self._enrich_via_tavily_search(
+                            name=p.get("full_name", ""),
+                            linkedin_url=url,
+                            query=query
+                        )
+                        enrichment_tasks.append((i, task))
 
-            logger.info(f"[STEP 2.5] {len(needs_enrichment)} profiles need enrichment (out of {len(profiles)})")
+            if enrichment_tasks:
+                logger.info(f"[STEP 2.5] Enriching {len(enrichment_tasks)} profiles with Tavily Search...")
+                results = await asyncio.gather(*[task for _, task in enrichment_tasks], return_exceptions=True)
 
-            if needs_enrichment:
+                for (idx, _), result in zip(enrichment_tasks, results):
+                    if isinstance(result, dict) and result:
+                        # Merge enrichment results
+                        profiles[idx].update(result)
+                        logger.debug(f"[STEP 2.5] Enriched profile {idx}: {result.get('full_name')}")
+
                 # (a) Tavily Extract — batch of 5 URLs = 1 credit
                 enrichment_urls = [p["linkedin_url"] for p in needs_enrichment if p.get("linkedin_url")]
                 extract_results: Dict[str, Dict] = {}
