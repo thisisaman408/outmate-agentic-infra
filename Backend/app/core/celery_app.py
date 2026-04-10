@@ -10,7 +10,14 @@ celery_app = Celery(
     "outmate_tasks",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.visitors", "app.tasks.copilot_tasks", "app.tasks.signal_tasks", "app.tasks.sequence_tasks", "app.tasks.champion_tasks"]
+    include=[
+        "app.tasks.visitors",
+        "app.tasks.copilot_tasks",
+        "app.tasks.signal_tasks",
+        "app.tasks.sequence_tasks",
+        "app.tasks.champion_tasks",
+        "app.tasks.social_listening_tasks",
+    ]
 )
 
 celery_app.conf.update(
@@ -49,6 +56,14 @@ celery_app.conf.update(
         "champion-job-change-poll-6h": {
             "task": "app.tasks.champion_tasks.poll_champion_job_changes",
             "schedule": crontab(minute=0, hour="*/6"),
+        },
+        # Social Listening: scan active social_listening watchers and run the
+        # discovery agent for any whose schedule is due.  Runs every 15 min so
+        # hourly schedules tick within reasonable latency without hammering
+        # the agentic infra.  The task itself filters by criteria.schedule.
+        "social-listening-poll-15m": {
+            "task": "app.tasks.social_listening_tasks.poll_due_social_searches",
+            "schedule": crontab(minute="*/15"),
         },
     },
 )

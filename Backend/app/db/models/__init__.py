@@ -36,6 +36,7 @@ from app.db.models.copilot_audit_log import CopilotAuditLog
 # Signal pipeline
 from app.db.models.signal_event import SignalEvent
 from app.db.models.signal_sequence_draft import SignalSequenceDraft
+from app.db.models.signal_watcher_match import SignalWatcherMatch
 # Champion alerts
 from app.db.models.champion_change_event import ChampionChangeEvent
 # Outmate-agentic backed agent runs (tenant-isolated)
@@ -82,6 +83,7 @@ __all__ = [
     "CopilotAuditLog",
     # Signal pipeline
     "SignalEvent",
+    "SignalWatcherMatch",
     "SignalSequenceDraft",
     # Champion alerts
     "ChampionChangeEvent",

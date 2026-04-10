@@ -401,7 +401,9 @@ async def check_flow_user_permission(
     Raises:
         HTTPException: If the user does not have permission to run the flow
     """
-    if flow and flow.user_id != api_key_user.id:
+    # Allow running unclaimed system flows (user_id=None) — these are starter
+    # projects loaded by the engine at boot time before any user logs in.
+    if flow and flow.user_id is not None and flow.user_id != api_key_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to run this flow")
 
 

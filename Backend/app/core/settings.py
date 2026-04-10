@@ -247,6 +247,10 @@ class Settings(BaseSettings):
         None,
         description="Brightdata API token (optional)"
     )
+    APIFY_API_TOKEN: str = Field(
+        "",
+        description="Apify API token for LinkedIn/Twitter scrapers. Optional — enhances social listening when set.",
+    )
     CONTEXTUAL_AI_API_KEY: Optional[str] = Field(
         None,
         description="Contextual AI API key (optional)"
@@ -279,6 +283,16 @@ class Settings(BaseSettings):
         "",
         description="Public URL for Google Calendar push notifications (e.g. ngrok tunnel)"
     )
+
+    # HubSpot OAuth
+    HUBSPOT_CLIENT_ID: str = Field("", description="HubSpot OAuth app client ID")
+    HUBSPOT_CLIENT_SECRET: str = Field("", description="HubSpot OAuth app client secret")
+    HUBSPOT_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/hubspot/callback",
+        description="HubSpot OAuth redirect URI (goes through Next.js proxy)",
+    )
+    HUBSPOT_PKCE_VERIFIER: str = Field("", description="HubSpot MCP Auth App PKCE code verifier (from dashboard)")
+    HUBSPOT_PKCE_CHALLENGE: str = Field("", description="HubSpot MCP Auth App PKCE code challenge (from dashboard)")
 
     # Calendly Webhook
     CALENDLY_WEBHOOK_SIGNING_KEY: str = Field(
@@ -356,17 +370,17 @@ class Settings(BaseSettings):
         ),
     )
     AGENTIC_INFRA_SOCIAL_LISTENING_FLOW_ID: str = Field(
-        "6999aee9-76ed-4683-92b2-5eb6cd13c1d9",
+        "3539ab22-a44b-4550-ab21-56cfe2a93a97",
         description=(
-            "Flow ID on the agentic infra wrapping the LeadDiscoveryOutreachAgent. "
-            "Stable ID baked into the starter project JSON loaded on every cold start."
+            "Flow ID on the agentic infra for the Social Media Agent. "
+            "Regenerated on every cold start from the starter project JSON."
         ),
     )
     AGENTIC_INFRA_SOCIAL_LISTENING_NODE_ID: str = Field(
-        "LeadDiscoveryOutreachAgent-99gLF",
+        "Agent-0vMrI",
         description=(
-            "Node ID of the LeadDiscoveryOutreachAgent component within the flow above. "
-            "Used as the key in the `tweaks` payload to override per-call inputs."
+            "Node ID of the Agent component within the Social Media Agent flow. "
+            "Used as the key in the `tweaks` payload to override system_prompt."
         ),
     )
     AGENTIC_INFRA_TIMEOUT_SECONDS: int = Field(
