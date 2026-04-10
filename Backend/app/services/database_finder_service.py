@@ -72,6 +72,8 @@ class DatabaseFinderService:
     def __init__(self):
         self.zenrows_api_key = getattr(settings, "ZENROWS_API_KEY", None) or ""
         self.tavily_api_key = getattr(settings, "TAVILY_API_KEY", None) or ""
+        self.serper_api_key = getattr(settings, "SERPER_API_KEY", None) or ""
+        self._tavily_exhausted = False  # set True on first 432 to skip further calls
 
     # ── ZenRows helpers ──────────────────────────────────────────────────
 
@@ -279,87 +281,279 @@ class DatabaseFinderService:
         logger.info(f"[GOOGLE SEARCH COMPLETE] Total unique URLs: {len(unique_urls)}/{num_results}")
         return unique_urls
 
-    async def _search_tavily_linkedin(self, query: str, location: str = "United States", num_results: int = 20) -> List[str]:
-        """Fallback: Tavily search for LinkedIn profile URLs with multiple strategies."""
-        if not self.tavily_api_key:
+    async def _search_tavily_linkedin(
+        self, query: str, location: str = "United States", num_results: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Search for LinkedIn profile URLs + extract profile data from results.
+
+        Uses Tavily (or Serper fallback) with multiple query variations and
+        pagination to collect up to ``num_results`` profiles.  Profile fields
+        (name, title, org) are parsed directly from the search result
+        title/snippet — no per-profile API calls needed.
+        """
+        if not self.tavily_api_key and not self.serper_api_key:
             return []
 
         unique_urls: List[str] = []
+        url_to_profile: Dict[str, Dict[str, Any]] = {}
 
-        # Strategy 1: Exact match with location
-        search_query = f'site:linkedin.com/in "{query}" {location}'.strip()
-        logger.info(f"[TAVILY 1] Searching: '{search_query}'")
-
-        results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
-        for r in results:
-            url = r.get("url", "")
-            if "linkedin.com/in/" not in url:
-                continue
-            cleaned = url.split("?")[0].split("#")[0].rstrip("/")
-            slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
-            if slug_match:
-                cleaned = slug_match.group(1).rstrip("/")
-            if cleaned not in unique_urls:
-                unique_urls.append(cleaned)
-            if len(unique_urls) >= num_results:
-                logger.info(f"[TAVILY 1] Found {len(unique_urls)} URLs (reached limit)")
-                return unique_urls
-
-        if unique_urls:
-            logger.info(f"[TAVILY 1] Found {len(unique_urls)} URLs")
-
-        # Strategy 2: Without location
-        if len(unique_urls) < num_results // 2:
-            search_query = f'site:linkedin.com/in "{query}"'.strip()
-            logger.info(f"[TAVILY 2] Searching (no location): '{search_query}'")
-
-            results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
+        def _collect(results: List[Dict[str, Any]]) -> bool:
+            """Add LinkedIn URLs from search results; return True when limit reached."""
             for r in results:
-                url = r.get("url", "")
+                url = r.get("url", "") or r.get("link", "")
                 if "linkedin.com/in/" not in url:
                     continue
                 cleaned = url.split("?")[0].split("#")[0].rstrip("/")
-                slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
+                slug_match = re.search(
+                    r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned
+                )
                 if slug_match:
                     cleaned = slug_match.group(1).rstrip("/")
-                if cleaned not in unique_urls:
-                    unique_urls.append(cleaned)
+                if cleaned in url_to_profile:
+                    continue
+                unique_urls.append(cleaned)
+                profile = self._parse_tavily_search_result(cleaned, r)
+                url_to_profile[cleaned] = profile
                 if len(unique_urls) >= num_results:
-                    logger.info(f"[TAVILY 2] Found {len(unique_urls)} URLs total (reached limit)")
-                    return unique_urls
+                    return True
+            return False
 
-            if unique_urls:
-                logger.info(f"[TAVILY 2] Found {len(unique_urls)} URLs total")
+        # Build a list of search queries — multiple variations to maximize results.
+        # Serper returns max 100 per call; we issue several different queries to
+        # get diverse results and approach the requested num_results.
+        search_queries: List[str] = []
 
-        # Strategy 3: Partial match
-        if len(unique_urls) < num_results // 2:
-            query_parts = query.split()
-            if len(query_parts) > 1:
-                partial_query = query_parts[0]
-                search_query = f'site:linkedin.com/in {partial_query}'.strip()
-                logger.info(f"[TAVILY 3] Searching partial: '{partial_query}'")
+        # Primary: exact match with location
+        search_queries.append(f'site:linkedin.com/in "{query}" {location}')
+        # Without location
+        search_queries.append(f'site:linkedin.com/in "{query}"')
 
-                results = await self._tavily_search(search_query, max_results=min(num_results * 2, 20))
-                for r in results:
-                    url = r.get("url", "")
-                    if "linkedin.com/in/" not in url:
-                        continue
-                    cleaned = url.split("?")[0].split("#")[0].rstrip("/")
-                    slug_match = re.search(r"(https?://(?:www\.)?linkedin\.com/in/[A-Za-z0-9\-]+)", cleaned)
-                    if slug_match:
-                        cleaned = slug_match.group(1).rstrip("/")
-                    if cleaned not in unique_urls:
-                        unique_urls.append(cleaned)
-                    if len(unique_urls) >= num_results:
-                        logger.info(f"[TAVILY 3] Found {len(unique_urls)} URLs total (reached limit)")
-                        return unique_urls
+        # Word variations for multi-word queries
+        words = query.split()
+        if len(words) > 1:
+            # Each word individually
+            for w in words:
+                if len(w) > 2:
+                    search_queries.append(f'site:linkedin.com/in "{w}" {location}')
+            # Pairs
+            if len(words) >= 2:
+                search_queries.append(f'site:linkedin.com/in "{words[0]}" "{words[1]}"')
+        else:
+            # Single word — try broader queries
+            search_queries.append(f'site:linkedin.com/in {query} {location}')
+            search_queries.append(f'site:linkedin.com/in {query}')
 
-                if unique_urls:
-                    logger.info(f"[TAVILY 3] Found {len(unique_urls)} URLs total")
+        # Related queries: people at <query> company
+        search_queries.append(f'site:linkedin.com/in {query} employees')
+        search_queries.append(f'site:linkedin.com/in {query} team')
 
-        if unique_urls:
-            logger.info(f"[TAVILY FALLBACK COMPLETE] Total URLs: {len(unique_urls)}/{num_results}")
-        return unique_urls
+        # Paginated queries with different offsets via Serper `start` param
+        # Serper supports start=0,10,20... for pagination
+        if num_results > 30:
+            for page_query in [
+                f'site:linkedin.com/in "{query}" {location}',
+                f'site:linkedin.com/in "{query}"',
+            ]:
+                for start_offset in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
+                    search_queries.append(f"{page_query} __start={start_offset}")
+
+        # De-dup queries while preserving order
+        seen_queries: set = set()
+        deduped_queries: List[str] = []
+        for q in search_queries:
+            q_key = q.replace(f" __start=", "").strip()
+            if q_key not in seen_queries or "__start=" in q:
+                seen_queries.add(q_key)
+                deduped_queries.append(q)
+
+        # Execute searches until we have enough results
+        search_idx = 0
+        for raw_query in deduped_queries:
+            if len(unique_urls) >= num_results:
+                break
+
+            # Parse optional start offset for Serper pagination
+            start_offset = 0
+            actual_query = raw_query
+            if "__start=" in raw_query:
+                parts = raw_query.rsplit("__start=", 1)
+                actual_query = parts[0].strip()
+                try:
+                    start_offset = int(parts[1])
+                except ValueError:
+                    start_offset = 0
+
+            search_idx += 1
+            per_query = min(100, max(10, num_results - len(unique_urls)))
+            logger.info(f"[SEARCH {search_idx}] '{actual_query}' (start={start_offset}, need {num_results - len(unique_urls)} more)")
+
+            results = await self._web_search_with_pagination(
+                actual_query, max_results=per_query, start=start_offset, location=location
+            )
+            _collect(results)
+
+            if len(unique_urls) >= num_results:
+                break
+
+        logger.info(f"[SEARCH COMPLETE] Total profiles: {len(unique_urls)}/{num_results} from {search_idx} queries")
+        return list(url_to_profile.values())
+
+    async def _web_search_with_pagination(
+        self, query: str, max_results: int = 10, start: int = 0, location: str = "United States"
+    ) -> List[Dict[str, Any]]:
+        """Unified search with pagination support. Tries Tavily, falls back to Serper."""
+        # Tavily doesn't support start offset — only use for first page
+        if start == 0:
+            results = await self._tavily_search(query, max_results=max_results)
+            if results:
+                return results
+
+        # Serper with pagination
+        if self.serper_api_key:
+            return await self._serper_search(query, num_results=max_results, start=start, location=location)
+        return []
+
+    def _parse_tavily_search_result(
+        self, linkedin_url: str, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract profile fields from a single Tavily search result.
+
+        Tavily result titles for LinkedIn often look like:
+          "John Doe - VP Sales - Acme Corp | LinkedIn"
+          "Jane Smith - Software Engineer at Google | LinkedIn"
+        Content snippets often contain location, about text, etc.
+        """
+        profile: Dict[str, Any] = {"linkedin_url": linkedin_url}
+
+        # ── Name from URL slug (baseline) ──
+        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
+        if name_match:
+            slug = self._strip_linkedin_slug_suffix(name_match.group(1))
+            name = slug.replace("-", " ").title()
+            name_words = [w for w in name.split() if re.match(r"^[A-Za-z]+$", w)]
+            if name_words:
+                profile["first_name"] = name_words[0]
+                profile["last_name"] = " ".join(name_words[1:]) if len(name_words) > 1 else ""
+                profile["full_name"] = " ".join(name_words)
+
+        title_text = result.get("title", "")
+        content = result.get("content", "") or ""
+
+        # ── Parse title tag: "Name - Title - Company | LinkedIn" ──
+        if title_text:
+            # Strip all LinkedIn suffixes: "| LinkedIn", "- LinkedIn", "... LinkedIn"
+            clean_title = re.sub(
+                r"\s*[\|\-–]\s*LinkedIn.*$", "", title_text, flags=re.IGNORECASE
+            ).strip()
+            # Also strip trailing "LinkedIn" if it's the last word
+            clean_title = re.sub(r"\s+LinkedIn\s*$", "", clean_title, flags=re.IGNORECASE).strip()
+
+            parts = [p.strip() for p in re.split(r"\s*-\s*", clean_title) if p.strip()]
+
+            # Filter out any part that is just "LinkedIn" or empty
+            parts = [p for p in parts if p.lower() not in ("linkedin", "")]
+
+            if parts:
+                # First part is usually the name
+                potential_name = parts[0]
+                name_parts = potential_name.split()
+                if len(name_parts) >= 2 and all(
+                    re.match(r"^[A-Za-z'.]+$", w) for w in name_parts
+                ):
+                    profile["full_name"] = potential_name
+                    profile["first_name"] = name_parts[0]
+                    profile["last_name"] = " ".join(name_parts[1:])
+
+                first_name = profile.get("first_name", "")
+                last_name = profile.get("last_name", "")
+
+                if len(parts) >= 3:
+                    # "Name - Title - Company"
+                    role = parts[1]
+                    company = parts[2]
+                    if not self._looks_like_name(role, first_name, last_name):
+                        profile["title"] = self._clean_text(role)
+                    org = self._clean_text(company)
+                    if org.lower() not in ("linkedin", ""):
+                        profile["organization"] = org
+                elif len(parts) == 2:
+                    # "Name - Title at Company" or "Name - Title"
+                    segment = parts[1]
+                    role, company = self._split_headline(segment)
+                    if role and not self._looks_like_name(role, first_name, last_name):
+                        profile["title"] = self._clean_text(role)
+                    if company:
+                        org = self._clean_text(company)
+                        if org.lower() not in ("linkedin", ""):
+                            profile["organization"] = org
+
+        # ── Extract from content snippet ──
+        if content:
+            first_name = profile.get("first_name", "")
+            last_name = profile.get("last_name", "")
+
+            # Location pattern
+            if not profile.get("location"):
+                loc_match = re.search(
+                    r"(?:located? in|based in|from|lives in)\s+([A-Z][a-z]+(?:[,\s]+[A-Z][a-z]+)*)",
+                    content,
+                )
+                if loc_match:
+                    profile["location"] = loc_match.group(1)
+                else:
+                    # Freestanding "City, State/Country"
+                    loc_match = re.search(
+                        r"([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),\s*([A-Z][A-Za-z]+(?:\s[A-Z][a-z]+)*)",
+                        content,
+                    )
+                    if loc_match:
+                        profile["location"] = f"{loc_match.group(1)}, {loc_match.group(2)}"
+                        profile["city"] = loc_match.group(1)
+                        profile["state"] = loc_match.group(2)
+
+            # Title/org from content ("works as X at Y", "is a X at Y")
+            if not profile.get("title"):
+                role_match = re.search(
+                    r"(?:works as|is a|serves as|role as)\s+([A-Za-z0-9\s&\-]+?)\s+(?:at|@|for)\s+([A-Za-z0-9\s&\-,.]+?)(?:\.|,|\s{2}|$)",
+                    content,
+                    re.IGNORECASE,
+                )
+                if role_match:
+                    role = role_match.group(1).strip()
+                    if not self._looks_like_name(role, first_name, last_name):
+                        profile["title"] = self._clean_text(role)
+                    if not profile.get("organization"):
+                        profile["organization"] = self._clean_text(role_match.group(2).strip())
+
+            # Summary from content (if long enough and mentions the person)
+            if not profile.get("summary") and len(content) > 80:
+                profile["summary"] = self._clean_text(content[:500])
+
+            # Email
+            email_match = re.search(
+                r"[a-zA-Z0-9][a-zA-Z0-9._%+\-]*@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+",
+                content,
+            )
+            if email_match and not profile.get("email"):
+                profile["email"] = email_match.group(0).lower()
+
+        # ── Derive company_domain from organization name ──
+        org = profile.get("organization", "")
+        if org and not profile.get("company_domain"):
+            # Simple heuristic: lowercase, remove common suffixes, add .com
+            domain_base = re.sub(
+                r"\s*(Inc\.?|LLC|Ltd\.?|Corp\.?|Co\.?|Group|Holdings|International|Technologies|Solutions|Services)\s*$",
+                "", org, flags=re.IGNORECASE
+            ).strip()
+            if domain_base and len(domain_base) > 1:
+                # Turn "Acme Corp" → "acme.com", "Boston Consulting Group" → "bcg.com" won't work
+                # but "Google" → "google.com" is fine for most cases
+                domain_guess = re.sub(r"[^a-z0-9]", "", domain_base.lower())
+                if domain_guess:
+                    profile["company_domain"] = f"{domain_guess}.com"
+
+        profile["_enrichment_source"] = "tavily_enriched"
+        return profile
 
     @staticmethod
     def _split_headline(raw: str) -> tuple:
@@ -746,7 +940,7 @@ class DatabaseFinderService:
         self, query: str, max_results: int = 5
     ) -> List[Dict[str, Any]]:
         """Run an advanced Tavily search and return results."""
-        if not self.tavily_api_key:
+        if not self.tavily_api_key or self._tavily_exhausted:
             return []
 
         payload = {
@@ -762,6 +956,10 @@ class DatabaseFinderService:
                 resp = await client.post(
                     "https://api.tavily.com/search", json=payload
                 )
+                if resp.status_code == 432:
+                    logger.warning("Tavily usage limit (432) — switching to Serper for rest of session")
+                    self._tavily_exhausted = True
+                    return []
                 if resp.status_code != 200:
                     logger.warning(f"Tavily returned {resp.status_code}")
                     return []
@@ -771,12 +969,98 @@ class DatabaseFinderService:
             logger.warning(f"Tavily search failed: {e}")
             return []
 
+    async def _serper_search(
+        self, query: str, num_results: int = 10, start: int = 0, location: str = "US"
+    ) -> List[Dict[str, Any]]:
+        """Google search via Serper API. Returns results in Tavily-compatible format.
+
+        Args:
+            query: Search query string
+            num_results: Number of results to return (max 100)
+            start: Result offset for pagination (0, 10, 20, ...).
+            location: Geolocation country code (e.g., 'US', 'GB', 'IN')
+        """
+        if not self.serper_api_key:
+            logger.warning("Serper API key not configured")
+            return []
+
+        headers = {
+            "X-API-KEY": self.serper_api_key,
+            "Content-Type": "application/json",
+        }
+
+        # Build payload with required and optional parameters
+        payload: Dict[str, Any] = {
+            "q": query,
+            "num": min(num_results, 100),
+            "gl": self._location_to_country_code(location),  # Add geolocation
+        }
+
+        if start > 0:
+            payload["page"] = (start // 10) + 1  # Serper uses 1-based page numbering
+
+        try:
+            logger.debug(f"Serper request: {payload}")
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    "https://google.serper.dev/search",
+                    headers=headers,
+                    json=payload,
+                    timeout=30.0
+                )
+                if resp.status_code != 200:
+                    error_text = resp.text
+                    logger.warning(f"Serper returned {resp.status_code}: {error_text[:300]}")
+                    return []
+
+                data = resp.json()
+                organic = data.get("organic", [])
+
+                # Normalize to Tavily-compatible format
+                results = [
+                    {
+                        "url": r.get("link", ""),
+                        "title": r.get("title", ""),
+                        "content": r.get("snippet", ""),
+                    }
+                    for r in organic
+                ]
+
+                logger.debug(f"Serper returned {len(results)} results")
+                return results
+
+        except Exception as e:
+            logger.warning(f"Serper search failed: {type(e).__name__}: {str(e)[:200]}")
+            return []
+
+    def _location_to_country_code(self, location: str) -> str:
+        """Convert location string to Serper country code."""
+        location_map = {
+            "United States": "us",
+            "United Kingdom": "uk",
+            "Canada": "ca",
+            "Germany": "de",
+            "France": "fr",
+            "India": "in",
+            "Australia": "au",
+            "Singapore": "sg",
+            "Netherlands": "nl",
+            "Sweden": "se",
+        }
+        return location_map.get(location, "us").lower()
+
+    async def _web_search(
+        self, query: str, max_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Unified search: tries Tavily first, falls back to Serper."""
+        return await self._web_search_with_pagination(query, max_results=max_results, start=0)
+
     async def _get_company_signals(
         self, company_name: str, location: str = ""
     ) -> List[Dict[str, str]]:
-        """Fetch company signals via Tavily."""
+        """Fetch company signals via web search (Tavily or Serper)."""
         query = f'"{company_name}" {location} company news updates funding'.strip()
-        results = await self._tavily_search(query, max_results=5)
+        results = await self._web_search(query, max_results=5)
         return [
             {
                 "title": self._clean_text(r.get("title", "")),
@@ -791,35 +1075,19 @@ class DatabaseFinderService:
     async def _get_person_signals(
         self, person_name: str, company_name: str = "", location: str = ""
     ) -> List[Dict[str, str]]:
-        """Fetch person signals via Tavily (3 queries, deduplicated)."""
-        queries = [
-            f'"{person_name}" professional executive leader',
-            f'"{person_name}" {company_name} representative contact',
-            f'"{person_name}" {location} news announcement article',
-        ]
-
-        all_results: List[Dict[str, Any]] = []
-        for q in queries:
-            results = await self._tavily_search(q.strip(), max_results=3)
-            all_results.extend(results)
-
-        # Deduplicate by title
-        seen: set = set()
-        unique: List[Dict[str, str]] = []
-        for r in all_results:
-            t = r.get("title", "")
-            if t not in seen:
-                seen.add(t)
-                unique.append(
-                    {
-                        "title": self._clean_text(t),
-                        "url": r.get("url", ""),
-                        "content": self._clean_text(r.get("content", "")),
-                        "score": str(r.get("score", 0)),
-                        "source": "tavily_person",
-                    }
-                )
-        return unique[:5]
+        """Fetch person signals via web search (single query to save credits)."""
+        query = f'"{person_name}" {company_name} {location} news announcement'.strip()
+        results = await self._web_search(query, max_results=5)
+        return [
+            {
+                "title": self._clean_text(r.get("title", "")),
+                "url": r.get("url", ""),
+                "content": self._clean_text(r.get("content", "")),
+                "score": str(r.get("score", 0)),
+                "source": "tavily_person",
+            }
+            for r in results
+        ][:5]
 
     # ── Tavily enrichment fallback ──────────────────────────────────────
 
@@ -1075,23 +1343,14 @@ class DatabaseFinderService:
 
         details: Dict[str, Any] = {"_enrichment_source": "tavily_enriched"}
 
-        # Search 1: Professional identity
-        identity_query = f'"{name}" {query} title company role location'.strip()
-        identity_results = await self._tavily_search(identity_query, max_results=5)
+        # Single combined search to minimize API calls (1 credit instead of 3)
+        search_query = f'"{name}" {query} title company location education'.strip()
+        results = await self._web_search(search_query, max_results=5)
 
-        # Search 2: Education + University background
-        education_query = f'"{name}" {query} university college education degree alumni'.strip()
-        education_results = await self._tavily_search(education_query, max_results=4)
-
-        # Search 3: Contact + Email + Social media (prioritize contact info)
-        contact_query = f'"{name}" {query} email contact phone social media linkedin'.strip()
-        contact_results = await self._tavily_search(contact_query, max_results=5)
-
-        all_results = identity_results + education_results + contact_results
-        if not all_results:
+        if not results:
             return details
 
-        self._extract_fields_from_results(details, all_results, name, query)
+        self._extract_fields_from_results(details, results, name, query)
         return details
 
     async def _search_decision_makers(
@@ -1108,7 +1367,7 @@ class DatabaseFinderService:
 
         search_query = f'{company_name} executives leadership team CEO CTO CFO VP director'.strip()
         try:
-            results = await self._tavily_search(search_query, max_results=8)
+            results = await self._web_search(search_query, max_results=8)
             decision_makers = set()
 
             for r in results:
@@ -1463,35 +1722,38 @@ class DatabaseFinderService:
         """
         start = datetime.now(timezone.utc)
 
-        # Step 1: Tavily search (skip ZenRows due to account limits)
+        # Step 1: Tavily search — returns profile dicts with name/title/org
+        # already parsed from the search result title/content (zero extra API calls)
         logger.info(f"[STEP 1] Using Tavily to search for: '{query}' in {location}")
-        urls = []
+        profiles: List[Dict[str, Any]] = []
 
         try:
-            urls = await self._search_tavily_linkedin(query, location, limit)
-            logger.info(f"[STEP 1] Tavily found {len(urls)} URLs")
+            profiles = await self._search_tavily_linkedin(query, location, limit)
+            logger.info(f"[STEP 1] Tavily found {len(profiles)} profiles")
         except Exception as e:
             logger.warning(f"[STEP 1] Tavily search failed: {e}")
-            urls = []
 
         # Fallback: If no results found, try searching as a company name
-        if not urls:
-            logger.warning(f"[FALLBACK] No URLs for '{query}', trying company-based search...")
+        if not profiles:
+            logger.warning(f"[FALLBACK] No profiles for '{query}', trying company-based search...")
             try:
-                # Try variation: search for people mentioning the company name in their profile
                 alt_query = f'{query} LinkedIn employees OR staff OR team'
                 logger.info(f"[FALLBACK] Searching with: '{alt_query}'")
-
-                fallback_urls = await self._search_tavily_linkedin(alt_query, location, limit)
-                if fallback_urls:
-                    urls.extend(fallback_urls)
-                    logger.info(f"[FALLBACK] Found {len(fallback_urls)} URLs from fallback search")
+                fallback = await self._search_tavily_linkedin(alt_query, location, limit)
+                if fallback:
+                    # Deduplicate by linkedin_url
+                    seen = {p["linkedin_url"] for p in profiles}
+                    for p in fallback:
+                        if p["linkedin_url"] not in seen:
+                            profiles.append(p)
+                            seen.add(p["linkedin_url"])
+                    logger.info(f"[FALLBACK] Found {len(fallback)} profiles from fallback search")
             except Exception as e:
                 logger.warning(f"[FALLBACK] Fallback search failed: {e}")
 
-        logger.info(f"[STEP 1 COMPLETE] Total URLs: {len(urls)}")
+        logger.info(f"[STEP 1 COMPLETE] Total profiles: {len(profiles)}")
 
-        if not urls:
+        if not profiles:
             return {
                 "leads": [],
                 "meta": {
@@ -1505,483 +1767,144 @@ class DatabaseFinderService:
                 },
             }
 
-        # Step 2: Use Tavily to extract profile details (skip ZenRows scraping)
-        logger.info(f"[STEP 2] Extracting data for {len(urls)} profiles using Tavily Search...")
+        # Trim to limit
+        profiles = profiles[:limit]
 
-        profiles = []
+        # Log what we got from Step 1 parsing
+        has_title = sum(1 for p in profiles if p.get("title"))
+        has_org = sum(1 for p in profiles if p.get("organization"))
+        has_name = sum(1 for p in profiles if p.get("full_name") and p["full_name"] != "Unknown")
+        logger.info(f"[STEP 1 STATS] From search results: {has_name} names, {has_title} titles, {has_org} orgs out of {len(profiles)}")
 
-        # Use Tavily Search to get detailed information about each profile
-        if self.tavily_api_key and urls:
-            for url in urls[:limit]:
-                try:
-                    # Search for information about the LinkedIn profile
-                    search_query = f'"{url}" OR site:linkedin.com profile'
-                    response = await self._tavily_search(search_query)
+        # Step 2: Targeted enrichment ONLY for profiles still missing title or org
+        # Use a concurrency semaphore to avoid hitting Tavily rate limits
+        needs_enrichment = [
+            p for p in profiles
+            if not p.get("title") or not p.get("organization")
+        ]
 
-                    results = response.get("results", [])
+        if needs_enrichment and (self.tavily_api_key or self.serper_api_key):
+            # Limit to max 10 concurrent enrichment searches to avoid 432
+            MAX_ENRICHMENT = min(len(needs_enrichment), 10)
+            batch = needs_enrichment[:MAX_ENRICHMENT]
+            logger.info(f"[STEP 2] Enriching {len(batch)}/{len(needs_enrichment)} profiles missing title/org via Tavily Search...")
 
-                    profile = {
-                        "linkedin_url": url,
-                        "full_name": "Unknown",
-                        "_scrape_failed": True
-                    }
+            sem = asyncio.Semaphore(3)  # max 3 concurrent Tavily calls
 
-                    # Extract name and info from search results
-                    if results:
-                        first_result = results[0]
-                        content = first_result.get("content", "") or first_result.get("title", "")
-
-                        # Try to extract name from content
-                        name_patterns = [
-                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:at|is a|works at|from)',
-                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*-\s*(?:LinkedIn|Profile)',
-                            r'Profile of ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
-                        ]
-
-                        for pattern in name_patterns:
-                            match = re.search(pattern, content)
-                            if match:
-                                profile["full_name"] = match.group(1)
-                                break
-
-                        # Try to extract title and organization
-                        title_patterns = [
-                            r'(?:as|is|works as a?)\s+([A-Za-z0-9\s&-]+?)\s+(?:at|@|for)',
-                            r'([A-Za-z0-9\s&-]+?)\s+at\s+([A-Za-z\s&-]+?)(?:\s+\||\.|\n)',
-                        ]
-
-                        for pattern in title_patterns:
-                            match = re.search(pattern, content)
-                            if match:
-                                if len(match.groups()) >= 2:
-                                    profile["title"] = match.group(1).strip()
-                                    profile["organization"] = match.group(2).strip()
-                                else:
-                                    profile["title"] = match.group(1).strip()
-                                break
-
-                    profiles.append(profile)
-
-                except Exception as e:
-                    logger.warning(f"Failed to search for {url}: {e}")
-                    profiles.append({
-                        "linkedin_url": url,
-                        "full_name": "Unknown",
-                        "_scrape_failed": True
-                    })
-        else:
-            # Fallback: create minimal profiles from URLs if Tavily not available
-            for url in urls[:limit]:
-                profiles.append({
-                    "linkedin_url": url,
-                    "full_name": "Unknown",
-                    "_scrape_failed": True
-                })
-
-        logger.info(f"[STEP 2 COMPLETE] Extracted {len(profiles)} profiles using Tavily Search")
-
-        # Step 2.5: Tavily enrichment - use search results to get actual data
-        logger.info(f"[STEP 2.5] Starting enrichment with Tavily Search results...")
-
-        if self.tavily_api_key:
-            # Search for each person to extract real names and details
-            enrichment_tasks = []
-            for i, p in enumerate(profiles):
-                if p.get("_scrape_failed") or p.get("full_name") == "Unknown":
-                    url = p.get("linkedin_url", "")
-                    if url:
-                        # Search for this specific LinkedIn profile
-                        task = self._enrich_via_tavily_search(
-                            name=p.get("full_name", ""),
-                            linkedin_url=url,
-                            query=query
-                        )
-                        enrichment_tasks.append((i, task))
-
-            if enrichment_tasks:
-                logger.info(f"[STEP 2.5] Enriching {len(enrichment_tasks)} profiles with Tavily Search...")
-                results = await asyncio.gather(*[task for _, task in enrichment_tasks], return_exceptions=True)
-
-                for (idx, _), result in zip(enrichment_tasks, results):
-                    if isinstance(result, dict) and result:
-                        # Merge enrichment results
-                        profiles[idx].update(result)
-                        logger.debug(f"[STEP 2.5] Enriched profile {idx}: {result.get('full_name')}")
-
-                # (a) Tavily Extract — batch of 5 URLs = 1 credit
-                enrichment_urls = [p["linkedin_url"] for p in needs_enrichment if p.get("linkedin_url")]
-                extract_results: Dict[str, Dict] = {}
-                for i in range(0, len(enrichment_urls), 5):
-                    batch = enrichment_urls[i:i + 5]
-                    batch_result = await self._tavily_extract_linkedin(batch)
-                    extract_results.update(batch_result)
-
-                # Merge extract results
-                for p in needs_enrichment:
-                    url = p.get("linkedin_url", "")
-                    if url in extract_results:
-                        merged = self._merge_profile_data(p, extract_results[url])
-                        p.update(merged)
-
-                # (b) Tavily Search — only for profiles STILL missing critical mandatory fields
-                still_needs = [
-                    p for p in needs_enrichment
-                    if not p.get("title")
-                    or not p.get("organization")
-                    or not p.get("full_name")
-                    or (p.get("full_name", "") and len(p.get("full_name", "").strip()) < 3)
-                ]
-
-                if still_needs:
-                    logger.info(f"[STEP 2.5] Tavily Search enriching {len(still_needs)} remaining profiles")
-                    search_tasks = [
-                        self._enrich_via_tavily_search(
-                            name=p.get("full_name", ""),
-                            linkedin_url=p.get("linkedin_url", ""),
-                            query=query,
-                            location=location,
-                        )
-                        for p in still_needs
-                    ]
-                    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-                    for p, result in zip(still_needs, search_results):
-                        if isinstance(result, dict):
-                            merged = self._merge_profile_data(p, result)
-                            p.update(merged)
-
-
-        # Step 3: Enrich with Tavily signals (concurrent)
-        logger.info(f"[STEP 3] Adding signals (include_signals={include_signals})")
-
-        if include_signals and self.tavily_api_key:
-            # Collect company signals (deduplicated by company name)
-            companies_seen: Dict[str, List[Dict]] = {}
-            person_signal_tasks = []
-
-            for prof in profiles:
-                org = prof.get("organization", "") or query
-                if org and org not in companies_seen:
-                    companies_seen[org] = []
-
-                full_name = prof.get("full_name", "")
-                if full_name:
-                    person_signal_tasks.append(
-                        (full_name, self._get_person_signals(full_name, org, location))
+            async def _rate_limited_enrich(p: Dict[str, Any]) -> Dict[str, Any]:
+                async with sem:
+                    return await self._enrich_via_tavily_search(
+                        name=p.get("full_name", ""),
+                        linkedin_url=p.get("linkedin_url", ""),
+                        query=query,
+                        location=location,
                     )
 
-            # Fetch company signals
-            company_tasks = {
-                name: self._get_company_signals(name, location)
-                for name in companies_seen
-            }
-            company_results = {}
-            if company_tasks:
-                results = await asyncio.gather(
-                    *company_tasks.values(), return_exceptions=True
-                )
+            results = await asyncio.gather(
+                *[_rate_limited_enrich(p) for p in batch],
+                return_exceptions=True,
+            )
+
+            for p, result in zip(batch, results):
+                if isinstance(result, dict) and result:
+                    merged = self._merge_profile_data(p, result)
+                    p.update(merged)
+
+            enriched_count = sum(1 for r in results if isinstance(r, dict) and r.get("title"))
+            logger.info(f"[STEP 2 COMPLETE] Enriched {enriched_count}/{len(batch)} profiles")
+        else:
+            logger.info(f"[STEP 2] All profiles already have title+org from Step 1, skipping enrichment")
+
+
+        # Step 3: Signals (only when requested, limit API calls)
+        logger.info(f"[STEP 3] Adding signals (include_signals={include_signals})")
+
+        if include_signals and (self.tavily_api_key or self.serper_api_key):
+            # Company signals — deduplicate by org name, limit to 5 unique companies
+            companies_seen: Dict[str, List[Dict]] = {}
+            for prof in profiles:
+                org = prof.get("organization", "").strip()
+                if org and org != query and org not in companies_seen:
+                    companies_seen[org] = []
+            # Limit company signal lookups
+            company_names = list(companies_seen.keys())[:5]
+            if company_names:
+                company_tasks = {n: self._get_company_signals(n, location) for n in company_names}
+                results = await asyncio.gather(*company_tasks.values(), return_exceptions=True)
+                company_results = {}
                 for name, result in zip(company_tasks.keys(), results):
                     company_results[name] = result if isinstance(result, list) else []
+            else:
+                company_results = {}
 
-            # Fetch person signals (limit to first 10 to avoid API overuse)
+            # Person signals — limit to 5 profiles max
             person_results: Dict[str, List[Dict]] = {}
-            if person_signal_tasks:
-                limited = person_signal_tasks[:10]
-                results = await asyncio.gather(
-                    *[t[1] for t in limited], return_exceptions=True
-                )
-                for (name, _), result in zip(limited, results):
+            person_tasks = []
+            for prof in profiles[:5]:
+                fn = prof.get("full_name", "")
+                org = prof.get("organization", "") or query
+                if fn and fn != "Unknown":
+                    person_tasks.append((fn, self._get_person_signals(fn, org, location)))
+            if person_tasks:
+                results = await asyncio.gather(*[t[1] for t in person_tasks], return_exceptions=True)
+                for (name, _), result in zip(person_tasks, results):
                     person_results[name] = result if isinstance(result, list) else []
 
             # Merge signals into profiles
             for prof in profiles:
-                org = prof.get("organization", "") or query
+                org = prof.get("organization", "").strip()
                 prof["company_signals"] = company_results.get(org, [])
-
-                full_name = prof.get("full_name", "")
-                prof["person_signals"] = person_results.get(full_name, [])
-
-                # Flatten signals into summary text
+                fn = prof.get("full_name", "")
+                prof["person_signals"] = person_results.get(fn, [])
                 all_sigs = prof.get("company_signals", []) + prof.get("person_signals", [])
                 sig_texts = [self._clean_text(s.get("content", "")[:200]) for s in all_sigs if s.get("content")]
                 prof["signals_summary"] = " | ".join(sig_texts[:5]) if sig_texts else ""
                 prof["signals_count"] = len(all_sigs)
 
-        # Step 3.5: Search for decision makers in target companies (concurrent)
-        if self.tavily_api_key:
-            companies_to_search = {}
-            for prof in profiles:
-                org = prof.get("organization", "").strip()
-                if org and org not in companies_to_search:
-                    companies_to_search[org] = []
+        # Step 4: Ensure mandatory fields + build lead records
+        logger.info(f"[STEP 4] Finalizing {len(profiles)} profiles")
 
-            if companies_to_search:
-                logger.info(f"Searching decision makers for {len(companies_to_search)} companies")
-                dm_tasks = {
-                    org: self._search_decision_makers(org, location)
-                    for org in companies_to_search
-                }
-
-                dm_results = {}
-                if dm_tasks:
-                    results = await asyncio.gather(
-                        *dm_tasks.values(), return_exceptions=True
-                    )
-                    for org, result in zip(dm_tasks.keys(), results):
-                        dm_list = result if isinstance(result, list) else []
-                        dm_results[org] = dm_list
-                        if dm_list:
-                            logger.info(f"Found {len(dm_list)} decision makers for {org}")
-
-                # Add decision maker info to profiles
-                for prof in profiles:
-                    org = prof.get("organization", "").strip()
-                    if org in dm_results:
-                        prof["_company_decision_makers"] = dm_results[org]
-
-        # Step 3.6: Final enrichment pass for profiles STILL missing mandatory fields
-        # This is a safety net to catch any profiles that slipped through enrichment
-        logger.info(f"[STEP 3.6] Final enrichment pass - checking for profiles missing mandatory fields")
-        profiles_needing_final_enrichment = [
-            p for p in profiles
-            if not p.get("full_name", "").strip()
-            or not p.get("title", "").strip()
-            or not p.get("organization", "").strip()
-        ]
-
-        if profiles_needing_final_enrichment and self.tavily_api_key:
-            logger.info(f"[STEP 3.6] {len(profiles_needing_final_enrichment)} profiles still missing mandatory fields - attempting final enrichment")
-
-            # Extract names from LinkedIn URLs for those missing full_name
-            for p in profiles_needing_final_enrichment:
-                if not p.get("full_name", "").strip():
-                    linkedin_url = p.get("linkedin_url", "")
-                    if linkedin_url:
-                        name_match = re.search(r"/in/([A-Za-z0-9\-%]+)", linkedin_url)
-                        if name_match:
-                            slug = name_match.group(1)
-                            slug = re.sub(r"-\d+$", "", slug)
-                            name = slug.replace("-", " ").title()
-                            p["full_name"] = name
-                            p["first_name"] = name.split()[0] if name.split() else ""
-                            p["last_name"] = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
-                            logger.debug(f"[STEP 3.6] Extracted name from URL: {name}")
-
-            # For remaining profiles missing data, do targeted Tavily searches
-            still_empty = [
-                p for p in profiles_needing_final_enrichment
-                if not p.get("full_name", "").strip()
-                or not p.get("title", "").strip()
-            ]
-
-            if still_empty:
-                logger.info(f"[STEP 3.6] Performing targeted Tavily searches for {len(still_empty)} profiles")
-                search_tasks = []
-                for p in still_empty:
-                    name = p.get("full_name", "") or p.get("first_name", "") or "person"
-                    search_tasks.append(
-                        self._enrich_via_tavily_search(
-                            name=name,
-                            linkedin_url=p.get("linkedin_url", ""),
-                            query=query,
-                            location=location,
-                        )
-                    )
-
-                if search_tasks:
-                    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                    for p, result in zip(still_empty, search_results):
-                        if isinstance(result, dict) and result:
-                            merged = self._merge_profile_data(p, result)
-                            p.update(merged)
-                            logger.debug(f"[STEP 3.6] Final enrichment result for {p.get('full_name', 'unknown')}: {result.get('title', 'N/A')} @ {result.get('organization', 'N/A')}")
-
-        # Step 4: Build final lead records with 30-40 fields
-        # Ensure all profiles have mandatory fields (Name and Title)
-        # AGGRESSIVE FALLBACKS: Never return empty name or title
-        logger.info(f"[STEP 4] Processing {len(profiles)} profiles for mandatory fields")
-
-        # CRITICAL: First pass - ABSOLUTE FORCE SET for ANY missing mandatory field
         for i, p in enumerate(profiles):
-            # Absolute minimum: every profile MUST have these 3 fields
+            # full_name: compose from parts or extract from URL
             if not p.get("full_name", "").strip():
-                # Try first_name + last_name
                 first = p.get("first_name", "").strip()
                 last = p.get("last_name", "").strip()
-                if first and last:
-                    p["full_name"] = f"{first} {last}"
-                elif first:
-                    p["full_name"] = first
-                elif last:
-                    p["full_name"] = last
+                if first or last:
+                    p["full_name"] = f"{first} {last}".strip()
                 else:
-                    # Try to extract from LinkedIn URL
                     url = p.get("linkedin_url", "")
-                    if url:
-                        try:
-                            match = re.search(r"/in/([A-Za-z0-9\-%]+)", url)
-                            if match:
-                                slug = re.sub(r"-\d+$", "", match.group(1))
-                                name = slug.replace("-", " ").title()
-                                p["full_name"] = name
-                            else:
-                                p["full_name"] = f"Lead {i+1}"
-                        except:
-                            p["full_name"] = f"Lead {i+1}"
+                    match = re.search(r"/in/([A-Za-z0-9\-%]+)", url) if url else None
+                    if match:
+                        slug = self._strip_linkedin_slug_suffix(match.group(1))
+                        name = slug.replace("-", " ").title()
+                        name_words = [w for w in name.split() if re.match(r"^[A-Za-z]+$", w)]
+                        p["full_name"] = " ".join(name_words) if name_words else f"Lead {i+1}"
                     else:
                         p["full_name"] = f"Lead {i+1}"
-                logger.warning(f"[STEP 4-FORCE] Set full_name for profile {i}: '{p['full_name']}'")
 
+            # Split full_name → first/last
+            parts = p["full_name"].split(" ", 1)
+            p["first_name"] = parts[0]
+            p["last_name"] = parts[1] if len(parts) > 1 else ""
+
+            # title fallback
             if not p.get("title", "").strip():
-                # Strategy 1: Use organization
                 org = p.get("organization", "").strip()
-                if org:
+                if org and org != query:
                     p["title"] = f"Professional at {org}"
-                # Strategy 2: Use query
-                elif query:
-                    p["title"] = query
-                # Strategy 3: Use seniority
-                elif p.get("seniority_level"):
-                    p["title"] = f"{p['seniority_level']} Professional"
-                # Absolute fallback
                 else:
                     p["title"] = "Professional"
-                logger.warning(f"[STEP 4-FORCE] Set title for profile {i}: '{p['title']}'")
 
+            # organization fallback
             if not p.get("organization", "").strip():
                 p["organization"] = query or "Company"
-                logger.warning(f"[STEP 4-FORCE] Set organization for profile {i}: '{p['organization']}'")
 
-        # Safeguard: Verify title is set for all profiles
-        for i, p in enumerate(profiles):
-            if not p.get("title", "").strip():
-                p["title"] = query or "Professional"
-                logger.warning(f"[SAFEGUARD] Re-set title for profile {i}: '{p['title']}'")
+        # Stats
+        has_real_name = sum(1 for p in profiles if p.get("last_name"))
+        has_real_title = sum(1 for p in profiles if "Professional" not in p.get("title", ""))
+        logger.info(f"[STEP 4 COMPLETE] {has_real_name} real names, {has_real_title} real titles out of {len(profiles)}")
 
-        # Safeguard: Verify organization is set for all profiles
-        for i, p in enumerate(profiles):
-            if not p.get("organization", "").strip():
-                p["organization"] = query or "Company"
-                logger.warning(f"[SAFEGUARD] Re-set organization for profile {i}: '{p['organization']}'")
-
-        # CRITICAL: After force-setting full_name, ALWAYS break it into first/last names
-        # Don't check if they exist - just set them from full_name
-        logger.warning("[STEP 4] FORCE-BREAKING full_name into first_name/last_name")
-        for i, p in enumerate(profiles):
-            full_name = p.get("full_name", "").strip()
-            if full_name:
-                # ALWAYS extract from full_name, regardless of whether first/last exist
-                parts = full_name.split(" ", 1)
-                p["first_name"] = parts[0]  # Always set
-                p["last_name"] = parts[1] if len(parts) > 1 else ""  # Always set (even if empty)
-                logger.debug(f"[{i}] FORCE-BREAK: '{full_name}' → first='{p['first_name']}', last='{p['last_name']}'")
-            else:
-                # Safeguard: If full_name is somehow empty, set first/last to at least "Lead N"
-                p["first_name"] = p.get("first_name", "") or f"Lead {i+1}"
-                p["last_name"] = p.get("last_name", "")
-                logger.error(f"[{i}] SAFEGUARD: full_name was empty! Set first_name='{p['first_name']}'")
-
-        missing_fields = {
-            "empty_full_name": 0,
-            "empty_title": 0,
-            "empty_org": 0,
-            "all_empty": 0,
-        }
-
-        for i, p in enumerate(profiles):
-            has_name = bool(p.get("full_name", "").strip())
-            has_title = bool(p.get("title", "").strip())
-            has_org = bool(p.get("organization", "").strip())
-
-            if not has_name:
-                missing_fields["empty_full_name"] += 1
-                logger.error(f"🚨 Profile {i} STILL has empty full_name after force-set!")
-            if not has_title:
-                missing_fields["empty_title"] += 1
-                logger.error(f"🚨 Profile {i} STILL has empty title after force-set!")
-            if not has_org:
-                missing_fields["empty_org"] += 1
-                logger.error(f"🚨 Profile {i} STILL has empty org after force-set!")
-            if not has_name and not has_title and not has_org:
-                missing_fields["all_empty"] += 1
-
-        if sum(missing_fields.values()) > 0:
-            logger.error(f"🚨🚨 BEFORE additional fixes: {missing_fields}")
-        else:
-            logger.info(f"✅ All {len(profiles)} profiles have mandatory fields after force-set")
-
-        # NOTE: All mandatory fields are already set by FORCE-SET (1754-1768) and
-        # FORCE-BREAK (1774-1784) above. Skip additional logic to avoid conflicts.
-
-        # CRITICAL: Verify ALL profiles now have mandatory fields
-        logger.warning("[STEP 4] AFTER mandatory field fixes - Verification:")
-        still_missing = {
-            "empty_full_name": [],
-            "empty_title": [],
-            "empty_org": [],
-        }
-
-        for i, p in enumerate(profiles):
-            if not p.get("full_name", "").strip():
-                still_missing["empty_full_name"].append(i)
-            if not p.get("title", "").strip():
-                still_missing["empty_title"].append(i)
-            if not p.get("organization", "").strip():
-                still_missing["empty_org"].append(i)
-
-        logger.warning(f"[STEP 4] Profiles still missing after fixes: {still_missing}")
-
-        if any(still_missing.values()):
-            logger.error(f"🚨 CRITICAL: {len([x for v in still_missing.values() for x in v])} profiles STILL have empty mandatory fields!")
-            # FORCE set them now as absolute last resort
-            for i, p in enumerate(profiles):
-                if not p.get("full_name", "").strip():
-                    p["full_name"] = f"Lead {i+1}"
-                    logger.error(f"[FORCE] Set full_name for profile {i}: {p['full_name']}")
-                if not p.get("title", "").strip():
-                    p["title"] = f"{query or 'Professional'}"
-                    logger.error(f"[FORCE] Set title for profile {i}: {p['title']}")
-                if not p.get("organization", "").strip():
-                    p["organization"] = query or "Company"
-                    logger.error(f"[FORCE] Set organization for profile {i}: {p['organization']}")
-
-        logger.info(f"[STEP 4 COMPLETE] All {len(profiles)} profiles have name + title")
-
-        # IMPORTANT: Don't filter! Return all profiles that have been enriched
-        # We've added fallbacks above, so all profiles should have name + title now
-        valid_profiles = profiles  # Return ALL profiles, not just complete ones
-
-        if not profiles:
-            logger.warning(f"No profiles found after scraping/enrichment. Total retrieved: {len(profiles)}")
-        else:
-            logger.info(f"Returning {len(valid_profiles)} profiles (all have fallback name + title)")
-
-        # VERIFY: Check that first_name/last_name are actually set before building lead records
-        logger.warning("[FINAL VERIFICATION] Checking profiles before _build_lead_record:")
-        for i, prof in enumerate(valid_profiles):
-            fn = prof.get("first_name", "")
-            ln = prof.get("last_name", "")
-            full = prof.get("full_name", "")
-            title = prof.get("title", "")
-
-            if not fn or not ln or not full:
-                logger.error(f"❌ Profile {i} STILL missing name fields: "
-                           f"first='{fn}', last='{ln}', full='{full}'")
-            if not title:
-                logger.error(f"❌ Profile {i} STILL missing title: '{title}'")
-
-            # LOG ALL FIELDS for debugging
-            logger.debug(f"[{i}] FINAL: first='{fn}', last='{ln}', full='{full}', title='{title}'")
-
-        leads = []
-        for i, prof in enumerate(valid_profiles):
-            lead = self._build_lead_record(prof, query, location, i)
-            # Verify lead has mandatory fields
-            if not lead.get("full_name") or not lead.get("title"):
-                logger.error(f"🚨 Lead {i} missing mandatory fields after build_lead_record: "
-                           f"full_name={lead.get('full_name')}, title={lead.get('title')}")
-            leads.append(lead)
-
+        leads = [self._build_lead_record(prof, query, location, i) for i, prof in enumerate(profiles)]
         elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
 
         return {
@@ -2007,6 +1930,9 @@ class DatabaseFinderService:
         last_name = profile.get("last_name", "")
         full_name = profile.get("full_name", f"{first_name} {last_name}".strip())
         org = profile.get("organization", "") or query
+        # Guard: never show "LinkedIn" as the organization
+        if org.lower().strip() in ("linkedin", "linkedin.com"):
+            org = query or ""
         linkedin_url = profile.get("linkedin_url", "")
 
         # Generate a deterministic ID

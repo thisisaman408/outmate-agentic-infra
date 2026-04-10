@@ -247,7 +247,7 @@ export default function DatabasePage() {
               <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {[5, 10, 20, 30, 50].map((n) => (<SelectItem key={n} value={String(n)}>{n}</SelectItem>))}
+                  {[5, 10, 20, 30, 50, 100, 150, 200, 300].map((n) => (<SelectItem key={n} value={String(n)}>{n}</SelectItem>))}
                 </SelectContent>
               </Select>
             </div>

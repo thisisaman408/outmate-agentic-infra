@@ -24,7 +24,7 @@ router = APIRouter()
 class DatabaseSearchRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=500, description="Search term (company name, industry, job title, etc.)")
     location: str = Field("United States", max_length=200)
-    limit: int = Field(20, ge=1, le=50)
+    limit: int = Field(20, ge=1, le=300)
     include_signals: bool = Field(True, description="Include Tavily company/person signals")
 
 
