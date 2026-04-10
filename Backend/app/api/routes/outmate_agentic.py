@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps.auth import get_current_user
+from app.core.agentic_flow_resolver import get_agentic_auth_headers, get_social_listening_flow
 from app.core.config import settings
 from app.db.deps import get_db
 from app.db.models.agent_run import AgentRun
@@ -114,11 +115,14 @@ async def run_social_listening(
             detail="agentic infra not configured",
         )
 
-    # 1. Persist the row up-front so any crash leaves a trace tied to the user.
+    # 1. Resolve the flow dynamically (survives agentic engine restarts).
+    flow_id, node_id, node_type = get_social_listening_flow()
+
+    # 2. Persist the row up-front so any crash leaves a trace tied to the user.
     run = AgentRun(
         user_id=current_user.id,
         agent_type="social-listening",
-        flow_id=settings.AGENTIC_INFRA_SOCIAL_LISTENING_FLOW_ID,
+        flow_id=flow_id,
         input=payload.model_dump(exclude_none=False),
         status="running",
     )
@@ -126,46 +130,21 @@ async def run_social_listening(
     db.commit()
     db.refresh(run)
 
-    # 2. Build tweaks payload.  Per-run service-API keys are injected from this
-    #    Backend's already-existing secrets so the agentic infra never needs its
-    #    own copy of TAVILY_API_KEY / OPENROUTER_API_KEY / etc.
-    tweak_fields: Dict[str, Any] = {
-        "keyword": payload.topic,
-        "max_leads": payload.max_leads,
-    }
-    for source_field, dest_field in (
-        ("client_company", "client_company"),
-        ("client_description", "client_description"),
-        ("sender_name", "sender_name"),
-        ("message_type", "message_type"),
-        ("tone", "tone"),
-        ("prospect_data", "prospect_data"),
-        ("system_prompt", "system_prompt"),
-    ):
-        value = getattr(payload, source_field, None)
-        if value:
-            tweak_fields[dest_field] = value
-
-    # NOTE: We deliberately do NOT inject API keys via tweaks. The agent's
-    # secret fields have load_from_db=True, which means any value passed via
-    # tweaks is treated as a workspace-variable NAME, not a literal value.
-    # The agentic infra resolves keys from its own workspace variables /
-    # environment.  In dev: variables exist on the local instance.  In prod:
-    # outmate-agentic must have these set as container env vars or workspace
-    # variables — see deployment notes.
-
-    tweaks = {settings.AGENTIC_INFRA_SOCIAL_LISTENING_NODE_ID: tweak_fields}
+    # 3. Build tweaks — format depends on agent type.
+    from app.services.social_listening.service import _build_tweaks
+    message_type = payload.message_type or "Connection Request (300 chars)"
+    tone = payload.tone or "Casual & Friendly"
+    tweaks = _build_tweaks(
+        node_id, node_type, payload.topic, payload.max_leads,
+        payload.client_company or "", payload.client_description or "",
+        payload.sender_name or "", message_type, tone,
+    )
 
     upstream_url = (
         f"{settings.AGENTIC_INFRA_URL.rstrip('/')}"
-        f"/api/v1/run/{settings.AGENTIC_INFRA_SOCIAL_LISTENING_FLOW_ID}?stream=false"
+        f"/api/v1/run/{flow_id}?stream=false"
     )
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
-    if settings.AGENTIC_INFRA_API_KEY:
-        # Production path: service-account key proves "I am outmate-api"
-        headers["x-api-key"] = settings.AGENTIC_INFRA_API_KEY
-    # else: dev path — relies on OUTMATE_AUTO_LOGIN + OUTMATE_SKIP_AUTH_AUTO_LOGIN
-    # being enabled on a local agentic infra.  No header sent → bypass triggers.
+    headers = get_agentic_auth_headers()
 
     started_at = time.monotonic()
     output_text: Optional[str] = None
@@ -177,18 +156,39 @@ async def run_social_listening(
                 upstream_url,
                 headers=headers,
                 json={
-                    # Prefix matches the agent's "Run the agent for: ..."
-                    # canonical pattern, which bypasses follow-up detection
-                    # in lead_discovery_outreach_agent._extract_followup_question.
                     "input_value": f"Run the agent for: {payload.topic}",
                     "input_type": "chat",
                     "output_type": "chat",
-                    # Fresh session_id per run → empty chat history → agent
-                    # never enters follow-up mode and always runs full discovery.
                     "session_id": str(run.id),
                     "tweaks": tweaks,
                 },
             )
+        if response.status_code in (403, 404) and any(
+            kw in (response.text or "").lower() for kw in ("not found", "permission")
+        ):
+            from app.core.agentic_flow_resolver import refresh as _refresh_flow
+            flow_id, node_id, node_type = _refresh_flow()
+            tweaks = _build_tweaks(
+                node_id, node_type, payload.topic, payload.max_leads,
+                payload.client_company or "", payload.client_description or "",
+                payload.sender_name or "", message_type, tone,
+            )
+            headers = get_agentic_auth_headers()
+            upstream_url = (
+                f"{settings.AGENTIC_INFRA_URL.rstrip('/')}"
+                f"/api/v1/run/{flow_id}?stream=false"
+            )
+            async with httpx.AsyncClient(timeout=settings.AGENTIC_INFRA_TIMEOUT_SECONDS) as rc:
+                response = await rc.post(
+                    upstream_url, headers=headers,
+                    json={
+                        "input_value": f"Run the agent for: {payload.topic}",
+                        "input_type": "chat",
+                        "output_type": "chat",
+                        "session_id": str(run.id),
+                        "tweaks": tweaks,
+                    },
+                )
         if response.status_code >= 400:
             snippet = response.text[:500] if response.text else f"HTTP {response.status_code}"
             raise RuntimeError(f"agentic infra returned {response.status_code}: {snippet}")

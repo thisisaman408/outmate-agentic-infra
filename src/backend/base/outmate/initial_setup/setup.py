@@ -854,8 +854,15 @@ async def create_or_update_agentic_flows(session: AsyncSession, user_id: UUID) -
             existing_flow = await find_existing_flow(session, flow_id, flow_endpoint_name)
 
             if existing_flow:
-                # Skip update if flow already exists
-                await logger.adebug(f"Agentic flow already exists, skipping: {flow_name}")
+                # Claim orphaned flows: the engine's starter loader creates flows
+                # with user_id=None; assign them to the current user so the
+                # permission check in check_flow_user_permission passes.
+                if existing_flow.user_id is None and user_id:
+                    existing_flow.user_id = user_id
+                    session.add(existing_flow)
+                    await logger.adebug(f"Claimed orphaned agentic flow: {flow_name} → user_id={user_id}")
+                else:
+                    await logger.adebug(f"Agentic flow already exists, skipping: {flow_name}")
                 flows_updated += 1
             else:
                 try:

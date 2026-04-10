@@ -1,3 +1,8 @@
+import { fileURLToPath } from 'url'
+import path from 'path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -13,6 +18,15 @@ const nextConfig = {
   // ECONNRESET / "socket hang up".  Bumped to 10 minutes.
   experimental: {
     proxyTimeout: 600_000,
+  },
+  // Turbopack resolves CSS @import from the git root (monorepo parent),
+  // not from Frontend/.  Point it at our node_modules so
+  // `@import "tailwindcss"` in globals.css resolves correctly.
+  turbopack: {
+    resolveAlias: {
+      tailwindcss: path.resolve(__dirname, 'node_modules/tailwindcss'),
+      'tw-animate-css': path.resolve(__dirname, 'node_modules/tw-animate-css'),
+    },
   },
   async headers() {
     const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || process.env.GITHUB_SHA || 'unknown'

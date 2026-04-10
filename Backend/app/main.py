@@ -62,6 +62,7 @@ from app.api.routes import dashboard
 from app.api.routes import events_routes
 from app.api.routes import database_finder
 from app.api.routes import outmate_agentic
+from app.api.routes import social_listening
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -335,6 +336,12 @@ logger.info("Database Finder router registered")
 app.include_router(outmate_agentic.router)
 logger.info("Outmate-agentic agents router registered")
 
+# Social Listening (continuous monitoring + signal feed) — same pattern,
+# tenant isolation is enforced inside the router via watcher.user_id and
+# the signal_watcher_matches.user_id denormalised join column.
+app.include_router(social_listening.router)
+logger.info("Social Listening router registered")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(SEPARATOR)
@@ -519,6 +526,7 @@ async def startup_event():
                 "ON signal_events (ingested_at);"
             ))
         logger.info("✓ Signal pipeline v1 indexes ensured")
+        # HubSpot tokens stored in user_integrations table — no ALTER TABLE needed.
     except Exception as e:
         logger.error(f"✗ Database init failed (app will start without DB): {e}")
 
@@ -557,6 +565,15 @@ async def startup_event():
             logger.info("✓ Embedding model preloaded")
         except Exception as e:
             logger.warning(f"⚠ Embedding model preload failed (will load on first request): {e}")
+
+    # Resolve the Social Listening flow ID from the agentic infra so we
+    # don't break when the engine regenerates UUIDs on cold start.
+    try:
+        from app.core.agentic_flow_resolver import get_social_listening_flow
+        flow_id, node_id, node_type = get_social_listening_flow()
+        logger.info("✓ Social Listening flow resolved: flow=%s node=%s type=%s", flow_id, node_id, node_type)
+    except Exception as e:
+        logger.warning("⚠ Social Listening flow resolution failed (will retry on first call): %s", e)
 
     logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")
