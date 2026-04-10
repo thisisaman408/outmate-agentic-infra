@@ -24,17 +24,21 @@ async def search_linkedin_posts(
         return []
 
     # Build the keyword query
-    query = " ".join(keywords)
-    if boolean_query:
+    if boolean_query and (boolean_query.get("must") or boolean_query.get("should")):
+        parts = []
         must = boolean_query.get("must", [])
         should = boolean_query.get("should", [])
         must_not = boolean_query.get("must_not", [])
         if must:
-            query = " AND ".join(f'"{w}"' for w in must)
+            parts.append(" AND ".join(f'"{w}"' for w in must))
         if should:
-            query += " OR " + " OR ".join(f'"{w}"' for w in should)
+            parts.append(" OR ".join(f'"{w}"' for w in should))
+        query = " ".join(parts)
         if must_not:
             query += " NOT " + " NOT ".join(f'"{w}"' for w in must_not)
+    else:
+        # No boolean query — wrap all keywords in AND so "Space Tech" + "GTM" = both required
+        query = " AND ".join(f'"{w}"' for w in keywords)
 
     # Map time_frame to CrustData's date_posted parameter
     date_map = {

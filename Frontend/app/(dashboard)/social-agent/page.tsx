@@ -167,12 +167,14 @@ export default function SocialListeningPage() {
           params={feedParams}
           onChange={(p) => setFeedParams({ ...feedParams, ...p })}
           onRefresh={handleRefresh}
+          onRunNow={activeSearchId ? () => handleRunNow(activeSearchId) : undefined}
           activeSearchName={
             activeSearchId
               ? searches.find((s) => s.id === activeSearchId)?.name ?? "All Searches"
               : "All Searches"
           }
           totalResults={signals.length}
+          isRunning={!!running}
         />
         <ScrollArea className="flex-1">
           <div className="p-4 space-y-3">
@@ -370,14 +372,18 @@ function FilterBar({
   params,
   onChange,
   onRefresh,
+  onRunNow,
   activeSearchName,
   totalResults,
+  isRunning,
 }: {
   params: SignalFeedParams
   onChange: (p: Partial<SignalFeedParams>) => void
   onRefresh: () => void
+  onRunNow?: () => void
   activeSearchName: string
   totalResults: number
+  isRunning?: boolean
 }) {
   return (
     <div className="px-4 pt-4 space-y-3">
@@ -393,6 +399,12 @@ function FilterBar({
           <select value={params.since || "all"} onChange={(e) => onChange({ since: e.target.value as any })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
             {SINCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          {onRunNow && (
+            <Button size="sm" onClick={onRunNow} disabled={isRunning}>
+              {isRunning ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="size-3.5 mr-1.5" />}
+              {isRunning ? "Running..." : "Run Search"}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={onRefresh}>
             <RefreshCw className="size-3.5 mr-1.5" />
             Refresh
