@@ -68,9 +68,10 @@ export interface DatabaseLead {
   quality_score: number
   discovered_at: string
   data_completeness: number
-  // Status (2)
+  // Status (3)
   status: string
   enrichment_status: string
+  is_decision_maker: boolean
 }
 
 export interface SearchMeta {
@@ -137,6 +138,27 @@ export const databaseFinderApi = {
   getStatus: async (): Promise<ServiceStatus> => {
     const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/database/status`)
     if (!response.ok) throw new Error("Failed to check service status")
+    return response.json()
+  },
+
+  predictEmail: async (
+    firstName: string,
+    lastName: string,
+    domain: string
+  ): Promise<{ success: boolean; email?: string; message?: string }> => {
+    const response = await fetchWithAuth(`${BACKEND_BASE}/api/v1/database/predict-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        first_name: firstName,
+        last_name: lastName,
+        domain,
+      }),
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: "Prediction failed" }))
+      throw new Error(err.detail || `Prediction failed (${response.status})`)
+    }
     return response.json()
   },
 }

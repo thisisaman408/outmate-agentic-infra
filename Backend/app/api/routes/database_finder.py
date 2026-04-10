@@ -32,6 +32,12 @@ class EnrichLeadRequest(BaseModel):
     linkedin_url: str = Field(..., min_length=10, max_length=500)
 
 
+class PredictEmailRequest(BaseModel):
+    first_name: str = Field(..., min_length=1)
+    last_name: str = Field("", description="Optional last name")
+    domain: str = Field(..., min_length=3)
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 @router.post("/search")
@@ -93,6 +99,39 @@ async def enrich_lead(
     except Exception as e:
         logger.exception(f"Enrichment failed: {e}")
         raise HTTPException(status_code=500, detail="Enrichment failed. Please try again.")
+
+
+@router.post("/predict-email")
+async def predict_email(
+    body: PredictEmailRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Predict common email patterns and verify them using ValidEmail.net API.
+    Returns the first verified email matching pattern requirements.
+    """
+    logger.info(f"Predicting email for: {body.first_name} {body.last_name} at {body.domain}")
+
+    from app.services.valid_email_service import ValidEmailService
+    service = ValidEmailService()
+
+    try:
+        email = await service.predict_and_verify(body.first_name, body.last_name, body.domain)
+        if email:
+            return {
+                "success": True,
+                "email": email,
+            }
+        return {
+            "success": False,
+            "message": "No verified email found using common patterns.",
+        }
+    except Exception as e:
+        logger.error(f"Email prediction failed: {e}")
+        return {
+            "success": False,
+            "message": f"Prediction error: {str(e)}",
+        }
 
 
 @router.get("/status")

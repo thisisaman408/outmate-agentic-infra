@@ -251,6 +251,10 @@ class Settings(BaseSettings):
         None,
         description="Contextual AI API key (optional)"
     )
+    VALIDEMAIL_API_KEY: Optional[str] = Field(
+        None,
+        description="ValidEmail.net API key (optional)"
+    )
 
     # OpenAI Configuration (routed through OpenRouter)
     OPENAI_API_KEY: Optional[str] = Field(

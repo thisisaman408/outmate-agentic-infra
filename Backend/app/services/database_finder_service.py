@@ -693,14 +693,29 @@ class DatabaseFinderService:
         last_name = details.get("last_name", "")
 
         # ── Headline / Title ────────────────────────────────────────────
-        # Priority 1: jobTitle from JSON-LD (pure role, no name, no company)
-        jt = re.search(r'"jobTitle"\s*:\s*"([^"]+)"', html, re.IGNORECASE)
-        if jt:
-            title_val = jt.group(1).strip()
-            if not self._looks_like_name(title_val, first_name, last_name):
-                details["title"] = title_val
+        # Priority 1: Experience Role (visual title in experience section)
+        # This is the "actual title" the user wants.
+        exp_title_matches = re.findall(
+            r'<div[^>]*class="[^"]*text-body-medium[^"]*font-weight-bold[^"]*"[^>]*>\s*([^<]+)',
+            html, re.IGNORECASE
+        )
+        if exp_title_matches:
+            for val in exp_title_matches:
+                val = val.strip()
+                # Skip if it's identical to the name or looks like a headline with "at "
+                if val and not self._looks_like_name(val, first_name, last_name) and " at " not in val.lower():
+                    details["title"] = val
+                    break
 
-        # Priority 2: headline JSON-LD (may contain "Role at Company")
+        # Priority 2: jobTitle from JSON-LD (pure role, no name, no company)
+        if not details.get("title"):
+            jt = re.search(r'"jobTitle"\s*:\s*"([^"]+)"', html, re.IGNORECASE)
+            if jt:
+                title_val = jt.group(1).strip()
+                if not self._looks_like_name(title_val, first_name, last_name):
+                    details["title"] = title_val
+
+        # Priority 3: headline JSON-LD (may contain "Role at Company")
         if not details.get("title"):
             hl = re.search(r'"headline"\s*:\s*"([^"]+)"', html, re.IGNORECASE | re.DOTALL)
             if hl:
@@ -1905,6 +1920,10 @@ class DatabaseFinderService:
         logger.info(f"[STEP 4 COMPLETE] {has_real_name} real names, {has_real_title} real titles out of {len(profiles)}")
 
         leads = [self._build_lead_record(prof, query, location, i) for i, prof in enumerate(profiles)]
+
+        # Step 5: Sort by decision maker rank
+        leads.sort(key=lambda x: self._get_decision_maker_rank(x), reverse=True)
+
         elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
 
         return {
@@ -2176,6 +2195,32 @@ class DatabaseFinderService:
         if profile.get("email"):
             score += 10
         return min(100, score)
+
+    def _get_decision_maker_rank(self, lead: Dict[str, Any]) -> float:
+        """Calculate a numerical rank based on seniority and decision-making status."""
+        score = 0
+        seniority = lead.get("seniority_level", "Unknown")
+
+        # Seniority tiers
+        ranks = {
+            "C-Suite": 1000,
+            "VP": 800,
+            "Director": 600,
+            "Manager": 400,
+            "Individual Contributor": 200,
+            "Entry Level": 100,
+            "Unknown": 0
+        }
+        score += ranks.get(seniority, 0)
+
+        # Flag bonus
+        if lead.get("is_decision_maker"):
+            score += 50
+
+        # Completeness/Quality as tie-breaker
+        score += (lead.get("quality_score", 0) / 10.0)
+
+        return float(score)
 
     @staticmethod
     def _calc_completeness(profile: Dict[str, Any]) -> float:

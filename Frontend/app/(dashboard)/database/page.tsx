@@ -30,6 +30,7 @@ import {
   ChevronRight,
   AlertCircle,
   Phone,
+  Wand2,
 } from "lucide-react"
 import { databaseFinderApi, type DatabaseLead, type SearchMeta } from "@/lib/api/database-finder"
 
@@ -111,6 +112,7 @@ export default function DatabasePage() {
   const [detailOpen, setDetailOpen] = useState(false)
 
   const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set())
+  const [predictingIds, setPredictingIds] = useState<Set<string>>(new Set())
   const stopRowClick = (e: React.MouseEvent<HTMLElement>) => e.stopPropagation()
 
   const handleSearch = async () => {
@@ -154,7 +156,69 @@ export default function DatabasePage() {
     } catch (err: any) {
       toast({ title: "Enrichment failed", description: err.message, variant: "destructive" })
     } finally {
-      setEnrichingIds((prev) => { const n = new Set(prev); n.delete(lead.id); return n })
+      setEnrichingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(lead.id)
+        return next
+      })
+    }
+  }
+
+  const handlePredictEmail = async (lead: DatabaseLead) => {
+    if (!lead.first_name || (!lead.company_domain && !lead.website)) {
+      toast({
+        title: "Missing Information",
+        description: "Need first name and company domain/website to predict email.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const domain = lead.company_domain || (lead.website ? new URL(lead.website).hostname.replace("www.", "") : "")
+    if (!domain) {
+      toast({ title: "No domain found", variant: "destructive" })
+      return
+    }
+
+    setPredictingIds((prev) => new Set(prev).add(lead.id))
+    try {
+      const result = await databaseFinderApi.predictEmail(
+        lead.first_name,
+        lead.last_name || "",
+        domain
+      )
+
+      if (result.success && result.email) {
+        setLeads((prev) =>
+          prev.map((l) => (l.id === lead.id ? { ...l, email: result.email! } : l))
+        )
+        // Also update selectedLead if it's open
+        if (selectedLead?.id === lead.id) {
+          setSelectedLead(prev => prev ? { ...prev, email: result.email! } : null)
+        }
+        toast({
+          title: "Email Predicted",
+          description: `Verified email found: ${result.email}`,
+        })
+      } else {
+        toast({
+          title: "Prediction Failed",
+          description: result.message || "Could not find a verified email pattern.",
+          variant: "destructive",
+        })
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Prediction service error.",
+        variant: "destructive",
+      })
+    } finally {
+      setPredictingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(lead.id)
+        return next
+      })
     }
   }
 
@@ -374,11 +438,44 @@ export default function DatabasePage() {
                       <TCell>{lead.first_name || "—"}</TCell>
                       <TCell>{lead.last_name || "—"}</TCell>
                       <TCell className="font-medium">{lead.full_name || "—"}</TCell>
-                      <TCell>{lead.email ? <a href={`mailto:${lead.email}`} className="text-blue-500 hover:underline" onClick={(e) => e.stopPropagation()}>{lead.email}</a> : "—"}</TCell>
+                      <TCell className="min-w-[160px]">
+                        {lead.email ? (
+                          <a href={`mailto:${lead.email}`} className="text-blue-500 hover:underline" onClick={(e) => e.stopPropagation()}>
+                            {lead.email}
+                          </a>
+                        ) : (
+                          <div className="flex items-center gap-2" onClick={stopRowClick}>
+                            <span className="text-muted-foreground">—</span>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-7 text-[10px] gap-1 px-2 border border-dashed border-primary/20 hover:border-primary/50 hover:bg-primary/5" 
+                              onClick={() => handlePredictEmail(lead)}
+                              disabled={predictingIds.has(lead.id) || (!lead.company_domain && !lead.website)}
+                            >
+                              {predictingIds.has(lead.id) ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Wand2 className="h-3 w-3 text-primary/70" />
+                              )}
+                              Predict
+                            </Button>
+                          </div>
+                        )}
+                      </TCell>
                       <TCell>{lead.phone ? <a href={`tel:${lead.phone}`} className="text-blue-500 hover:underline" onClick={stopRowClick}>{lead.phone}</a> : "—"}</TCell>
                       <TCell onClick={stopRowClick}><LinkCell href={lead.linkedin_url} label="Profile" /></TCell>
                       {/* Professional */}
-                      <TCell className="max-w-[180px] truncate">{lead.title || "—"}</TCell>
+                      <TCell className="max-w-[180px]">
+                        <div className="flex flex-col gap-1">
+                          <span className="truncate" title={lead.title}>{lead.title || "—"}</span>
+                          {lead.is_decision_maker && (
+                            <Badge variant="secondary" className="w-fit text-[9px] h-3.5 px-1 py-0 bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-900/50">
+                              Decision Maker
+                            </Badge>
+                          )}
+                        </div>
+                      </TCell>
                       <TCell><SeniorityBadge level={lead.seniority_level} /></TCell>
                       <TCell>{lead.department || "—"}</TCell>
                       <TCell className="font-medium">{lead.organization_name || "—"}</TCell>
@@ -534,6 +631,12 @@ export default function DatabasePage() {
                     {enrichingIds.has(selectedLead.id) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Re-enrich
                   </Button>
+                  {!selectedLead.email && (selectedLead.company_domain || selectedLead.website) && (
+                    <Button variant="outline" size="sm" onClick={() => handlePredictEmail(selectedLead)} disabled={predictingIds.has(selectedLead.id)}>
+                      {predictingIds.has(selectedLead.id) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4 text-primary" />}
+                      Predict Email
+                    </Button>
+                  )}
                   {selectedLead.linkedin_url && (
                     <Button variant="outline" size="sm" asChild>
                       <a href={selectedLead.linkedin_url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />Open LinkedIn</a>
