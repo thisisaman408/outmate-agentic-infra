@@ -161,6 +161,9 @@ export interface SignalFeedParams {
   sort?: "intent" | "recent" | "engagement"
   since?: "hour" | "today" | "week" | "month" | "all"
   limit?: number
+  enriched_only?: boolean
+  hot_only?: boolean
+  strength?: string
 }
 
 export async function fetchSignals(params: SignalFeedParams = {}): Promise<SocialSignal[]> {
@@ -172,6 +175,9 @@ export async function fetchSignals(params: SignalFeedParams = {}): Promise<Socia
     if (params.sort) sp.set("sort", params.sort)
     if (params.since) sp.set("since", params.since)
     if (params.limit) sp.set("limit", String(params.limit))
+    if (params.enriched_only) sp.set("enriched_only", "true")
+    if (params.hot_only) sp.set("hot_only", "true")
+    if (params.strength) sp.set("strength", params.strength)
     const res = await fetch(`${API}/signals?${sp}`)
     return await json<SocialSignal[]>(res)
   } catch {
@@ -241,6 +247,13 @@ export const SINCE_OPTIONS = [
   { value: "today", label: "Today" },
   { value: "week", label: "This week" },
   { value: "month", label: "This month" },
+]
+
+export const STRENGTH_OPTIONS = [
+  { value: "all", label: "All Strength" },
+  { value: "High", label: "High" },
+  { value: "Medium", label: "Medium" },
+  { value: "Low", label: "Low" },
 ]
 
 export const SCHEDULE_OPTIONS = [

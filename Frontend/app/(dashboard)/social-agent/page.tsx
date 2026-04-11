@@ -42,6 +42,7 @@ import {
   SIGNAL_TYPE_OPTIONS,
   SORT_OPTIONS,
   SINCE_OPTIONS,
+  STRENGTH_OPTIONS,
   type SocialSearch,
   type SocialSignal,
   type SocialStats,
@@ -399,6 +400,37 @@ function FilterBar({
           <select value={params.since || "all"} onChange={(e) => onChange({ since: e.target.value as any })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
             {SINCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <select
+            value={params.strength || "all"}
+            onChange={(e) => onChange({ strength: e.target.value === "all" ? undefined : e.target.value })}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {STRENGTH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <button
+            onClick={() => onChange({ enriched_only: !params.enriched_only })}
+            className={cn(
+              "h-9 px-3 rounded-md text-sm font-medium border transition-colors whitespace-nowrap",
+              params.enriched_only
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <Mail className="size-3.5 inline-block mr-1.5 -mt-0.5" />
+            Enriched only
+          </button>
+          <button
+            onClick={() => onChange({ hot_only: !params.hot_only })}
+            className={cn(
+              "h-9 px-3 rounded-md text-sm font-medium border transition-colors whitespace-nowrap",
+              params.hot_only
+                ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <Flame className="size-3.5 inline-block mr-1.5 -mt-0.5" />
+            Hot leads
+          </button>
           {onRunNow && (
             <Button size="sm" onClick={onRunNow} disabled={isRunning}>
               {isRunning ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="size-3.5 mr-1.5" />}

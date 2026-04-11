@@ -352,6 +352,9 @@ def list_signals(
     sort: str = Query("intent", pattern=r"^(intent|recent|engagement)$"),
     since: Optional[str] = Query(None, pattern=r"^(hour|today|week|month|all)$"),
     limit: int = Query(50, ge=1, le=200),
+    enriched_only: Optional[bool] = Query(None),
+    hot_only: Optional[bool] = Query(None),
+    strength: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> List[SignalResponse]:
@@ -376,12 +379,23 @@ def list_signals(
     if signal_type and signal_type != "all":
         q = q.filter(SignalEvent.signal_type == signal_type)
     if signal_category and signal_category != "all":
-        # Filter by category stored inside the raw_data JSONB taxonomy object.
+        # Filter by taxonomy.category inside the raw_data JSONB column.
+        # PostgreSQL: raw_data->'taxonomy'->>'category' = 'Sales-Led'
         q = q.filter(
             SignalEvent.raw_data["taxonomy"]["category"].astext == signal_category
         )
     if min_intent is not None:
         q = q.filter(SignalEvent.icp_score >= min_intent)
+    if enriched_only:
+        q = q.filter(SignalEvent.prospect_email.isnot(None))
+    if hot_only:
+        q = q.filter(SignalEvent.icp_score >= 80)
+    if strength:
+        # Filter by taxonomy.strength inside the raw_data JSONB column.
+        # PostgreSQL: raw_data->'taxonomy'->>'strength' = 'High'
+        q = q.filter(
+            SignalEvent.raw_data["taxonomy"]["strength"].astext == strength
+        )
 
     if since and since != "all":
         cutoff = _since_cutoff(since)
