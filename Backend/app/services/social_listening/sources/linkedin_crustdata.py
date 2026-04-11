@@ -37,8 +37,8 @@ async def search_linkedin_posts(
         if must_not:
             query += " NOT " + " NOT ".join(f'"{w}"' for w in must_not)
     else:
-        # No boolean query — wrap all keywords in AND so "Space Tech" + "GTM" = both required
-        query = " AND ".join(f'"{w}"' for w in keywords)
+        # No boolean query (legacy searches) — use OR so each keyword broadens results
+        query = " OR ".join(f'"{w}"' for w in keywords)
 
     # Map time_frame to CrustData's date_posted parameter
     date_map = {
