@@ -247,6 +247,10 @@ class Settings(BaseSettings):
         None,
         description="Brightdata API token (optional)"
     )
+    BRIGHTDATA_DISCOVER_KEY: str = Field(
+        "",
+        description="BrightData Discover API key for intent-aware LinkedIn search",
+    )
     APIFY_API_TOKEN: str = Field(
         "",
         description="Apify API token for LinkedIn/Twitter scrapers. Optional — enhances social listening when set.",
