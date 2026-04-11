@@ -78,7 +78,10 @@ async def search_linkedin_posts(
                     json=payload,
                 )
                 if resp.status_code >= 400:
-                    logger.warning("CrustData keyword search page %d failed: %s", page, resp.status_code)
+                    if page > 1:
+                        logger.debug("CrustData page %d: no more results", page)
+                    else:
+                        logger.warning("CrustData keyword search failed: %s", resp.status_code)
                     break
                 data = resp.json()
                 page_posts = data if isinstance(data, list) else data.get("posts", data.get("data", []))

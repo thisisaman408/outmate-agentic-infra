@@ -79,7 +79,7 @@ async def search_linkedin_posts(
         "intent": intent,
         "remove_duplicates": True,
         "include_content": True,
-        "num_results": max_results,
+        "num_results": min(max_results, 20),  # BrightData max is 20
     }
 
     try:
