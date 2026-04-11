@@ -135,6 +135,30 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                   className="mt-1.5"
                   autoFocus
                 />
+                {!name.trim() && (
+                  <div className="mt-2">
+                    <p className="text-xs text-muted-foreground mb-1.5">Suggestions:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        "CTOs discussing AI stack",
+                        "VPs evaluating outbound tools",
+                        "Founders posting about GTM",
+                        "Sales leaders hiring SDRs",
+                        "Product leaders on AI agents",
+                        "RevOps evaluating CRM alternatives",
+                      ].map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setName(suggestion)}
+                          className="px-2.5 py-1 text-xs rounded-md border border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <SourceSelector value={source} onChange={setSource} />
             </div>
@@ -198,6 +222,20 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                 />
               </div>
 
+              {/* Credit cost summary */}
+              <div className="border border-border/60 rounded-lg p-3 bg-muted/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">Estimated credit cost per run</span>
+                  <span className="text-sm font-bold text-primary">{maxLeads * (autoEnrich ? 2 : 0) + maxLeads * (autoOutreach ? 1 : 0)} credits</span>
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div className="flex justify-between"><span>Signal discovery</span><span className="text-foreground/80">Free</span></div>
+                  <div className="flex justify-between"><span>Contact reveal ({maxLeads} signals x 2cr)</span><span className="text-foreground/80">{autoEnrich ? `${maxLeads * 2} cr` : "—"}</span></div>
+                  <div className="flex justify-between"><span>AI outreach draft ({maxLeads} x 1cr)</span><span className="text-foreground/80">{autoOutreach ? `${maxLeads} cr` : "—"}</span></div>
+                  <div className="flex justify-between"><span>CRM push</span><span className="text-foreground/80">Free</span></div>
+                </div>
+              </div>
+
               {/* Auto-actions */}
               <div className="space-y-3 border-t border-border/60 pt-4">
                 <label className="text-sm font-medium">Automatic actions on new signals</label>
@@ -206,7 +244,7 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                 <ActionToggle
                   icon={Zap}
                   label="Enrich contact automatically"
-                  description="Find email, phone, and company data for each signal"
+                  description="Find email, phone, and company data for each signal · 2 credits per contact"
                   checked={autoEnrich}
                   onChange={setAutoEnrich}
                 />
@@ -219,7 +257,7 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                     description={
                       integrations?.email.connected
                         ? `Connected as ${integrations.email.email}`
-                        : "Draft and queue personalized outreach for review"
+                        : "Draft and queue personalized outreach · 1 credit per draft"
                     }
                     checked={autoOutreach}
                     onChange={setAutoOutreach}
