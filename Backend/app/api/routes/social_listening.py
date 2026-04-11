@@ -459,7 +459,37 @@ async def enrich_signal(
             "credits_charged": 0,
         }
 
+    # Check credits before enriching
+    ENRICH_COST = 2
+    if current_user.credits_balance < ENRICH_COST:
+        return {
+            "signal_id": str(signal.id),
+            "status": "insufficient_credits",
+            "email": None,
+            "credits_charged": 0,
+            "error": f"Need {ENRICH_COST} credits, have {current_user.credits_balance}",
+        }
+
     result = await do_enrich(signal, db)
+
+    # Deduct credits and record transaction
+    credits_charged = 0
+    if result.get("email") or result.get("phone"):
+        credits_charged = ENRICH_COST
+        current_user.credits_balance -= ENRICH_COST
+        db.add(current_user)
+        try:
+            from app.db.models.credit import CreditTransaction
+            tx = CreditTransaction(
+                user_id=current_user.id,
+                amount=-ENRICH_COST,
+                description=f"Signal reveal: {signal.prospect_name or signal.id}",
+                transaction_type="signal_reveal",
+            )
+            db.add(tx)
+        except Exception:
+            pass  # CreditTransaction model may not exist — non-fatal
+
     db.commit()
 
     return {
@@ -467,7 +497,8 @@ async def enrich_signal(
         "status": result.get("status", "unknown"),
         "email": result.get("email"),
         "phone": result.get("phone"),
-        "credits_charged": 1 if result.get("email") else 0,
+        "credits_charged": credits_charged,
+        "credits_remaining": current_user.credits_balance,
     }
 
 

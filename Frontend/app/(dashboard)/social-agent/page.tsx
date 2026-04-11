@@ -454,6 +454,7 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
 
   const [enriching, setEnriching] = useState(false)
   const [enrichResult, setEnrichResult] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState(!!signal.person_email)
   const [outreachLoading, setOutreachLoading] = useState(false)
   const [outreachDraft, setOutreachDraft] = useState<string | null>(signal.outreach_message || null)
   const [crmLoading, setCrmLoading] = useState(false)
@@ -461,12 +462,18 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
 
   const handleEnrich = async (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (revealed) return
     setEnriching(true)
     try {
       const res = await enrichSignal(signal.id)
-      setEnrichResult(res?.status === "already_enriched" ? "Already enriched" : "Enrichment queued")
+      if (res?.email) {
+        signal.person_email = res.email
+        signal.person_email_verified = !res.email_unverified
+      }
+      setRevealed(true)
+      setEnrichResult(res?.status === "already_enriched" ? "Already enriched" : res?.email ? `Found: ${res.email}` : "No email found")
     } catch { setEnrichResult("Failed") }
-    finally { setEnriching(false); setTimeout(() => setEnrichResult(null), 3000) }
+    finally { setEnriching(false); setTimeout(() => setEnrichResult(null), 5000) }
   }
 
   const handleOutreach = async (e: React.MouseEvent) => {
@@ -561,19 +568,27 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
 
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {signal.person_email ? (
+            {revealed && signal.person_email ? (
               <span className="flex items-center gap-1">
                 <Mail className="size-3" />{signal.person_email}
                 {!signal.person_email_verified && <span className="text-[10px] text-amber-400">(unverified)</span>}
               </span>
-            ) : <span className="text-muted-foreground/60">no email found</span>}
+            ) : revealed ? (
+              <span className="text-muted-foreground/60">no email found</span>
+            ) : (
+              <button
+                onClick={handleEnrich}
+                disabled={enriching}
+                className="flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
+              >
+                {enriching ? <Loader2 className="size-3 animate-spin" /> : <Mail className="size-3" />}
+                <span className="text-xs font-medium">{enriching ? "Revealing..." : "Reveal contact · 2cr"}</span>
+              </button>
+            )}
             {enrichResult && <span className="text-[10px] text-emerald-400 ml-2">{enrichResult}</span>}
             {crmResult && <span className="text-[10px] text-sky-400 ml-2">{crmResult}</span>}
           </div>
           <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" className="h-7 text-xs text-foreground hover:text-foreground" onClick={handleEnrich} disabled={enriching}>
-              {enriching ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Sparkles className="size-3 mr-1" />}Enrich
-            </Button>
             <Button variant="outline" size="sm" className="h-7 text-xs text-foreground hover:text-foreground" onClick={handleOutreach} disabled={outreachLoading}>
               {outreachLoading ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Send className="size-3 mr-1" />}Outreach
             </Button>
@@ -585,7 +600,7 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
                 <ExternalLink className="size-3.5 text-muted-foreground hover:text-foreground" />
               </a>
             )}
-            {signal.person_linkedin && (
+            {revealed && signal.person_linkedin && (
               <a href={signal.person_linkedin} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-muted" onClick={(e) => e.stopPropagation()} title="View LinkedIn profile">
                 <Linkedin className="size-3.5 text-blue-400 hover:text-blue-300" />
               </a>
