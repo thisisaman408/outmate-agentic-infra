@@ -31,18 +31,17 @@ async def enrich_signal(signal: SignalEvent, db: Session) -> Dict[str, Any]:
 
     result: Dict[str, Any] = {"status": "no_data", "email": None, "phone": None}
 
-    # Try CrustData person enrichment first
-    if linkedin_url and settings.CRUSTDATA_API_KEY:
-        crustdata_result = await _enrich_crustdata(linkedin_url)
-        if crustdata_result:
-            result = crustdata_result
-
-    # Fall back to BetterContact if no email found
-    if not result.get("email") and name and settings.BETTERCONTACT_API_KEY:
+    # BetterContact first (cheaper than CrustData for enrichment)
+    if name and getattr(settings, "BETTERCONTACT_API_KEY", None):
         bc_result = await _enrich_bettercontact(name, company, linkedin_url)
         if bc_result:
-            # Merge -- CrustData data takes priority
-            for k, v in bc_result.items():
+            result = bc_result
+
+    # CrustData person enrichment as fallback only if BetterContact missed
+    if not result.get("email") and linkedin_url and settings.CRUSTDATA_API_KEY:
+        crustdata_result = await _enrich_crustdata(linkedin_url)
+        if crustdata_result:
+            for k, v in crustdata_result.items():
                 if v and not result.get(k):
                     result[k] = v
 

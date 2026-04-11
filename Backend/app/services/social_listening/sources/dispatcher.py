@@ -58,16 +58,18 @@ async def _search_linkedin(
     max_results: int,
     time_frame: str,
 ) -> List[Dict[str, Any]]:
-    """LinkedIn search: BrightData Discover (intent-aware) + CrustData + Apify.
+    """LinkedIn search: BrightData Discover (primary, cheap) → CrustData (fallback only).
 
-    BrightData Discover is preferred because it understands search INTENT —
-    it finds people who are actually discussing problems, building solutions,
-    or evaluating tools, not just random posts with matching keywords.
-    CrustData fills in the gaps with structured data (engagement, dates).
+    BrightData Discover is the primary source — it's intent-aware and cheaper
+    than CrustData. CrustData is ONLY used as a fallback when BrightData
+    returns fewer results than requested or is unavailable.
+    Apify enhances if both above are short.
+
+    Cost priority: BrightData (~$0.01/result) > CrustData (~$0.05/result) > Apify
     """
     all_results: List[Dict[str, Any]] = []
 
-    # 1. BrightData Discover — intent-aware, contextually relevant
+    # 1. BrightData Discover — PRIMARY source (cheap, intent-aware)
     if brightdata_discover.is_available():
         try:
             bd_results = await brightdata_discover.search_linkedin_posts(
@@ -81,20 +83,20 @@ async def _search_linkedin(
         except Exception as exc:
             logger.warning("BrightData Discover failed (non-fatal): %s", exc)
 
-    # 2. CrustData — always available, structured data with engagement metrics
-    remaining = max_results - len(all_results)
-    if remaining > 0:
+    # 2. CrustData — FALLBACK only when BrightData returned nothing
+    if not all_results:
         try:
             crustdata_results = await linkedin_crustdata.search_linkedin_posts(
                 keywords=keywords,
                 boolean_query=boolean_query,
                 filters=filters,
-                max_results=remaining,
+                max_results=max_results,
                 time_frame=time_frame,
             )
-            all_results = _merge_and_dedupe(all_results, crustdata_results)
+            all_results.extend(crustdata_results)
+            logger.info("CrustData fallback returned %d results", len(crustdata_results))
         except Exception as exc:
-            logger.warning("CrustData search failed (non-fatal): %s", exc)
+            logger.warning("CrustData fallback failed: %s", exc)
 
     # 3. Apify — optional enhancement if still short
     remaining = max_results - len(all_results)
