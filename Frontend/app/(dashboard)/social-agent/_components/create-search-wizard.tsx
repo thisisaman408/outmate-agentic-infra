@@ -135,30 +135,35 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                   className="mt-1.5"
                   autoFocus
                 />
-                {!name.trim() && (
-                  <div className="mt-2">
-                    <p className="text-xs text-muted-foreground mb-1.5">Suggestions:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        "CTOs discussing AI stack",
-                        "VPs evaluating outbound tools",
-                        "Founders posting about GTM",
-                        "Sales leaders hiring SDRs",
-                        "Product leaders on AI agents",
-                        "RevOps evaluating CRM alternatives",
-                      ].map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          onClick={() => setName(suggestion)}
-                          className="px-2.5 py-1 text-xs rounded-md border border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors"
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
+                <div className="mt-2">
+                  <p className="text-xs text-muted-foreground mb-1.5">Quick start — click to use:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "CTOs discussing AI stack",
+                      "VPs evaluating outbound tools",
+                      "Founders posting about GTM",
+                      "Sales leaders hiring SDRs",
+                      "Product leaders on AI agents",
+                      "RevOps evaluating CRM alternatives",
+                      "Engineers building AI agents",
+                      "CMOs on demand gen strategy",
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => setName(suggestion)}
+                        className={cn(
+                          "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                          name === suggestion
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary"
+                        )}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
               </div>
               <SourceSelector value={source} onChange={setSource} />
             </div>
