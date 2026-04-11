@@ -263,6 +263,22 @@ export const SCHEDULE_OPTIONS = [
   { value: "manual", label: "Manual only" },
 ]
 
+// ---------- Suggestions ----------
+
+export interface SearchSuggestions {
+  name_suggestions: string[]
+  keyword_suggestions: string[]
+}
+
+export async function fetchSuggestions(q: string = ""): Promise<SearchSuggestions> {
+  try {
+    const res = await fetch(`${API}/suggestions?q=${encodeURIComponent(q)}`)
+    return await json<SearchSuggestions>(res)
+  } catch {
+    return { name_suggestions: [], keyword_suggestions: [] }
+  }
+}
+
 // ---------- Integrations ----------
 
 export interface IntegrationStatus {

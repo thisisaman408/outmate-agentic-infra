@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { SourceSelector, type MonitorSource } from "./source-selector"
 import { QueryBuilder, type BooleanQuery, type QueryFilters } from "./query-builder"
-import { fetchIntegrations, disconnectHubSpot, getHubSpotAuthUrl, type CreateSearchPayload, type IntegrationStatus } from "@/lib/social-listening"
+import { fetchIntegrations, fetchSuggestions, disconnectHubSpot, getHubSpotAuthUrl, type CreateSearchPayload, type IntegrationStatus, type SearchSuggestions } from "@/lib/social-listening"
 
 const STEPS = ["Source & Name", "Query Builder", "Frequency & Actions"]
 
@@ -28,10 +28,22 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
   const [step, setStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null)
+  const [suggestions, setSuggestions] = useState<SearchSuggestions>({ name_suggestions: [], keyword_suggestions: [] })
 
   useEffect(() => {
     fetchIntegrations().then(setIntegrations)
+    fetchSuggestions("").then(setSuggestions)
   }, [])
+
+  // Debounced suggestion fetch on name change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (name.trim().length >= 2) {
+        fetchSuggestions(name.trim()).then(setSuggestions)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [name])
 
   // Step 1 state
   const [name, setName] = useState("")
@@ -135,35 +147,30 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
                   className="mt-1.5"
                   autoFocus
                 />
-                <div className="mt-2">
-                  <p className="text-xs text-muted-foreground mb-1.5">Quick start — click to use:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      "CTOs discussing AI stack",
-                      "VPs evaluating outbound tools",
-                      "Founders posting about GTM",
-                      "Sales leaders hiring SDRs",
-                      "Product leaders on AI agents",
-                      "RevOps evaluating CRM alternatives",
-                      "Engineers building AI agents",
-                      "CMOs on demand gen strategy",
-                    ].map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => setName(suggestion)}
-                        className={cn(
-                          "px-2.5 py-1 text-xs rounded-md border transition-colors",
-                          name === suggestion
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary"
-                        )}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
+                {suggestions.name_suggestions.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      {name.trim() ? "Suggestions based on your input:" : "Popular search ideas:"}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {suggestions.name_suggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setName(suggestion)}
+                          className={cn(
+                            "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                            name === suggestion
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary"
+                          )}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
               <SourceSelector value={source} onChange={setSource} />
             </div>

@@ -177,6 +177,75 @@ class StatsResponse(BaseModel):
 
 
 # ============================================================================
+# Search Suggestions
+# ============================================================================
+
+
+ROLE_TEMPLATES = [
+    "CTOs", "VPs of Engineering", "Founders", "Sales leaders",
+    "Product managers", "CMOs", "RevOps leaders", "SDR managers",
+    "Growth leads", "CIOs", "Engineering managers", "DevRel leads",
+]
+
+TOPIC_TEMPLATES = [
+    "discussing AI stack", "evaluating outbound tools", "posting about GTM strategy",
+    "hiring for sales teams", "building AI agents", "switching CRM platforms",
+    "scaling outbound", "adopting signal-based selling", "automating workflows",
+    "complaining about tool fatigue", "sharing sales playbooks", "announcing funding",
+    "launching new products", "exploring AI automation", "debating cold email vs social",
+]
+
+
+@router.get("/suggestions")
+def get_search_suggestions(
+    q: str = Query("", max_length=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return smart search name + keyword suggestions based on user input."""
+    import random
+
+    q_lower = q.strip().lower()
+
+    # Filter roles and topics that match the partial input
+    if q_lower:
+        matching_roles = [r for r in ROLE_TEMPLATES if q_lower in r.lower() or any(w in r.lower() for w in q_lower.split())]
+        matching_topics = [t for t in TOPIC_TEMPLATES if q_lower in t.lower() or any(w in t.lower() for w in q_lower.split())]
+    else:
+        matching_roles = ROLE_TEMPLATES[:6]
+        matching_topics = TOPIC_TEMPLATES[:6]
+
+    # If no matches, show top suggestions
+    if not matching_roles:
+        matching_roles = random.sample(ROLE_TEMPLATES, min(4, len(ROLE_TEMPLATES)))
+    if not matching_topics:
+        matching_topics = random.sample(TOPIC_TEMPLATES, min(4, len(TOPIC_TEMPLATES)))
+
+    # Combine into full search name suggestions
+    suggestions = []
+    for role in matching_roles[:4]:
+        for topic in matching_topics[:3]:
+            suggestions.append(f"{role} {topic}")
+            if len(suggestions) >= 8:
+                break
+        if len(suggestions) >= 8:
+            break
+
+    # Also suggest keywords for the query builder
+    keyword_suggestions = []
+    if q_lower:
+        keyword_suggestions = [w for w in q_lower.split() if len(w) > 2]
+        keyword_suggestions.extend([t.split()[-1] for t in matching_topics[:5]])
+    else:
+        keyword_suggestions = ["AI agents", "GTM", "outbound", "automation", "sales tools", "CRM"]
+
+    return {
+        "name_suggestions": suggestions[:8],
+        "keyword_suggestions": list(dict.fromkeys(keyword_suggestions))[:10],
+    }
+
+
+# ============================================================================
 # Searches CRUD
 # ============================================================================
 
