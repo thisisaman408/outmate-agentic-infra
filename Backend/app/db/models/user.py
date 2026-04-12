@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -24,6 +24,14 @@ class User(Base):
     google_calendar_channel_id = Column(Text, nullable=True)
     google_calendar_resource_id = Column(Text, nullable=True)
     google_calendar_webhook_expiry = Column(DateTime(timezone=True), nullable=True)
+    # Onboarding
+    onboarding_completed = Column(Boolean, default=False)
+    onboarding_step = Column(Integer, default=1)
+    website_url = Column(String(500))
+    user_role = Column(String(100))
+    onboarding_data = Column(JSONB, default={}) # JSON for flexible extra data
+    icp_config = Column(JSONB, default={})  # Versioned ICP configuration
+    integrations = Column(JSONB, default={}) # Slack, HubSpot, Salesforce tokens & status
     # BYOK (Bring Your Own Key) for AI services
     anthropic_api_key = Column(Text, nullable=True)  # User's own Anthropic API key (encrypted in practice)
     use_byok = Column(Boolean, default=False)  # Flag to use BYOK instead of system credits

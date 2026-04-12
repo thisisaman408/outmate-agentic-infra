@@ -9,6 +9,8 @@ export interface User {
   credits: number
   plan?: "free" | "basic" | "pro" | "enterprise"
   is_email_verified?: boolean
+  onboarding_completed?: boolean
+  onboarding_step?: number
 }
 
 export interface AuthState {
@@ -137,6 +139,26 @@ export const authService = {
     return localStorage.getItem(AUTH_KEY)
   },
 
+  getMe: async (): Promise<User> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const response = await fetch(`${API_URL}/me`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    if (!response.ok) {
+      localStorage.removeItem(AUTH_KEY)
+      localStorage.removeItem(USER_KEY)
+      throw new Error("Session expired")
+    }
+
+    const data = await response.json()
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+    return data.user
+  },
+
   getAuthHeaders: () => {
     const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
     return {
@@ -145,8 +167,63 @@ export const authService = {
     }
   },
 
+  inviteDeveloper: async (email: string) => {
+    const response = await fetch("/api/v1/support/invite-dev", {
+      method: "POST",
+      headers: authService.getAuthHeaders(),
+      body: JSON.stringify({ email }),
+    })
+    return response.json()
+  },
+
+  sendSupportMessage: async (message: string) => {
+    const response = await fetch("/api/v1/support/message", {
+      method: "POST",
+      headers: authService.getAuthHeaders(),
+      body: JSON.stringify({ message }),
+    })
+    return response.json()
+  },
+
+  bookSupportCall: async (slot: string) => {
+    const response = await fetch("/api/v1/support/book-call", {
+      method: "POST",
+      headers: authService.getAuthHeaders(),
+      body: JSON.stringify({ slot }),
+    })
+    return response.json()
+  },
+
   resetPassword: async (_email: string): Promise<void> => {
     // TODO: implement password reset endpoint
     return Promise.resolve()
+  },
+
+  updateOnboarding: async (data: {
+    step?: number
+    completed?: boolean
+    website_url?: string
+    user_role?: string
+    onboarding_data?: string
+    icp_config?: Record<string, unknown>
+  }): Promise<{ success: boolean; user: User }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const response = await fetch(`${API_URL}/onboarding/update`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Failed to update onboarding")
+    }
+
+    const result = await response.json()
+    localStorage.setItem(USER_KEY, JSON.stringify(result.user))
+    return result
   },
 }

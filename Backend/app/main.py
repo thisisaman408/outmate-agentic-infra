@@ -62,6 +62,8 @@ from app.api.routes import dashboard
 from app.api.routes import events_routes
 from app.api.routes import database_finder
 from app.api.routes import outmate_agentic
+from app.api.routes import integrations
+from app.api.routes import support
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -328,6 +330,12 @@ logger.info("Events router registered")
 app.include_router(database_finder.router, prefix="/api/v1/database", tags=["database"], dependencies=auth_dependencies)
 logger.info("Database Finder router registered")
 
+app.include_router(integrations.router, dependencies=auth_dependencies)
+logger.info("Integrations router registered")
+
+app.include_router(support.router, dependencies=auth_dependencies)
+logger.info("Support router registered")
+
 # Outmate-agentic backed agents (Lead Discovery / Social Listening etc.)
 # Auth + tenant isolation are enforced INSIDE the route module via
 # get_current_user + hard user_id filters on every query, so we deliberately
@@ -352,6 +360,13 @@ async def startup_event():
 
         # Ensure columns added across releases exist (idempotent ALTER TABLE)
         migrations = [
+            ("onboarding_completed", "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE;"),
+            ("onboarding_step",      "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step INTEGER DEFAULT 1;"),
+            ("website_url",          "ALTER TABLE users ADD COLUMN IF NOT EXISTS website_url VARCHAR(500);"),
+            ("user_role",            "ALTER TABLE users ADD COLUMN IF NOT EXISTS user_role VARCHAR(100);"),
+            ("onboarding_data",      "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_data JSONB DEFAULT '{}';"),
+            ("icp_config",           "ALTER TABLE users ADD COLUMN IF NOT EXISTS icp_config JSONB DEFAULT '{}';"),
+            ("integrations",       "ALTER TABLE users ADD COLUMN IF NOT EXISTS integrations JSONB DEFAULT '{}';"),
             ("hashed_password",    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255);"),
             ("google_id",          "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);"),
             ("is_email_verified",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT FALSE;"),
@@ -361,27 +376,37 @@ async def startup_event():
             ("anthropic_api_key",  "ALTER TABLE users ADD COLUMN IF NOT EXISTS anthropic_api_key TEXT;"),
             ("use_byok",           "ALTER TABLE users ADD COLUMN IF NOT EXISTS use_byok BOOLEAN DEFAULT FALSE;"),
         ]
-        with engine.begin() as conn:
-            for col_name, ddl in migrations:
-                if col_name not in columns:
-                    conn.execute(text(ddl))
-                    logger.info(f"Added missing users.{col_name} column")
-
-        watcher_columns = {col["name"] for col in inspector.get_columns("watchers")} if inspector.has_table("watchers") else set()
-        watcher_migrations = [
-            ("matches",            "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"),
-            ("linkedin_url",       "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(512);"),
-            ("track_job_changes",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS track_job_changes BOOLEAN NOT NULL DEFAULT false;"),
-            ("last_known_company", "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_company VARCHAR(255);"),
-            ("last_known_title",   "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_title VARCHAR(255);"),
-            ("last_job_check_at",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_job_check_at TIMESTAMP WITH TIME ZONE;"),
-        ]
-        if inspector.has_table("watchers"):
-            with engine.begin() as conn:
-                for col_name, ddl in watcher_migrations:
-                    if col_name not in watcher_columns:
+        
+        for col_name, ddl in migrations:
+            if col_name not in columns:
+                try:
+                    with engine.begin() as conn:
+                        # Set a short timeout for migrations so we don't hang the app
+                        conn.execute(text("SET statement_timeout = 10000;")) # 10s
                         conn.execute(text(ddl))
-                        logger.info(f"Added missing watchers.{col_name} column")
+                        logger.info(f"✓ Added missing users.{col_name} column")
+                except Exception as e:
+                    logger.warning(f"⚠ Could not add users.{col_name}: {e}")
+
+        # Watchers table migrations
+        if inspector.has_table("watchers"):
+            watcher_columns = {col["name"] for col in inspector.get_columns("watchers")}
+            watcher_migrations = [
+                ("matches",            "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS matches JSON;"),
+                ("linkedin_url",       "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR(512);"),
+                ("track_job_changes",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS track_job_changes BOOLEAN NOT NULL DEFAULT false;"),
+                ("last_known_company", "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_company VARCHAR(255);"),
+                ("last_known_title",   "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_known_title VARCHAR(255);"),
+                ("last_job_check_at",  "ALTER TABLE watchers ADD COLUMN IF NOT EXISTS last_job_check_at TIMESTAMP WITH TIME ZONE;"),
+            ]
+            for col_name, ddl in watcher_migrations:
+                if col_name not in watcher_columns:
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text(ddl))
+                            logger.info(f"✓ Added missing watchers.{col_name} column")
+                    except Exception as e:
+                        logger.warning(f"⚠ Could not add watchers.{col_name}: {e}")
 
         # ── Visitor tracker v2 schema migrations (idempotent) ─────────────────
         # site_configs new columns

@@ -776,6 +776,108 @@ async def list_company_aliases(current_user: User = Depends(get_current_user)):
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 
+@router.get("/detail/{visitor_id}")
+async def get_visitor_detail(visitor_id: str, current_user: User = Depends(get_current_user)):
+    """Get a single visitor by ID, scoped to the current user's org."""
+    def _find():
+        db = SessionLocal()
+        try:
+            v = (
+                db.query(Visit)
+                .filter(Visit.id == visitor_id, Visit.org_id == current_user.id)
+                .first()
+            )
+            if not v:
+                return None
+            return _visit_to_dict(v)
+        finally:
+            db.close()
+
+    visitor = await _run_db(_find)
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+    return visitor
+
+
+@router.get("/first-success")
+async def get_first_success_visitor(current_user: User = Depends(get_current_user)):
+    """
+    Find the first corporate visitor for the user's pixel. 
+    Triggers an email on the first discovery.
+    If none found, returns a 'waiting' state.
+    """
+    def _find():
+        db = SessionLocal()
+        try:
+            # Look for identified companies with intent
+            v = (
+                db.query(Visit)
+                .filter(Visit.org_id == current_user.id)
+                .filter(Visit.matched == True)
+                .order_by(Visit.created_at.desc())
+                .first()
+            )
+            if not v:
+                return None
+            return _visit_to_dict(v)
+        finally:
+            db.close()
+
+    visitor = await _run_db(_find)
+    
+    if visitor:
+        # Check if we should send email (idempotent via Redis or User flag)
+        # For simplicity, we trigger it if onboarding is not yet finished
+        if not current_user.onboarding_completed:
+            from app.services.email import send_first_visitor_alert
+            # Check if alert already sent in last 24h
+            try:
+                rc = RedisManager.get_client()
+                sent_key = f"first_visitor_email_sent:{current_user.id}"
+                if rc and not await rc.get(sent_key):
+                    await send_first_visitor_alert(
+                        to_email=current_user.email,
+                        company_name=visitor.get("company", "A new company"),
+                        domain=visitor.get("domain", ""),
+                        score=int(visitor.get("intent_score", 0.5) * 100),
+                        visitor_name=visitor.get("full_name"),
+                        visitor_id=visitor.get("id"),
+                    )
+                    await rc.setex(sent_key, 86400, "1")
+            except Exception:
+                pass
+                
+        return {"status": "success", "visitor": visitor}
+
+    # Demo Fallback: If user has been in onboarding for > 15 mins, return a realistic demo card
+    # (Checking user created_at vs now)
+    now = datetime.now(timezone.utc)
+    user_age = (now - current_user.created_at.replace(tzinfo=timezone.utc)).total_seconds()
+    
+    if user_age > 900: # 15 minutes
+        return {
+            "status": "demo",
+            "visitor": {
+                "id": "demo-1",
+                "company": "DeepMind Technologies",
+                "domain": "deepmind.com",
+                "full_name": "Demis Hassabis",
+                "job_title": "CEO & Founder",
+                "email": "demis@deepmind.com",
+                "intent_score": 0.95,
+                "created_at": now.isoformat(),
+                "geo": {"city": "London", "country": "UK"},
+                "industry": "Artificial Intelligence",
+                "employee_count_range": "1001-5000",
+                "source_site": "deepmind.com",
+                "matched": True,
+                "is_demo": True
+            }
+        }
+
+    return {"status": "waiting"}
+
+
 @router.post("/company-aliases")
 async def create_company_alias(
     body: CompanyAliasRequest,

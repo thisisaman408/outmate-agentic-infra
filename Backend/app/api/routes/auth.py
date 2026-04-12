@@ -72,6 +72,23 @@ class ByokStatusResponse(BaseModel):
     has_key: bool
 
 
+class OnboardingUpdateRequest(BaseModel):
+    step: Optional[int] = None
+    completed: Optional[bool] = None
+    website_url: Optional[str] = None
+    user_role: Optional[str] = None
+    onboarding_data: Optional[str] = None
+    icp_config: Optional[dict] = None
+
+
+class ICPConfigRequest(BaseModel):
+    industries: Optional[list] = None
+    company_sizes: Optional[list] = None
+    geographies: Optional[list] = None
+    job_titles: Optional[list] = None
+    funding_stages: Optional[list] = None
+
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
@@ -110,7 +127,6 @@ def create_access_token(user: User) -> str:
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 
-
 def user_response(user: User) -> dict:
     return {
         "id": str(user.id),
@@ -120,6 +136,8 @@ def user_response(user: User) -> dict:
         "credits": user.credits_balance,
         "plan": user.subscription_tier,
         "is_email_verified": bool(user.is_email_verified),
+        "onboarding_completed": bool(user.onboarding_completed),
+        "onboarding_step": int(user.onboarding_step or 1),
     }
 
 
@@ -170,6 +188,11 @@ async def _verify_google_token(credential: str) -> dict:
 
 
 # ─── Routes ─────────────────────────────────────────────────────────────────
+@router.get("/me")
+async def get_me(user: User = Depends(get_current_user)):
+    """Verify the current user's token and return their profile."""
+    return {"user": user_response(user)}
+
 
 @router.post("/register")
 @limiter.limit(RateLimits.AUTH)
@@ -230,6 +253,10 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
     if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Returning users who never went through onboarding: auto-complete it
+    if not user.onboarding_completed and user.last_login_at:
+        user.onboarding_completed = True
+
     user.last_login_at = datetime.utcnow()
     try:
         db.commit()
@@ -288,6 +315,9 @@ async def google_auth(request: Request, body: GoogleAuthRequest, db: Session = D
             user.is_email_verified = True
         if not user.terms_accepted_at and body.terms_accepted:
             user.terms_accepted_at = datetime.utcnow()
+        # Returning users: auto-complete onboarding
+        if not user.onboarding_completed and user.last_login_at:
+            user.onboarding_completed = True
         user.last_login_at = datetime.utcnow()
         db.commit()
     else:
@@ -461,7 +491,7 @@ async def logout(
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly"
+GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events"
 
 
 @router.get("/google/auth-url")
@@ -561,6 +591,9 @@ async def google_oauth_callback(
                     user.is_email_verified = True
                 if not user.terms_accepted_at and terms_accepted:
                     user.terms_accepted_at = datetime.utcnow()
+                # Returning users: auto-complete onboarding
+                if not user.onboarding_completed and user.last_login_at:
+                    user.onboarding_completed = True
                 user.gmail_access_token = access_token
                 if refresh_token:
                     user.gmail_refresh_token = refresh_token
@@ -666,3 +699,83 @@ async def disable_byok(
     except Exception as e:
         logger.error(f"BYOK disable error: {e}")
         raise HTTPException(status_code=500, detail="Failed to disable BYOK")
+
+
+@router.post("/onboarding/update")
+async def update_onboarding(
+    body: OnboardingUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update user onboarding progress."""
+    try:
+        if body.step is not None:
+            user.onboarding_step = body.step
+        if body.completed is not None:
+            user.onboarding_completed = body.completed
+        if body.website_url is not None:
+            user.website_url = body.website_url
+        if body.user_role is not None:
+            user.user_role = body.user_role
+        if body.onboarding_data is not None:
+            user.onboarding_data = body.onboarding_data
+        if body.icp_config is not None:
+            now = datetime.utcnow().isoformat()
+            existing = user.icp_config or {}
+            version = existing.get("version", 0) + 1
+            user.icp_config = {
+                **body.icp_config,
+                "version": version,
+                "created_at": existing.get("created_at", now),
+                "updated_at": now,
+            }
+
+        db.commit()
+        db.refresh(user)
+        return {"success": True, "user": user_response(user)}
+    except Exception as e:
+        logger.error(f"Onboarding update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update onboarding progress")
+
+
+@router.get("/icp")
+async def get_icp_config(
+    user: User = Depends(get_current_user),
+):
+    """Return the user's current ICP configuration."""
+    return {"success": True, "icp_config": user.icp_config or {}}
+
+
+@router.post("/icp/update")
+async def update_icp_config(
+    body: ICPConfigRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save or update the user's ICP configuration."""
+    try:
+        now = datetime.utcnow().isoformat()
+        existing = user.icp_config or {}
+        version = existing.get("version", 0) + 1
+
+        user.icp_config = {
+            "industries": body.industries or [],
+            "company_sizes": body.company_sizes or [],
+            "geographies": body.geographies or [],
+            "job_titles": body.job_titles or [],
+            "funding_stages": body.funding_stages or [],
+            "version": version,
+            "created_at": existing.get("created_at", now),
+            "updated_at": now,
+        }
+
+        db.commit()
+        db.refresh(user)
+        return {
+            "success": True,
+            "version": version,
+            "icp_config": user.icp_config,
+        }
+    except Exception as e:
+        logger.error(f"ICP config update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update ICP configuration")

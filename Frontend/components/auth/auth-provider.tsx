@@ -14,12 +14,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         const checkAuth = async () => {
-            const user = authService.getCurrentUser()
-            if (user) {
+            try {
+                // First check if we have a token at all
+                const token = authService.getToken()
+                if (!token) {
+                    if (!pathname.startsWith('/auth')) {
+                        router.push('/auth/login')
+                    }
+                    setIsLoading(false)
+                    return
+                }
+
+                // Verify the token with the backend
+                const user = await authService.getMe()
                 setUser(user)
+                
                 // Link authenticated user to the tracking pixel
                 if (typeof window !== 'undefined' && (window as any).outmate) {
                     (window as any).outmate.identify(user.email);
+                }
+                
+                // Onboarding redirect logic
+                if (!user.onboarding_completed && !pathname.startsWith('/onboarding') && !pathname.startsWith('/auth')) {
+                    router.push('/onboarding')
+                }
+            } catch (err) {
+                console.error("Auth verification failed:", err)
+                if (!pathname.startsWith('/auth')) {
+                    router.push('/auth/login')
                 }
             }
             setIsLoading(false)

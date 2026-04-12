@@ -80,27 +80,16 @@ class ICPSignalScorer:
             return 50, ["scoring_error"]
 
     async def _get_user_icp_criteria(self, user_id: UUID) -> Optional[Dict[str, Any]]:
-        """Get user's ICP criteria from copilot_user_preferences (if exists)."""
+        """Get user's ICP criteria from User.icp_config."""
         try:
-            # Try to import and query copilot preferences
-            # This is optional - if copilot not set up yet, return None
-            from app.db.models.copilot_preferences import CopilotUserPreferences
+            from app.db.models.user import User
 
-            prefs = (
-                self.db.query(CopilotUserPreferences)
-                .filter_by(user_id=user_id)
-                .first()
-            )
-
-            if prefs:
-                return {
-                    # Add ICP fields as stored in preferences
-                    # For now, return a simple structure
-                    "exists": True,
-                }
+            user = self.db.query(User).filter_by(id=user_id).first()
+            if user and user.icp_config and user.icp_config.get("version"):
+                return user.icp_config
             return None
-        except Exception:
-            # Copilot model may not exist yet
+        except Exception as e:
+            logger.debug(f"Failed to load ICP criteria for user {user_id}: {e}")
             return None
 
     async def _score_company(
@@ -108,68 +97,125 @@ class ICPSignalScorer:
         company_data: Dict[str, Any],
         icp_criteria: Dict[str, Any],
     ) -> Tuple[int, List[str]]:
-        """Score company data (0-100)."""
-        score = 50  # Base score
+        """Score company data (0-100) against ICP criteria."""
+        score = 30  # Base score
         factors = []
 
         try:
-            # Industry match (bonus)
-            if "industry" in company_data:
-                score += 10
-                factors.append("has_industry")
+            # Industry match (20 pts)
+            icp_industries = [i.lower() for i in icp_criteria.get("industries", [])]
+            company_industry = (company_data.get("industry") or "").lower()
+            if icp_industries and company_industry:
+                if company_industry in icp_industries or any(
+                    ind in company_industry for ind in icp_industries
+                ):
+                    score += 20
+                    factors.append("industry_match")
 
-            # Employee count (hiring signal)
+            # Company size match (15 pts)
+            icp_sizes = icp_criteria.get("company_sizes", [])
+            employee_count = company_data.get("employee_count", 0)
+            if icp_sizes and employee_count:
+                size_bucket = self._employee_count_to_bucket(employee_count)
+                if size_bucket in icp_sizes:
+                    score += 15
+                    factors.append("company_size_match")
+
+            # Funding stage match (15 pts)
+            icp_funding = [f.lower() for f in icp_criteria.get("funding_stages", [])]
+            company_funding = (company_data.get("funding_stage") or "").lower()
+            if icp_funding and company_funding:
+                if company_funding in icp_funding or any(
+                    f in company_funding for f in icp_funding
+                ):
+                    score += 15
+                    factors.append("funding_stage_match")
+            elif icp_funding and company_data.get("funding_total", 0) > 0:
+                score += 5
+                factors.append("has_funding")
+
+            # Geography match (10 pts)
+            icp_geos = [g.lower() for g in icp_criteria.get("geographies", [])]
+            company_country = (company_data.get("country") or company_data.get("location", "")).lower()
+            if icp_geos and company_country:
+                if any(geo in company_country for geo in icp_geos):
+                    score += 10
+                    factors.append("geography_match")
+
+            # Bonus: hiring activity
             if company_data.get("employee_growth_6m", 0) > 0:
-                score += 15
+                score += 5
                 factors.append("hiring_activity")
 
-            # Revenue (buying power)
-            if company_data.get("revenue_exact", 0) > 10_000_000:
-                score += 10
-                factors.append("high_revenue")
-
-            # Technology stack (technical fit)
+            # Bonus: technology stack
             if company_data.get("technologies"):
                 score += 5
                 factors.append("has_technologies")
 
-            # Funding (growth signal)
-            funding = company_data.get("funding_total")
-            if funding and funding > 0:
-                score += 10
-                factors.append("has_funding")
-
             return min(100, score), factors
         except Exception as e:
             logger.debug(f"Failed to score company: {e}")
-            return 50, []
+            return 30, []
+
+    @staticmethod
+    def _employee_count_to_bucket(count: int) -> str:
+        """Convert employee count to ICP size bucket string."""
+        if count <= 10:
+            return "1-10"
+        elif count <= 50:
+            return "11-50"
+        elif count <= 200:
+            return "51-200"
+        elif count <= 500:
+            return "201-500"
+        elif count <= 1000:
+            return "501-1000"
+        elif count <= 5000:
+            return "1001-5000"
+        elif count <= 10000:
+            return "5001-10000"
+        else:
+            return "10000+"
 
     async def _score_prospect(
         self,
         prospect_data: Dict[str, Any],
         icp_criteria: Dict[str, Any],
     ) -> Tuple[int, List[str]]:
-        """Score prospect data (0-100)."""
-        score = 50  # Base score
+        """Score prospect data (0-100) against ICP criteria."""
+        score = 30  # Base score
         factors = []
 
         try:
-            # Seniority (decision-maker)
+            # Job title match (25 pts)
+            icp_titles = [t.lower() for t in icp_criteria.get("job_titles", [])]
+            prospect_title = (prospect_data.get("title") or "").lower()
+            if icp_titles and prospect_title:
+                if any(t in prospect_title for t in icp_titles):
+                    score += 25
+                    factors.append("title_match")
+                elif any(prospect_title in t for t in icp_titles):
+                    score += 15
+                    factors.append("partial_title_match")
+
+            # Geography match (15 pts)
+            icp_geos = [g.lower() for g in icp_criteria.get("geographies", [])]
+            prospect_location = (prospect_data.get("location") or prospect_data.get("country") or "").lower()
+            if icp_geos and prospect_location:
+                if any(geo in prospect_location for geo in icp_geos):
+                    score += 15
+                    factors.append("geography_match")
+
+            # Seniority bonus (10 pts)
             seniority = prospect_data.get("seniority")
             if seniority in ["C-Level", "VP", "Director"]:
-                score += 20
+                score += 10
                 factors.append("high_seniority")
             elif seniority in ["Manager"]:
-                score += 10
+                score += 5
                 factors.append("mid_level")
 
-            # Department (functional fit)
-            department = prospect_data.get("department")
-            if department in ["Sales", "Marketing", "Operations", "Executive"]:
-                score += 10
-                factors.append("sales_aligned_department")
-
-            # LinkedIn presence (engagement signal)
+            # LinkedIn presence (5 pts)
             if prospect_data.get("linkedin_url"):
                 score += 5
                 factors.append("has_linkedin")
@@ -177,7 +223,7 @@ class ICPSignalScorer:
             return min(100, score), factors
         except Exception as e:
             logger.debug(f"Failed to score prospect: {e}")
-            return 50, []
+            return 30, []
 
     def _get_signal_type_boost(self, signal_type: str) -> int:
         """Get score boost based on signal type (higher = more valuable)."""

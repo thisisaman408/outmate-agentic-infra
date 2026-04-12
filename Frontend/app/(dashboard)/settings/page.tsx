@@ -18,6 +18,8 @@ import {
 } from "@/lib/api/settings"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
+import { IntegrationsStep } from "@/components/onboarding/integrations-step"
+import { Zap } from "lucide-react"
 
 export default function SettingsPage() {
   const { toast } = useToast()
@@ -215,6 +217,10 @@ export default function SettingsPage() {
           <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="api">API Keys</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="integrations" className="gap-2">
+            <Zap className="h-4 w-4 text-orange-400" />
+            Integrations
+          </TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
@@ -438,6 +444,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Integrations Tab */}
+        <TabsContent value="integrations">
+          <IntegrationsStep onStatusChange={() => {}} />
         </TabsContent>
       </Tabs>
     </div>

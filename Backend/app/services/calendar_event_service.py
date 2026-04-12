@@ -81,6 +81,60 @@ class CalendarEventService:
                 external.append(att)
         return external
 
+    async def create_event(
+        self,
+        access_token: str,
+        summary: str,
+        start_iso: str,
+        end_iso: str,
+        attendees: List[str],
+        description: str = "",
+        timezone: str = "UTC",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a Google Calendar event with a Google Meet link.
+
+        Args:
+            access_token: Valid OAuth access token with calendar.events scope.
+            summary: Event title.
+            start_iso: ISO 8601 start datetime (e.g. "2026-04-14T10:00:00").
+            end_iso: ISO 8601 end datetime.
+            attendees: List of email addresses to invite.
+            description: Event description / body.
+            timezone: IANA timezone string.
+
+        Returns:
+            The created event dict (includes hangoutLink for Meet), or None on failure.
+        """
+        url = f"{CALENDAR_API_BASE}/calendars/primary/events"
+        body = {
+            "summary": summary,
+            "description": description,
+            "start": {"dateTime": start_iso, "timeZone": timezone},
+            "end": {"dateTime": end_iso, "timeZone": timezone},
+            "attendees": [{"email": e} for e in attendees],
+            "conferenceData": {
+                "createRequest": {
+                    "requestId": f"outmate-{start_iso[:10]}",
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                }
+            },
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                params={"conferenceDataVersion": "1", "sendUpdates": "all"},
+                json=body,
+            )
+            if resp.status_code in (200, 201):
+                return resp.json()
+            logger.error("create_event failed: %s %s", resp.status_code, resp.text)
+        return None
+
     def get_meeting_title(self, event: Dict[str, Any]) -> str:
         """Return the event summary/title."""
         return event.get("summary", "Untitled Meeting")
