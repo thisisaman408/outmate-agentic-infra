@@ -683,37 +683,8 @@ export default function OnboardingPage() {
           })}
         </div>
 
-        <div className="mt-auto pt-4 border-t border-indigo-900/40 space-y-1">
-          <button 
-            onClick={() => setActiveModal('trouble')}
-            className="w-full flex items-center gap-3 p-2 rounded-md text-[11px] font-medium text-indigo-300 hover:bg-white/5 transition-colors"
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-            Troubleshoot Installation
-          </button>
-          <button 
-            onClick={() => setActiveModal('dev')}
-            className="w-full flex items-center gap-3 p-2 rounded-md text-[11px] font-medium text-indigo-300 hover:bg-white/5 transition-colors"
-          >
-            <MailIcon className="h-3.5 w-3.5" />
-            Invite a Developer
-          </button>
-          <button 
-            onClick={() => setActiveModal('chat')}
-            className="w-full flex items-center gap-3 p-2 rounded-md text-[11px] font-medium text-indigo-300 hover:bg-white/5 transition-colors"
-          >
-            <MessageCircle className="h-3.5 w-3.5" />
-            Get Support via Chat
-          </button>
-          <button 
-            onClick={() => setActiveModal('call')}
-            className="w-full flex items-center gap-3 p-2 rounded-md text-[11px] font-medium text-indigo-300 hover:bg-white/5 transition-colors"
-          >
-            <Calendar className="h-3.5 w-3.5" />
-            Book a Call
-          </button>
-          
-          <div className="pt-4 flex items-center gap-2">
+        <div className="mt-auto pt-4 border-t border-indigo-900/40">
+          <div className="flex items-center gap-2">
             <img src="/image.png" alt="Outmate" className="h-7 rounded" />
           </div>
         </div>
