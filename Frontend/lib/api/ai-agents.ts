@@ -20,6 +20,7 @@ export interface AgenticSearchResult {
   perplexityReason?: string
   perplexityDetails?: string
   perplexityReasoning?: any
+  contacts?: { name?: string; title?: string; role?: string; email?: string }[]
 }
 
 export interface LookalikeResult {
@@ -39,7 +40,7 @@ export interface LookalikeResult {
 export interface ResearchResult {
   companyName: string
   summary: string
-  marketPosition: string
+  marketPosition: string | { positioning?: string; industry?: string; geographicPresence?: string }
   keyInsights: string[]
   opportunities: string[]
   risks: string[]
