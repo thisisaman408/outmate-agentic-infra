@@ -32,6 +32,8 @@ class User(Base):
     onboarding_data = Column(JSONB, default={}) # JSON for flexible extra data
     icp_config = Column(JSONB, default={})  # Versioned ICP configuration
     integrations = Column(JSONB, default={}) # Slack, HubSpot, Salesforce tokens & status
+    # HubSpot tokens stored in user_integrations table (not here)
+    # to avoid Supabase ALTER TABLE timeout issues.
     # BYOK (Bring Your Own Key) for AI services
     anthropic_api_key = Column(Text, nullable=True)  # User's own Anthropic API key (encrypted in practice)
     use_byok = Column(Boolean, default=False)  # Flag to use BYOK instead of system credits

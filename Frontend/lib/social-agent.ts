@@ -5,8 +5,8 @@
 // converts that Markdown into structured Lead objects so the UI can render
 // rich cards instead of a wall of text.
 
-export const SOCIAL_AGENT_FLOW_ID = "6999aee9-76ed-4683-92b2-5eb6cd13c1d9"
-export const SOCIAL_AGENT_NODE_ID = "LeadDiscoveryOutreachAgent-99gLF"
+export const SOCIAL_AGENT_FLOW_ID = "3539ab22-a44b-4550-ab21-56cfe2a93a97"
+export const SOCIAL_AGENT_NODE_ID = "Agent-0vMrI"
 
 export type MessageType =
   | "Connection Request (300 chars)"
