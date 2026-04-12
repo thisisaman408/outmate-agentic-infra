@@ -143,7 +143,7 @@ export const getRedisClient = (): Redis => {
     redisClient.on('close', () => {
       console.warn('Redis client disconnected')
     })
-    redisClient.on('reconnecting', (delay) => {
+    redisClient.on('reconnecting', (delay: number) => {
       console.log(`Redis client reconnecting in ${delay}ms`)
     })
   }
