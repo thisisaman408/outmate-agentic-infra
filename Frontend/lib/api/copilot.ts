@@ -460,10 +460,7 @@ export const copilotApi = {
     const authHeaders = authService.getAuthHeaders()
     const response = await fetch(`${BACKEND_BASE}/api/copilot/orchestrate`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
+      headers: authHeaders,
       body: JSON.stringify({ prospect_id: prospectId, task, context_overrides: contextOverrides ?? null }),
       signal,
     })
