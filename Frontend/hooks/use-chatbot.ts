@@ -86,7 +86,7 @@ function stripJSONWrapper(raw: string): string {
     .replace(/\\r/g, "")
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/copilot/ws`
 
 function getAuthHeaders(): Record<string, string> {
   return authService.getAuthHeaders()
