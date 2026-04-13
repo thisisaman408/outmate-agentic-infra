@@ -32,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   const pixelKey = process.env.NEXT_PUBLIC_PIXEL_KEY
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://dev.outmate.ai"
 
   return (
     <html lang="en" className="dark" suppressHydrationWarning>

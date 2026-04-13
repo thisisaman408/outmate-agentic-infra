@@ -120,7 +120,7 @@ export default function KeywordSearchPage() {
       if (cf.author_title) advFilters.push({ filter_type: 'AUTHOR_TITLE', type: 'in', value: String(cf.author_title).split(',').map(s => s.trim()) })
       if (advFilters.length > 0) params.append('filters', JSON.stringify(advFilters))
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const body: Record<string, unknown> = {
         keyword: cf.keyword,
         exact_keyword_match: Boolean(cf.exact_match ?? false),
@@ -230,7 +230,7 @@ export default function KeywordSearchPage() {
         requestBody.filters = filters
       }
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/leads/linkedin-post-keyword`, {
         method: 'POST',
         headers: {

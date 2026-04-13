@@ -82,7 +82,7 @@ type ChatSession = {
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
 const CHAT_STORAGE_USER_KEY = "nlp_enrichment_user_id"
 const CAMPAIGN_STATE_KEY = "nlp_enrichment_campaign_state_v2"
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE_URL = ""
 
 const CREDIT_LABELS: Record<string, string> = {
   explorium_searches: "Explorium searches",
@@ -342,7 +342,7 @@ export default function DatabaseFinderPage() {
 
   // Check Social connection status on mount
   useEffect(() => {
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const API = ""
     // Check Social (Messaging provider) status
     fetch(`${API}/api/v1/campaigns/linkedin/status`).then(r => r.json()).then(data => {
       if (data.connected) setSocialConnected(true)
@@ -401,7 +401,7 @@ export default function DatabaseFinderPage() {
     setSendingRecipients(prev => ({ ...prev, [recipientIdx]: "email" }))
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const res = await fetch(`${API}/api/v1/campaigns/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -426,7 +426,7 @@ export default function DatabaseFinderPage() {
     setSendingRecipients(prev => ({ ...prev, [recipientIdx]: "Social" }))
     setSendErrors(prev => { const n = { ...prev }; delete n[recipientIdx]; return n })
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
     const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -897,7 +897,7 @@ export default function DatabaseFinderPage() {
   }
 
   const buildExamples = (query: string) => {
-    const endpoint = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/explorium/search`
+    const endpoint = `""/api/explorium/search`
     const payload = { query }
     return {
       curl: `curl -X POST "${endpoint}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(payload)}'`,
@@ -1038,7 +1038,7 @@ export default function DatabaseFinderPage() {
     setIsSearching(true)
     try {
       const targetLimit = Math.min(Math.max(results.length, 25), 100)
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/leads/search/companies`, {
+      const response = await fetch(`""/api/v1/leads/search/companies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1465,7 +1465,7 @@ export default function DatabaseFinderPage() {
     overrideFilters?: Record<string, any>,
     overrideIntent?: "business" | "prospect"
   ) => {
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const API = ""
     const trimmedQuery = naturalLanguageQuery.trim()
     if (!trimmedQuery) return
 
@@ -1631,7 +1631,7 @@ export default function DatabaseFinderPage() {
       console.log("Intent:", intent)
       console.log("Query:", trimmedQuery)
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const searchIntent = intent === "prospect" ? "prospect" : "business"
       const endpoint = searchIntent === "prospect"
         ? `${API}/api/v1/prospects/search`
@@ -2068,7 +2068,7 @@ export default function DatabaseFinderPage() {
   }
 
   const handleAgentChat = async () => {
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const API = ""
     const trimmedQuery = naturalLanguageQuery.trim()
     if (!trimmedQuery) return
 
@@ -2454,7 +2454,7 @@ export default function DatabaseFinderPage() {
 
       console.log("Sending for signal detection:", JSON.stringify(dataToSend, null, 2))
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
+      const response = await fetch(`""/api/v1/signals/detect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2572,7 +2572,7 @@ export default function DatabaseFinderPage() {
         }
 
         try {
-          const signalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/signals/detect`, {
+          const signalResponse = await fetch(`""/api/v1/signals/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(signalPayload),
@@ -2592,7 +2592,7 @@ export default function DatabaseFinderPage() {
 
       setClarification("Generating personalized campaign draft based on signals...")
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/campaigns/generate-draft`, {
+      const response = await fetch(`""/api/v1/campaigns/generate-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

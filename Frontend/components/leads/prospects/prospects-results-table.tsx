@@ -234,7 +234,7 @@ export function ProspectsResultsTable({
         let fieldValues: string[] = []
         try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/prospects/reveal-contact`, {
+            const response = await fetch(`""/api/v1/prospects/reveal-contact`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
                 body: JSON.stringify({ linkedin_url: linkedinUrl }),
@@ -253,7 +253,7 @@ export function ProspectsResultsTable({
             if (linkedinUrl) {
                 try {
                     const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
-                    const crustRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/crustdata/person/enrich`, {
+                    const crustRes = await fetch(`""/api/v1/crustdata/person/enrich`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
                         body: JSON.stringify({ linkedin_profile_url: linkedinUrl }),
@@ -289,7 +289,7 @@ export function ProspectsResultsTable({
             const employer = profile.current_employers?.[0]
             const companyName = employer?.name || ""
             const companyDomain = employer?.company_website_domain || ""
-            const bcRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/bettercontact/enrich-prospect`, {
+            const bcRes = await fetch(`""/api/v1/bettercontact/enrich-prospect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ first_name: firstName, last_name: lastName, company_name: companyName, company_domain: companyDomain, linkedin_url: linkedinUrl, field }),

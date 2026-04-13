@@ -1338,7 +1338,7 @@ export class ClaudeIntegration {
     systemPrompt: string,
     assistantMsgId: string,
   ): Promise<{ text: string; toolCalls: BackendToolCall[] }> {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const API_BASE = ""
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
     let attempt = 0
@@ -1424,7 +1424,7 @@ export class ClaudeIntegration {
     messages: ClaudeMessage[],
     systemPrompt: string,
   ): Promise<{ text: string; toolCalls: BackendToolCall[] }> {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const API_BASE = ""
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
     const response = await fetch(`${API_BASE}/api/copilot/chat-with-tools`, {

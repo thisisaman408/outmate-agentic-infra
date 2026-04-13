@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://dev.outmate.ai'
     const url = `${backendUrl}/api/v1/explorium/funding`
 
     const authHeader = request.headers.get('authorization') || ''

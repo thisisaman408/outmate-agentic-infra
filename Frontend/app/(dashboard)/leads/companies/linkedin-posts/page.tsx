@@ -104,7 +104,7 @@ export default function LinkedInPostsPage() {
       params.append('limit', String(cf.limit || '5'))
       params.append('post_types', String(cf.post_types || 'repost, original'))
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/linkedin_posts?${params.toString()}`)
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
@@ -157,7 +157,7 @@ export default function LinkedInPostsPage() {
       if (fields.includes('reactors')) params.append('max_reactors', maxReactors)
       if (fields.includes('comments')) params.append('max_comments', maxComments)
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/linkedin_posts?${params.toString()}`)
       
       if (!response.ok) {

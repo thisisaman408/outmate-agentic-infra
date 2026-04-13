@@ -35,7 +35,7 @@ export function NlpSearchBar({ intent, onFiltersExtracted, placeholder }: NlpSea
     const trimmed = query.trim()
     if (!trimmed) return
 
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const API = ""
     setIsParsing(true)
     setError("")
     setRedirect(null)

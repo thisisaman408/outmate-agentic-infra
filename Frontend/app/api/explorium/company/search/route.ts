@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://dev.outmate.ai'
 
     console.log('Proxying to backend:', `${backendUrl}/api/v1/explorium/company/search`)
     console.log('Request body:', body)

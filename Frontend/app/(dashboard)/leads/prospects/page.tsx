@@ -1,902 +1,669 @@
 "use client"
 
-import { useState, useEffect, useRef, Suspense } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useState, useMemo, useEffect } from "react"
+import {
+  Search,
+  Plus,
+  Lock,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Bot,
+  Bookmark,
+  Star,
+  Play,
+  Settings,
+  Mic,
+  Clock,
+  ArrowRight,
+  SlidersHorizontal,
+  UserCircle,
+  Building2,
+  Mail,
+  Linkedin,
+  MapPin,
+  Briefcase,
+  Sparkles,
+  Download,
+} from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { UserCircle, Download, Plus, Loader2, AlertCircle, AlertTriangle, Sparkles } from "lucide-react"
-import { CsvImportButton } from "@/components/shared/csv-import-button"
-import { FilterSidebar } from "@/components/leads/prospects/filter-sidebar"
-import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
-import { searchProspects, ProspectProfile, ProspectSearchFilters } from "@/lib/services/prospectService"
-import { useToast } from "@/hooks/use-toast"
-import { saveSearchToHistory, getSearchHistoryItem } from "@/lib/stores/searchHistoryStore"
-import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
-import { enrichProspect, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
-import { Zap } from "lucide-react"
-import { normalizeCsvRecord } from "@/lib/utils/csv"
-import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
-import { useAgentHighlight } from "@/hooks/use-agent-highlight"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { searchProspects, type ProspectProfile, type ProspectSearchFilters } from "@/lib/services/prospectService"
+import { toast } from "sonner"
+import { Separator } from "@/components/ui/separator"
 
-// IMPORTANT: Credit protection - limit results during testing
-const MAX_RESULTS_LIMIT = 90 // Maximum total results to prevent credit wastage
-const INITIAL_LIMIT = 3 // Results per search
-const LOAD_MORE_LIMIT = 3 // Results per "Load More" click
+/* ─── types ─── */
 
-function ProspectsPageContent() {
-    const { toast } = useToast()
-    const router = useRouter()
-    const searchParams = useSearchParams()
-    const [profiles, setProfiles] = useState<ProspectProfile[]>([])
-    const [isSearching, setIsSearching] = useState(false)
-    const [isLoadingMore, setIsLoadingMore] = useState(false)
-    const [hasSearched, setHasSearched] = useState(false)
-    const [totalCount, setTotalCount] = useState(0)
-    const [nextCursor, setNextCursor] = useState<string | null>(null)
-    const [currentFilters, setCurrentFilters] = useState<ProspectSearchFilters>({})
-    const [filterOperators, setFilterOperators] = useState<Record<string, 'in' | 'not_in'>>({
-        seniority_level: 'in',  // Default to include
-    })
-  const [error, setError] = useState<string | null>(null)
-  const [copilotMappedFilters, setCopilotMappedFilters] = useState<Record<string, any> | null>(null)
+interface FilterDef {
+  label: string
+  locked?: boolean
+  tier?: "Starter" | "Growth" | "Scale"
+  signalRow?: boolean
+  chips?: string[]
+  expanded?: boolean
+  options?: string[]
+  category?: string
+  advancedOptions?: { label: string; description: string }[]
+}
 
-  // ── Copilot automation agent bridge ──────────────────────────────────────
-  // Watch for filter injections from the automation agent and run the search
-  const copilotFilters = useCoPilotAgentStore(s => s.appliedFilters?.['prospects'])
-  const isFilterHighlighted = useAgentHighlight('prospects-filters-panel')
-  const lastCopilotKey = useRef<string>('')
+/* ─── filter data ─── */
 
-  useEffect(() => {
-    if (!copilotFilters || Object.keys(copilotFilters).length === 0) return
-    const key = JSON.stringify(copilotFilters)
-    if (key === lastCopilotKey.current) return
-    lastCopilotKey.current = key
+const unlockedFilters: FilterDef[] = [
+  /* ── Identity ── */
+  {
+    label: "Current title",
+    category: "Identity",
+    options: [
+      "VP Sales",
+      "Head of Growth",
+      "CRO",
+      "Director of Sales",
+      "Account Executive",
+      "SDR Manager",
+      "CMO",
+      "Head of Marketing",
+      "RevOps Lead",
+      "BDR Manager",
+    ],
+    advancedOptions: [
+      { label: "Include similar titles", description: "Match related job titles automatically" },
+      { label: "Exclude past titles", description: "Don't match on previous positions" },
+    ],
+  },
+  {
+    label: "Seniority level",
+    category: "Identity",
+    options: ["C-suite", "VP", "Director", "Senior IC", "Manager", "IC", "Founder"],
+    advancedOptions: [{ label: "Include one level up/down", description: "Broaden to adjacent seniority" }],
+  },
+  {
+    label: "Function / department",
+    category: "Identity",
+    options: ["Sales", "Marketing", "Engineering", "Product", "Operations", "Finance", "Customer Success", "Design"],
+  },
 
-    // Map copilot store keys → prospects filter sidebar IDs
-    const mapped: Record<string, any> = {}
-    const toArray = (v: any) => Array.isArray(v) ? v : [v]
+  /* ── Location ── */
+  {
+    label: "Location",
+    category: "Location",
+    options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "New York", "San Francisco"],
+    advancedOptions: [{ label: "Include remote", description: "Include remote workers based in region" }],
+  },
+]
 
-    // Current title (Claude may use job_title or current_title)
-    if (copilotFilters.current_title) mapped.current_title = toArray(copilotFilters.current_title)
-    if (copilotFilters.job_title && !mapped.current_title) mapped.current_title = toArray(copilotFilters.job_title)
+const signalFilters: FilterDef[] = [
+  { label: "Signals", signalRow: true, expanded: true, chips: ["Job change", "Promotion", "New hire"] },
+  { label: "Job change signal", signalRow: true },
+  { label: "Promotion signal", signalRow: true },
+]
 
-    // Past title
-    if (copilotFilters.past_title) mapped.past_title = toArray(copilotFilters.past_title)
+const lockedFilters: FilterDef[] = [
+  { label: "Buying intent", locked: true, tier: "Growth" },
+  { label: "Website visitors", locked: true, tier: "Growth" },
+  { label: "ICP fit score", locked: true, tier: "Growth" },
+  { label: "Composite GTM score", locked: true, tier: "Scale" },
+  { label: "Territories", locked: true, tier: "Scale" },
+]
 
-    // Function / Department — handleApplyFilters reads filters.function → API param "functions"
-    if (copilotFilters.functions) mapped.function = toArray(copilotFilters.functions)
-    if (copilotFilters.department && !mapped.function) mapped.function = toArray(copilotFilters.department)
+/* ─── helpers ─── */
 
-    // Seniority level (Claude may use seniority or seniority_level)
-    if (copilotFilters.seniority_level) mapped.seniority_level = toArray(copilotFilters.seniority_level)
-    if (copilotFilters.seniority && !mapped.seniority_level) mapped.seniority_level = toArray(copilotFilters.seniority)
+const tierPill = (tier: "Starter" | "Growth" | "Scale") => {
+  const cls =
+    tier === "Starter" ? "bg-amber-500/20 text-amber-600" : tier === "Growth" ? "bg-primary/20 text-primary" : "bg-red-500/20 text-red-600"
+  return <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider", cls)}>{tier}</span>
+}
 
-    // Seniority operator (include vs exclude)
-    const rawOp = copilotFilters.seniority_operator || copilotFilters.seniority_level_operator
-    if (rawOp) {
-      const op = String(rawOp).toLowerCase().includes('not') || String(rawOp) === 'exclude' ? 'not_in' : 'in'
-      setFilterOperators(prev => ({ ...prev, seniority_level: op as 'in' | 'not_in' }))
-    }
+const scoreBar = (score: number) => (
+  <div className="flex items-center gap-1.5">
+    <div className="w-[38px] h-[4px] rounded-full bg-muted overflow-hidden">
+      <div className="h-full rounded-full bg-primary" style={{ width: `${score}%` }} />
+    </div>
+    <span className="text-[10px] font-bold text-foreground">{score}</span>
+  </div>
+)
 
-    // Location
-    if (copilotFilters.location) mapped.location = toArray(copilotFilters.location)
+const intentDots = (n: number) => (
+  <div className="flex items-center gap-[3px]">
+    {[1, 2, 3, 4, 5].map((i) => (
+      <div key={i} className={cn("w-[6px] h-[6px] rounded-full", i <= n ? "bg-primary" : "bg-muted")} />
+    ))}
+  </div>
+)
 
-    // Name filters
-    if (copilotFilters.first_name) mapped.first_name = String(copilotFilters.first_name)
-    if (copilotFilters.last_name) mapped.last_name = String(copilotFilters.last_name)
+/* ─── Filter Panel ─── */
 
-    // Profile language
-    if (copilotFilters.profile_languages) mapped.profile_languages = toArray(copilotFilters.profile_languages)
-    if (copilotFilters.languages && !mapped.profile_languages) mapped.profile_languages = toArray(copilotFilters.languages)
+function UnlockedFilterPanel({
+  filter,
+  isExpanded,
+  chips,
+  onToggle,
+  onAddChip,
+  onRemoveChip,
+}: {
+  filter: FilterDef
+  isExpanded: boolean
+  chips: string[]
+  onToggle: () => void
+  onAddChip: (val: string) => void
+  onRemoveChip: (chip: string) => void
+}) {
+  const [search, setSearch] = useState("")
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const hasChips = chips.length > 0
+  const options = filter.options || []
+  const advOpts = filter.advancedOptions || []
 
-    // Industry
-    if (copilotFilters.industry) mapped.industry = toArray(copilotFilters.industry)
+  const filtered = useMemo(() => {
+    const available = options.filter((o) => !chips.includes(o))
+    if (!search.trim()) return available
+    return available.filter((o) => o.toLowerCase().includes(search.toLowerCase()))
+  }, [options, chips, search])
 
-    // Company name
-    if (copilotFilters.company) mapped.company = String(copilotFilters.company)
+  const addOption = (val: string) => {
+    if (!chips.includes(val)) onAddChip(val)
+    setSearch("")
+  }
 
-    // Employee size (Claude may use employees or company_size)
-    if (copilotFilters.employees) mapped.employees = toArray(copilotFilters.employees)
-    if (copilotFilters.company_size && !mapped.employees) mapped.employees = toArray(copilotFilters.company_size)
+  return (
+    <div className="border-b border-border/40 last:border-0">
+      <button
+        onClick={onToggle}
+        className={cn(
+          "w-full flex items-center gap-3 px-4 h-11 text-left transition-all hover:bg-muted/30",
+          hasChips ? "text-foreground" : "text-muted-foreground"
+        )}
+      >
+        <span className="flex-1 text-[12px] font-bold tracking-tight">{filter.label}</span>
+        {hasChips && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{chips.length}</span>}
+        {isExpanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-foreground/70" strokeWidth={2.5} />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-foreground/70" strokeWidth={2.5} />
+        )}
+      </button>
+      {isExpanded && (
+        <div className="px-4 pb-4 pt-1.5 bg-muted/20">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-background border border-border mb-3 focus-within:border-primary/50 transition-all">
+            <Search className="w-3.5 h-3.5 text-muted-foreground/50" strokeWidth={2.5} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={`Quick search...`}
+              className="flex-1 bg-transparent text-[11px] font-bold text-foreground placeholder:text-muted-foreground/40 outline-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && search.trim()) {
+                  addOption(search.trim())
+                }
+              }}
+            />
+          </div>
 
-    // Keyword
-    if (copilotFilters.keyword) mapped.keyword = String(copilotFilters.keyword)
-    if (copilotFilters.keywords && !mapped.keyword) mapped.keyword = String(copilotFilters.keywords)
+          {hasChips && (
+            <div className="mb-3">
+              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Active</div>
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((c) => (
+                  <span
+                    key={c}
+                    className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20"
+                  >
+                    {c}
+                    <button onClick={() => JSON.stringify(onRemoveChip(c))} className="opacity-60 hover:opacity-100">
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
-    if (Object.keys(mapped).length === 0) return
-    setCopilotMappedFilters(mapped)
-    handleApplyFilters(mapped)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [copilotFilters])
-  // ─────────────────────────────────────────────────────────────────────────
-  const [isImporting, setIsImporting] = useState(false)
+          {filtered.length > 0 && (
+            <div className="max-h-[160px] overflow-y-auto no-scrollbar space-y-0.5">
+              {filtered.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => addOption(opt)}
+                  className="w-full flex items-center gap-2.5 px-2 py-2 text-left text-[11px] font-bold text-foreground/70 rounded-lg hover:bg-card hover:text-primary transition-all group"
+                >
+                  <div className="w-4 h-4 rounded border border-border group-hover:border-primary/30 flex items-center justify-center shrink-0">
+                    <Plus className="w-2.5 h-2.5 opacity-30 group-hover:opacity-100" />
+                  </div>
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
 
-    // Enrichment state - field-specific like companies
-    const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
-    const [enrichedData, setEnrichedData] = useState<Record<string, { email?: ProspectEnrichmentResult, phone?: ProspectEnrichmentResult }>>({})
-    const [isBulkEnriching, setIsBulkEnriching] = useState(false)
+          {advOpts.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-border/50">
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-primary transition-colors w-full"
+              >
+                <SlidersHorizontal className="w-3 h-3" strokeWidth={2.5} />
+                <span>Advanced</span>
+                {showAdvanced ? (
+                  <ChevronUp className="w-3 h-3 ml-auto opacity-40" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 ml-auto opacity-40" />
+                )}
+              </button>
+              {showAdvanced && (
+                <div className="mt-3 space-y-2">
+                  {advOpts.map((ao) => (
+                    <label
+                      key={ao.label}
+                      className="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-card cursor-pointer transition-all border border-transparent hover:border-border/50"
+                    >
+                      <input type="checkbox" className="mt-0.5 w-3.5 h-3.5 rounded border-muted accent-primary" />
+                      <div>
+                        <div className="text-[11px] font-black text-foreground/80">{ao.label}</div>
+                        <div className="text-[9px] text-muted-foreground font-bold mt-0.5 leading-relaxed">{ao.description}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
-    // Export functionality
-  const handleExport = async () => {
-    if (profiles.length === 0) {
-      toast({
-        title: "No Data to Export",
-        description: "Please search for prospects first before exporting.",
-        variant: "destructive"
-      })
-            return
-        }
+/* ─── Main Component ─── */
 
-        try {
-            // Create CSV content with proper typing
-            const headers = [
-                'Name', 'First Name', 'Last Name', 'Region', 'Headline', 
-                'Summary', 'Skills', 'Profile URL', 'Emails', 'Connections'
-            ]
-            
-            const csvRows = profiles.map((profile: ProspectProfile) => [
-                profile.name || '',
-                profile.first_name || '',
-                profile.last_name || '',
-                profile.region || '',
-                profile.headline || '',
-                profile.summary || '',
-                (profile.skills || []).join('; '),
-                profile.linkedin_profile_url || '',
-                (profile.emails || []).join('; '),
-                profile.num_of_connections?.toString() || ''
-            ])
-            
-            const csvContent = [
-                headers.join(','),
-                ...csvRows.map(row => row.map(cell => `"${cell}"`).join(','))
-            ].join('\n')
+export default function PeoplePage() {
+  const [view, setView] = useState<"nlp" | "results">("nlp")
+  const [nlpQuery, setNlpQuery] = useState("")
+  const [activeTab, setActiveTab] = useState<"total" | "new" | "saved">("new")
+  const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({
+    "Current title": true,
+    "Seniority level": true,
+  })
+  const [filterChips, setFilterChips] = useState<Record<string, string[]>>({
+    "Current title": ["VP Sales", "Head of Growth"],
+    "Seniority level": ["VP", "C-suite"],
+  })
+  const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({})
 
-            // Create and download CSV file
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-            const url = URL.createObjectURL(blob)
-            const link = document.createElement('a')
-            link.href = url
-            link.download = `prospects_${new Date().toISOString().split('T')[0]}.csv`
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-            URL.revokeObjectURL(url)
+  // Real Data State
+  const [prospects, setProspects] = useState<ProspectProfile[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [isLoading, setIsLoading] = useState(false)
 
-            toast({
-                title: "Export Successful",
-                description: `Exported ${profiles.length} prospects to CSV file.`,
-            })
-        } catch (error) {
-            console.error('Export error:', error)
-            toast({
-                title: "Export Failed",
-                description: "Failed to export prospects. Please try again.",
-                variant: "destructive"
-            })
+  const toggleFilter = (label: string) => setExpandedFilters((p) => ({ ...p, [label]: !p[label] }))
+  const removeChip = (filter: string, chip: string) =>
+    setFilterChips((p) => ({ ...p, [filter]: (p[filter] || []).filter((c) => c !== chip) }))
+  const toggleRow = (id: string) => setSelectedRows((p) => ({ ...p, [id]: !p[id] }))
+  const selectedCount = Object.values(selectedRows).filter(Boolean).length
+  const activeFilterCount = Object.values(filterChips).filter((v) => v.length > 0).length
+
+  const handleSearch = async (query?: string) => {
+    setIsLoading(true)
+    setView("results")
+    try {
+      const filters: ProspectSearchFilters = {
+        keyword: query || nlpQuery || undefined,
+        current_title: filterChips["Current title"],
+        seniority_level: filterChips["Seniority level"],
+        limit: 50,
+      }
+      const res = await searchProspects(filters)
+      setProspects(res.profiles)
+      setTotalCount(res.total_count)
+    } catch (err) {
+      toast.error("Failed to fetch prospects")
+    } finally {
+      setIsLoading(false)
     }
   }
 
-    const handleProspectImport = async (records: Record<string, string>[]) => {
-        if (!records.length) {
-            toast({
-                title: "Empty file",
-                description: "CSV/Excel must include at least one row with filter columns.",
-                variant: "destructive"
-            })
-            return
-        }
+  const exampleChips = ["VP Sales at Series A SaaS", "CRO in recently funded fintech", "Founders at AI startups (NY)", "RevOps leads using HubSpot"]
 
-        // --- Detect if file contains actual prospect data (not filters) ---
-        const headers = Object.keys(records[0]).map(h => h.toLowerCase().trim())
-        const prospectDataHeaders = ["email", "emails", "linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url", "headline", "summary", "skills", "twitter", "twitter_handle", "phone", "connections", "num_of_connections"]
-        const nameHeaders = ["name", "full_name", "full name", "first_name", "first name", "firstname", "last_name", "last name", "lastname"]
-        const hasProspectData = headers.some(h => prospectDataHeaders.includes(h))
-        const hasNames = headers.some(h => nameHeaders.includes(h))
-
-        if (hasProspectData && hasNames && records.length > 1) {
-            // Direct population: treat imported rows as prospect data
-            const colMap: Record<string, string> = {}
-            for (const h of Object.keys(records[0])) {
-                const low = h.toLowerCase().trim()
-                if (["name", "full_name", "full name"].includes(low)) colMap[h] = "name"
-                else if (["first_name", "first name", "firstname"].includes(low)) colMap[h] = "first_name"
-                else if (["last_name", "last name", "lastname", "surname"].includes(low)) colMap[h] = "last_name"
-                else if (["email", "emails"].includes(low)) colMap[h] = "emails"
-                else if (["linkedin", "linkedin_profile_url", "linkedin url", "linkedin_url", "profile_url"].includes(low)) colMap[h] = "linkedin_profile_url"
-                else if (["headline", "title", "job_title", "job title"].includes(low)) colMap[h] = "headline"
-                else if (["company", "company_name", "employer", "current_company"].includes(low)) colMap[h] = "company"
-                else if (["location", "region", "city"].includes(low)) colMap[h] = "region"
-                else if (["industry"].includes(low)) colMap[h] = "industry"
-                else if (["skills"].includes(low)) colMap[h] = "skills"
-                else if (["twitter", "twitter_handle"].includes(low)) colMap[h] = "twitter_handle"
-                else if (["phone"].includes(low)) colMap[h] = "phone"
-                else if (["summary", "bio", "about"].includes(low)) colMap[h] = "summary"
-                else if (["connections", "num_of_connections"].includes(low)) colMap[h] = "num_of_connections"
-            }
-
-            const imported: ProspectProfile[] = records.map((row, idx) => {
-                const mapped: any = {}
-                Object.entries(row).forEach(([k, v]) => {
-                    const field = colMap[k]
-                    if (field && v) mapped[field] = String(v).trim()
-                })
-                const firstName = mapped.first_name || ""
-                const lastName = mapped.last_name || ""
-                const fullName = mapped.name || [firstName, lastName].filter(Boolean).join(" ") || "Unknown"
-                const emails = mapped.emails ? (mapped.emails.includes(",") ? mapped.emails.split(",").map((e: string) => e.trim()) : [mapped.emails]) : []
-
-                return {
-                    person_id: idx + 1,
-                    name: fullName,
-                    first_name: firstName || fullName.split(" ")[0] || "",
-                    last_name: lastName || fullName.split(" ").slice(1).join(" ") || "",
-                    region: mapped.region || "",
-                    region_address_components: [],
-                    headline: mapped.headline || "",
-                    summary: mapped.summary || "",
-                    skills: mapped.skills ? mapped.skills.split(",").map((s: string) => s.trim()) : [],
-                    languages: [],
-                    linkedin_profile_url: mapped.linkedin_profile_url || "",
-                    flagship_profile_url: mapped.linkedin_profile_url || "",
-                    emails,
-                    profile_picture_url: "",
-                    profile_picture_permalink: "",
-                    twitter_handle: mapped.twitter_handle || "",
-                    num_of_connections: mapped.num_of_connections ? parseInt(mapped.num_of_connections) : 0,
-                    education_background: [],
-                    honors: [],
-                    certifications: [],
-                    current_employers: mapped.company ? [{ name: mapped.company, title: mapped.headline || "", start_date: "", end_date: "", industry: mapped.industry || "" }] : [],
-                    past_employers: [],
-                    last_updated: new Date().toISOString(),
-                    recently_changed_jobs: false,
-                    years_of_experience: "",
-                    years_of_experience_raw: 0,
-                    all_employers: [],
-                    updated_at: new Date().toISOString(),
-                    location_details: { city: "", state: "", country: "" },
-                } as ProspectProfile
-            }).filter(p => p.name !== "Unknown")
-
-            setProfiles(imported)
-            setTotalCount(imported.length)
-            setNextCursor(null)
-            setHasSearched(true)
-            setCurrentFilters({})
-            try { localStorage.setItem("prospect_search_results", JSON.stringify(imported)) } catch {}
-
-            toast({
-                title: "Import complete",
-                description: `Imported ${imported.length} prospect(s) directly from file.`,
-            })
-            return
-        }
-
-        // --- Otherwise, treat as filter data and search ---
-        // Alias mapping for header names → API filter keys
-        const aliasMap: Record<string, keyof ProspectSearchFilters> = {
-            // Titles
-            "current_title": "current_title",
-            "title": "current_title",
-            "job_title": "current_title",
-            "current job title": "current_title",
-            "past_title": "past_title",
-            "previous_title": "past_title",
-            // Location
-            "location": "location",
-            "locations": "location",
-            "region": "location",
-            "city": "location",
-            "state": "location",
-            "country": "location",
-            // Industry / Department / Seniority
-            "industry": "industry",
-            "industries": "industry",
-            "function": "functions",
-            "functions": "functions",
-            "department": "functions",
-            "dept": "functions",
-            "seniority": "seniority_level",
-            "seniority_level": "seniority_level",
-            // Person name
-            "name": "name",
-            "full_name": "name",
-            "first_name": "first_name",
-            "firstname": "first_name",
-            "first name": "first_name",
-            "given_name": "first_name",
-            "last_name": "last_name",
-            "lastname": "last_name",
-            "last name": "last_name",
-            "surname": "last_name",
-            // Languages
-            "languages": "profile_languages",
-            "language": "profile_languages",
-            "profile_languages": "profile_languages",
-            // Company & size
-            "company": "company",
-            "company_name": "company",
-            "employer": "company",
-            "employees": "employees",
-            "company_size": "employees",
-            "headcount": "employees",
-            "company size": "employees",
-            // Keyword
-            "keyword": "keyword",
-            "keywords": "keyword",
-            "query": "keyword",
-            "search": "keyword",
-        }
-
-        const ensureArray = (val: any): string[] => {
-            if (val == null) return []
-            if (Array.isArray(val)) return val.filter(Boolean)
-            const str = String(val).trim()
-            return str ? [str] : []
-        }
-
-        const arrayKeys: (keyof ProspectSearchFilters)[] = [
-            "current_title",
-            "past_title",
-            "location",
-            "industry",
-            "functions",
-            "seniority_level",
-            "profile_languages",
-            "employees",
-        ]
-
-        const mapRecordToFilters = (record: Record<string, string | string[]>): ProspectSearchFilters => {
-            const mapped: ProspectSearchFilters = {}
-            Object.entries(record).forEach(([k, v]) => {
-                const key = aliasMap[k.toLowerCase?.() || k]
-                if (!key) return
-                if (arrayKeys.includes(key)) {
-                    const arr = ensureArray(v)
-                    if (arr.length) {
-                        // @ts-ignore
-                        mapped[key] = arr
-                    }
-                } else if (key === "keyword") {
-                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                    if (str) mapped.keyword = str
-                } else if (key === "name") {
-                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                    if (str) mapped.name = str
-                } else if (key === "first_name") {
-                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                    if (str) mapped.first_name = str
-                } else if (key === "last_name") {
-                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                    if (str) mapped.last_name = str
-                } else if (key === "company") {
-                    const str = Array.isArray(v) ? (v[0] ?? "") : String(v ?? "")
-                    if (str) mapped.company = str
-                }
-            })
-            if (mapped.seniority_level && !mapped.seniority_level_operator) {
-                mapped.seniority_level_operator = 'in'
-            }
-            return mapped
-        }
-
-        // Build filters per-row
-        const perRowFilters: ProspectSearchFilters[] = []
-        for (const row of records) {
-            const raw = normalizeCsvRecord(row)
-            const mapped = mapRecordToFilters(raw)
-            if (Object.keys(mapped).length > 0) perRowFilters.push(mapped)
-        }
-
-        if (perRowFilters.length === 0) {
-            toast({
-                title: "No recognized headers",
-                description: "CSV/Excel does not contain recognized filter columns. Supported: title/current_title, past_title, location, industry, function/department, seniority, first_name, last_name, languages, company, employees, keyword.",
-                variant: "destructive",
-            })
-            return
-        }
-
-        // If multiple rows, fetch one result per row to match row count and protect credits
-        const perRowLimit = perRowFilters.length > 1 ? 1 : INITIAL_LIMIT
-
-        setCurrentFilters({})
-        setProfiles([])
-        setEnrichedData({})
-        setError(null)
-        setHasSearched(false)
-        setIsSearching(true)
-        setIsImporting(true)
-
-        try {
-            const aggregated: ProspectProfile[] = []
-            const seen = new Set<string>()
-            let processed = 0
-            let success = 0
-
-            for (const f of perRowFilters) {
-                // Stop if we hit global max
-                if (aggregated.length >= MAX_RESULTS_LIMIT) break
-
-                try {
-                    const res = await searchProspects({ ...f, limit: perRowLimit })
-                    const rows = res.profiles.slice(0, perRowLimit)
-                    let added = 0
-                    for (const p of rows) {
-                        const key = String((p as any).person_id || p.linkedin_profile_url || p.flagship_profile_url || `${p.name}-${(p as any).current_employers?.[0]?.name || ''}`)
-                        if (!seen.has(key) && aggregated.length < MAX_RESULTS_LIMIT) {
-                            aggregated.push(p)
-                            seen.add(key)
-                            added++
-                        }
-                    }
-                    if (added > 0) success++
-                } catch (e) {
-                    // continue other rows
-                } finally {
-                    processed++
-                }
-            }
-
-            setProfiles(aggregated)
-            setTotalCount(aggregated.length)
-            setNextCursor(null)
-            setHasSearched(true)
-
-            // Persist to local storage for detail page access
-            try { localStorage.setItem("prospect_search_results", JSON.stringify(aggregated)) } catch {}
-
-            toast({
-                title: "Import complete",
-                description: `Processed ${processed} row(s); found ${aggregated.length} unique prospect(s).`,
-            })
-        } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to import CSV filters."
-            setError(message)
-            toast({
-                title: "Import failed",
-                description: message,
-                variant: "destructive",
-            })
-        } finally {
-            setIsSearching(false)
-            setIsImporting(false)
-        }
-    }
-
-    // Restore search from history if historyId is in URL params
-    useEffect(() => {
-        const historyId = searchParams.get('historyId')
-        if (historyId) {
-            const historyItem = getSearchHistoryItem(historyId)
-            if (historyItem) {
-                // Restore the search results
-                setProfiles((historyItem.results || []).slice(0, INITIAL_LIMIT))
-                setTotalCount(historyItem.totalCount)
-                setNextCursor(historyItem.nextCursor)
-                setCurrentFilters(historyItem.filters)
-                setHasSearched(true)
-
-                toast({
-                    title: "Search Restored",
-                    description: `Restored search with ${historyItem.totalCount.toLocaleString()} results`,
-                })
-
-                // Clean URL (remove historyId param)
-                router.replace('/leads/prospects')
-            }
-        }
-    }, [searchParams])
-
-    // Handle filter application from sidebar
-    const handleApplyFilters = async (filters: Record<string, any>) => {
-        setError(null)
-        setIsSearching(true)
-        setHasSearched(true)
-
-        try {
-            // Helper function to extract values from dual-mode filters
-            const extractFilterValue = (filterId: string, filterValue: any) => {
-                // Check if this is a dual-mode value (has included/excluded)
-                if (filterValue && typeof filterValue === 'object' && ('included' in filterValue || 'excluded' in filterValue)) {
-                    const dualValue = filterValue as { included: string[], excluded: string[] }
-
-                    // Determine operator and values based on which list has items
-                    if (dualValue.excluded.length > 0 && dualValue.included.length === 0) {
-                        // Only excluded items - use not_in operator
-                        setFilterOperators(prev => ({ ...prev, [filterId]: 'not_in' }))
-                        return { values: dualValue.excluded, operator: 'not_in' }
-                    } else if (dualValue.included.length > 0) {
-                        // Has included items (with or without excluded) - included takes precedence
-                        setFilterOperators(prev => ({ ...prev, [filterId]: 'in' }))
-                        return { values: dualValue.included, operator: 'in' }
-                    }
-                    return null
-                }
-                // Regular array value
-                return { values: filterValue, operator: filterOperators[filterId] || 'in' }
-            }
-
-            // Extract seniority level with dual-mode support
-            const seniorityData = filters.seniority_level
-                ? extractFilterValue('seniority_level', filters.seniority_level)
-                : null
-
-            // Map filter IDs to API parameters
-            const searchFilters: ProspectSearchFilters = {
-                current_title: filters.current_title || undefined,
-                past_title: filters.past_title || undefined,
-                location: filters.location || undefined,
-                industry: filters.industry || undefined,
-                functions: filters.function || undefined,
-                seniority_level: seniorityData?.values || undefined,
-                seniority_level_operator: (seniorityData?.operator || filterOperators.seniority_level || 'in') as 'in' | 'not_in',
-                // New Filters
-                first_name: filters.first_name?.trim() || undefined,
-                last_name: filters.last_name?.trim() || undefined,
-                profile_languages: filters.profile_languages || undefined,
-                company: filters.company || undefined,
-                employees: filters.employees || undefined,
-                // Keyword is a string, not an array - extract from array if needed
-                keyword: Array.isArray(filters.keyword)
-                    ? (filters.keyword[0] || undefined)
-                    : (filters.keyword || undefined),
-                limit: INITIAL_LIMIT, // Limited for credit protection
-            }
-
-            setCurrentFilters(searchFilters)
-            const response = await searchProspects(searchFilters)
-
-            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
-            setProfiles(limitedProfiles)
-            setTotalCount(response.total_count)
-            setNextCursor(response.next_cursor || null)
-            setEnrichedData({}) // Reset enrichment on new search
-
-            // Store in localStorage for profile detail page access
-            localStorage.setItem("prospect_search_results", JSON.stringify(limitedProfiles))
-
-            // Save to search history for easy restoration
-            saveSearchToHistory(
-                searchFilters,
-                limitedProfiles,
-                response.total_count,
-                response.next_cursor || null
-            )
-
-            toast({
-                title: "Search Complete",
-                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${limitedProfiles.length} (max ${MAX_RESULTS_LIMIT} total to save credits)`,
-            })
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
-            setError(errorMessage)
-            toast({
-                title: "Search Failed",
-                description: errorMessage,
-                variant: "destructive",
-            })
-        } finally {
-            setIsSearching(false)
-        }
-    }
-
-    // Handle loading more results
-    const handleLoadMore = async () => {
-        if (!nextCursor) return
-
-        // CREDIT PROTECTION: Check if we're at the limit
-        if (profiles.length >= MAX_RESULTS_LIMIT) {
-            toast({
-                title: "Result Limit Reached",
-                description: `Maximum of ${MAX_RESULTS_LIMIT} results reached to save credits. Refine your filters for different results.`,
-                variant: "destructive",
-            })
-            return
-        }
-
-        setIsLoadingMore(true)
-        try {
-            // Calculate how many more we can load without exceeding limit
-            const remainingSlots = MAX_RESULTS_LIMIT - profiles.length
-            const loadLimit = Math.min(LOAD_MORE_LIMIT, remainingSlots)
-
-            const response = await searchProspects({
-                ...currentFilters,
-                cursor: nextCursor,
-                limit: loadLimit,
-            })
-
-            const newProfiles = [...profiles, ...response.profiles]
-            setProfiles(newProfiles)
-
-            // Stop pagination if we've hit the limit
-            if (newProfiles.length >= MAX_RESULTS_LIMIT) {
-                setNextCursor(null)
-            } else {
-                setNextCursor(response.next_cursor || null)
-            }
-
-            // Update localStorage
-            localStorage.setItem("prospect_search_results", JSON.stringify(newProfiles))
-
-            const reachedLimit = newProfiles.length >= MAX_RESULTS_LIMIT
-            toast({
-                title: reachedLimit ? "Limit Reached" : "Loaded More Results",
-                description: reachedLimit
-                    ? `Loaded ${response.profiles.length} more. Total: ${newProfiles.length}/${MAX_RESULTS_LIMIT} (credit limit reached)`
-                    : `${response.profiles.length} more loaded. Total: ${newProfiles.length}/${MAX_RESULTS_LIMIT}`,
-            })
-        } catch (err) {
-            toast({
-                title: "Failed to Load More",
-                description: err instanceof Error ? err.message : "Please try again",
-                variant: "destructive",
-            })
-        } finally {
-            setIsLoadingMore(false)
-        }
-    }
-
-    // NLP search: takes LLM-extracted filters and calls the prospect search API (max 3 results)
-    const handleNlpSearch = async (filters: Record<string, any>) => {
-        setError(null)
-        setIsSearching(true)
-        setHasSearched(true)
-
-        try {
-            // Map NLP filter keys to ProspectSearchFilters
-            // NOTE: Don't pass keywords — CrustData's KEYWORD filter_type mixes
-            // badly with column-based filters and the LLM often extracts non-searchable
-            // terms like "verified emails". The structured filters are sufficient.
-            const searchFilters: ProspectSearchFilters = {
-                current_title: filters.current_title || undefined,
-                location: filters.location || undefined,
-                industry: filters.industry || undefined,
-                limit: 3,
-            }
-
-            // Add company_size as employees filter if present
-            if (filters.company_size && Array.isArray(filters.company_size) && filters.company_size.length > 0) {
-                searchFilters.employees = filters.company_size
-            }
-
-            setCurrentFilters(searchFilters)
-            const response = await searchProspects(searchFilters)
-            const limitedProfiles = response.profiles.slice(0, INITIAL_LIMIT)
-            setEnrichedData({}) // Reset enrichment on new search
-            setProfiles(limitedProfiles)
-            setTotalCount(response.total_count)
-            setNextCursor(response.next_cursor || null)
-
-            localStorage.setItem("prospect_search_results", JSON.stringify(limitedProfiles))
-
-            saveSearchToHistory(
-                searchFilters,
-                limitedProfiles,
-                response.total_count,
-                response.next_cursor || null
-            )
-
-            toast({
-                title: "AI Search Complete",
-                description: `Found ${response.total_count.toLocaleString()} prospects. Showing ${limitedProfiles.length}.`,
-            })
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "Failed to search prospects"
-            setError(errorMessage)
-            toast({
-                title: "Search Failed",
-                description: errorMessage,
-                variant: "destructive",
-            })
-        } finally {
-            setIsSearching(false)
-        }
-    }
-
-
-    const enrichedCount = Object.values(enrichedData).filter(r => (r.email?.success && !r.email?.not_found) || (r.phone?.success && !r.phone?.not_found)).length
-
-    // Field-specific enrichment handler
-    const onEnrichReveal = async (profile: ProspectProfile, field: 'email' | 'phone') => {
-        const linkedinKey = profile.linkedin_profile_url || profile.flagship_profile_url
-        if (!linkedinKey) return
-
-        const enrichmentKey = `${linkedinKey}-${field}`
-        if (enrichingRows[enrichmentKey]) return
-
-        const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
-        const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
-        const employer = profile.current_employers?.[0]
-        const companyName = employer?.name || ""
-        const companyDomain = employer?.company_website_domain || ""
-        const linkedinUrl = linkedinKey
-
-        setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
-        const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinUrl, field)
-        setEnrichedData(prev => ({
-            ...prev,
-            [linkedinKey]: {
-                email: field === 'email' ? result : prev[linkedinKey]?.email,
-                phone: field === 'phone' ? result : prev[linkedinKey]?.phone,
-            },
-        }))
-        setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: false }))
-    }
-
-    const handleWaterfallResult = (linkedinUrl: string, field: 'email' | 'phone', result: Record<string, any>) => {
-        if (!linkedinUrl || !result) return
-        setEnrichedData(prev => {
-            const existing = prev[linkedinUrl] || {}
-            const updated = { ...existing }
-            if (result.email) {
-                updated.email = {
-                    email: result.email,
-                    credits_consumed: result.credits_consumed,
-                }
-            }
-            if (result.phone) {
-                updated.phone = {
-                    phone: result.phone,
-                    credits_consumed: result.credits_consumed,
-                }
-            }
-            if (!result.email && field === 'email') {
-                updated.email = result
-            }
-            if (!result.phone && field === 'phone') {
-                updated.phone = result
-            }
-            return {
-                ...prev,
-                [linkedinUrl]: updated,
-            }
-        })
-    }
-
-    return (
-        <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
-            {/* Left Sidebar - Filters */}
-            <div id="prospects-filters-panel" className={cn('transition-all duration-300', isFilterHighlighted && 'ring-2 ring-primary ring-offset-2 rounded-xl')}>
-              <FilterSidebar
-                onApplyFilters={handleApplyFilters}
-                filterOperators={filterOperators}
-                onOperatorChange={(filterId, operator) => {
-                    setFilterOperators(prev => ({
-                        ...prev,
-                        [filterId]: operator
-                    }))
-                }}
-                externalFilters={copilotMappedFilters ?? undefined}
-              />
-            </div>
-
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-muted/5">
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-
-                    {/* Header Section */}
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-in slide-in-from-top-4 duration-500">
-                        <div>
-                            <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                                <UserCircle className="h-8 w-8 text-primary" />
-                                Prospects
-                            </h1>
-                            <p className="text-muted-foreground mt-1 text-lg">
-                                Find and manage your key decision makers.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <CsvImportButton label="Import filters" onRecordsParsed={handleProspectImport} />
-                            {isImporting && <span className="text-xs text-muted-foreground">Applying filters...</span>}
-                            {profiles.length > 0 && (
-                                <Button variant="outline" className="gap-2 bg-background" onClick={handleExport}>
-                                    <Download className="h-4 w-4" />
-                                    Export
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* NLP Search Bar */}
-                    <div className="rounded-lg border bg-card p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Sparkles className="h-4 w-4 text-primary" />
-                            <span className="text-sm font-medium">AI Search</span>
-                            <span className="text-xs text-muted-foreground">Describe the people you&apos;re looking for in plain English</span>
-                        </div>
-                        <NlpSearchBar intent="prospect" onFiltersExtracted={handleNlpSearch} />
-                    </div>
-
-                    {/* Credit Limit Warning */}
-                    {profiles.length > 0 && (
-                        <Card className="p-4 border-amber-500/50 bg-amber-500/5">
-                            <div className="flex items-center gap-3">
-                                <AlertTriangle className="h-5 w-5 text-amber-600" />
-                                <div className="flex-1">
-                                    <h3 className="font-semibold text-amber-900 dark:text-amber-100">Credit Protection Active</h3>
-                                    <p className="text-sm text-muted-foreground mt-1">
-                                        Showing {profiles.length} of {MAX_RESULTS_LIMIT} max results to save credits during testing
-                                        {profiles.length >= MAX_RESULTS_LIMIT && " - Limit reached!"}
-                                    </p>
-                                </div>
-                            </div>
-                        </Card>
-                    )}
-
-                    {error && (
-                        <Card className="p-6 border-destructive/50 bg-destructive/5">
-                            <div className="flex items-center gap-3">
-                                <AlertCircle className="h-5 w-5 text-destructive" />
-                                <div>
-                                    <h3 className="font-semibold text-destructive">Search Error</h3>
-                                    <p className="text-sm text-muted-foreground mt-1">{error}</p>
-                                </div>
-                            </div>
-                        </Card>
-                    )}
-
-                    {isSearching ? (
-                        <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
-                            <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-                            <h3 className="text-lg font-semibold">Searching for prospects...</h3>
-                            <p className="text-sm text-muted-foreground mt-2">
-                                This may take a few seconds
-                            </p>
-                        </Card>
-                    ) : profiles.length > 0 ? (
-                        <ProspectsResultsTable
-                            profiles={profiles}
-                            totalCount={totalCount}
-                            hasMore={!!nextCursor && profiles.length < MAX_RESULTS_LIMIT}
-                            onLoadMore={handleLoadMore}
-                            isLoadingMore={isLoadingMore}
-                            enableContactReveal={true}
-                            onEnrichReveal={onEnrichReveal}
-                            onWaterfallResult={handleWaterfallResult}
-                            enrichCache={enrichedData}
-                            enrichingRows={enrichingRows}
-                            tableId="prospects_v2"
-                        />
-                    ) : hasSearched ? (
-                        <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="text-center space-y-4 p-8 max-w-md mx-auto">
-                                <div className="bg-muted w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <UserCircle className="h-8 w-8 text-muted-foreground" />
-                                </div>
-                                <h3 className="text-xl font-semibold">No prospects found</h3>
-                                <p className="text-muted-foreground">
-                                    Try adjusting your filters or search criteria to find more results.
-                                </p>
-                            </div>
-                        </Card>
-                    ) : (
-                        <Card className="flex-1 p-0 border-border/60 shadow-sm bg-card/80 backdrop-blur-sm overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
-                            <div className="text-center space-y-4 p-8 max-w-md mx-auto">
-                                <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                                    <UserCircle className="h-8 w-8 text-primary" />
-                                </div>
-                                <h3 className="text-xl font-semibold">Find your ideal prospects</h3>
-                                <p className="text-muted-foreground">
-                                    Use the filters on the left to refine your search by job title, location, and more.
-                                    Then click <strong>"Apply Filters"</strong> to start searching.
-                                </p>
-                            </div>
-                        </Card>
-                    )}
-                </div>
-            </div>
+  return (
+    <div className="flex h-full overflow-hidden bg-background">
+      {/* Filter Sidebar */}
+      <aside className="w-[260px] min-w-[260px] h-full flex flex-col bg-card border-r border-border shadow-sm">
+        <div className="p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
+            <Input
+              placeholder="Search filters..."
+              className="pl-9 h-9 bg-muted/40 border-transparent focus:bg-background transition-all text-xs font-medium rounded-lg"
+            />
+          </div>
         </div>
-    )
-}
 
-export default function ProspectsPage() {
-    return (
-        <Suspense fallback={<div>Loading...</div>}>
-            <ProspectsPageContent />
-        </Suspense>
-    )
+        <div className="flex border-b border-border px-2">
+          {([
+            ["total", "128K", "Total"],
+            ["new", "2,847", "New"],
+            ["saved", "12", "Saved"],
+          ] as const).map(([key, num, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key as any)}
+              className={cn(
+                "flex-1 flex flex-col items-center py-3 relative transition-all",
+                activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <span className="text-[14px] font-bold tracking-tight">{num}</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5">{label}</span>
+              {activeTab === key && <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary rounded-full" />}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto no-scrollbar py-2">
+          {(() => {
+            const categories = [...new Set(unlockedFilters.map((f) => f.category))]
+            return categories.map((cat) => (
+              <div key={cat}>
+                <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-2">{cat}</div>
+                {unlockedFilters
+                  .filter((f) => f.category === cat)
+                  .map((f) => (
+                    <UnlockedFilterPanel
+                      key={f.label}
+                      filter={f}
+                      isExpanded={!!expandedFilters[f.label]}
+                      chips={filterChips[f.label] || []}
+                      onToggle={() => toggleFilter(f.label)}
+                      onAddChip={(val) => setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))}
+                      onRemoveChip={(chip) => removeChip(f.label, chip)}
+                    />
+                  ))}
+              </div>
+            ))
+          })()}
+
+          <div className="mx-4 my-4 border-t border-border/50" />
+
+          {signalFilters.map((f) => (
+            <div key={f.label} className="opacity-80 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
+              <button className="w-full flex items-center gap-3 px-4 h-11 text-left">
+                <span className="flex-1 text-[12px] font-bold tracking-tight text-orange-500/70">{f.label}</span>
+                <Sparkles className="w-3.5 h-3.5 text-orange-500/30" />
+              </button>
+            </div>
+          ))}
+
+          <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-4">Locked Filters</div>
+          {lockedFilters.map((f) => (
+            <Popover key={f.label}>
+              <PopoverTrigger asChild>
+                <button className="w-full flex items-center gap-3 px-4 h-11 text-left opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
+                  <span className="flex-1 text-[12px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
+                  <Lock className="w-3.5 h-3.5 opacity-30" />
+                  {f.tier && tierPill(f.tier)}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="right" className="w-[240px] shadow-2xl rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-bold">Requires {f.tier}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground font-medium mb-3">
+                  Find high-potential prospects using advanced {f.label.toLowerCase()} intelligence.
+                </p>
+                <Button className="w-full h-8 text-xs font-bold">Upgrade Now</Button>
+              </PopoverContent>
+            </Popover>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between px-4 py-4 border-t border-border bg-card">
+          <button className="text-[11px] font-bold text-muted-foreground flex items-center gap-2">
+            Clear all <Badge variant="secondary" className="h-4 px-1 text-[9px] font-black">{activeFilterCount}</Badge>
+          </button>
+          <button className="text-[11px] font-black text-primary hover:underline">Advanced</button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Navbar */}
+        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
+          <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-xl">
+            <Button variant="ghost" size="sm" className={cn("h-8 px-4 text-[11px] font-black uppercase tracking-wider rounded-lg", view === "results" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground")}>
+              Find People
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => window.location.href = "/leads/companies"} className="h-8 px-4 text-[11px] font-black uppercase tracking-wider text-muted-foreground rounded-lg">
+              Find Companies
+            </Button>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" className="h-9 px-4 gap-2 text-[11px] font-bold border-border/50 hover:bg-muted transition-all">
+              <Plus className="w-3.5 h-3.5" /> Save List
+            </Button>
+            <Button className="h-9 px-4 gap-2 text-[11px] font-black bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
+              <Sparkles className="w-4 h-4" /> Research with AI
+            </Button>
+          </div>
+        </div>
+
+        {/* NLP Search Land */}
+        {view === "nlp" && (
+          <div className="flex-1 flex flex-col items-center justify-center px-8 bg-gradient-to-b from-background to-muted/10">
+            <div className="w-full max-w-[720px] -mt-20 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-8 shadow-inner">
+                <Bot className="w-8 h-8 text-primary" strokeWidth={1.5} />
+              </div>
+              <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">
+                Who are you looking for today?
+              </h1>
+              <p className="text-muted-foreground font-medium text-sm mb-10 max-w-md mx-auto leading-relaxed opacity-60">
+                 Search 128M+ decision makers worldwide across 20M+ companies with natural language.
+              </p>
+
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-primary/20 to-indigo-500/20 rounded-2xl blur opacity-0 group-focus-within:opacity-100 transition duration-500" />
+                <div className="relative flex items-center gap-2 p-3 rounded-2xl bg-card border border-border shadow-2xl focus-within:border-primary transition-all">
+                  <Search className="w-5 h-5 ml-2 text-muted-foreground/30" />
+                  <input
+                    value={nlpQuery}
+                    onChange={(e) => setNlpQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    placeholder="e.g. VP Sales at Series A SaaS in US who changed jobs recently..."
+                    className="flex-1 bg-transparent text-base font-bold text-foreground placeholder:text-muted-foreground/30 outline-none px-2"
+                  />
+                  <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground/50 hover:bg-muted rounded-xl">
+                    <Mic className="w-5 h-5" />
+                  </Button>
+                  <Button onClick={() => handleSearch()} className="h-11 px-6 font-black bg-primary text-primary-foreground rounded-xl shadow-lg shadow-primary/20 active:scale-95 transition-all">
+                    Search
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-8 opacity-80">
+                {exampleChips.map((chip) => (
+                  <button
+                    key={chip}
+                    onClick={() => { setNlpQuery(chip); handleSearch(chip); }}
+                    className="text-[11px] font-bold text-muted-foreground px-4 py-2 rounded-xl bg-card border border-border hover:border-primary/30 hover:text-primary transition-all shadow-sm"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Results Page */}
+        {view === "results" && (
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Stats Bar */}
+            <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/10">
+               <div className="flex items-center gap-3">
+                 <span className="text-[11px] font-bold text-foreground tracking-tight">
+                   Found <span className="text-primary">{totalCount.toLocaleString()}</span> results
+                 </span>
+                 <Separator orientation="vertical" className="h-3" />
+                 <span className="text-[10px] font-bold text-muted-foreground">
+                   {activeFilterCount} active filters
+                 </span>
+               </div>
+               <div className="flex items-center gap-3">
+                 {selectedCount > 0 && <Badge className="font-bold">{selectedCount} Selected</Badge>}
+                 <button className="text-[11px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+                   <Download className="w-3.5 h-3.5" /> Export CSV
+                 </button>
+                 <Button size="sm" className="h-8 px-4 font-black bg-indigo-500 text-white shadow-xl shadow-indigo-500/20">
+                   <Zap className="w-3.5 h-3.5 fill-current mr-1.5" /> Run Outreach
+                 </Button>
+               </div>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto no-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[1400px]">
+                <thead className="sticky top-0 z-20 bg-card/95 backdrop-blur-md">
+                   <tr className="border-b border-border shadow-sm">
+                     <th className="w-14 px-6 py-4">
+                        <input type="checkbox" className="w-4 h-4 rounded-md accent-primary" />
+                     </th>
+                     {[
+                       { label: "Person", w: "280px" },
+                       { label: "Title", w: "220px" },
+                       { label: "Company", w: "220px" },
+                       { label: "Seniority", w: "130px" },
+                       { label: "Location", w: "180px" },
+                       { label: "Email", w: "140px" },
+                       { label: "ICP Score", w: "120px" },
+                       { label: "Intent", w: "100px" },
+                       { label: "Action", w: "100px" }
+                     ].map(h => (
+                       <th key={h.label} className="px-4 py-4 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/50" style={{ width: h.w }}>
+                         {h.label}
+                       </th>
+                     ))}
+                   </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {isLoading ? (
+                    Array.from({ length: 12 }).map((_, i) => (
+                      <tr key={i} className="animate-pulse">
+                         <td className="px-6 py-5"><div className="w-4 h-4 rounded bg-muted mx-auto" /></td>
+                         <td className="px-4 py-5"><div className="flex items-center gap-3.5"><div className="w-10 h-10 rounded-full bg-muted" /><div className="w-32 h-4 rounded bg-muted" /></div></td>
+                         <td className="px-4 py-5"><div className="w-40 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-32 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-24 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-12 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-10 h-4 rounded bg-muted" /></td>
+                      </tr>
+                    ))
+                  ) : (
+                    prospects.map((p) => {
+                       const employer = p.current_employers?.[0]
+                       return (
+                        <tr
+                          key={p.person_id}
+                          className={cn(
+                            "group transition-all hover:bg-muted/30 border-l-2 border-transparent",
+                            selectedRows[p.person_id] && "bg-primary/5 border-primary border-l-4"
+                          )}
+                          onClick={() => toggleRow(String(p.person_id))}
+                        >
+                          <td className="px-6 py-5 align-middle" onClick={e => e.stopPropagation()}>
+                             <input
+                               type="checkbox"
+                               checked={!!selectedRows[p.person_id]}
+                               onChange={() => toggleRow(String(p.person_id))}
+                               className="w-4 h-4 rounded-md accent-primary"
+                             />
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-3.5">
+                               <div className="w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 overflow-hidden relative">
+                                  {p.profile_picture_url ? (
+                                    <img src={p.profile_picture_url} className="w-full h-full object-cover" alt="" />
+                                  ) : (
+                                    <span className="opacity-40">{p.name.charAt(0)}</span>
+                                  )}
+                               </div>
+                               <div className="min-w-0">
+                                 <div className="text-[13px] font-black text-foreground hover:text-primary transition-colors cursor-pointer truncate">{p.name}</div>
+                                 <div className="flex items-center gap-2 mt-0.5">
+                                    <Linkedin className="w-3 h-3 text-[#0A66C2]" />
+                                    <span className="text-[9px] text-muted-foreground font-bold tracking-tight opacity-50 truncate">{p.linkedin_profile_url.split('/in/')[1]}</span>
+                                 </div>
+                               </div>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <span className="text-[11px] font-bold text-foreground/80 leading-relaxed block truncate">{p.headline}</span>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-2 max-w-[200px]">
+                                <div className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center shrink-0">
+                                  <Building2 className="w-3 h-3 text-muted-foreground/40" />
+                                </div>
+                                <span className="text-[11px] font-bold text-foreground/80 truncate">{employer?.name || "Unknown"}</span>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <Badge variant="outline" className="text-[9px] font-black bg-muted/30 border-border/50 uppercase tracking-widest">{p.seniority_level || "VP"}</Badge>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 truncate">
+                                <MapPin className="w-3.5 h-3.5 opacity-30 shrink-0" />
+                                {p.location_details.city}, {p.location_details.country}
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-1.5">
+                                <Mail className={cn("w-3.5 h-3.5", p.emails?.length > 0 ? "text-green-500" : "text-muted-foreground/30")} />
+                                <span className={cn("text-[10px] font-black uppercase tracking-widest", p.emails?.length > 0 ? "text-green-600" : "text-muted-foreground/50")}>
+                                   {p.emails?.length > 0 ? "Verified" : "Missing"}
+                                </span>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             {scoreBar(p._icpScore?.score || 85)}
+                          </td>
+                          <td className="px-4 py-5">
+                             {intentDots(4)}
+                          </td>
+                          <td className="px-4 py-5 text-right">
+                             <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all translate-x-1 group-hover:translate-x-0">
+                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors">
+                                  <Star className="w-4 h-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors">
+                                  <ArrowRight className="w-4 h-4" />
+                                </Button>
+                             </div>
+                          </td>
+                        </tr>
+                       )
+                    })
+                  )}
+                </tbody>
+              </table>
+              
+              {!isLoading && prospects.length > 0 && (
+                <div className="p-8 flex justify-center border-t border-border bg-muted/5">
+                  <Button variant="outline" className="h-11 px-10 rounded-xl font-bold text-xs gap-3 border-border/60 hover:border-primary hover:bg-primary/5 transition-all group">
+                     Load more prospects
+                     <ChevronDown className="w-4 h-4 opacity-40 group-hover:opacity-100 transition-opacity" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }

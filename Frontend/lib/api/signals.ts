@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { authService } from '@/lib/auth'
 
-const BASE_API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-const API_URL = `${BASE_API}/api/v1/signals`;
+const API_URL = '/api/v1/signals';
 
 const getAuthHeaders = () => {
     const headers: Record<string, string> = {

@@ -252,7 +252,7 @@ export function CampaignCreationWizard() {
   const loadLeads = async () => {
     setIsLeadLoading(true)
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/companies/db?limit=${MAX_LEADS}`)
       if (!response.ok) {
         const errText = await response.text().catch(() => response.statusText)
@@ -305,7 +305,7 @@ export function CampaignCreationWizard() {
       window.history.replaceState({}, "", window.location.pathname)
     }
 
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const API = ""
     fetch(`${API}/api/v1/campaigns/gmail/status`)
       .then((res) => res.json())
       .then((data) => {
@@ -342,7 +342,7 @@ export function CampaignCreationWizard() {
       )
     }
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const returnPath = "/campaigns/new"
       const res = await fetch(
         `${API}/api/v1/campaigns/Email/auth-url?return_to=${encodeURIComponent(returnPath)}`
@@ -386,7 +386,7 @@ export function CampaignCreationWizard() {
       return next
     })
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const res = await fetch(`${API}/api/v1/campaigns/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -423,7 +423,7 @@ export function CampaignCreationWizard() {
       return next
     })
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const res = await fetch(`${API}/api/v1/campaigns/send-linkedin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -1,6 +1,6 @@
 import { authService } from "@/lib/auth"
 
-const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const BACKEND_BASE = ""
 
 const fetchWithAuth = (url: string, init: RequestInit = {}) => {
   const headers = new Headers(init.headers ?? {})

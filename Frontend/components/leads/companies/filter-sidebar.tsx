@@ -118,7 +118,7 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
         try {
             console.log('🔍 Searching with filters:', transformedFilters)
 
-            const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+            const apiBase = ""
             const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 min timeout

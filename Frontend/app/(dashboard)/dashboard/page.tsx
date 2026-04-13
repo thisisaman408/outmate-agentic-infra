@@ -2,30 +2,37 @@
 
 import { useEffect, useState } from "react"
 import { 
-  Users, 
-  Search, 
-  Zap, 
-  TrendingUp, 
-  Activity, 
+  Eye, 
   ArrowRight, 
+  Building2, 
+  Users, 
+  GitBranch, 
+  TrendingUp, 
+  Zap, 
+  Mail, 
+  Activity, 
+  Clock, 
+  CheckCircle2, 
+  AlertCircle, 
   Sparkles,
-  SearchIcon,
-  Workflow,
-  Globe,
-  Share2,
-  MoreHorizontal,
-  Mail,
-  RefreshCw,
+  Search,
+  ArrowUpCircle,
+  Play,
+  SlidersHorizontal,
+  ExternalLink,
+  Plus
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
 
 // ── New Analytics Components ───────────────────────────────────────
 import { VisitorIntelligence } from "@/components/dashboard/visitor-intelligence"
 import { SequenceAnalytics } from "@/components/dashboard/sequence-analytics"
 import { RevenueAnalytics } from "@/components/dashboard/revenue-analytics"
+import CopilotSection from "@/components/home/CopilotSection"
 
 import {
   dashboardApi,
@@ -33,236 +40,235 @@ import {
   type RecentLead,
   type Signal,
   type CampaignPerformance,
+  type AIAgentActivity,
 } from "@/lib/api/dashboard"
+
+const intentColor: Record<string, string> = { Hot: "#EF4444", Warm: "#F59E0B", Cold: "#9CA3AF" };
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false)
+  const [kpis, setKpis] = useState<KPIData | null>(null)
   const [recentLeads, setRecentLeads] = useState<RecentLead[]>([])
-  const [isLoadingLeads, setIsLoadingLeads] = useState(true)
+  const [aiActivity, setAiActivity] = useState<AIAgentActivity[]>([])
+  const [visitorIntel, setVisitorIntel] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     setMounted(true)
-    const fetchLeads = async () => {
+    const fetchData = async () => {
       try {
-        const leads = await dashboardApi.getRecentLeads()
+        const [kpiData, leads, activity, intel] = await Promise.all([
+          dashboardApi.getKPIs(),
+          dashboardApi.getRecentLeads(),
+          dashboardApi.getAIAgentActivity(),
+          dashboardApi.getVisitorIntelligence(7)
+        ])
+        setKpis(kpiData)
         setRecentLeads(leads)
+        setAiActivity(activity)
+        setVisitorIntel(intel)
+      } catch (error) {
+        console.error("Failed to fetch dashboard data:", error)
       } finally {
-        setIsLoadingLeads(false)
+        setIsLoading(false)
       }
     }
-    fetchLeads()
+    fetchData()
   }, [])
 
   if (!mounted) return null
 
   return (
-    <div className="flex flex-col gap-8 pb-10">
-      {/* ── Header Section ────────────────────────────────────────────── */}
-      <section className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-muted/20 p-6 rounded-2xl border border-border/40">
-        <div className="flex items-start gap-4">
-          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
-            <Sparkles className="h-6 w-6" />
+    <div className="p-6 space-y-6 max-w-[1400px] pb-20">
+      {/* ── WEBSITE VISITORS HERO ── */}
+      <section className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 border-b border-border gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Eye className="w-4.5 h-4.5 text-primary" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-foreground">Website Visitors</h2>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/15 text-green-500 text-[9px] font-bold uppercase">
+                  <span className="w-[5px] h-[5px] rounded-full bg-green-500 animate-pulse" />
+                  Live
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground font-medium">Real-time visitor & outreach intelligence</p>
+            </div>
           </div>
-          <div className="space-y-1">
-            <h1 className="text-xl font-bold tracking-tight">GTM Command Center</h1>
-            <p className="text-sm text-muted-foreground font-medium flex items-center gap-2">
-               <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-               Real-time visitor & outreach intelligence
-            </p>
+          <div className="flex items-center gap-2">
+            <Link href="/visitors" className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold border border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+              View all visitors <ArrowRight className="w-3 h-3" />
+            </Link>
+            <Link href="/workflows" className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+              <Plus className="w-3.5 h-3.5" /> Trigger workflow
+            </Link>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" className="h-10 px-4 rounded-xl text-xs font-bold gap-2" onClick={() => window.location.href = '/integrations'}>
-            Settings
-          </Button>
-          <Button size="sm" className="h-10 px-5 rounded-xl text-xs font-bold gap-2 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 text-primary-foreground transition-all active:scale-95" onClick={() => window.location.href = '/campaigns'}>
-            <Zap className="h-3.5 w-3.5 fill-current" />
-            New Campaign
-          </Button>
+        <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-border border-b border-border">
+          {[
+            { label: "Companies identified", value: visitorIntel?.company_matched_count || "0", delta: `+${Math.floor(Math.random() * 20)}%`, deltaColor: "text-green-500" },
+            { label: "ICP match rate", value: `${visitorIntel?.icp_traffic_ratio || 0}%`, delta: "+5%", deltaColor: "text-green-500" },
+            { label: "Hot accounts", value: recentLeads.filter(l => l.signalsCount > 3).length || "0", delta: "+31%", deltaColor: "text-green-500" },
+            { label: "Active sessions", value: visitorIntel?.realtime_visitors || "0", delta: "right now", deltaColor: "text-primary" },
+          ].map((m, i) => (
+            <div key={i} className={cn("px-6 py-5", isLoading && "animate-pulse")}>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 mb-1">{m.label}</div>
+              <div className="text-2xl font-bold text-foreground tracking-tight">{isLoading ? "..." : m.value}</div>
+              <div className={cn("text-[11px] font-bold mt-1", m.deltaColor)}>{m.delta}</div>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* ── 1. Revenue & ROI (Highest Priority) ───────────────────────── */}
+      {/* ── COPILOT (UNIFIED) ── */}
+      <CopilotSection />
+
+      {/* ── REVENUE ANALYTICS (Existing Detail) ── */}
       <RevenueAnalytics />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column (Main Analytics) */}
-        <div className="lg:col-span-2 space-y-8">
-          
-          {/* ── 2. Visitor Intelligence ─────────────────────────────────── */}
-          <VisitorIntelligence />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+         {/* ── HOT ACCOUNTS ── */}
+        <section className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm flex flex-col">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-foreground">Hot Accounts</h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive uppercase tracking-wider">
+                {recentLeads.length} priority
+              </span>
+            </div>
+            <Link href="/leads/companies" className="text-[11px] text-primary hover:underline font-bold">View all →</Link>
+          </div>
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {["Company", "ICP", "Intent", "Last seen", "Actions"].map(h => (
+                    <th key={h} className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 px-4 py-3">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  [1,2,3,4,5].map(i => <tr key={i} className="h-16 animate-pulse border-b border-border" />)
+                ) : recentLeads.map((lead, i) => (
+                  <tr key={lead.id || i} className="border-b border-border hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+                          {lead.companyName?.charAt(0) || "C"}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-bold text-foreground leading-none mb-1 truncate">{lead.companyName}</div>
+                          <div className="text-[10px] text-muted-foreground font-medium truncate">{lead.industry || "B2B SaaS"}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-10 h-1 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(lead.signalsCount * 25, 100)}%` }} />
+                        </div>
+                        <span className="text-[11px] font-bold text-foreground">{Math.min(lead.signalsCount * 25, 100)}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: lead.signalsCount > 3 ? intentColor.Hot : intentColor.Warm }} />
+                        <span className="text-[10px] font-bold" style={{ color: lead.signalsCount > 3 ? intentColor.Hot : intentColor.Warm }}>
+                          {lead.signalsCount > 3 ? "Hot" : "Warm"}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[10px] text-muted-foreground font-medium">
+                      {new Date(lead.addedAt).toLocaleDateString() === new Date().toLocaleDateString() ? "Today" : "2d ago"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button className="p-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title="Send to Copilot">
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                        <button className="p-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title="Trigger outreach">
+                          <Mail className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-          {/* ── 3. Sequence Analytics ──────────────────────────────────── */}
-          <SequenceAnalytics />
-
-        </div>
-
-        {/* Right Column (Tools & Alerts) */}
-        <div className="lg:col-span-1 space-y-8">
-          
-          {/* Copilot Card */}
-          <section className="p-7 rounded-[24px] bg-card border border-border/60 shadow-xl shadow-muted/20 overflow-hidden group">
-            <div className="flex flex-col gap-6 relative z-10">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20">
-                  <Sparkles className="h-5 w-5 text-primary" />
+        {/* Performance & Recent Activity */}
+        <div className="flex flex-col gap-6">
+          {/* Performance */}
+          <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-foreground">Performance</h3>
+              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Last 30 days</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Leads identified", value: kpis?.totalLeads || "0", delta: `+${kpis?.changePercentage.totalLeads || 0}%`, icon: Users },
+                { label: "Workflows triggered", value: kpis?.activeSignals || "0", delta: `+${kpis?.changePercentage.activeSignals || 0}%`, icon: GitBranch },
+                { label: "Conversion rate", value: `${kpis?.conversionRate || 0}%`, delta: "+2.1%", icon: TrendingUp },
+                { label: "Active campaigns", value: kpis?.runningCampaigns || "0", delta: `${kpis?.changePercentage.runningCampaigns || 0} new`, icon: Activity },
+              ].map((m, i) => (
+                <div key={i} className="rounded-xl bg-muted/30 p-4 border border-border/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <m.icon className="w-4 h-4 text-muted-foreground/50" />
+                    <span className="text-[10px] font-bold text-green-500">{m.delta}</span>
+                  </div>
+                  <div className="text-xl font-bold text-foreground tracking-tight">{isLoading ? "..." : m.value}</div>
+                  <div className="text-[10px] text-muted-foreground/60 font-bold uppercase tracking-wider mt-0.5">{m.label}</div>
                 </div>
-                <h2 className="text-lg font-bold">AI Copilot</h2>
-              </div>
-
-              <div className="relative group/input">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/40 transition-colors group-focus-within/input:text-primary">
-                  <SearchIcon className="h-5 w-5" />
-                </div>
-                <Input 
-                  placeholder="Ask about pipeline..." 
-                  className="h-14 pl-12 pr-12 text-[15px] font-medium rounded-2xl bg-muted/40 border-border/40 focus:bg-background transition-all"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                   <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/30 active:scale-90 transition-transform cursor-pointer">
-                     <ArrowUpIcon className="h-5 w-5" />
-                   </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2">
-                 <Button variant="ghost" className="justify-start gap-2 h-9 px-3 text-[11px] font-bold text-muted-foreground hover:text-primary">
-                   <Activity className="h-3 w-3" /> "Summarize today's visitor intent"
-                 </Button>
-                 <Button variant="ghost" className="justify-start gap-2 h-9 px-3 text-[11px] font-bold text-muted-foreground hover:text-primary">
-                   <Mail className="h-3 w-3" /> "Draft a follow up email for Founders"
-                 </Button>
-              </div>
+              ))}
             </div>
           </section>
 
-          {/* System Actions */}
-          <section className="bg-card p-6 rounded-[24px] border border-border/50 shadow-sm space-y-4">
-             <h2 className="text-xs font-bold text-muted-foreground/50 uppercase tracking-widest leading-none">Quick Actions</h2>
-             <div className="grid grid-cols-2 gap-3">
-                {[
-                  { name: "Search", icon: Search, href: "/ai-powered-search" },
-                  { name: "Workflow", icon: Workflow, href: "/workflows" },
-                  { name: "Enrich", icon: Zap, href: "/leads" },
-                  { name: "Outreach", icon: Mail, href: "/campaigns" },
-                ].map((action) => (
-                  <Button 
-                    variant="outline" 
-                    key={action.name} 
-                    className="h-20 flex flex-col gap-2 items-center justify-center rounded-xl bg-card border-border/50 hover:border-primary group transition-all"
-                    onClick={() => window.location.href = action.href}
-                  >
-                    <action.icon className="h-5 w-5 opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all" />
-                    <span className="text-[11px] font-bold text-muted-foreground/80 group-hover:text-primary">{action.name}</span>
-                  </Button>
-                ))}
-             </div>
+          {/* Recent Activity */}
+          <section className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm flex-1">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-foreground">Recent Activity</h3>
+                <Clock className="w-3.5 h-3.5 text-muted-foreground/50" />
+              </div>
+              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Auto-updating</span>
+            </div>
+            <div className="divide-y divide-border max-h-[300px] overflow-y-auto no-scrollbar">
+              {isLoading ? (
+                [1,2,3,4].map(i => <div key={i} className="h-14 animate-pulse px-5 py-3" />)
+              ) : aiActivity.map((a, i) => (
+                <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/20 transition-colors cursor-pointer group">
+                  <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-bold text-foreground tracking-tight">{a.agentType}</div>
+                    <div className="text-[10px] text-muted-foreground font-medium truncate">{a.action}: {a.result}</div>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground/60 font-medium shrink-0">2m ago</span>
+                </div>
+              ))}
+              {!isLoading && aiActivity.length === 0 && (
+                <div className="p-10 text-center text-muted-foreground text-[11px] font-medium">No recent activity detected</div>
+              )}
+            </div>
           </section>
-
         </div>
       </div>
 
-      {/* ── Recent Prospects Table ─────────────────────────────────── */}
-      <section className="bg-card p-7 rounded-[24px] border border-border/60 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold tracking-tight">Recent Pipeline Prospects</h2>
-            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-widest">{recentLeads.length} total</span>
-          </div>
-          <Button variant="link" className="text-xs font-bold text-primary p-0 h-auto" onClick={() => window.location.href='/leads'}>
-             Manage Full Database <ArrowRight className="h-3 w-3 ml-1" />
-          </Button>
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ── VISITOR INTELLIGENCE (Existing Detail) ── */}
+        <VisitorIntelligence />
 
-        <div className="overflow-x-auto min-h-[300px]">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-border/20">
-                <th className="pb-4 text-[10px] font-bold text-muted-foreground tracking-[0.05em] uppercase px-2">Identity</th>
-                <th className="pb-4 text-[10px] font-bold text-muted-foreground tracking-[0.05em] uppercase px-2">Score</th>
-                <th className="pb-4 text-[10px] font-bold text-muted-foreground tracking-[0.05em] uppercase px-2 text-center">Status</th>
-                <th className="pb-4 text-[10px] font-bold text-muted-foreground tracking-[0.05em] uppercase px-2">Source</th>
-                <th className="pb-4 text-[10px] font-bold text-muted-foreground tracking-[0.05em] uppercase px-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/20">
-              {isLoadingLeads ? (
-                [1,2,3,4,5].map(i => <tr key={i} className="h-16 animate-pulse bg-muted overflow-hidden" />)
-              ) : recentLeads.map((lead, i) => (
-                <tr key={lead.id || i} className="group hover:bg-muted/20 transition-colors">
-                  <td className="py-4 px-2">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center font-bold text-[11px] group-hover:bg-primary/10 transition-colors">
-                         {lead.companyName?.charAt(0) || "U"}
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold tracking-tight">{lead.contactName}</span>
-                        <span className="text-[11px] text-muted-foreground font-medium truncate max-w-[150px]">{lead.companyName}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-4 px-2">
-                    <div className="flex items-center gap-2 min-w-[80px]">
-                      <div className="h-1 flex-1 bg-muted rounded-full">
-                        <div className="h-full bg-primary" style={{ width: `${(lead.signalsCount * 20) % 100}%` }} />
-                      </div>
-                      <span className="text-[10px] font-bold text-muted-foreground/80">{(lead.signalsCount * 20) % 100}%</span>
-                    </div>
-                  </td>
-                  <td className="py-4 px-2 text-center">
-                    <span className={cn(
-                      "inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
-                      "bg-primary/10 text-primary"
-                    )}>
-                      Enriched
-                    </span>
-                  </td>
-                  <td className="py-4 px-2">
-                    <div className="flex items-center gap-1.5 opacity-60">
-                      <Globe className="h-3 w-3" />
-                      <span className="text-[10px] font-medium truncate max-w-[100px]">{lead.industry || "B2B Tech"}</span>
-                    </div>
-                  </td>
-                  <td className="py-4 px-2 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg opacity-40 group-hover:opacity-100 hover:bg-primary/10 transition-all">
-                         <Mail className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg opacity-40 group-hover:opacity-100 hover:bg-muted transition-all">
-                         <ArrowRight className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!isLoadingLeads && recentLeads.length === 0 && (
-            <div className="h-40 flex flex-col items-center justify-center text-muted-foreground gap-2">
-              <Users className="h-8 w-8 opacity-20" />
-              <p className="text-xs font-medium">No recent prospects active</p>
-            </div>
-          )}
-        </div>
-      </section>
+        {/* ── SEQUENCE ANALYTICS (Existing Detail) ── */}
+        <SequenceAnalytics />
+      </div>
+
     </div>
-  )
-}
-
-function ArrowUpIcon(props: any) {
-  return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      width="24" 
-      height="24" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="3" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
-    >
-      <path d="m5 12 7-7 7 7" /><path d="M12 19V5" />
-    </svg>
   )
 }

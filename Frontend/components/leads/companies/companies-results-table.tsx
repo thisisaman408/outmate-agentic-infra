@@ -395,7 +395,7 @@ export function CompaniesResultsTable({
             // CrustData email fallback when ContactOut returned nothing
             if (sanitized.length === 0 && field === 'email' && company.linkedin_url) {
                 try {
-                    const crustRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/crustdata/person/enrich`, {
+                    const crustRes = await fetch(`""/api/v1/crustdata/person/enrich`, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify({ linkedin_profile_url: company.linkedin_url }),

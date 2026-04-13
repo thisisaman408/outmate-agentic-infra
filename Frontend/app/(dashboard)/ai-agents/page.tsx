@@ -1,231 +1,299 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useCoPilotAgentStore } from "@/lib/copilot/agent-store"
-import { AgenticSearchPanel } from "@/components/ai-agents/agentic-search-panel"
-import { LookalikePanel } from "@/components/ai-agents/lookalike-panel"
-import { ResearchPanel } from "@/components/ai-agents/research-panel"
-import { PredictivePanel } from "@/components/ai-agents/predictive-panel"
-import { CrossfirePanel } from "@/components/ai-agents/crossfire-panel"
-import { ComplianceOraclePanel } from "@/components/ai-agents/compliance-oracle-panel"
-import { ViralityEnginePanel } from "@/components/ai-agents/virality-engine-panel"
-import { TalentRadarPanel } from "@/components/ai-agents/talent-radar-panel"
-import { RegimeShifterPanel } from "@/components/ai-agents/regime-shifter-panel"
-import { Sparkles, Users, Search, TrendingUp, Cpu, Target, ShieldCheck, Network, Radar, Globe } from "lucide-react"
+import {
+  Mic, MicOff, Paperclip, ArrowUp,
+  Bot, Search, Zap, Mail, Sparkles,
+  Play, Settings, Code, Bug, TestTube,
+  Plus, MoreHorizontal, ChevronRight, GripVertical,
+  Check,
+  Filter, Clock, MessageSquare, Database,
+  Globe, FileText, Users, BarChart3,
+  Linkedin, Phone, Target, Brain,
+  Webhook, GitBranch, RefreshCw,
+  Activity, CheckCircle2, Circle,
+  RotateCcw, Copy, ExternalLink,
+  Share2, Bell, BellRing, Download,
+  Link, ToggleLeft, ToggleRight, AlertTriangle,
+  PanelRightOpen, Layers, Send, X
+} from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 
-const AGENTS = [
+/* ── @ mention agents ─────────────────────── */
+const mentionAgents = [
+  { emoji: "🤖", name: "AI SDR", category: "Outbound Execution" },
+  { emoji: "🗂", name: "Prospect Brief", category: "Research & Enrichment" },
+  { emoji: "📡", name: "Intent Radar", category: "Signal Detection" },
+  { emoji: "✉️", name: "Email Writer", category: "Outbound Execution" },
+  { emoji: "💎", name: "Funding Scout", category: "Signal Detection" },
+]
+
+/* ── copilot conversation ─────────────────── */
+interface CopilotMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  promptChange?: { title: string; applied: boolean }
+  followUp?: string[]
+}
+
+const initialConversation: CopilotMessage[] = [
   {
-    id: "search",
-    name: "Agentic Search",
-    description: "Multi-step prospect identification",
-    icon: Sparkles,
-    component: AgenticSearchPanel,
-    color: "text-blue-400",
-    bg: "bg-blue-400/10",
-  },
-  {
-    id: "lookalike",
-    name: "Lookalike",
-    description: "Mirror your best customers",
-    icon: Users,
-    component: LookalikePanel,
-    color: "text-purple-400",
-    bg: "bg-purple-400/10",
-  },
-  {
-    id: "research",
-    name: "Research",
-    description: "Deep company intelligence",
-    icon: Search,
-    component: ResearchPanel,
-    color: "text-emerald-400",
-    bg: "bg-emerald-400/10",
-  },
-  {
-    id: "predictive",
-    name: "Predictive",
-    description: "Lead conversion scoring",
-    icon: TrendingUp,
-    component: PredictivePanel,
-    color: "text-orange-400",
-    bg: "bg-orange-400/10",
-  },
-  {
-    id: "crossfire",
-    name: "Crossfire Agent",
-    description: "Competitive poacher for weakening accounts",
-    icon: Target,
-    component: CrossfirePanel,
-    color: "text-rose-400",
-    bg: "bg-rose-400/10",
-  },
-  {
-    id: "compliance",
-    name: "Compliance Oracle",
-    description: "Global outreach compliance architect",
-    icon: ShieldCheck,
-    component: ComplianceOraclePanel,
-    color: "text-emerald-400",
-    bg: "bg-emerald-400/10",
-  },
-  {
-    id: "virality",
-    name: "Virality Engine",
-    description: "Self-propagating B2B referral chains",
-    icon: Network,
-    component: ViralityEnginePanel,
-    color: "text-indigo-400",
-    bg: "bg-indigo-400/10",
-  },
-  {
-    id: "talent",
-    name: "Talent Radar",
-    description: "Executive churn prediction strategist",
-    icon: Radar,
-    component: TalentRadarPanel,
-    color: "text-sky-400",
-    bg: "bg-sky-400/10",
-  },
-  {
-    id: "regime",
-    name: "Regime Shifter",
-    description: "Geo-political ICP adaptation commander",
-    icon: Globe,
-    component: RegimeShifterPanel,
-    color: "text-lime-400",
-    bg: "bg-lime-400/10",
+    id: "1", role: "assistant",
+    content: "I've analyzed your **ICP Outbound Agent** pipeline. Here's the current workflow:\n\n1. **Signal Detection**: Monitor hiring + funding signals for ICP companies\n2. **Waterfall Enrichment**: Multi-provider data enrichment for contacts\n3. **Lead Scoring**: AI-powered qualification with 80+ threshold\n4. **Email Sequence**: 5-step personalized outreach\n5. **CRM Update**: Push qualified leads to Salesforce\n\nThe pipeline looks solid. Would you like to optimize any specific step?",
+    followUp: ["I want to add a LinkedIn touchpoint before email", "How can I improve the lead scoring accuracy?", "Add a condition to skip already-contacted leads"],
   },
 ]
 
-// Map store agent keys → tab IDs
-const AGENT_KEY_TO_TAB: Record<string, string> = {
-  agentic_search: 'search',
-  lookalike: 'lookalike',
-  research: 'research',
-  predictive: 'predictive',
-  crossfire: 'crossfire',
-  compliance_oracle: 'compliance',
-  virality_engine: 'virality',
-  talent_radar: 'talent',
-  regime_shifter: 'regime',
+/* ── canvas nodes ─────────────────────────── */
+interface CanvasNode {
+  id: string
+  label: string
+  type: "trigger" | "action" | "condition" | "output"
+  emoji: string
+  color: string
+  y: number
+  desc: string
+  integration?: string
+  outputPreview?: string
 }
 
-export default function AIAgentsPage() {
-  const [activeTab, setActiveTab] = useState("search")
+const initialNodes: CanvasNode[] = [
+  { id: "n1", label: "Workflow Input Settings", type: "trigger", emoji: "⚡", color: "bg-teal-500/10 text-teal-500", y: 20, desc: "ICP match trigger · Hiring + Funding signals", integration: "Signal Engine", outputPreview: '{"matches": 12, "source": "LinkedIn Jobs"}' },
+  { id: "n2", label: "Waterfall Enrich", type: "action", emoji: "✨", color: "bg-indigo-500/10 text-indigo-500", y: 170, desc: "Multi-provider data enrichment", integration: "Clearbit + Hunter", outputPreview: '{"enriched": 12, "match_rate": 0.92}' },
+  { id: "n3", label: "Lead Scoring", type: "condition", emoji: "🎯", color: "bg-green-500/10 text-green-500", y: 320, desc: "Score ≥ 80 → qualified path", integration: "AI Scorer", outputPreview: '{"qualified": 8, "avg_score": 84.2}' },
+  { id: "n4", label: "Email Sequence", type: "action", emoji: "✉️", color: "bg-purple-500/10 text-purple-500", y: 470, desc: "5-step personalized outreach", integration: "Gmail", outputPreview: '{"drafting": 8, "template": "outbound-v3"}' },
+  { id: "n5", label: "CRM Update", type: "output", emoji: "🗂", color: "bg-teal-500/10 text-teal-500", y: 620, desc: "Push to Salesforce pipeline", integration: "Salesforce" },
+]
 
-  // Auto-switch tab when Automation Agent injects a form
-  const copilotForms = useCoPilotAgentStore((s) => s.copilotForms)
-  useEffect(() => {
-    const agentKeys = Object.keys(AGENT_KEY_TO_TAB)
-    for (const key of agentKeys) {
-      if (copilotForms?.[key]) {
-        const tabId = AGENT_KEY_TO_TAB[key]
-        setActiveTab(tabId)
-        break
-      }
-    }
-  }, [copilotForms])
+export default function AgentStudioPage() {
+  const [copilotMode, setCopilotMode] = useState<"build" | "debug" | "test">("build")
+  const [input, setInput] = useState("")
+  const [conversation, setConversation] = useState<CopilotMessage[]>(initialConversation)
+  const [nodes, setNodes] = useState<CanvasNode[]>(initialNodes)
+  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [showOutputPanel, setShowOutputPanel] = useState(false)
 
-  const activeAgent = AGENTS.find((a) => a.id === activeTab) || AGENTS[0]
+  const sendMessage = (text?: string) => {
+    const content = text || input.trim()
+    if (!content) return
+    setConversation(prev => [...prev, { id: Date.now().toString(), role: "user", content }])
+    setInput("")
+    setTimeout(() => {
+      setConversation(prev => [...prev, {
+        id: (Date.now() + 1).toString(), role: "assistant",
+        content: "I've analyzed the request. I recommend adding a **LinkedIn warm-up** step before the email sequence to increase reply rates by ~15%.",
+        followUp: ["Apply this change", "Show benchmark comparison"],
+      }])
+    }, 1000)
+  }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-10 pb-20">
-      {/* Premium Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-end justify-between gap-6"
-      >
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-xl bg-primary/10 border border-primary/20">
-              <Cpu className="h-6 w-6 text-primary animate-pulse-subtle" />
+    <div className="flex h-full bg-background overflow-hidden font-sans">
+      {/* Copilot Sidebar */}
+      <aside className="w-[360px] border-r border-border bg-card flex flex-col shrink-0">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-black uppercase tracking-widest text-foreground">Copilot</h2>
+            <Badge variant="secondary" className="bg-primary/10 text-primary border-transparent text-[8px] font-black uppercase tracking-widest">v2.4 ALPHA</Badge>
+          </div>
+          <div className="flex gap-1">
+             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground/40 hover:text-foreground">
+                <RotateCcw className="w-4 h-4" />
+             </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto no-scrollbar p-6 space-y-6">
+           {conversation.map(msg => (
+             <div key={msg.id} className={cn("flex flex-col gap-2", msg.role === 'user' ? 'items-end' : 'items-start')}>
+                <div className={cn("max-w-[85%] p-4 rounded-2xl text-[11px] font-medium leading-relaxed", 
+                  msg.role === 'user' ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20 rounded-tr-sm' : 'bg-muted/30 text-foreground rounded-tl-sm')}>
+                   {msg.content}
+                </div>
+                {msg.followUp && (
+                   <div className="flex flex-wrap gap-1.5 mt-1">
+                      {msg.followUp.map(q => (
+                        <button key={q} onClick={() => sendMessage(q)} className="text-[9px] font-black uppercase tracking-widest border border-border bg-card hover:bg-muted px-3 py-1.5 rounded-lg transition-all text-muted-foreground/60">
+                           {q}
+                        </button>
+                      ))}
+                   </div>
+                )}
+             </div>
+           ))}
+        </div>
+
+        <div className="p-6 border-t border-border bg-muted/5 space-y-4">
+           <div className="flex gap-1.5 p-1 bg-muted/30 rounded-xl max-w-fit">
+              {(["build", "debug", "test"] as const).map(m => (
+                <button
+                   key={m}
+                   onClick={() => setCopilotMode(m)}
+                   className={cn(
+                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all",
+                      copilotMode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                   )}
+                >
+                   {m}
+                </button>
+              ))}
+           </div>
+           <div className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-primary/10 to-indigo-500/10 rounded-2xl blur opacity-0 group-focus-within:opacity-100 transition duration-500" />
+              <div className="relative border border-border rounded-2xl bg-card overflow-hidden focus-within:border-primary transition-all shadow-xl shadow-black/5">
+                 <textarea 
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendMessage())}
+                    placeholder="Ask Copilot to build or edit..."
+                    className="w-full h-24 bg-transparent p-4 text-[11px] font-medium placeholder:text-muted-foreground/30 focus:outline-none resize-none"
+                 />
+                 <div className="px-3 py-2 bg-muted/20 border-t border-border flex items-center justify-between">
+                    <div className="flex gap-2">
+                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/40 hover:text-foreground rounded-lg">
+                          <Paperclip className="w-3.5 h-3.5" />
+                       </Button>
+                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/40 hover:text-foreground rounded-lg">
+                          <Mic className="w-3.5 h-3.5" />
+                       </Button>
+                    </div>
+                    <Button onClick={() => sendMessage()} disabled={!input} size="sm" className="h-7 w-7 p-0 bg-primary text-primary-foreground shadow-lg shadow-primary/20 rounded-lg active:scale-90 transition-all">
+                       <ArrowUp className="w-3.5 h-3.5" />
+                    </Button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      </aside>
+
+      {/* Main Canvas Area */}
+      <main className="flex-1 overflow-hidden relative bg-muted/5 flex flex-col">
+         {/* Canvas Header */}
+         <div className="px-8 py-4 bg-card border-b border-border flex items-center justify-between z-10">
+            <div className="flex items-center gap-4">
+               <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center">
+                  <Bot className="w-6 h-6 text-orange-500" strokeWidth={1.5} />
+               </div>
+               <div>
+                  <h1 className="text-sm font-black text-foreground uppercase tracking-widest leading-none">Global Outreach Pilot</h1>
+                  <p className="text-[10px] font-bold text-muted-foreground/40 mt-1 uppercase tracking-widest">Last edited by Gautam Singh · 2h ago</p>
+               </div>
             </div>
-            <span className="text-xs font-bold tracking-widest uppercase text-muted-foreground/60">Autonomous Intelligence</span>
-          </div>
-          <h1 className="text-5xl font-black tracking-tight text-gradient">AI Agents</h1>
-          <p className="text-xl text-muted-foreground max-w-2xl leading-relaxed">
-            Deploy specialized autonomous agents to automate your GTM workflow with surgical precision.
-          </p>
-        </div>
+            <div className="flex items-center gap-2">
+               <Button onClick={() => setShowOutputPanel(!showOutputPanel)} variant="outline" className={cn("h-9 px-4 text-[10px] font-black uppercase tracking-widest border-border gap-2 rounded-xl transition-all", showOutputPanel && "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20")}>
+                  <PanelRightOpen className="w-3.5 h-3.5" />
+                  Live Console
+               </Button>
+               <Button variant="outline" className="h-9 px-4 text-[10px] font-black uppercase tracking-widest border-border gap-2 rounded-xl">
+                  <Play className="w-3.5 h-3.5" />
+                  Test Sequence
+               </Button>
+               <Button className="h-9 px-4 text-[10px] font-black uppercase tracking-widest bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 rounded-xl gap-2 hover:bg-emerald-600 border-none transition-all">
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  Deploy Agent
+               </Button>
+            </div>
+         </div>
 
-        <div className="flex items-center gap-4 bg-muted/30 p-2 rounded-2xl border border-white/5 glass-effect">
-          <div className="px-4 py-2 border-r border-white/10">
-            <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/50">Active Agents</p>
-            <p className="text-lg font-mono font-bold">09</p>
-          </div>
-          <div className="px-4 py-2">
-            <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/50">Tasks Today</p>
-            <p className="text-lg font-mono font-bold">128</p>
-          </div>
-        </div>
-      </motion.div>
+         {/* Visual Canvas (Mock) */}
+         <div className="flex-1 overflow-auto p-12 relative flex flex-col items-center gap-0 no-scrollbar" style={{ backgroundImage: "radial-gradient(hsl(var(--muted-foreground) / 0.1) 1px, transparent 1px)", backgroundSize: "32px 32px" }}>
+            {nodes.map((node, i) => (
+              <React.Fragment key={node.id}>
+                <div onClick={() => setSelectedNode(node.id)} className={cn(
+                  "w-[340px] bg-card border-2 rounded-3xl p-6 transition-all cursor-pointer relative group",
+                  selectedNode === node.id ? "border-primary shadow-2xl shadow-primary/10" : "border-border hover:border-primary/20 shadow-xl shadow-black/[0.02]"
+                )}>
+                  <div className="absolute top-4 right-4 text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground/20">Step 0{i+1}</div>
+                   <div className="flex items-center gap-4 mb-4">
+                      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner", node.color)}>
+                         {node.emoji}
+                      </div>
+                      <div className="min-w-0">
+                         <div className="text-[13px] font-black text-foreground uppercase tracking-widest truncate">{node.label}</div>
+                         <div className="text-[9px] font-black text-primary/60 uppercase tracking-widest flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                            {node.integration}
+                         </div>
+                      </div>
+                   </div>
+                   <p className="text-[11px] font-medium text-muted-foreground/60 leading-relaxed line-clamp-2">
+                      {node.desc}
+                   </p>
+                   {selectedNode === node.id && (
+                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-4 mt-4 border-t border-border overflow-hidden">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-[9px] font-black text-muted-foreground/40 uppercase tracking-widest">Preview Output</span>
+                           <Button variant="ghost" size="icon" className="h-5 w-5 rounded-md text-muted-foreground/40"><Copy className="w-2.5 h-2.5" /></Button>
+                        </div>
+                        <pre className="text-[10px] font-mono p-3 bg-muted/30 rounded-xl border border-border/50 text-indigo-500 overflow-x-auto whitespace-pre">
+                           {JSON.stringify(JSON.parse(node.outputPreview || '{}'), null, 2)}
+                        </pre>
+                     </motion.div>
+                   )}
+                </div>
+                {i < nodes.length - 1 && (
+                  <div className="h-12 w-px bg-gradient-to-b from-primary/40 to-muted/20 relative">
+                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center shadow-sm">
+                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground rotate-90" />
+                     </div>
+                  </div>
+                )}
+              </React.Fragment>
+            ))}
+            
+            <button className="mt-12 w-[340px] h-16 border-2 border-dashed border-border rounded-3xl flex items-center justify-center gap-3 text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 hover:border-primary/40 hover:text-primary/60 transition-all hover:bg-primary/5">
+                <Plus className="w-4 h-4" /> Add Next Step
+            </button>
+         </div>
 
-      {/* Agent Selector Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {AGENTS.map((agent) => {
-          const Icon = agent.icon
-          const isActive = activeTab === agent.id
-
-          return (
-            <motion.button
-              key={agent.id}
-              onClick={() => setActiveTab(agent.id)}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className={cn(
-                "relative flex flex-col items-start p-5 rounded-3xl transition-all duration-500 text-left border overflow-hidden",
-                isActive
-                  ? "bg-muted/50 border-white/20 shadow-2xl glass-effect"
-                  : "bg-transparent border-white/5 hover:border-white/10"
-              )}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId="active-pill"
-                  className="absolute inset-0 bg-primary/5 -z-10"
-                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                />
-              )}
-
-              <div className={cn("p-3 rounded-2xl mb-4 transition-colors duration-500", agent.bg)}>
-                <Icon className={cn("h-6 w-6 transition-transform duration-500", isActive ? "scale-110" : "scale-100", agent.color)} />
-              </div>
-
-              <div className="space-y-1">
-                <h3 className={cn("font-bold tracking-tight transition-colors duration-500", isActive ? "text-lg text-foreground" : "text-muted-foreground")}>
-                  {agent.name}
-                </h3>
-                <p className="text-xs text-muted-foreground line-clamp-1 leading-relaxed">
-                  {agent.description}
-                </p>
-              </div>
-
-              {isActive && (
-                <div className="absolute top-4 right-4 h-2 w-2 rounded-full bg-primary animate-pulse" />
-              )}
-            </motion.button>
-          )
-        })}
-      </div>
-
-      {/* Content Area with Animation */}
-      <motion.div
-        key={activeTab}
-        initial={{ opacity: 0, scale: 0.98, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="relative"
-      >
-        <div className="absolute -inset-4 bg-primary/5 blur-3xl rounded-[3rem] -z-10" />
-        <div className="p-1 rounded-[2.5rem] bg-gradient-to-br from-white/10 to-transparent border border-white/5">
-          <div className="rounded-[2.4rem] bg-background/60 dark:bg-card/40 backdrop-blur-3xl overflow-hidden p-8 min-h-[500px] pointer-events-auto relative z-10">
-            {activeAgent && <activeAgent.component />}
-          </div>
-        </div>
-      </motion.div>
+         {/* Output Slid-in Panel */}
+         <AnimatePresence>
+            {showOutputPanel && (
+              <motion.aside 
+                initial={{ x: 400 }} animate={{ x: 0 }} exit={{ x: 400 }}
+                className="absolute right-0 top-0 bottom-0 w-[400px] bg-card border-l border-border shadow-2xl z-20 flex flex-col">
+                 <div className="p-8 border-b border-border flex items-center justify-between">
+                    <div>
+                       <h3 className="text-lg font-black tracking-tight text-foreground uppercase tracking-widest">Live Console</h3>
+                       <div className="flex items-center gap-2 mt-1">
+                          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                          <span className="text-[10px] font-black text-green-500 uppercase tracking-widest">System Operational</span>
+                       </div>
+                    </div>
+                    <Button onClick={() => setShowOutputPanel(false)} variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground/40 hover:text-foreground rounded-2xl bg-muted/50">
+                       <X className="w-4 h-4" />
+                    </Button>
+                 </div>
+                 <div className="flex-1 overflow-auto no-scrollbar p-8 space-y-6 bg-muted/5">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="space-y-3">
+                         <div className="flex items-center gap-3">
+                            <Activity className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-[10px] font-black text-muted-foreground uppercase opacity-40">14:02:{20 + i * 14}</span>
+                            <span className="text-[10px] font-black text-foreground uppercase tracking-widest">Enrichment Processed</span>
+                         </div>
+                         <div className="p-4 rounded-2xl bg-black font-mono text-[9px] text-emerald-500 overflow-x-auto border border-white/5 shadow-2xl">
+                            {`> FETCHING DATA FROM SOURCE_0${i}...\n> SUCCESS: 128 RECORDS MATCHED\n> ENRICHING VIA CLEARBIT_V3...\n> QUALITY SCORE: 0.94\n> [OK]`}
+                         </div>
+                      </div>
+                    ))}
+                 </div>
+                 <div className="p-8 border-t border-border bg-card">
+                    <Button className="w-full h-11 bg-indigo text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-indigo/20">
+                       Clear Logs
+                    </Button>
+                 </div>
+              </motion.aside>
+            )}
+         </AnimatePresence>
+      </main>
     </div>
   )
 }

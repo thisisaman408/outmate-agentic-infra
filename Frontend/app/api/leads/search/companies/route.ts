@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
     const url = new URL(request.url)
     const demo = url.searchParams.get('demo') === 'true'
     const body = await request.json()
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
+    const backendUrl = process.env.BACKEND_URL || 'https://dev.outmate.ai'
 
     console.log('=== DEBUG: backend URL ===')
     console.log('backendUrl:', backendUrl)

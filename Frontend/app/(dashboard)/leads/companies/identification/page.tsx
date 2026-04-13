@@ -81,7 +81,7 @@ export default function CompanyIdentificationPage() {
       else if (cf.company_id) requestBody.query_company_id = cf.company_id
       else { setError("Please provide at least one identifier"); setLoading(false); return }
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/identify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,7 +150,7 @@ export default function CompanyIdentificationPage() {
         return
       }
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/identify`, {
         method: 'POST',
         headers: {

@@ -1,6 +1,6 @@
 "use client"
 
-import { Search, ChevronDown, Settings, Building2, Menu } from "lucide-react"
+import { Search, ChevronDown, Settings, Building2, Menu, Bell } from "lucide-react"
 import { NotificationDropdown } from "@/components/copilot/notification-dropdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,15 +14,25 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useStore } from "@/lib/store"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { authService } from "@/lib/auth"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { AuthModal } from "@/components/auth/auth-modal"
 import { useState, useEffect } from "react"
+import Link from "next/link"
+import { cn } from "@/lib/utils"
+
+const navPills = [
+  { label: "Home", href: "/dashboard" },
+  { label: "Agents", href: "/ai-agents" },
+  { label: "Database", href: "/leads/companies" },
+  { label: "Analytics", href: "/dashboard" }, // Analytics is part of dashboard for now
+]
 
 export function Header() {
   const { user, logout, mobileSidebarOpen, setMobileSidebarOpen } = useStore()
   const router = useRouter()
+  const pathname = usePathname()
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authTab, setAuthTab] = useState<"login" | "signup">("login")
   const [mounted, setMounted] = useState(false)
@@ -31,14 +41,15 @@ export function Header() {
     setMounted(true)
   }, [])
 
-  // Use the mounted check from visitor-tracker to handle SSR
-  if (!mounted) return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border/50 bg-background/95 px-6">
-      <div className="flex-1 max-w-md">
-        <div className="h-10 bg-muted/50 rounded-lg animate-pulse" />
-      </div>
-    </header>
-  )
+  if (!mounted) {
+    return (
+      <header className="sticky top-0 z-30 flex h-16 items-center border-b border-border/50 bg-background/95 px-6">
+        <div className="flex-1 max-w-md">
+          <div className="h-10 bg-muted/50 rounded-lg animate-pulse" />
+        </div>
+      </header>
+    )
+  }
 
   const handleLogout = async () => {
     await authService.logout()
@@ -56,9 +67,12 @@ export function Header() {
     setAuthModalOpen(true)
   }
 
+  const isActive = (href: string) =>
+    pathname === href || (href !== "/" && pathname.startsWith(href))
+
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center border-b border-border/50 bg-background/95 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60 px-4 sm:px-6 gap-2 sm:gap-4">
+      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-border bg-card px-4 sm:px-6 gap-4">
         {/* Mobile Sidebar Toggle */}
         <Button
           variant="ghost"
@@ -69,87 +83,96 @@ export function Header() {
           <Menu className="h-5 w-5" />
         </Button>
 
-        {/* Search - Left aligned */}
-        <div className="flex-1 max-w-md">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        {/* Left: Nav Pills */}
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
+          {navPills.map((pill) => (
+            <Link
+              key={pill.href}
+              href={pill.href}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-[11px] font-bold transition-colors whitespace-nowrap",
+                isActive(pill.href)
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              )}
+            >
+              {pill.label}
+            </Link>
+          ))}
+        </div>
+
+        {/* Middle: Search (Optional, keeping it but making it more subtle) */}
+        <div className="hidden md:flex flex-1 max-w-sm ml-4">
+           <div className="relative w-full">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
             <Input
-              placeholder="Search..."
-              className="pl-10 h-10 bg-muted/50 border-border/50 focus:bg-background transition-colors w-full"
+              placeholder="Quick search..."
+              className="pl-9 h-8 bg-muted/30 border-transparent focus:bg-background transition-colors w-full text-xs"
             />
           </div>
         </div>
 
-        {/* Actions - Right aligned */}
-        <div className="ml-auto flex items-center gap-3">
+        {/* Right: Actions */}
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {/* Credits Pill */}
+          {user && (
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary text-[10px] font-bold text-muted-foreground">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              {user.credits?.toLocaleString() || "22,400"} credits
+            </div>
+          )}
+
           <ThemeToggle />
 
           {/* Notifications */}
           <NotificationDropdown />
 
-          {mounted && user ? (
-            // User Menu for authenticated users
+          {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-3 h-10 px-3 rounded-lg hover:bg-accent/50 border border-transparent hover:border-border/50 transition-all">
-                  <Avatar className="h-8 w-8 ring-2 ring-primary/10">
-                    <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-semibold text-xs tracking-tighter">
-                      {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
+                <Button variant="ghost" className="p-0 h-8 w-8 rounded-full border border-border/50 overflow-hidden hover:ring-2 hover:ring-primary/20 transition-all">
+                  <Avatar className="h-full w-full">
+                    <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                      {user.name?.charAt(0).toUpperCase() || "U"}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="hidden sm:flex flex-col items-start text-left min-w-0">
-                    <span className="text-sm font-semibold truncate leading-none mb-1">
-                      {user?.name || "Member"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground/80 truncate leading-none uppercase tracking-wider font-medium">
-                      {user?.plan || "Free"} Plan
-                    </span>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground/60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 p-2 shadow-xl border-border/40">
-                <div className="flex items-center gap-3 p-2 mb-2 bg-muted/40 rounded-md">
-                  <Avatar className="h-10 w-10 shrink-0">
-                    <AvatarFallback className="bg-primary/20 text-primary text-base font-bold">
-                       {user?.name?.charAt(0).toUpperCase() || "U"}
-                    </AvatarFallback>
-                  </Avatar>
+              <DropdownMenuContent align="end" className="w-56 p-2 shadow-xl border-border/40">
+                <div className="flex items-center gap-3 p-2 mb-2 bg-muted/20 rounded-md">
+                   <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">
+                      {user.name?.charAt(0).toUpperCase() || "U"}
+                   </div>
                   <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-bold truncate">{user?.name || "User"}</span>
-                    <span className="text-xs text-muted-foreground truncate italic">{user?.email}</span>
+                    <span className="text-xs font-bold truncate">{user.name || "User"}</span>
+                    <span className="text-[10px] text-muted-foreground truncate">{user.email}</span>
                   </div>
                 </div>
-                <DropdownMenuSeparator className="-mx-2 mb-1 opacity-50" />
-                <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 px-2 py-1.5">
-                  Management
-                </DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => router.push("/settings")} className="rounded-md gap-2 cursor-pointer">
-                  <Settings className="h-4 w-4 opacity-70" /> Account Settings
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push("/settings")} className="text-xs font-medium cursor-pointer rounded-md">
+                  <Settings className="mr-2 h-3.5 w-3.5 opacity-60" /> Account Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push("/settings/workspace")} className="rounded-md gap-2 cursor-pointer">
-                  <Building2 className="h-4 w-4 opacity-70" /> {user?.workspace || "Main Workspace"}
+                <DropdownMenuItem onClick={() => router.push("/settings/workspace")} className="text-xs font-medium cursor-pointer rounded-md">
+                  <Building2 className="mr-2 h-3.5 w-3.5 opacity-60" /> {user.workspace || "Main Workspace"}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator className="-mx-2 mt-1 mb-1 opacity-50" />
-                <DropdownMenuItem onClick={handleLogout} className="rounded-md gap-2 cursor-pointer text-destructive focus:bg-destructive focus:text-destructive-foreground">
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-xs font-bold text-destructive cursor-pointer rounded-md">
                   Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            // Auth buttons for non-authenticated users
             <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={openSignIn} className="h-9 rounded-lg">
+              <Button variant="ghost" onClick={openSignIn} className="h-8 px-3 text-xs font-bold">
                 Sign In
               </Button>
-              <Button onClick={openSignUp} className="h-9 rounded-lg shadow-sm bg-primary hover:bg-primary/90 text-primary-foreground">
+              <Button onClick={openSignUp} className="h-8 px-3 text-xs font-bold bg-primary hover:bg-primary/90">
                 Get Started
               </Button>
             </div>
           )}
         </div>
       </header>
-
       <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} defaultTab={authTab} />
     </>
   )

@@ -12,7 +12,7 @@ import { signalsApi } from '@/lib/api/signals'
 import { getModuleSchema } from './module-schemas'
 import { authService } from '@/lib/auth'
 
-const BACKEND_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+const BACKEND_BASE = ''
 
 export interface SearchResult {
   module: string

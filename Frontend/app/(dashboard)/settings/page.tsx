@@ -1,456 +1,287 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import React, { useState } from "react"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Copy, Plus, Trash2, Eye, EyeOff, Loader2 } from "lucide-react"
-import {
-  settingsApi,
-  type UserProfile,
-  type WorkspaceSettings,
-  type APIKey,
-  type NotificationSettings,
-} from "@/lib/api/settings"
-import { useToast } from "@/hooks/use-toast"
-import { Skeleton } from "@/components/ui/skeleton"
-import { IntegrationsStep } from "@/components/onboarding/integrations-step"
-import { Zap } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Separator } from "@/components/ui/separator"
+import { 
+  User, Users, Bell, Shield, Wallet, BarChart3, FileText, 
+  Building2, Settings2, Code2, History, AlertTriangle,
+  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2
+} from "lucide-react"
+import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+
+type SettingsNavItem = {
+  id: string
+  icon: any
+  name: string
+  badge?: string
+  danger?: boolean
+}
+
+type SettingsSection = {
+  label: string
+  items: SettingsNavItem[]
+}
+
+const NAV_SECTIONS: SettingsSection[] = [
+  {
+    label: "Account",
+    items: [
+      { id: "profile", icon: User, name: "Profile" },
+      { id: "team", icon: Users, name: "Team & roles" },
+      { id: "notifications", icon: Bell, name: "Notifications" },
+      { id: "security", icon: Shield, name: "Security" },
+    ],
+  },
+  {
+    label: "Financial",
+    items: [
+      { id: "billing", icon: Wallet, name: "Plan & billing" },
+      { id: "usage", icon: BarChart3, name: "Usage & credits", badge: "78%" },
+      { id: "invoices", icon: FileText, name: "Invoices" },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      { id: "organization", icon: Building2, name: "Organization" },
+      { id: "preferences", icon: Settings2, name: "Preferences" },
+      { id: "api", icon: Code2, name: "API & webhooks" },
+      { id: "audit", icon: History, name: "Audit logs" },
+    ],
+  },
+  {
+    label: "System",
+    items: [{ id: "danger", icon: AlertTriangle, name: "Danger zone", danger: true }],
+  },
+]
 
 export default function SettingsPage() {
-  const { toast } = useToast()
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-
-  // Profile
-  const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [profileForm, setProfileForm] = useState({ name: "", email: "" })
-
-  // Workspace
-  const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null)
-  const [workspaceForm, setWorkspaceForm] = useState({ name: "", billingEmail: "" })
-
-  // API Keys
-  const [apiKeys, setApiKeys] = useState<APIKey[]>([])
-  const [newKeyName, setNewKeyName] = useState("")
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
-
-  // Notifications
-  const [notifications, setNotifications] = useState<NotificationSettings | null>(null)
-
-  useEffect(() => {
-    fetchSettings()
-  }, [])
-
-  const fetchSettings = async () => {
-    try {
-      const [profileData, workspaceData, apiKeysData, notificationsData] = await Promise.all([
-        settingsApi.getUserProfile(),
-        settingsApi.getWorkspaceSettings(),
-        settingsApi.getAPIKeys(),
-        settingsApi.getNotificationSettings(),
-      ])
-
-      setProfile(profileData)
-      setProfileForm({ name: profileData.name, email: profileData.email })
-
-      setWorkspace(workspaceData)
-      setWorkspaceForm({ name: workspaceData.name, billingEmail: workspaceData.billingEmail })
-
-      setApiKeys(apiKeysData)
-      setNotifications(notificationsData)
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load settings",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleSaveProfile = async () => {
-    setIsSaving(true)
-    try {
-      await settingsApi.updateUserProfile(profileForm)
-      toast({
-        title: "Success",
-        description: "Profile updated successfully",
-      })
-      fetchSettings()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update profile",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleSaveWorkspace = async () => {
-    setIsSaving(true)
-    try {
-      await settingsApi.updateWorkspaceSettings(workspaceForm)
-      toast({
-        title: "Success",
-        description: "Workspace settings updated successfully",
-      })
-      fetchSettings()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update workspace settings",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleCreateAPIKey = async () => {
-    if (!newKeyName.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a key name",
-        variant: "destructive",
-      })
-      return
-    }
-
-    try {
-      await settingsApi.createAPIKey(newKeyName)
-      toast({
-        title: "Success",
-        description: "API key created successfully",
-      })
-      setNewKeyName("")
-      fetchSettings()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create API key",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleDeleteAPIKey = async (keyId: string) => {
-    try {
-      await settingsApi.deleteAPIKey(keyId)
-      toast({
-        title: "Success",
-        description: "API key deleted",
-      })
-      fetchSettings()
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to delete API key",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleCopyKey = (key: string) => {
-    navigator.clipboard.writeText(key)
-    toast({
-      title: "Copied",
-      description: "API key copied to clipboard",
-    })
-  }
-
-  const toggleKeyVisibility = (keyId: string) => {
-    setVisibleKeys((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(keyId)) {
-        newSet.delete(keyId)
-      } else {
-        newSet.add(keyId)
-      }
-      return newSet
-    })
-  }
-
-  const handleUpdateNotifications = async (updates: Partial<NotificationSettings>) => {
-    try {
-      await settingsApi.updateNotificationSettings(updates)
-      setNotifications((prev) => (prev ? { ...prev, ...updates } : null))
-      toast({
-        title: "Success",
-        description: "Notification settings updated",
-      })
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update notification settings",
-        variant: "destructive",
-      })
-    }
-  }
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    )
-  }
+  const [activeTab, setActiveTab] = useState("profile")
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Manage your account and workspace settings</p>
-      </div>
+    <div className="flex h-full bg-background overflow-hidden font-sans">
+      {/* Left Navigation */}
+      <aside className="w-[280px] shrink-0 border-r border-border bg-card flex flex-col">
+        <div className="p-8 border-b border-border">
+          <div className="flex items-center gap-3 mb-6">
+             <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <Settings2 className="w-5 h-5 text-primary" />
+             </div>
+             <div>
+               <h1 className="text-xl font-black tracking-tight text-foreground">Settings</h1>
+               <div className="flex items-center gap-1.5 text-[10px] font-black text-muted-foreground/40 uppercase tracking-widest mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  Live Sync On
+               </div>
+             </div>
+          </div>
+        </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-          <TabsTrigger value="api">API Keys</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2">
-            <Zap className="h-4 w-4 text-orange-400" />
-            Integrations
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex-1 overflow-auto no-scrollbar p-6">
+          {NAV_SECTIONS.map((sec) => (
+            <div key={sec.label} className="mb-8 last:mb-0">
+              <h3 className="px-4 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 mb-4">
+                {sec.label}
+              </h3>
+              <div className="space-y-1">
+                {sec.items.map((item) => {
+                  const Icon = item.icon
+                  const active = activeTab === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black transition-all group relative",
+                        active 
+                          ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" 
+                          : item.danger 
+                            ? "text-red-500 hover:bg-red-500/5 hover:text-red-600" 
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      )}
+                    >
+                      <Icon className={cn("w-4 h-4", active ? "text-primary-foreground" : "text-muted-foreground/40 group-hover:text-current")} />
+                      <span className="flex-1 text-left uppercase tracking-widest leading-none">{item.name}</span>
+                      {item.badge && (
+                        <span className={cn(
+                          "px-2 py-1 rounded-lg text-[9px] font-black",
+                          active ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
+                        )}>
+                          {item.badge}
+                        </span>
+                      )}
+                      {active && (
+                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-white rounded-r-full" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
 
-        {/* Profile Tab */}
-        <TabsContent value="profile">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Settings</CardTitle>
-              <CardDescription>Manage your personal account information</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  value={profileForm.name}
-                  onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-                />
+        <div className="p-8 border-t border-border bg-muted/5">
+           <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-black text-white shadow-lg">GS</div>
+              <div className="flex-1 min-w-0">
+                 <div className="text-[11px] font-black text-foreground truncate uppercase tracking-widest">Gautam Singh</div>
+                 <div className="text-[10px] font-bold text-muted-foreground/40 truncate">Growth Plan</div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={profileForm.email}
-                  onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Badge variant="secondary">{profile?.role}</Badge>
-              </div>
-              <Button onClick={handleSaveProfile} disabled={isSaving}>
-                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
+           </div>
+        </div>
+      </aside>
 
-        {/* Workspace Tab */}
-        <TabsContent value="workspace">
-          <Card>
-            <CardHeader>
-              <CardTitle>Workspace Settings</CardTitle>
-              <CardDescription>Manage your workspace configuration</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="workspaceName">Workspace Name</Label>
-                <Input
-                  id="workspaceName"
-                  value={workspaceForm.name}
-                  onChange={(e) => setWorkspaceForm({ ...workspaceForm, name: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Plan</Label>
-                  <Badge variant="default" className="capitalize">
-                    {workspace?.plan}
-                  </Badge>
+      {/* Main Content */}
+      <main className="flex-1 overflow-auto no-scrollbar bg-background">
+        <div className="max-w-4xl mx-auto p-12">
+           {activeTab === 'profile' && <ProfileSettings />}
+           {activeTab === 'team' && <TeamSettings />}
+           {(activeTab !== 'profile' && activeTab !== 'team') && (
+             <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6">
+                   <Settings2 className="w-6 h-6 text-muted-foreground/30" />
                 </div>
-                <div className="space-y-2">
-                  <Label>Team Members</Label>
-                  <p className="text-sm font-medium">{workspace?.members} members</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="billingEmail">Billing Email</Label>
-                <Input
-                  id="billingEmail"
-                  type="email"
-                  value={workspaceForm.billingEmail}
-                  onChange={(e) => setWorkspaceForm({ ...workspaceForm, billingEmail: e.target.value })}
-                />
-              </div>
-              <Button onClick={handleSaveWorkspace} disabled={isSaving}>
-                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* API Keys Tab */}
-        <TabsContent value="api" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Create New API Key</CardTitle>
-              <CardDescription>Generate a new API key for integrations</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Key name (e.g., Production)"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                />
-                <Button onClick={handleCreateAPIKey}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create
+                <h2 className="text-xl font-black tracking-tight text-foreground uppercase tracking-widest">{activeTab} section</h2>
+                <p className="text-xs font-medium text-muted-foreground/40 mt-2">Section content placeholder. Components will be dynamically loaded here.</p>
+                <Button variant="outline" className="mt-8 h-10 px-6 font-black uppercase tracking-widest text-[10px] rounded-xl border-border" onClick={() => setActiveTab('profile')}>
+                   Return to Profile
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
+             </div>
+           )}
+        </div>
+      </main>
+    </div>
+  )
+}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>API Keys</CardTitle>
-              <CardDescription>Manage your API keys for accessing the Outmate API</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {apiKeys.map((key) => (
-                  <div key={key.id} className="rounded-lg border p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="font-medium">{key.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Created {new Date(key.createdAt).toLocaleDateString()}
-                          {key.lastUsed && ` • Last used ${new Date(key.lastUsed).toLocaleDateString()}`}
-                        </p>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteAPIKey(key.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono">
-                        {visibleKeys.has(key.id) ? key.key : key.key.replace(/./g, "•")}
-                      </code>
-                      <Button variant="outline" size="icon" onClick={() => toggleKeyVisibility(key.id)}>
-                        {visibleKeys.has(key.id) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
-                      <Button variant="outline" size="icon" onClick={() => handleCopyKey(key.key)}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+function ProfileSettings() {
+  return (
+    <div className="space-y-12">
+      <header>
+        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">Profile Settings</h2>
+        <p className="text-sm font-medium text-muted-foreground/60">Manage your personal identity, roles, and preferences across Outmate.</p>
+      </header>
 
-        {/* Notifications Tab */}
-        <TabsContent value="notifications">
-          <Card>
-            <CardHeader>
-              <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose how you want to be notified</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Email Notifications</p>
-                    <p className="text-sm text-muted-foreground">Receive notifications via email</p>
-                  </div>
-                  <Switch
-                    checked={notifications?.emailNotifications}
-                    onCheckedChange={(checked) => handleUpdateNotifications({ emailNotifications: checked })}
-                  />
+      <div className="bg-card border border-border rounded-3xl overflow-hidden shadow-xl shadow-black/5">
+        <div className="p-8">
+           <div className="flex items-center gap-8 mb-10 pb-10 border-b border-border">
+              <div className="relative group">
+                 <div className="w-24 h-24 rounded-[32px] bg-primary text-white flex items-center justify-center text-2xl font-black shadow-2xl shadow-primary/40 group-hover:scale-105 transition-transform duration-500">GS</div>
+                 <button className="absolute -bottom-2 -right-2 w-10 h-10 rounded-2xl bg-white text-foreground shadow-xl border border-border flex items-center justify-center hover:bg-muted transition-all active:scale-95">
+                    <Upload className="w-4 h-4" />
+                 </button>
+              </div>
+              <div>
+                 <h3 className="text-lg font-black tracking-tight text-foreground uppercase tracking-widest">Gautam Singh</h3>
+                 <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em] mt-1 opacity-60">Account Holder · Administrator</p>
+                 <div className="flex gap-2 mt-4">
+                    <Button variant="outline" size="sm" className="h-8 px-4 text-[9px] font-black uppercase tracking-widest rounded-xl border-border">Change Photo</Button>
+                    <Button variant="ghost" size="sm" className="h-8 px-4 text-[9px] font-black uppercase tracking-widest rounded-xl text-red-500 hover:bg-red-500/5">Remove</Button>
+                 </div>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-2 gap-8">
+              <div className="space-y-6">
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Full Name</label>
+                    <Input defaultValue="Gautam Singh" className="h-12 bg-muted/20 border-transparent focus:bg-background focus:ring-0 text-sm font-bold rounded-2xl" />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Email Address</label>
+                    <Input defaultValue="gautam@outmate.ai" disabled className="h-12 bg-muted/40 border-transparent text-sm font-bold rounded-2xl opacity-60" />
+                 </div>
+              </div>
+              <div className="space-y-6">
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Organization Role</label>
+                    <Input defaultValue="Chief Executive Officer" className="h-12 bg-muted/20 border-transparent focus:bg-background focus:ring-0 text-sm font-bold rounded-2xl" />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Timezone</label>
+                    <div className="h-12 bg-muted/20 border border-transparent rounded-2xl flex items-center px-4 text-sm font-bold text-foreground">
+                       (GMT+5:30) Asia/Kolkata
+                       <ChevronRight className="w-4 h-4 ml-auto text-muted-foreground/30" />
+                    </div>
+                 </div>
+              </div>
+           </div>
+        </div>
+
+        <div className="px-8 py-6 bg-muted/10 border-t border-border flex items-center justify-between">
+           <div className="flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full bg-primary" />
+              <p className="text-[10px] font-bold text-muted-foreground/60">Changes will apply across all linked Outmate organizations.</p>
+           </div>
+           <Button className="h-11 px-8 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
+              <Save className="w-4 h-4 mr-2" />
+              Save Changes
+           </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TeamSettings() {
+  const members = [
+    { name: "Gautam Singh", role: "Owner", email: "gautam@outmate.ai", status: "Active", initials: "GS" },
+    { name: "Saurabh Mishra", role: "Admin", email: "saurabh@outmate.ai", status: "Active", initials: "SM" },
+    { name: "Abhinav Gupta", role: "Member", email: "abhinav@outmate.ai", status: "Active", initials: "AG" },
+    { name: "Vatsal Sharma", role: "Member", email: "vatsal@outmate.ai", status: "Invited", initials: "VS" },
+  ]
+
+  return (
+    <div className="space-y-12">
+      <header className="flex items-end justify-between">
+        <div>
+          <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">Team & Roles</h2>
+          <p className="text-sm font-medium text-muted-foreground/60">Manage your workspace collaborators and their access levels.</p>
+        </div>
+        <Button className="h-11 px-8 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-primary/20">
+           + Invite User
+        </Button>
+      </header>
+
+      <div className="grid grid-cols-1 gap-4">
+        {members.map((member) => (
+          <div key={member.email} className="group bg-card border border-border rounded-3xl p-6 flex items-center gap-6 transition-all hover:border-primary/20 hover:shadow-xl hover:shadow-black/5">
+             <div className="w-14 h-14 rounded-2xl bg-muted/50 border border-border flex items-center justify-center text-sm font-black text-muted-foreground group-hover:bg-primary group-hover:text-white transition-all">
+                {member.initials}
+             </div>
+             <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-1">
+                   <h3 className="text-[15px] font-black tracking-tight text-foreground truncate uppercase tracking-widest">{member.name}</h3>
+                   <Badge variant="outline" className={cn("text-[9px] font-black uppercase tracking-widest border-transparent px-2", 
+                     member.status === 'Active' ? 'bg-green-500/10 text-green-500' : 'bg-amber-500/10 text-amber-500')}>
+                     {member.status}
+                   </Badge>
                 </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Messaging Notifications</p>
-                    <p className="text-sm text-muted-foreground">Receive notifications in your messaging channel</p>
-                  </div>
-                  <Switch
-                    checked={notifications?.slackNotifications}
-                    onCheckedChange={(checked) => handleUpdateNotifications({ slackNotifications: checked })}
-                  />
+                <div className="flex items-center gap-4 text-[11px] font-bold text-muted-foreground/60">
+                   <span className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" /> {member.email}</span>
+                   <span className="w-1 h-1 rounded-full bg-border" />
+                   <span className="flex items-center gap-1.5 uppercase tracking-widest text-[10px]">{member.role}</span>
                 </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h4 className="font-medium mb-4">Event Notifications</h4>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">New Leads</p>
-                      <p className="text-sm text-muted-foreground">Get notified when new leads are generated</p>
-                    </div>
-                    <Switch
-                      checked={notifications?.newLeads}
-                      onCheckedChange={(checked) => handleUpdateNotifications({ newLeads: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Campaign Updates</p>
-                      <p className="text-sm text-muted-foreground">Get updates on campaign performance</p>
-                    </div>
-                    <Switch
-                      checked={notifications?.campaignUpdates}
-                      onCheckedChange={(checked) => handleUpdateNotifications({ campaignUpdates: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Signal Alerts</p>
-                      <p className="text-sm text-muted-foreground">Get alerted for high-confidence signals</p>
-                    </div>
-                    <Switch
-                      checked={notifications?.signalAlerts}
-                      onCheckedChange={(checked) => handleUpdateNotifications({ signalAlerts: checked })}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Weekly Report</p>
-                      <p className="text-sm text-muted-foreground">Receive weekly performance summary</p>
-                    </div>
-                    <Switch
-                      checked={notifications?.weeklyReport}
-                      onCheckedChange={(checked) => handleUpdateNotifications({ weeklyReport: checked })}
-                    />
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Integrations Tab */}
-        <TabsContent value="integrations">
-          <IntegrationsStep onStatusChange={() => {}} />
-        </TabsContent>
-      </Tabs>
+             </div>
+             <div className="flex gap-2">
+                <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground/30 hover:text-foreground rounded-xl hover:bg-muted transition-all">
+                   <Settings2 className="w-4 h-4" />
+                </Button>
+                {member.role !== 'Owner' && (
+                  <Button variant="ghost" size="icon" className="h-10 w-10 text-red-500/30 hover:text-red-500 rounded-xl hover:bg-red-500/5 transition-all">
+                     <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+             </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

@@ -44,7 +44,7 @@ export default function PublicCompanyPage() {
       try {
         setLoading(true);
         setError(null);
-        const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const BASE = "";
         const response = await fetch(`${BASE}/api/explorium/company/search`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -24,7 +24,7 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const page = searchParams.get('page') || '1'
     
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://dev.outmate.ai'
 
     const url = `${backendUrl}/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}?page=${page}`
     console.log('Proxying to backend:', url)

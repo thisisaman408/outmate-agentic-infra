@@ -17,7 +17,7 @@ export function GoogleButton({ text = "continue_with", disabled, termsAccepted =
     if (loading) return
     setLoading(true)
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const res = await fetch(`${API}/api/v1/auth/google/auth-url?terms_accepted=${termsAccepted}`)
       const data = await res.json()
       if (data.auth_url) {

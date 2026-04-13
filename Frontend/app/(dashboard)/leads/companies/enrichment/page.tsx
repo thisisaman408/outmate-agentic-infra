@@ -90,7 +90,7 @@ export default function CompanyEnrichmentPage() {
       if (cf.exact_match) params.append('exact_match', 'true')
       if (cf.realtime) params.append('enrich_realtime', 'true')
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/enrich?${params.toString()}`)
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
@@ -137,7 +137,7 @@ export default function CompanyEnrichmentPage() {
       if (exactMatch) params.append('exact_match', 'true')
       if (enrichRealtime) params.append('enrich_realtime', 'true')
 
-      const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const API = ""
       const response = await fetch(`${API}/api/v1/crustdata/enrich?${params.toString()}`)
       
       if (!response.ok) {

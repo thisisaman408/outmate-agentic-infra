@@ -68,7 +68,7 @@ export interface PredictiveScore {
   profileLink?: string
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = ""
 
 function getHeaders(): Record<string, string> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null

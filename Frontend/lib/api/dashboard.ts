@@ -1,6 +1,6 @@
 import { authService } from "@/lib/auth"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE_URL = ""
 export interface KPIData {
   totalLeads: number
   activeSignals: number

@@ -366,13 +366,13 @@ export default function OnboardingPage() {
               
               <div className="bg-slate-900 rounded-lg p-4 font-mono text-[11px] text-indigo-300 mb-6 relative group">
                   <code className="block whitespace-pre-wrap leading-relaxed">
-                      {`<!-- Outmate.ai Tracking -->\n<script src="${window.location.host === 'localhost:3000' ? 'http://localhost:8000' : window.location.origin}/api/v1/visitors/pixel.js"\n  data-pixel-key="${user?.id || 'YOUR_KEY'}"\n  async></script>`}
+                      {`<!-- Outmate.ai Tracking -->\n<script src="${window.location.host === 'localhost:3000' ? "" : window.location.origin}/api/v1/visitors/pixel.js"\n  data-pixel-key="${user?.id || 'YOUR_KEY'}"\n  async></script>`}
                   </code>
                   <Button 
                     size="sm" 
                     variant="ghost" 
                     className="absolute top-2 right-2 text-indigo-400 hover:text-white hover:bg-white/10" 
-                    onClick={() => navigator.clipboard.writeText(`<script src="${window.location.host === 'localhost:3000' ? 'http://localhost:8000' : window.location.origin}/api/v1/visitors/pixel.js" data-pixel-key="${user?.id || 'YOUR_KEY'}" async></script>`)}
+                    onClick={() => navigator.clipboard.writeText(`<script src="${window.location.host === 'localhost:3000' ? "" : window.location.origin}/api/v1/visitors/pixel.js" data-pixel-key="${user?.id || 'YOUR_KEY'}" async></script>`)}
                   >
                       Copy Snippet
                   </Button>

@@ -3,7 +3,7 @@
  * Calls the backend API which handles the async BetterContact flow.
  */
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API = ""
 
 export interface ProspectEnrichmentResult {
   success: boolean

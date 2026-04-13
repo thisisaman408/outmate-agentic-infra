@@ -4,110 +4,131 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
-  LayoutDashboard,
+  Home,
+  Eye,
+  Building2,
   Users,
-  Activity,
-  Send,
-  Bot,
+  Sparkles,
+  GitBranch,
+  BookOpen,
+  Share2,
+  BarChart3,
   Plug,
   Settings,
-  ChevronLeft,
-  ChevronRight,
-  Database,
-  Workflow,
-  Target,
+  Menu,
+  X,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronDown,
-  Building2,
-  UserCircle,
-  Clock,
-  AlertCircle,
-  CheckSquare,
-  Radar,
-  Globe,
-  Eye,
-  Sparkles,
+  ChevronRight,
+  Radio,
+  DollarSign,
+  UserPlus,
+  Phone,
+  ListTree,
+  Bot,
+  Target,
+  Bell,
   Cpu,
   ExternalLink,
+  Radar,
+  Zap,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
 
 type NavItem = {
   name: string
   href: string
   icon: any
-  external?: boolean
   badge?: string
+  badgeColor?: string
+  external?: boolean
   children?: { name: string; href: string; icon?: any }[]
 }
 
-// The agentic infra canvas is intentionally NOT publicly reachable in
-// production — it lives on the internal Container Apps network and is only
-// callable by outmate-api via a service-account key.  We only show the
-// "AI Agents Infra" sidebar link in environments where a public canvas URL
-// has been explicitly provided via NEXT_PUBLIC_AGENTIC_URL.
+type NavSection = {
+  label: string
+  items: NavItem[]
+}
+
 const AGENTIC_INFRA_URL =
   process.env.NEXT_PUBLIC_AGENTIC_URL ||
   (process.env.NODE_ENV === "production" ? "" : "http://localhost:7860")
 
-const navItems: NavItem[] = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Visitors", href: "/visitors", icon: Users },
-  { name: "AI-Powered Search", href: "/ai-powered-search", icon: Database },
-  { name: "Database", href: "/database", icon: Globe },
+const sections: NavSection[] = [
   {
-    name: "Leads",
-    href: "/leads",
-    icon: Users,
-    children: [
+    label: "Intelligence",
+    items: [
+      { name: "Website Visitors", href: "/visitors", icon: Eye, badge: "Live", badgeColor: "green" },
+      { name: "Intent Signals", href: "/signals", icon: Radar, badge: "AI", badgeColor: "indigo" },
+    ],
+  },
+  {
+    label: "Database",
+    items: [
       { name: "Companies", href: "/leads/companies", icon: Building2 },
-      { name: "Prospects", href: "/leads/prospects", icon: UserCircle },
-      { name: "Watcher", href: "/leads/watcher", icon: Eye },
-      { name: "History", href: "/leads/history", icon: Clock },
+      { name: "People", href: "/leads/prospects", icon: Users },
+      { name: "Segments & Lists", href: "/lists", icon: ListTree },
+      { name: "Knowledge Base", href: "/knowledge", icon: BookOpen },
     ],
   },
   {
-    name: "Signals",
-    href: "/signals",
-    icon: Activity,
-    children: [
-      { name: "Overview", href: "/signals", icon: AlertCircle },
-      { name: "Events", href: "/signals/events", icon: AlertCircle },
-      { name: "Intents", href: "/signals/intent", icon: Target },
-      { name: "Trackers", href: "/signals/tracker", icon: Radar },
-      { name: "Websights", href: "/signals/websights", icon: Globe },
-      { name: "Form Complete", href: "/signals/formcomplete", icon: CheckSquare },
+    label: "Execution",
+    items: [
+      { name: "Unified Copilot", href: "/copilot", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
+      { name: "Workflows", href: "/campaigns", icon: GitBranch },
+      { name: "Social Agent", href: "/social-agent", icon: Share2, badge: "Hot", badgeColor: "indigo" },
+      { name: "Voice Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
+      { name: "Enrichment", href: "/enrichment", icon: Zap, badge: "AI", badgeColor: "indigo" },
+      { name: "Agent Studio", href: "/ai-agents", icon: Bot, badge: "Studio", badgeColor: "indigo" },
+      { name: "Marketplace", href: "/marketplace", icon: Target, badge: "52", badgeColor: "indigo" },
+      // Only render the canvas link when a URL is configured (dev only by default).
+      ...(AGENTIC_INFRA_URL
+        ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
+        : []),
     ],
   },
-  { name: "Campaigns", href: "/campaigns", icon: Send },
-  { name: "Workflows", href: "/workflows", icon: Workflow },
-  { name: "Co-Pilot", href: "/copilot", icon: Sparkles },
-  { name: "AI Agents", href: "/ai-agents", icon: Bot },
-  { name: "Social Agent", href: "/social-agent", icon: Radar, badge: "New" },
-  // Only render the canvas link when a URL is configured (dev only by default).
-  ...(AGENTIC_INFRA_URL
-    ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
-    : []),
-  { name: "Integrations", href: "/integrations", icon: Plug },
-  { name: "Settings", href: "/settings", icon: Settings },
+  {
+    label: "System",
+    items: [
+      { name: "Home Dashboard", href: "/dashboard", icon: Home },
+      { name: "Analytics", href: "/analytics", icon: BarChart3 },
+      { name: "Integrations", href: "/integrations", icon: Plug },
+      { name: "Settings", href: "/settings", icon: Settings },
+    ],
+  },
 ]
+
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { sidebarCollapsed, setSidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen } = useStore()
-  const [expandedItems, setExpandedItems] = useState<string[]>(["Leads", "Signals"])
+  const { user, sidebarCollapsed, setSidebarCollapsed, mobileSidebarOpen, setMobileSidebarOpen } = useStore()
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ "Website Visitors": true })
+
+  const toggleSection = (label: string) => {
+    setCollapsedSections(prev => ({ ...prev, [label]: !prev[label] }))
+  }
+
+  const toggleItem = (label: string) => {
+    setExpandedItems(prev => ({ ...prev, [label]: !prev[label] }))
+  }
 
   // Auto-expand if child is active
   useEffect(() => {
-    navItems.forEach((item) => {
-      if (item.children) {
-        const hasActiveChild = item.children.some((child) => pathname === child.href)
-        if (hasActiveChild && !expandedItems.includes(item.name)) {
-          setExpandedItems((prev) => [...prev, item.name])
+    sections.forEach((section) => {
+      section.items.forEach((item) => {
+        if (item.children) {
+          const hasActiveChild = item.children.some((child) => pathname === child.href)
+          if (hasActiveChild && !expandedItems[item.name]) {
+            setExpandedItems((prev) => ({ ...prev, [item.name]: true }))
+          }
         }
-      }
+      })
     })
   }, [pathname])
 
@@ -116,214 +137,213 @@ export function Sidebar() {
     setMobileSidebarOpen(false)
   }, [pathname, setMobileSidebarOpen])
 
-  const toggleExpand = (name: string, e: React.MouseEvent) => {
-    e.preventDefault()
-    setExpandedItems((prev) =>
-      prev.includes(name) ? prev.filter((item) => item !== name) : [...prev, name]
+  const isActive = (path: string) =>
+    pathname === path || (path === "/dashboard" && pathname === "/") || (path !== "/" && pathname.startsWith(path + "/"))
+
+  const renderItem = (item: NavItem, depth = 0) => {
+    const active = isActive(item.href)
+    const hasChildren = item.children && item.children.length > 0
+    const isExpanded = expandedItems[item.name] ?? false
+    const Icon = item.icon
+
+    const linkContent = (
+      <div key={item.href}>
+        <div className="flex items-center">
+          {item.external ? (
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                "group relative flex-1 flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
+                sidebarCollapsed ? "justify-center px-2 py-2" : `px-3 py-[7px] ${depth > 0 ? "pl-9" : ""}`,
+                "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+              )}
+            >
+              <Icon className="w-[15px] h-[15px] shrink-0" />
+              {!sidebarCollapsed && <span className="truncate">{item.name}</span>}
+              {!sidebarCollapsed && <ExternalLink className="ml-auto w-3 h-3 opacity-50" />}
+            </a>
+          ) : (
+            <Link
+              href={item.href}
+              className={cn(
+                "group relative flex-1 flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
+                sidebarCollapsed ? "justify-center px-2 py-2" : `px-3 py-[7px] ${depth > 0 ? "pl-9" : ""}`,
+                active
+                  ? "bg-primary/10 text-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+              )}
+            >
+              {active && !sidebarCollapsed && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-primary" />
+              )}
+              <Icon className={cn("w-[15px] h-[15px] shrink-0", active ? "text-primary" : "")} />
+              {!sidebarCollapsed && <span className="truncate">{item.name}</span>}
+              {!sidebarCollapsed && item.badge && (
+                <span
+                  className={cn(
+                    "ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded-full leading-none",
+                    item.badgeColor === "green"
+                      ? "bg-green-500/15 text-green-500"
+                      : "bg-primary/15 text-primary"
+                  )}
+                >
+                  {item.badge}
+                </span>
+              )}
+            </Link>
+          )}
+          {!sidebarCollapsed && hasChildren && (
+            <button
+              onClick={() => toggleItem(item.name)}
+              className="p-1 mr-1 rounded hover:bg-muted text-muted-foreground/50"
+            >
+              {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+          )}
+        </div>
+        {!sidebarCollapsed && hasChildren && isExpanded && (
+          <div className="mt-0.5 space-y-0.5">
+            {item.children!.map((child) => renderItem({ ...child, name: child.name, icon: child.icon || Icon }, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+
+    if (sidebarCollapsed && !hasChildren) {
+      return (
+        <Tooltip key={item.href}>
+          <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+          <TooltipContent side="right" className="text-xs">
+            {item.name}
+          </TooltipContent>
+        </Tooltip>
+      )
+    }
+
+    return linkContent
+  }
+
+  const renderSection = (section: NavSection, index: number) => {
+    const isCollapsedSection = collapsedSections[section.label] ?? false
+
+    return (
+      <div key={section.label} className={index > 0 ? "mt-1" : ""}>
+        {!sidebarCollapsed ? (
+          <button
+            onClick={() => toggleSection(section.label)}
+            className="w-full flex items-center justify-between px-3 py-1.5 group cursor-pointer"
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/60">
+              {section.label}
+            </span>
+            <ChevronDown
+              className={cn(
+                "w-3 h-3 text-muted-foreground/40 transition-transform duration-200",
+                isCollapsedSection ? "-rotate-90" : ""
+              )}
+            />
+          </button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex justify-center py-2">
+                <span className="w-5 h-[1px] bg-border rounded" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">
+              {section.label}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {!isCollapsedSection && (
+          <div className={cn("space-y-0.5", sidebarCollapsed ? "px-1.5" : "px-2")}>
+            {section.items.map((item) => renderItem(item))}
+          </div>
+        )}
+      </div>
     )
   }
 
   return (
-    <>
+    <TooltipProvider delayDuration={150}>
       {/* Backdrop for mobile */}
       {mobileSidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm lg:hidden h-full w-full"
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden h-full w-full"
           onClick={() => setMobileSidebarOpen(false)}
         />
       )}
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out lg:translate-x-0",
-          sidebarCollapsed ? "lg:w-16" : "lg:w-64",
-          mobileSidebarOpen ? "translate-x-0 w-64 shadow-2xl" : "-translate-x-full",
-          "w-64", // Default width on mobile
+          "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar transition-all duration-300 lg:translate-x-0 flex flex-col",
+          sidebarCollapsed ? "lg:w-[60px]" : "lg:w-[220px]",
+          mobileSidebarOpen ? "translate-x-0 w-[240px] shadow-2xl" : "-translate-x-full",
         )}
       >
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
-          {!sidebarCollapsed && (
-            <Link href="/dashboard" className="flex items-center gap-3 group">
-              <img src="/image.png" alt="Outmate" className="h-9 w-9 rounded-xl object-cover" />
-              <span className="text-lg font-semibold text-sidebar-foreground tracking-tight">Outmate.ai</span>
-            </Link>
-          )}
-          {sidebarCollapsed && (
-            <Link href="/dashboard" className="flex items-center justify-center w-full group">
-              <img src="/image.png" alt="Outmate" className="h-9 w-9 rounded-xl object-cover" />
-            </Link>
-          )}
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 space-y-1 px-3 py-5 overflow-y-auto no-scrollbar">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href
-            const isChildActive = item.children?.some((child) => pathname === child.href)
-            const isExpanded = expandedItems.includes(item.name)
-            const Icon = item.icon
-
-            return (
-              <div key={item.name}>
-                {item.children ? (
-                  <>
-                    <div
-                      onClick={(e) => !sidebarCollapsed && toggleExpand(item.name, e)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 relative group cursor-pointer select-none",
-                        isActive || isChildActive
-                          ? "bg-sidebar-accent/50 text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                        !sidebarCollapsed && "justify-start",
-                        sidebarCollapsed && "justify-center",
-                      )}
-                    >
-                      {isActive && !item.children && (
-                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
-                      )}
-
-                      <Icon className={cn("h-5 w-5 shrink-0", (isActive || isChildActive) && "text-primary")} />
-
-                      {!sidebarCollapsed && (
-                        <>
-                          <span className="tracking-tight flex-1">{item.name}</span>
-                          <ChevronDown
-                            className={cn(
-                              "h-4 w-4 shrink-0 transition-transform duration-200",
-                              isExpanded ? "rotate-180" : ""
-                            )}
-                          />
-                        </>
-                      )}
-
-                      {sidebarCollapsed && (
-                        <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-                          {item.name}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Nested Items */}
-                    <AnimatePresence>
-                      {!sidebarCollapsed && isExpanded && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: "easeInOut" }}
-                          className="overflow-hidden bg-sidebar-accent/10 rounded-b-xl mb-1"
-                        >
-                          <div className="pl-4 pr-2 pb-2 pt-1 space-y-0.5">
-                            {item.children.map((child) => {
-                              const isChildActive = pathname === child.href
-                              const ChildIcon = child.icon
-                              return (
-                                <Link
-                                  key={child.href}
-                                  href={child.href}
-                                  className={cn(
-                                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
-                                    isChildActive
-                                      ? "bg-primary/10 text-primary"
-                                      : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/40"
-                                  )}
-                                >
-                                  {ChildIcon && <ChildIcon className="h-4 w-4 shrink-0" />}
-                                  <span>{child.name}</span>
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </>
-                ) : item.external ? (
-                  <a href={item.href}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 relative group",
-                        "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                        !sidebarCollapsed && "justify-start",
-                        sidebarCollapsed && "justify-center",
-                      )}
-                    >
-                      <Icon className="h-5 w-5 shrink-0" />
-                      {!sidebarCollapsed && (
-                        <span className="tracking-tight flex-1">{item.name}</span>
-                      )}
-                      {!sidebarCollapsed && (
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                      )}
-                      {sidebarCollapsed && (
-                        <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-                          {item.name}
-                        </div>
-                      )}
-                    </div>
-                  </a>
-                ) : (
-                  <Link href={item.href}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 relative group",
-                        isActive
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                        !sidebarCollapsed && "justify-start",
-                        sidebarCollapsed && "justify-center",
-                      )}
-                    >
-                      {isActive && (
-                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
-                      )}
-                      <Icon className={cn("h-5 w-5 shrink-0", isActive && "text-primary")} />
-                      {!sidebarCollapsed && (
-                        <>
-                          <span className="tracking-tight flex-1">{item.name}</span>
-                          {item.badge && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/15 text-primary">
-                              {item.badge}
-                            </span>
-                          )}
-                        </>
-                      )}
-                      {sidebarCollapsed && (
-                        <div className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-                          {item.name}
-                          {item.badge && ` · ${item.badge}`}
-                        </div>
-                      )}
-                    </div>
-                  </Link>
-                )}
+        {/* Logo Section */}
+        <div className={cn("border-b border-sidebar-border px-3 py-3", sidebarCollapsed && "px-2")}>
+          <div className={cn("flex items-center", sidebarCollapsed ? "justify-center" : "gap-2.5 px-1")}>
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center text-primary-foreground text-sm font-bold shrink-0">
+              O
+            </div>
+            {!sidebarCollapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate">Outmate</div>
+                <div className="text-[10px] text-muted-foreground/60">GTM Operating System</div>
               </div>
-            )
-          })}
-        </nav>
-
-        {/* Collapse Toggle */}
-        <div className="border-t border-sidebar-border p-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="w-full justify-center hover:bg-sidebar-accent rounded-xl h-9"
-          >
-            {sidebarCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronLeft className="mr-2 h-4 w-4" />
-                <span className="text-sm">Collapse</span>
-              </>
             )}
-          </Button>
+          </div>
+          <div className={cn("mt-2", sidebarCollapsed ? "px-0" : "")}>
+            {renderItem({ name: "Home", href: "/dashboard", icon: Home })}
+          </div>
         </div>
-      </div>
-    </aside>
-    </>
+
+        {/* Navigation Section */}
+        <div className="flex-1 overflow-y-auto py-2 space-y-0.5 no-scrollbar">
+          {sections.map((section, idx) => renderSection(section, idx))}
+        </div>
+
+        {/* Footer Section */}
+        <div className="border-t border-sidebar-border p-3 space-y-2.5">
+          {!sidebarCollapsed && (
+            <>
+              <div className="px-1">
+                <div className="flex justify-between text-[11px] mb-1">
+                  <span className="text-muted-foreground/60 font-bold">Credits</span>
+                  <span className="font-bold text-muted-foreground">
+                    {user?.credits?.toLocaleString() || "22,400"} / {user?.plan === 'pro' ? '100,000' : '30,000'}
+                  </span>
+                </div>
+                <div className="h-1 bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary rounded-full transition-all" 
+                    style={{ width: `${Math.min(((user?.credits || 22400) / (user?.plan === 'pro' ? 100000 : 30000)) * 100, 100)}%` }} 
+                  />
+                </div>
+              </div>
+              <Button 
+                variant="default"
+                size="sm"
+                className="w-full h-8 bg-primary text-primary-foreground text-xs font-bold rounded-lg hover:bg-primary/90 transition-colors"
+                onClick={() => window.location.href = '/settings'}
+              >
+                Upgrade Plan
+              </Button>
+            </>
+          )}
+
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="w-full flex items-center justify-center py-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground/60 transition-colors"
+          >
+            {sidebarCollapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+            {!sidebarCollapsed && <span className="text-[11px] font-bold ml-2">Collapse</span>}
+          </button>
+        </div>
+      </aside>
+    </TooltipProvider>
   )
 }

@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-4.5-sonnet'
 const OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_EMBEDDING_MODEL || '' // optional
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || ''
-const BACKEND_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+const BACKEND_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://dev.outmate.ai'
 
 // Optional pgvector memory (requires DATABASE_URL + pgvector extension)
 let pool: any = null

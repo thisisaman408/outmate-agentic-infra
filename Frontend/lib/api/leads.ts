@@ -2,7 +2,7 @@
 
 import { authService } from "@/lib/auth"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE_URL = ""
 const DEFAULT_LEADS_LIMIT = 3
 const DEFAULT_LEAD_FILTERS: LeadFilters = {
   industry: "software",

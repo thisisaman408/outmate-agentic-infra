@@ -14,7 +14,7 @@ export async function GET(
         { status: 400 }
       )
     }
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://dev.outmate.ai'
 
     console.log('Proxying to backend:', `${backendUrl}/api/v1/contactout/company/${encodeURIComponent(domain)}`)
 
