@@ -26,7 +26,7 @@ const navPills = [
   { label: "Home", href: "/dashboard" },
   { label: "Agents", href: "/ai-agents" },
   { label: "Database", href: "/leads/companies" },
-  { label: "Analytics", href: "/dashboard" }, // Analytics is part of dashboard for now
+  { label: "Analytics", href: "/dashboard#analytics" },
 ]
 
 export function Header() {

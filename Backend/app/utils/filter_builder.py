@@ -77,15 +77,20 @@ class ProspectFilterBuilder:
         locations: Optional[List[str]] = None,
         industries: Optional[List[str]] = None,
         keyword: Optional[str] = None,
-        # NEW: Name filters
+        # Name filters
         name: Optional[str] = None,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
-        # NEW: Profile Language filter
+        # Profile Language filter
         profile_languages: Optional[List[str]] = None,
         company: Optional[str] = None,
         domain: Optional[str] = None,
-        employees: Optional[List[str]] = None
+        employees: Optional[List[str]] = None,
+        # Signal filters
+        recently_changed_jobs: Optional[bool] = None,
+        # Experience range
+        years_of_experience_min: Optional[int] = None,
+        years_of_experience_max: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Build combined filter structure for CrustData API
@@ -204,7 +209,31 @@ class ProspectFilterBuilder:
             if language_filter:  # Only add if not empty dict
                 conditions.append(language_filter)
                 logger.debug(f"Added profile_language filter: {len(profile_languages)} language(s)")
-        
+
+        # Build recently_changed_jobs signal filter
+        if recently_changed_jobs is True:
+            signal_filter = self._build_recently_changed_jobs_filter(api_type)
+            if signal_filter:
+                conditions.append(signal_filter)
+                logger.debug("Added recently_changed_jobs signal filter")
+
+        # Build years_of_experience range filters (In-DB only)
+        if api_type == "in_db":
+            if years_of_experience_min is not None:
+                conditions.append({
+                    "column": "years_of_experience_raw",
+                    "type": "=>",
+                    "value": years_of_experience_min
+                })
+                logger.debug(f"Added years_of_experience_min filter: {years_of_experience_min}")
+            if years_of_experience_max is not None:
+                conditions.append({
+                    "column": "years_of_experience_raw",
+                    "type": "=<",
+                    "value": years_of_experience_max
+                })
+                logger.debug(f"Added years_of_experience_max filter: {years_of_experience_max}")
+
         # Return appropriate structure based on number of conditions
         if len(conditions) == 0:
             # No filters - return all results
@@ -753,6 +782,26 @@ class ProspectFilterBuilder:
                 "type": "(.)",
                 "value": company
             }
+
+    def _build_recently_changed_jobs_filter(self, api_type: str = "in_db") -> Dict[str, Any]:
+        """
+        Build recently_changed_jobs signal filter.
+
+        - In-DB API: uses boolean field `recently_changed_jobs = true`
+        - Realtime API: uses the special RECENTLY_CHANGED_JOBS filter_type (no value required)
+
+        Per CrustData docs example:
+            {"filter_type": "RECENTLY_CHANGED_JOBS"}
+        """
+        if api_type == "realtime":
+            return {"filter_type": "RECENTLY_CHANGED_JOBS"}
+        else:
+            return {
+                "column": "recently_changed_jobs",
+                "type": "=",
+                "value": True
+            }
+
     
     # Valid CrustData headcount ranges with their numeric boundaries
     CRUSTDATA_RANGES = [

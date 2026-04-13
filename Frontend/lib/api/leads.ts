@@ -27,6 +27,8 @@ export interface Lead {
   addedAt: string
   linkedin?: string
   experience?: string[]
+  fundingStage?: string
+  domain?: string
 }
 
 export interface LeadFilters {
@@ -156,6 +158,8 @@ export function transformCompanyToLead(company: any): Lead {
     status: "new",
     addedAt: new Date().toISOString(),
     linkedin: company.linkedin_url,
+    fundingStage: company.funding_stage || company.last_funding_round_type || undefined,
+    domain: company.domain || undefined,
   }
 }
 

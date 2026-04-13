@@ -131,7 +131,30 @@ class ProspectSearchRequest(BaseModel):
         example=["1-10", "1000_plus"],
         alias="employees"
     )
-    
+
+    # Signal filters
+    recently_changed_jobs: Optional[bool] = Field(
+        None,
+        description="Filter for people who recently changed jobs (last 90 days). Maps to CrustData RECENTLY_CHANGED_JOBS signal.",
+        example=True,
+        alias="recently_changed_jobs"
+    )
+
+    # Experience range
+    years_of_experience_min: Optional[int] = Field(
+        None,
+        description="Minimum years of experience",
+        example=5,
+        alias="years_of_experience_min"
+    )
+
+    years_of_experience_max: Optional[int] = Field(
+        None,
+        description="Maximum years of experience",
+        example=15,
+        alias="years_of_experience_max"
+    )
+
     # Profile Language filter (Location & Demographics)
     profile_languages: Optional[List[str]] = Field(
         None,

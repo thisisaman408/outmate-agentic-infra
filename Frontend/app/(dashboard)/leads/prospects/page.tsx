@@ -25,6 +25,7 @@ import {
   Briefcase,
   Sparkles,
   Download,
+  Zap,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
@@ -89,8 +90,21 @@ const unlockedFilters: FilterDef[] = [
   {
     label: "Location",
     category: "Location",
-    options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "New York", "San Francisco"],
+    options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "India", "New York", "San Francisco", "London"],
     advancedOptions: [{ label: "Include remote", description: "Include remote workers based in region" }],
+  },
+
+  /* ── Company ── */
+  {
+    label: "Company",
+    category: "Company",
+    options: [],
+    advancedOptions: [{ label: "Include subsidiaries", description: "Match parent and subsidiary companies" }],
+  },
+  {
+    label: "# Employees",
+    category: "Company",
+    options: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "10001+"],
   },
 ]
 
@@ -98,6 +112,7 @@ const signalFilters: FilterDef[] = [
   { label: "Signals", signalRow: true, expanded: true, chips: ["Job change", "Promotion", "New hire"] },
   { label: "Job change signal", signalRow: true },
   { label: "Promotion signal", signalRow: true },
+  { label: "New hire signal", signalRow: true },
 ]
 
 const lockedFilters: FilterDef[] = [
@@ -290,6 +305,12 @@ export default function PeoplePage() {
     "Seniority level": ["VP", "C-suite"],
   })
   const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({})
+  const [activeSignals, setActiveSignals] = useState<Record<string, boolean>>({
+    "Job change signal": false,
+    "Promotion signal": false,
+    "New hire signal": false,
+  })
+  const [pendingChange, setPendingChange] = useState(false)
 
   // Real Data State
   const [prospects, setProspects] = useState<ProspectProfile[]>([])
@@ -297,20 +318,30 @@ export default function PeoplePage() {
   const [isLoading, setIsLoading] = useState(false)
 
   const toggleFilter = (label: string) => setExpandedFilters((p) => ({ ...p, [label]: !p[label] }))
-  const removeChip = (filter: string, chip: string) =>
+  const removeChip = (filter: string, chip: string) => {
     setFilterChips((p) => ({ ...p, [filter]: (p[filter] || []).filter((c) => c !== chip) }))
+    setPendingChange(true)
+  }
   const toggleRow = (id: string) => setSelectedRows((p) => ({ ...p, [id]: !p[id] }))
   const selectedCount = Object.values(selectedRows).filter(Boolean).length
   const activeFilterCount = Object.values(filterChips).filter((v) => v.length > 0).length
+    + Object.values(activeSignals).filter(Boolean).length
 
   const handleSearch = async (query?: string) => {
     setIsLoading(true)
     setView("results")
+    setPendingChange(false)
     try {
       const filters: ProspectSearchFilters = {
         keyword: query || nlpQuery || undefined,
-        current_title: filterChips["Current title"],
-        seniority_level: filterChips["Seniority level"],
+        current_title: filterChips["Current title"]?.length ? filterChips["Current title"] : undefined,
+        seniority_level: filterChips["Seniority level"]?.length ? filterChips["Seniority level"] : undefined,
+        functions: filterChips["Function / department"]?.length ? filterChips["Function / department"] : undefined,
+        location: filterChips["Location"]?.length ? filterChips["Location"] : undefined,
+        company: filterChips["Company"]?.[0] || undefined,
+        employees: filterChips["# Employees"]?.length ? filterChips["# Employees"] : undefined,
+        // Signal filters — map toggle state to boolean
+        recently_changed_jobs: activeSignals["Job change signal"] ? true : undefined,
         limit: 50,
       }
       const res = await searchProspects(filters)
@@ -375,7 +406,10 @@ export default function PeoplePage() {
                       isExpanded={!!expandedFilters[f.label]}
                       chips={filterChips[f.label] || []}
                       onToggle={() => toggleFilter(f.label)}
-                      onAddChip={(val) => setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))}
+                      onAddChip={(val) => {
+                setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
+                setPendingChange(true)
+              }}
                       onRemoveChip={(chip) => removeChip(f.label, chip)}
                     />
                   ))}
@@ -385,14 +419,38 @@ export default function PeoplePage() {
 
           <div className="mx-4 my-4 border-t border-border/50" />
 
-          {signalFilters.map((f) => (
-            <div key={f.label} className="opacity-80 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
-              <button className="w-full flex items-center gap-3 px-4 h-11 text-left">
-                <span className="flex-1 text-[12px] font-bold tracking-tight text-orange-500/70">{f.label}</span>
-                <Sparkles className="w-3.5 h-3.5 text-orange-500/30" />
-              </button>
-            </div>
-          ))}
+          {signalFilters.filter(f => f.label !== "Signals").map((f) => {
+            const isActive = activeSignals[f.label]
+            return (
+              <div key={f.label} className="transition-all">
+                <button
+                  onClick={() => {
+                    setActiveSignals(p => ({ ...p, [f.label]: !p[f.label] }))
+                    setPendingChange(true)
+                    // removed auto re-search; user should click Apply
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 h-11 text-left transition-all",
+                    isActive ? "bg-orange-500/10" : "opacity-70 hover:opacity-100"
+                  )}
+                >
+                  <Sparkles className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-orange-500" : "text-orange-500/30")} />
+                  <span className={cn("flex-1 text-[12px] font-bold tracking-tight", isActive ? "text-orange-500" : "text-orange-500/70")}>
+                    {f.label}
+                  </span>
+                  <div className={cn(
+                    "w-8 h-4 rounded-full relative transition-all shrink-0",
+                    isActive ? "bg-orange-500" : "bg-muted"
+                  )}>
+                    <div className={cn(
+                      "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all",
+                      isActive ? "left-4" : "left-0.5"
+                    )} />
+                  </div>
+                </button>
+              </div>
+            )
+          })}
 
           <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-4">Locked Filters</div>
           {lockedFilters.map((f) => (
@@ -418,11 +476,43 @@ export default function PeoplePage() {
           ))}
         </div>
 
-        <div className="flex items-center justify-between px-4 py-4 border-t border-border bg-card">
-          <button className="text-[11px] font-bold text-muted-foreground flex items-center gap-2">
-            Clear all <Badge variant="secondary" className="h-4 px-1 text-[9px] font-black">{activeFilterCount}</Badge>
+        <div className="flex flex-col gap-2 px-4 py-3 border-t border-border bg-card">
+          {/* Apply filters CTA */}
+          <button
+            onClick={() => handleSearch()}
+            className={cn(
+              "w-full h-10 rounded-xl font-black text-[12px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg",
+              pendingChange
+                ? "bg-primary text-primary-foreground shadow-primary/30 animate-pulse"
+                : "bg-primary text-primary-foreground shadow-primary/20 hover:bg-primary/90"
+            )}
+          >
+            <Search className="w-3.5 h-3.5" />
+            Apply Filters
+            {activeFilterCount > 0 && (
+              <span className="bg-primary-foreground/20 text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                {activeFilterCount}
+              </span>
+            )}
           </button>
-          <button className="text-[11px] font-black text-primary hover:underline">Advanced</button>
+          {/* Clear / Advanced row */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => {
+                setFilterChips({})
+                setActiveSignals({ "Job change signal": false, "Promotion signal": false, "New hire signal": false })
+                setPendingChange(true)
+              }}
+              className="text-[10px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+            >
+              <X className="w-3 h-3" />
+              Clear all
+              {activeFilterCount > 0 && (
+                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-black">{activeFilterCount}</Badge>
+              )}
+            </button>
+            <button className="text-[10px] font-black text-primary hover:underline">Advanced</button>
+          </div>
         </div>
       </aside>
 

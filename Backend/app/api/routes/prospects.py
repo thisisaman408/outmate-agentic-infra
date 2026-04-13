@@ -233,12 +233,15 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
                 "seniority_level_operator": request.seniority_level_operator,
                 "location": request.location,
                 "industry": request.industry,
-                "person_name": request.name,  # Renamed from 'name' to avoid LogRecord conflict
+                "person_name": request.name,
                 "first_name": request.first_name,
                 "last_name": request.last_name,
                 "profile_languages": request.profile_languages,
                 "company": request.company,
                 "employees": request.employees,
+                "recently_changed_jobs": request.recently_changed_jobs,
+                "years_of_experience_min": request.years_of_experience_min,
+                "years_of_experience_max": request.years_of_experience_max,
                 "limit": request.limit,
                 "cursor": request.cursor
             }
@@ -348,6 +351,13 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
                         Company.employee_count_range.in_(request.employees)
                     )
 
+            # recently_changed_jobs signal filter
+            if request.recently_changed_jobs is True:
+                if hasattr(Prospect, "recently_changed_jobs"):
+                    prospects_query = prospects_query.filter(
+                        Prospect.recently_changed_jobs == True  # noqa: E712
+                    )
+
             prospects = prospects_query.limit(effective_limit).all()
             profiles = []
             
@@ -454,6 +464,11 @@ async def search_prospects(request: ProspectSearchRequest, db: Session = Depends
             company=request.company,
             # Employees filter
             employees=request.employees,
+            # Signal filters
+            recently_changed_jobs=request.recently_changed_jobs,
+            # Experience range
+            years_of_experience_min=request.years_of_experience_min,
+            years_of_experience_max=request.years_of_experience_max,
             limit=effective_limit,
             cursor=request.cursor
         )

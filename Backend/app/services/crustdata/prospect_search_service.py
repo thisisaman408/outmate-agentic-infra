@@ -98,7 +98,11 @@ class ProspectSearchService:
         
         # NEW: Employees filter
         employees: Optional[List[str]] = None,
-        
+        # NEW: Signal filters
+        recently_changed_jobs: Optional[bool] = None,
+        # NEW: Experience range
+        years_of_experience_min: Optional[int] = None,
+        years_of_experience_max: Optional[int] = None,
         # Pagination
         limit: int = 100,
         cursor: Optional[str] = None
@@ -163,7 +167,8 @@ class ProspectSearchService:
         if any([
             current_titles, past_titles, functions, seniority_levels, 
             locations, industries, name, first_name, last_name, 
-            profile_languages, company, domain, employees
+            profile_languages, company, domain, employees,
+            recently_changed_jobs, years_of_experience_min, years_of_experience_max
         ]):
             builder = ProspectFilterBuilder()
             
@@ -198,7 +203,10 @@ class ProspectSearchService:
                     profile_languages=profile_languages,
                     company=company,
                     domain=domain,
-                    employees=employees
+                    employees=employees,
+                    recently_changed_jobs=recently_changed_jobs,
+                    years_of_experience_min=years_of_experience_min,
+                    years_of_experience_max=years_of_experience_max,
                 )
         else:
             filters = None

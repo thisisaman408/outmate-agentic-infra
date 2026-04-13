@@ -2,6 +2,7 @@
  * Prospect Search API Service
  * Handles all API calls related to prospect searching via backend
  */
+import { authService } from '@/lib/auth'
 
 const API_BASE_URL = '';
 
@@ -18,13 +19,18 @@ export interface ProspectSearchFilters {
     keyword?: string;
     limit?: number;
     cursor?: string | null;
-    // New filters
+    // Name filters
     name?: string;
     first_name?: string;
     last_name?: string;
     profile_languages?: string[];
     company?: string;
     employees?: string[];
+    // Signal filters
+    recently_changed_jobs?: boolean;
+    // Experience range
+    years_of_experience_min?: number;
+    years_of_experience_max?: number;
 }
 
 export interface ProspectProfile {
@@ -142,9 +148,7 @@ export async function searchProspects(
 
         const response = await fetch(`${API_BASE_URL}/api/v1/prospects/search`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: authService.getAuthHeaders(),
             body: JSON.stringify(filters),
         });
 

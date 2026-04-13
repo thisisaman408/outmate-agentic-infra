@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react"
 import { getNotifications, markRead as apiMarkRead, markAllRead as apiMarkAllRead, getToken } from "@/lib/api/notifications"
 import { useNotificationStore } from "@/lib/stores/notificationStore"
 
-const WS_BASE = `wss://${window.location.host}`
+const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export function useNotifications() {
   const { setAll, append, markRead, markAllRead, notifications, unreadCount } = useNotificationStore()
