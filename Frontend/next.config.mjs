@@ -23,6 +23,7 @@ const nextConfig = {
   // not from Frontend/.  Point it at our node_modules so
   // `@import "tailwindcss"` in globals.css resolves correctly.
   turbopack: {
+    root: __dirname,
     resolveAlias: {
       tailwindcss: path.resolve(__dirname, 'node_modules/tailwindcss'),
       'tw-animate-css': path.resolve(__dirname, 'node_modules/tw-animate-css'),
