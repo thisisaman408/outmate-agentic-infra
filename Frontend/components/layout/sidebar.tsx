@@ -72,6 +72,7 @@ const sections: NavSection[] = [
     items: [
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "People", href: "/leads/prospects", icon: Users },
+      { name: "AI Powered Search", href: "/ai-powered-search", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
       { name: "Segments & Lists", href: "/lists", icon: ListTree },
       { name: "Knowledge Base", href: "/knowledge", icon: BookOpen },
     ],

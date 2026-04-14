@@ -3,7 +3,7 @@
  * Calls the backend API which handles the async BetterContact flow.
  */
 
-const API = ""
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export interface ProspectEnrichmentResult {
   success: boolean
@@ -29,6 +29,74 @@ export interface CompanyEnrichmentResult {
   credits_consumed?: number
   credits_left?: number
   confidence?: 'verified' | 'inferred'
+}
+
+export async function enrichProspectContactOut(
+  linkedinUrl: string,
+  includePhone: boolean = true
+): Promise<ProspectEnrichmentResult> {
+  try {
+    const res = await fetch(`${API}/api/v1/contactout/reveal-contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        linkedin_url: linkedinUrl,
+        include_phone: includePhone
+      }),
+    })
+
+    if (!res.ok) {
+      return { success: false, error: `ContactOut error: ${res.status}` }
+    }
+
+    const result = await res.json()
+    if (result.success && result.data) {
+      return {
+        success: true,
+        email: result.data.emails?.[0] || result.data.work_emails?.[0] || result.data.personal_emails?.[0],
+        phone: result.data.phones?.[0],
+        confidence: 'verified'
+      }
+    }
+    return { success: false, not_found: true }
+  } catch (err: any) {
+    console.error("ContactOut prospect enrichment error:", err)
+    return { success: false, error: err.message || "Network error" }
+  }
+}
+
+export async function enrichCompanyContactOut(
+  domain: string,
+  includePhone: boolean = true
+): Promise<CompanyEnrichmentResult> {
+  try {
+    const res = await fetch(`${API}/api/v1/contactout/reveal-company-contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        domain: domain,
+        include_phone: includePhone
+      }),
+    })
+
+    if (!res.ok) {
+      return { success: false, error: `ContactOut error: ${res.status}` }
+    }
+
+    const result = await res.json()
+    if (result.success && result.data) {
+      return {
+        success: true,
+        email: result.data.emails?.[0] || result.data.work_emails?.[0] || result.data.personal_emails?.[0],
+        phone: result.data.phones?.[0],
+        not_found: false
+      }
+    }
+    return { success: false, not_found: true }
+  } catch (err: any) {
+    console.error("ContactOut company enrichment error:", err)
+    return { success: false, error: err.message || "Network error" }
+  }
 }
 
 export async function enrichProspect(

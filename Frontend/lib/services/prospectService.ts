@@ -91,6 +91,7 @@ export interface EducationItem {
 }
 
 export interface EmployerItem {
+    company_name?: string;     // CrustData sometimes returns this instead of name
     name: string;
     linkedin_id: string;
     company_id: number;

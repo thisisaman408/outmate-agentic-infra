@@ -362,6 +362,37 @@ class ProspectFilterBuilder:
                 "value": cleaned_values
             }
             
+    SENIORITY_ALIASES: Dict[str, str] = {
+        "c-suite": "CXO",
+        "cxo": "CXO",
+        "vp": "Vice President",
+        "vice president": "Vice President",
+        "director": "Director",
+        "senior ic": "Senior",
+        "senior": "Senior",
+        "manager": "Manager",
+        "ic": "Entry",
+        "entry": "Entry",
+        "founder": "Owner/Partner",
+        "owner": "Owner/Partner",
+        "partner": "Owner/Partner",
+        "unpaid": "Unpaid",
+        "training": "Training"
+    }
+
+    def _normalize_seniority(self, levels: List[str]) -> List[str]:
+        """Normalize UI seniority names to canonical CrustData values."""
+        normalized: List[str] = []
+        for level in levels:
+            canonical = self.SENIORITY_ALIASES.get(level.lower().strip())
+            if canonical:
+                if canonical not in normalized:
+                    normalized.append(canonical)
+            else:
+                if level not in normalized:
+                    normalized.append(level)
+        return normalized
+
     def _build_seniority_filter(self, seniority_levels: List[str], operator: str = "in") -> Dict[str, Any]:
         """
         Build seniority level filter with configurable operator
@@ -379,6 +410,8 @@ class ProspectFilterBuilder:
         Returns:
             Filter dictionary for seniority level
         """
+        seniority_levels = self._normalize_seniority(seniority_levels)
+        
         # Map to CrustData API operator format
         # For multiple values: use 'in' or 'not_in'
         # For single value: use '=' or '!='

@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useMemo, useEffect } from "react"
 import {
@@ -35,9 +35,8 @@ import { cn } from "@/lib/utils"
 import { searchProspects, type ProspectProfile, type ProspectSearchFilters } from "@/lib/services/prospectService"
 import { toast } from "sonner"
 import { Separator } from "@/components/ui/separator"
-import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 
-/* ─── types ─── */
+/* ΓöÇΓöÇΓöÇ types ΓöÇΓöÇΓöÇ */
 
 interface FilterDef {
   label: string
@@ -51,10 +50,10 @@ interface FilterDef {
   advancedOptions?: { label: string; description: string }[]
 }
 
-/* ─── filter data ─── */
+/* ΓöÇΓöÇΓöÇ filter data ΓöÇΓöÇΓöÇ */
 
 const unlockedFilters: FilterDef[] = [
-  /* ── Identity ── */
+  /* ΓöÇΓöÇ Identity ΓöÇΓöÇ */
   {
     label: "Current title",
     category: "Identity",
@@ -87,7 +86,7 @@ const unlockedFilters: FilterDef[] = [
     options: ["Sales", "Marketing", "Engineering", "Product", "Operations", "Finance", "Customer Success", "Design"],
   },
 
-  /* ── Location ── */
+  /* ΓöÇΓöÇ Location ΓöÇΓöÇ */
   {
     label: "Location",
     category: "Location",
@@ -95,7 +94,7 @@ const unlockedFilters: FilterDef[] = [
     advancedOptions: [{ label: "Include remote", description: "Include remote workers based in region" }],
   },
 
-  /* ── Company ── */
+  /* ΓöÇΓöÇ Company ΓöÇΓöÇ */
   {
     label: "Company",
     category: "Company",
@@ -124,7 +123,7 @@ const lockedFilters: FilterDef[] = [
   { label: "Territories", locked: true, tier: "Scale" },
 ]
 
-/* ─── helpers ─── */
+/* ΓöÇΓöÇΓöÇ helpers ΓöÇΓöÇΓöÇ */
 
 const tierPill = (tier: "Starter" | "Growth" | "Scale") => {
   const cls =
@@ -149,7 +148,7 @@ const intentDots = (n: number) => (
   </div>
 )
 
-/* ─── Filter Panel ─── */
+/* ΓöÇΓöÇΓöÇ Filter Panel ΓöÇΓöÇΓöÇ */
 
 function UnlockedFilterPanel({
   filter,
@@ -291,7 +290,7 @@ function UnlockedFilterPanel({
   )
 }
 
-/* ─── Main Component ─── */
+/* ΓöÇΓöÇΓöÇ Main Component ΓöÇΓöÇΓöÇ */
 
 export default function PeoplePage() {
   const [view, setView] = useState<"nlp" | "results">("nlp")
@@ -317,11 +316,6 @@ export default function PeoplePage() {
   const [prospects, setProspects] = useState<ProspectProfile[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
-  
-  // Stubs for table compatibility
-  const handleLoadMore = async () => {}
-  const onEnrichReveal = async () => {}
-  const handleWaterfallResult = () => {}
 
   const toggleFilter = (label: string) => setExpandedFilters((p) => ({ ...p, [label]: !p[label] }))
   const removeChip = (filter: string, chip: string) => {
@@ -346,7 +340,7 @@ export default function PeoplePage() {
         location: filterChips["Location"]?.length ? filterChips["Location"] : undefined,
         company: filterChips["Company"]?.[0] || undefined,
         employees: filterChips["# Employees"]?.length ? filterChips["# Employees"] : undefined,
-        // Signal filters — map toggle state to boolean
+        // Signal filters ΓÇö map toggle state to boolean
         recently_changed_jobs: activeSignals["Job change signal"] ? true : undefined,
         limit: 50,
       }
@@ -619,20 +613,143 @@ export default function PeoplePage() {
             </div>
 
             {/* Table */}
-            <div className="flex-1 overflow-hidden min-h-0">
-               <ProspectsResultsTable
-                  profiles={prospects}
-                  totalCount={totalCount}
-                  hasMore={false}
-                  onLoadMore={handleLoadMore}
-                  isLoadingMore={false}
-                  enableContactReveal={true}
-                  onEnrichReveal={onEnrichReveal}
-                  onWaterfallResult={handleWaterfallResult}
-                  enrichCache={{}}
-                  enrichingRows={{}}
-                  tableId="prospects_v2"
-               />
+            <div className="flex-1 overflow-auto no-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[1400px]">
+                <thead className="sticky top-0 z-20 bg-card/95 backdrop-blur-md">
+                   <tr className="border-b border-border shadow-sm">
+                     <th className="w-14 px-6 py-4">
+                        <input type="checkbox" className="w-4 h-4 rounded-md accent-primary" />
+                     </th>
+                     {[
+                       { label: "Person", w: "280px" },
+                       { label: "Title", w: "220px" },
+                       { label: "Company", w: "220px" },
+                       { label: "Seniority", w: "130px" },
+                       { label: "Location", w: "180px" },
+                       { label: "Email", w: "140px" },
+                       { label: "ICP Score", w: "120px" },
+                       { label: "Intent", w: "100px" },
+                       { label: "Action", w: "100px" }
+                     ].map(h => (
+                       <th key={h.label} className="px-4 py-4 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/50" style={{ width: h.w }}>
+                         {h.label}
+                       </th>
+                     ))}
+                   </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {isLoading ? (
+                    Array.from({ length: 12 }).map((_, i) => (
+                      <tr key={i} className="animate-pulse">
+                         <td className="px-6 py-5"><div className="w-4 h-4 rounded bg-muted mx-auto" /></td>
+                         <td className="px-4 py-5"><div className="flex items-center gap-3.5"><div className="w-10 h-10 rounded-full bg-muted" /><div className="w-32 h-4 rounded bg-muted" /></div></td>
+                         <td className="px-4 py-5"><div className="w-40 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-32 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-24 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-20 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-12 h-4 rounded bg-muted" /></td>
+                         <td className="px-4 py-5"><div className="w-10 h-4 rounded bg-muted" /></td>
+                      </tr>
+                    ))
+                  ) : (
+                    prospects.map((p) => {
+                       const employer = p.current_employers?.[0]
+                       return (
+                        <tr
+                          key={p.person_id}
+                          className={cn(
+                            "group transition-all hover:bg-muted/30 border-l-2 border-transparent",
+                            selectedRows[p.person_id] && "bg-primary/5 border-primary border-l-4"
+                          )}
+                          onClick={() => toggleRow(String(p.person_id))}
+                        >
+                          <td className="px-6 py-5 align-middle" onClick={e => e.stopPropagation()}>
+                             <input
+                               type="checkbox"
+                               checked={!!selectedRows[p.person_id]}
+                               onChange={() => toggleRow(String(p.person_id))}
+                               className="w-4 h-4 rounded-md accent-primary"
+                             />
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-3.5">
+                               <div className="w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center text-[10px] font-black shadow-sm shrink-0 overflow-hidden relative">
+                                  {p.profile_picture_url ? (
+                                    <img src={p.profile_picture_url} className="w-full h-full object-cover" alt="" />
+                                  ) : (
+                                    <span className="opacity-40">{p.name.charAt(0)}</span>
+                                  )}
+                               </div>
+                               <div className="min-w-0">
+                                 <div className="text-[13px] font-black text-foreground hover:text-primary transition-colors cursor-pointer truncate">{p.name}</div>
+                                 <div className="flex items-center gap-2 mt-0.5">
+                                    <Linkedin className="w-3 h-3 text-[#0A66C2]" />
+                                    <span className="text-[9px] text-muted-foreground font-bold tracking-tight opacity-50 truncate">{p.linkedin_profile_url.split('/in/')[1]}</span>
+                                 </div>
+                               </div>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <span className="text-[11px] font-bold text-foreground/80 leading-relaxed block truncate">{p.headline}</span>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-2 max-w-[200px]">
+                                <div className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center shrink-0">
+                                  <Building2 className="w-3 h-3 text-muted-foreground/40" />
+                                </div>
+                                <span className="text-[11px] font-bold text-foreground/80 truncate">{employer?.name || "Unknown"}</span>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <Badge variant="outline" className="text-[9px] font-black bg-muted/30 border-border/50 uppercase tracking-widest">{p.seniority_level || "VP"}</Badge>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 truncate">
+                                <MapPin className="w-3.5 h-3.5 opacity-30 shrink-0" />
+                                {p.location_details.city}, {p.location_details.country}
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             <div className="flex items-center gap-1.5">
+                                <Mail className={cn("w-3.5 h-3.5", p.emails?.length > 0 ? "text-green-500" : "text-muted-foreground/30")} />
+                                <span className={cn("text-[10px] font-black uppercase tracking-widest", p.emails?.length > 0 ? "text-green-600" : "text-muted-foreground/50")}>
+                                   {p.emails?.length > 0 ? "Verified" : "Missing"}
+                                </span>
+                             </div>
+                          </td>
+                          <td className="px-4 py-5">
+                             {scoreBar(p._icpScore?.score || 85)}
+                          </td>
+                          <td className="px-4 py-5">
+                             {intentDots(4)}
+                          </td>
+                          <td className="px-4 py-5 text-right">
+                             <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all translate-x-1 group-hover:translate-x-0">
+                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors">
+                                  <Star className="w-4 h-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors">
+                                  <ArrowRight className="w-4 h-4" />
+                                </Button>
+                             </div>
+                          </td>
+                        </tr>
+                       )
+                    })
+                  )}
+                </tbody>
+              </table>
+              
+              {!isLoading && prospects.length > 0 && (
+                <div className="p-8 flex justify-center border-t border-border bg-muted/5">
+                  <Button variant="outline" className="h-11 px-10 rounded-xl font-bold text-xs gap-3 border-border/60 hover:border-primary hover:bg-primary/5 transition-all group">
+                     Load more prospects
+                     <ChevronDown className="w-4 h-4 opacity-40 group-hover:opacity-100 transition-opacity" />
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}

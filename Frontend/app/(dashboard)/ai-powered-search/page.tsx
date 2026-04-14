@@ -33,7 +33,7 @@ import { CompaniesResultsTable } from "@/components/leads/companies/companies-re
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
 import type { ProspectProfile, EmployerItem } from "@/lib/services/prospectService"
-import { enrichCompany, enrichProspect, type CompanyEnrichmentResult, type ProspectEnrichmentResult } from "@/lib/services/betterContactService"
+import { enrichCompany, enrichProspect, type CompanyEnrichmentResult, type ProspectEnrichmentResult, enrichProspectContactOut, enrichCompanyContactOut } from "@/lib/services/betterContactService"
 import { authService } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { CsvImportButton } from "@/components/shared/csv-import-button"
@@ -82,7 +82,7 @@ type ChatSession = {
 const CHAT_STORAGE_KEY = "nlp_enrichment_chats_v3"
 const CHAT_STORAGE_USER_KEY = "nlp_enrichment_user_id"
 const CAMPAIGN_STATE_KEY = "nlp_enrichment_campaign_state_v2"
-const API_BASE_URL = ""
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 const CREDIT_LABELS: Record<string, string> = {
   explorium_searches: "Explorium searches",
@@ -897,7 +897,7 @@ export default function DatabaseFinderPage() {
   }
 
   const buildExamples = (query: string) => {
-    const endpoint = `""/api/explorium/search`
+    const endpoint = `${API_BASE_URL}/api/explorium/search`
     const payload = { query }
     return {
       curl: `curl -X POST "${endpoint}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(payload)}'`,
@@ -2454,7 +2454,7 @@ export default function DatabaseFinderPage() {
 
       console.log("Sending for signal detection:", JSON.stringify(dataToSend, null, 2))
 
-      const response = await fetch(`""/api/v1/signals/detect`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/signals/detect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2572,7 +2572,7 @@ export default function DatabaseFinderPage() {
         }
 
         try {
-          const signalResponse = await fetch(`""/api/v1/signals/detect`, {
+          const signalResponse = await fetch(`${API_BASE_URL}/api/v1/signals/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(signalPayload),
@@ -2592,7 +2592,7 @@ export default function DatabaseFinderPage() {
 
       setClarification("Generating personalized campaign draft based on signals...")
 
-      const response = await fetch(`""/api/v1/campaigns/generate-draft`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/campaigns/generate-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2769,14 +2769,24 @@ export default function DatabaseFinderPage() {
     const companyDomain = employer?.company_website_domain || ""
 
     setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
-    const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinKey, field)
+    
+    // 1. Primary: ContactOut
+    let result = await enrichProspectContactOut(linkedinKey, field === 'phone')
+    
+    // 2. Fallback: Crustdata (via BetterContact waterfall which includes Crustdata)
+    if (!result.success || result.not_found) {
+      console.log(`ContactOut failed for ${field}, falling back to Crustdata/BetterContact...`)
+      result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinKey, field)
+    }
+
     setEnrichedData(prev => ({
       ...prev,
       [linkedinKey]: {
-        ...prev[linkedinKey],
-        email: field === 'email' ? result : prev[linkedinKey]?.email,
-        phone: field === 'phone' ? result : prev[linkedinKey]?.phone,
-      },
+        ...(prev[linkedinKey] || {}),
+        [field]: result.success ? (field === 'email' ? result.email : result.phone) : undefined,
+        [`${field}_error`]: !result.success ? result.error : undefined,
+        [`${field}_not_found`]: result.not_found
+      }
     }))
     setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: false }))
   }
@@ -3602,7 +3612,16 @@ export default function DatabaseFinderPage() {
                           const company = results.find((c: any) => (c.domain || c.id) === companyId)
                           if (!company) return
                           setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
-                          const result = await enrichCompany(company.name, company.domain, field)
+                          
+                          // 1. Primary: ContactOut
+                          let result = await enrichCompanyContactOut(company.domain, field === 'phone')
+                          
+                          // 2. Fallback: Explorium (via BetterContact waterfall or specific Explorium logic)
+                          if (!result.success || result.not_found) {
+                            console.log(`ContactOut failed for company ${field}, falling back to Explorium...`)
+                            result = await enrichCompany(company.name, company.domain, field)
+                          }
+
                           setEnrichedData(prev => {
                             const existing = prev[companyId] || {}
                             const updated = { ...existing, success: result.success, not_found: result.not_found }
