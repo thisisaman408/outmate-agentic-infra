@@ -271,7 +271,7 @@ export function LeadCopilotPanel() {
           try {
             const domain = selectedProspect.domain || selectedProspect.website || ""
             if (domain) {
-              const res = await fetch(`""/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}`, {
+              const res = await fetch(`/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}`, {
                 headers: { "Authorization": `Bearer ${localStorage.getItem("outmate_auth_token")}` }
               })
               if (res.ok) {

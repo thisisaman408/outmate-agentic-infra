@@ -353,6 +353,8 @@ export default function PeoplePage() {
       const res = await searchProspects(filters)
       setProspects(res.profiles)
       setTotalCount(res.total_count)
+      // Persist for profile page
+      try { localStorage.setItem("prospect_search_results", JSON.stringify(res.profiles)) } catch {}
     } catch (err) {
       toast.error("Failed to fetch prospects")
     } finally {

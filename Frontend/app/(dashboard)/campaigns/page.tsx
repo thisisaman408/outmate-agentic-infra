@@ -1,15 +1,17 @@
 "use client"
 
-import React, { useState, useReducer, useCallback } from "react"
+import React, { useState, useReducer, useCallback, useEffect } from "react"
 import {
   Search, Filter, Plus, MoreVertical, Sparkles, ChevronDown,
   Clock, Zap, Mail, Database, Bot, BarChart3, Globe, Users, Building2,
   Bell, Settings, Eye, ArrowRight, TrendingUp, Target, Layers,
-  MessageSquare, Phone, Share2, Gauge, Shield
+  MessageSquare, Phone, Share2, Gauge, Shield, Loader2
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { campaignsApi, type Campaign } from "@/lib/api/campaigns"
+import { toast } from "sonner"
 
 /* ═══════════════════════════════════════════════
    WORKFLOWS TAB — Types & Data
@@ -199,11 +201,48 @@ function TemplateCard({ t, onUse }: { t: Template; onUse: () => void }) {
 
 export default function CampaignsPage() {
   const router = useRouter()
-  const [wfs, dispatch] = useReducer(wfReducer, workflows)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [tab, setTab] = useState<"workflows" | "templates">("workflows")
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [templateSearch, setTemplateSearch] = useState("")
+
+  // Fetch campaigns from API
+  useEffect(() => {
+    const loadCampaigns = async () => {
+      try {
+        setLoading(true)
+        const data = await campaignsApi.getCampaigns()
+        setCampaigns(data)
+      } catch (error) {
+        console.error("Failed to load campaigns:", error)
+        toast.error("Failed to load campaigns")
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadCampaigns()
+  }, [])
+
+  // Map campaigns to workflow items for display
+  const wfs: WfItem[] = campaigns.map((c, idx) => ({
+    id: c.id,
+    on: c.status === "running",
+    name: c.name,
+    desc: c.objective || "No description",
+    status: c.status === "running" ? "live" : c.status === "paused" ? "paused" : "draft",
+    trigger: "manual" as TriggerType,
+    target: "People" as const,
+    owner: "User",
+    inProgress: c.stats?.sent || 0,
+    completed: c.stats?.replied || 0,
+    failed: c.stats?.bounced || 0,
+    lastRun: c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : "-",
+    nextRun: "-",
+    folder: "",
+    actions: [{ label: c.type || "Email", icon: Mail, color: "text-blue-500" }]
+  }))
 
   const filtered = wfs.filter(w => {
     if (search && !w.name.toLowerCase().includes(search.toLowerCase()) && !w.desc.toLowerCase().includes(search.toLowerCase())) return false
@@ -283,6 +322,12 @@ export default function CampaignsPage() {
 
                {/* Table */}
                <div className="bg-card border border-border rounded-[32px] overflow-hidden shadow-xl shadow-black/[0.02]">
+                  {loading ? (
+                    <div className="p-12 flex flex-col items-center justify-center text-muted-foreground">
+                      <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                      <p className="text-sm font-medium">Loading campaigns...</p>
+                    </div>
+                  ) : (
                   <table className="w-full text-left border-collapse">
                      <thead>
                         <tr className="bg-muted/30 border-b border-border">
@@ -348,10 +393,15 @@ export default function CampaignsPage() {
                         })}
                      </tbody>
                   </table>
-                  
-                  {filtered.length === 0 && (
+                  )}
+
+                  {!loading && filtered.length === 0 && (
                      <div className="p-12 text-center text-muted-foreground">
-                        <p className="text-sm font-medium">No workflows found</p>
+                        <p className="text-sm font-medium mb-2">No campaigns found</p>
+                        <p className="text-xs text-muted-foreground/60 mb-4">Create your first campaign to get started</p>
+                        <Button onClick={createNew} size="sm" className="gap-2">
+                          <Plus className="w-4 h-4" /> Create Campaign
+                        </Button>
                      </div>
                   )}
                </div>

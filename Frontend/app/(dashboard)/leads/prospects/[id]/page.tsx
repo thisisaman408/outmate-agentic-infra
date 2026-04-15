@@ -148,9 +148,20 @@ export default function ProspectProfilePage() {
         const storedProfiles = localStorage.getItem("prospect_search_results")
         if (storedProfiles) {
             const profiles: ProspectProfile[] = JSON.parse(storedProfiles)
-            const found = profiles.find((p) =>
-                String((p as any).person_id || (p as any).prospect_id || (p as any).linkedin_profile_urn) === params.id
-            )
+            const rawId = params.id as string
+            const id = decodeURIComponent(rawId)
+            const found = profiles.find((p) => {
+                // First check _stableId (set by ProspectsResultsTable before navigation)
+                if ((p as any)._stableId && ((p as any)._stableId === id || (p as any)._stableId === rawId)) return true
+                const candidates = [
+                    (p as any).person_id,
+                    (p as any).prospect_id,
+                    (p as any).linkedin_profile_urn,
+                    p.linkedin_profile_url,
+                    p.flagship_profile_url,
+                ]
+                return candidates.some((c) => c && (String(c) === id || String(c) === rawId))
+            })
             setProfile(found || null)
         }
         const cachedEmail = localStorage.getItem(`email_${params.id}`)
@@ -168,7 +179,7 @@ export default function ProspectProfilePage() {
         try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
             const response = await fetch(
-                `""/api/v1/prospects/reveal-contact`,
+                `/api/v1/prospects/reveal-contact`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
                     body: JSON.stringify({ linkedin_url: profile.flagship_profile_url || profile.linkedin_profile_url }) }
             )

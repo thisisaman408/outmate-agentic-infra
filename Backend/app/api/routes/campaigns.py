@@ -293,21 +293,13 @@ class CampaignCreateRequest(BaseModel):
     objective: str
     leads: List[str]
     schedule: Optional[Dict[str, Any]] = None
+    type: Optional[str] = "email"
 
 
 class OpenRouterMessageRequest(BaseModel):
     objective: str
     leads: List[str]
-
-
-class OpenRouterMessageRequest(BaseModel):
-    objective: str
-    leads: List[str]
-
-
-class OpenRouterMessageRequest(BaseModel):
-    objective: str
-    leads: List[str]
+    signals: List[str] = []
 
 
 @router.get("/dashboard/sequences")
@@ -354,6 +346,7 @@ async def create_dashboard_campaign(request: CampaignCreateRequest):
         objective=request.objective,
         leads=request.leads,
         schedule=request.schedule,
+        campaign_type=request.type or "email",
     )
     return {"campaign": campaign}
 

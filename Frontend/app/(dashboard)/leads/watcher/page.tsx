@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge"
 // ──────────────────────────────────────────────
 // API layer
 // ──────────────────────────────────────────────
-const BASE = "";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("outmate_auth_token") : null;
@@ -64,13 +64,13 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 const api = {
-  listByType:    (type: string)                  => req<Watcher[]>(`/api/v1/watchers/?type=${type}`),
-  createEvent:   (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/event/",   { method: "POST", body: JSON.stringify(p) }),
-  createAccount: (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/account/", { method: "POST", body: JSON.stringify(p) }),
-  createLead:    (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/lead/",    { method: "POST", body: JSON.stringify(p) }),
-  toggle:        (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/toggle/`, { method: "POST" }),
-  remove:        (id: string)                   => req<void>   (`/api/v1/watchers/${id}/`,        { method: "DELETE" }),
-  sync:          (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/sync/`,   { method: "POST" }),
+  listByType:    (type: string)                  => req<Watcher[]>(`/api/v1/watchers?type=${type}`),
+  createEvent:   (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/event",   { method: "POST", body: JSON.stringify(p) }),
+  createAccount: (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/account", { method: "POST", body: JSON.stringify(p) }),
+  createLead:    (p: Record<string, unknown>)   => req<Watcher>("/api/v1/watchers/lead",    { method: "POST", body: JSON.stringify(p) }),
+  toggle:        (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/toggle`, { method: "POST" }),
+  remove:        (id: string)                   => req<void>   (`/api/v1/watchers/${id}`,        { method: "DELETE" }),
+  sync:          (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/sync`,   { method: "POST" }),
 }
 
 // ──────────────────────────────────────────────

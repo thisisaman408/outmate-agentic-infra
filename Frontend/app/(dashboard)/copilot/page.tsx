@@ -1,12 +1,16 @@
 "use client"
 
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useRouter, usePathname } from "next/navigation"
 import { 
   Sparkles, Send, Building2, Users, GitBranch, Mail, 
   Search, Bot, FileText, X, ArrowUpCircle, Database,
-  BarChart3, Zap, Eye, Command, MessageSquare, ChevronRight
+  BarChart3, Zap, Eye, Command, MessageSquare, ChevronRight,
+  Sun, Calendar, AlertTriangle, Signal, Settings as SettingsIcon, Layers
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 
 /* ─── types ─── */
 interface ChatMessage {
@@ -16,7 +20,96 @@ interface ChatMessage {
   timestamp: Date
 }
 
+interface CopilotFeature {
+  id: string
+  name: string
+  description: string
+  icon: any
+  href: string
+  badge?: string
+  badgeColor?: string
+}
+
 /* ─── data ─── */
+const copilotFeatures: CopilotFeature[] = [
+  { 
+    id: "chat", 
+    name: "AI Chat", 
+    description: "Conversational AI assistant", 
+    icon: MessageSquare, 
+    href: "/copilot",
+  },
+  { 
+    id: "ai-assistant", 
+    name: "AI Assistant", 
+    description: "Get help with any feature", 
+    icon: Sparkles, 
+    href: "/copilot",
+    badge: "Help",
+    badgeColor: "indigo"
+  },
+  { 
+    id: "automation-agent", 
+    name: "Automation Agent", 
+    description: "Automate tasks with AI", 
+    icon: Bot, 
+    href: "/copilot",
+    badge: "AI",
+    badgeColor: "violet"
+  },
+  { 
+    id: "daily-brief", 
+    name: "Daily Brief", 
+    description: "AI-generated daily insights", 
+    icon: Sun, 
+    href: "/copilot/daily-brief",
+    badge: "New",
+    badgeColor: "green"
+  },
+  { 
+    id: "meeting-prep", 
+    name: "Meeting Prep", 
+    description: "AI meeting preparation", 
+    icon: Calendar, 
+    href: "/copilot/meeting-prep",
+  },
+  { 
+    id: "campaign-optimizer", 
+    name: "Campaign Optimizer", 
+    description: "AI campaign analysis", 
+    icon: BarChart3, 
+    href: "/copilot/campaign-optimizer",
+  },
+  { 
+    id: "pipeline-alerts", 
+    name: "Pipeline Alerts", 
+    description: "AI pipeline monitoring", 
+    icon: AlertTriangle, 
+    href: "/copilot/pipeline-alerts",
+  },
+  { 
+    id: "champion-alerts", 
+    name: "Champion Alerts", 
+    description: "Champion change detection", 
+    icon: Signal, 
+    href: "/copilot/champion-alerts",
+  },
+  { 
+    id: "signal-drafts", 
+    name: "Signal Drafts", 
+    description: "AI-generated signal drafts", 
+    icon: FileText, 
+    href: "/copilot/signal-drafts",
+  },
+  { 
+    id: "settings", 
+    name: "Settings", 
+    description: "Copilot preferences", 
+    icon: SettingsIcon, 
+    href: "/copilot/settings",
+  },
+]
+
 const suggestions = [
   { icon: Eye, label: "Hot Visitors", desc: "Find high-intent accounts from 24h", color: "bg-emerald-500/10 text-emerald-500" },
   { icon: Users, label: "Enrich Leads", desc: "Run waterfall lookup on target list", color: "bg-indigo-500/10 text-indigo-500" },
@@ -26,9 +119,12 @@ const suggestions = [
 
 /* ─── component ─── */
 export default function UnifiedCopilotPage() {
+  const router = useRouter()
+  const pathname = usePathname()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [isTyping, setIsTyping] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -70,9 +166,68 @@ export default function UnifiedCopilotPage() {
   const hasMessages = messages.length > 0
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden font-sans">
-      {/* Search Header */}
-      <div className="px-8 py-6 bg-card border-b border-border flex items-center justify-between">
+    <div className="flex h-full bg-background overflow-hidden font-sans">
+      {/* Copilot Sidebar */}
+      <aside className={cn(
+        "w-64 border-r border-border bg-card flex flex-col transition-all duration-300",
+        !sidebarOpen && "w-0 overflow-hidden"
+      )}>
+        <div className="p-4 border-b border-border">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            <span className="text-xs font-black uppercase tracking-widest text-primary">Copilot</span>
+          </div>
+          <h2 className="text-lg font-black tracking-tight text-foreground">AI Features</h2>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+          {copilotFeatures.map((feature) => {
+            const Icon = feature.icon
+            const isActive = pathname === feature.href
+            return (
+              <button
+                key={feature.id}
+                onClick={() => router.push(feature.href)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group",
+                  isActive 
+                    ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" 
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                )}
+              >
+                <Icon className={cn("w-4 h-4 shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground/40 group-hover:text-current")} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wider truncate">{feature.name}</p>
+                  <p className="text-[10px] font-medium opacity-60 truncate">{feature.description}</p>
+                </div>
+                {feature.badge && (
+                  <Badge variant="outline" className={cn(
+                    "text-[9px] font-black px-1.5 py-0.5 border-transparent",
+                    feature.badgeColor === "green" && "bg-green-500/10 text-green-500",
+                    isActive && "bg-white/20 text-white"
+                  )}>
+                    {feature.badge}
+                  </Badge>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <div className="p-3 border-t border-border">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="w-full h-9 text-[10px] font-black uppercase tracking-widest"
+          >
+            {sidebarOpen ? "Collapse" : "Expand"}
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col bg-background overflow-hidden">
+        {/* Header */}
+        <div className="px-8 py-6 bg-card border-b border-border flex items-center justify-between">
          <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
                <Sparkles className="w-3.5 h-3.5 text-primary" />
@@ -85,13 +240,16 @@ export default function UnifiedCopilotPage() {
                <Command className="w-3 h-3 text-muted-foreground/40" />
                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Shift + Enter to send</span>
             </div>
-            <button className="w-10 h-10 rounded-xl bg-card border border-border flex items-center justify-center hover:bg-muted transition-colors">
-               <Settings className="w-4 h-4 text-muted-foreground" />
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="w-10 h-10 rounded-xl bg-card border border-border flex items-center justify-center hover:bg-muted transition-colors"
+            >
+               <Layers className="w-4 h-4 text-muted-foreground" />
             </button>
          </div>
       </div>
 
-      {/* Main Container */}
+      {/* Chat Container */}
       <div className="flex-1 flex flex-col relative overflow-hidden bg-muted/5">
          
          {/* Message Feed */}
@@ -198,13 +356,7 @@ export default function UnifiedCopilotPage() {
          </div>
 
       </div>
+      </div>
     </div>
-  )
-}
-
-function Settings({ className }: { className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
   )
 }

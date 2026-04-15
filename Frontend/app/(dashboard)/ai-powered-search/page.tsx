@@ -1038,7 +1038,7 @@ export default function DatabaseFinderPage() {
     setIsSearching(true)
     try {
       const targetLimit = Math.min(Math.max(results.length, 25), 100)
-      const response = await fetch(`""/api/v1/leads/search/companies`, {
+      const response = await fetch(`/api/v1/leads/search/companies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

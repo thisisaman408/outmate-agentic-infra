@@ -1,14 +1,16 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, X, Eye, EyeOff, Copy, ExternalLink, Blocks, CheckCircle2, AlertCircle } from "lucide-react"
+import { Search, X, Eye, EyeOff, Copy, ExternalLink, Blocks, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
+import { integrationsApi, type IntegrationStatus } from "@/lib/api/integrations"
+import { toast } from "sonner"
 
 type FilterType = "all" | "connected" | "gtm" | "ai"
 
@@ -25,23 +27,59 @@ interface Integration {
   lastSync?: string
 }
 
-const integrations: Integration[] = [
-  { id: "hubspot", name: "HubSpot", icon: "⊞", description: "Sync contacts, deals, companies, notes", connected: true, badges: ["popular", "gtm"], category: "CRM", syncType: "Bi-directional", records: "12,400", lastSync: "2 min ago" },
-  { id: "salesforce", name: "Salesforce", icon: "☁", description: "Enterprise CRM sync", connected: false, badges: ["popular", "gtm"], category: "CRM" },
-  { id: "gmail", name: "Gmail", icon: "✉", description: "Send and receive emails", connected: true, badges: ["popular", "gtm"], category: "Outbound & email", syncType: "Push", records: "3,200", lastSync: "5 min ago" },
-  { id: "linkedin", name: "LinkedIn", icon: "◈", description: "LinkedIn outreach and messaging", connected: false, badges: ["popular", "gtm"], category: "Outbound & email" },
-  { id: "slack", name: "Slack", icon: "#", description: "Team notifications and alerts", connected: true, badges: ["popular"], category: "Messaging", syncType: "Push", lastSync: "Just now" },
-  { id: "anthropic", name: "Claude / Anthropic", icon: "A", description: "Advanced reasoning and analysis", connected: true, badges: ["popular"], category: "AI models", syncType: "API", lastSync: "Active" },
-  { id: "crustdata", name: "Crustdata", icon: "◉", description: "Company and people data enrichment", connected: true, badges: ["gtm"], category: "Enrichment & data", syncType: "On-demand", records: "8,100" },
-]
-
 const categories = ["CRM", "Outbound & email", "Enrichment & data", "Messaging", "AI models"]
+
+// Map backend integration IDs to frontend display config
+const integrationConfig: Record<string, Partial<Integration>> = {
+  gmail: { icon: "✉", description: "Send and receive emails", category: "Outbound & email", badges: ["popular", "gtm"] },
+  slack: { icon: "#", description: "Team notifications and alerts", category: "Messaging", badges: ["popular"] },
+  hubspot: { icon: "⊞", description: "Sync contacts, deals, companies, notes", category: "CRM", badges: ["popular", "gtm"], syncType: "Bi-directional", records: "12,400" },
+  salesforce: { icon: "☁", description: "Enterprise CRM sync", category: "CRM", badges: ["popular", "gtm"] },
+  outreach: { icon: "◈", description: "Outreach automation via Instantly or Smartlead", category: "Outbound & email", badges: ["gtm"] },
+}
 
 export default function IntegrationsPage() {
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<FilterType>("all")
-  const [selectedId, setSelectedId] = useState<string>("hubspot")
+  const [selectedId, setSelectedId] = useState<string>("gmail")
   const [showKey, setShowKey] = useState(false)
+  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [loading, setLoading] = useState(true)
+  const [testingOutreach, setTestingOutreach] = useState(false)
+  const [outreachApiKey, setOutreachApiKey] = useState("")
+  const [outreachService, setOutreachService] = useState<"instantly" | "smartlead">("instantly")
+
+  // Fetch integrations from API
+  useEffect(() => {
+    const loadIntegrations = async () => {
+      try {
+        setLoading(true)
+        const status = await integrationsApi.getStatus()
+        const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+          const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
+          return {
+            id,
+            name: int.name,
+            icon: config.icon,
+            description: config.description,
+            connected: int.connected,
+            badges: config.badges || [],
+            category: config.category,
+            syncType: config.syncType,
+            records: config.records,
+            lastSync: int.connected ? "Active" : undefined,
+          } as Integration
+        })
+        setIntegrations(mapped)
+      } catch (error) {
+        console.error("Failed to load integrations:", error)
+        toast.error("Failed to load integrations")
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadIntegrations()
+  }, [])
 
   const filtered = useMemo(() => {
     let items = integrations
@@ -53,9 +91,79 @@ export default function IntegrationsPage() {
     if (filter === "gtm") items = items.filter(i => i.badges.includes("gtm"))
     if (filter === "ai") items = items.filter(i => i.category === "AI models")
     return items
-  }, [search, filter])
+  }, [search, filter, integrations])
 
   const selected = integrations.find(i => i.id === selectedId) || integrations[0]
+
+  // Handle outreach connection test
+  const handleTestOutreach = async () => {
+    if (!outreachApiKey.trim()) {
+      toast.error("Please enter an API key")
+      return
+    }
+    setTestingOutreach(true)
+    try {
+      const result = await integrationsApi.testOutreach({
+        service: outreachService,
+        api_key: outreachApiKey,
+      })
+      if (result.success) {
+        toast.success(result.message)
+        // Refresh integrations list
+        const status = await integrationsApi.getStatus()
+        const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+          const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
+          return {
+            id,
+            name: int.name,
+            icon: config.icon,
+            description: config.description,
+            connected: int.connected,
+            badges: config.badges || [],
+            category: config.category,
+            syncType: config.syncType,
+            records: config.records,
+            lastSync: int.connected ? "Active" : undefined,
+          } as Integration
+        })
+        setIntegrations(mapped)
+      } else {
+        toast.error(result.message)
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to test connection")
+    } finally {
+      setTestingOutreach(false)
+    }
+  }
+
+  // Handle skip integration
+  const handleSkip = async (service: string) => {
+    try {
+      await integrationsApi.skipIntegration(service)
+      toast.success(`Skipped ${service}`)
+      // Refresh list
+      const status = await integrationsApi.getStatus()
+      const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+        const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
+        return {
+          id,
+          name: int.name,
+          icon: config.icon,
+          description: config.description,
+          connected: int.connected,
+          badges: config.badges || [],
+          category: config.category,
+          syncType: config.syncType,
+          records: config.records,
+          lastSync: int.connected ? "Active" : undefined,
+        } as Integration
+      })
+      setIntegrations(mapped)
+    } catch (error: any) {
+      toast.error(error.message || "Failed to skip")
+    }
+  }
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
@@ -102,6 +210,12 @@ export default function IntegrationsPage() {
 
         {/* Catalog */}
         <div className="flex-1 overflow-auto no-scrollbar bg-muted/5">
+           {loading ? (
+             <div className="p-12 flex flex-col items-center justify-center text-muted-foreground">
+               <Loader2 className="w-8 h-8 animate-spin mb-4" />
+               <p className="text-sm font-medium">Loading integrations...</p>
+             </div>
+           ) : (
            <div className="p-8 space-y-10">
               {categories.map(cat => {
                  const items = filtered.filter(i => i.category === cat)
@@ -119,8 +233,8 @@ export default function IntegrationsPage() {
                                 onClick={() => setSelectedId(item.id)}
                                 className={cn(
                                    "flex flex-col p-4 rounded-2xl border transition-all text-left group relative backdrop-blur-sm",
-                                   selectedId === item.id 
-                                      ? "bg-primary/5 border-primary shadow-xl shadow-primary/5" 
+                                   selectedId === item.id
+                                      ? "bg-primary/5 border-primary shadow-xl shadow-primary/5"
                                       : "bg-background/50 border-border/50 hover:border-primary/20 hover:bg-background"
                                 )}
                              >
@@ -152,7 +266,13 @@ export default function IntegrationsPage() {
                     </div>
                  )
               })}
+              {!loading && filtered.length === 0 && (
+                <div className="p-12 text-center text-muted-foreground">
+                  <p className="text-sm font-medium">No integrations found</p>
+                </div>
+              )}
            </div>
+           )}
         </div>
       </div>
 
@@ -164,6 +284,13 @@ export default function IntegrationsPage() {
              </Button>
          </div>
 
+         {!selected ? (
+           <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted-foreground">
+             <Loader2 className="w-8 h-8 animate-spin mb-4" />
+             <p className="text-sm font-medium">Loading integration details...</p>
+           </div>
+         ) : (
+         <>
          <div className="p-8 pb-6 border-b border-border">
             <div className="w-16 h-16 rounded-2xl bg-muted/20 border border-dashed border-border flex items-center justify-center text-4xl mb-6">
                {selected.icon}
@@ -245,8 +372,72 @@ export default function IntegrationsPage() {
                      ))}
                   </div>
 
-                  <Button className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20">
-                     Authorize {selected.name}
+                  {selected.id === "outreach" ? (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Service</label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setOutreachService("instantly")}
+                            className={cn(
+                              "flex-1 py-2 px-3 rounded-lg text-[11px] font-bold transition-all",
+                              outreachService === "instantly"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            Instantly
+                          </button>
+                          <button
+                            onClick={() => setOutreachService("smartlead")}
+                            className={cn(
+                              "flex-1 py-2 px-3 rounded-lg text-[11px] font-bold transition-all",
+                              outreachService === "smartlead"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            Smartlead
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">API Key</label>
+                        <Input
+                          type="password"
+                          value={outreachApiKey}
+                          onChange={(e) => setOutreachApiKey(e.target.value)}
+                          placeholder="Enter your API key"
+                          className="h-10 text-xs"
+                        />
+                      </div>
+                      <Button
+                        onClick={handleTestOutreach}
+                        disabled={testingOutreach}
+                        className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                      >
+                        {testingOutreach ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Testing...
+                          </>
+                        ) : (
+                          "Connect Outreach"
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20">
+                      Authorize {selected.name}
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSkip(selected.id)}
+                    className="w-full h-9 text-muted-foreground hover:text-foreground font-black uppercase tracking-widest text-[10px]"
+                  >
+                    Skip Integration
                   </Button>
                </div>
             )}
@@ -257,6 +448,8 @@ export default function IntegrationsPage() {
                <ExternalLink className="w-3.5 h-3.5" /> Documentation Guide
             </button>
          </div>
+         </>
+         )}
       </aside>
     </div>
   )

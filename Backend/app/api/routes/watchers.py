@@ -17,7 +17,6 @@ from app.api.deps.auth import get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/v1/watchers",
     tags=["watchers"]
 )
 
@@ -81,7 +80,7 @@ class CreateWatcherRequest(BaseModel):
     trackJobChanges: Optional[bool] = False
 
 
-@router.get("/")
+@router.get("")
 async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     query = db.query(WatcherModel).filter(WatcherModel.user_id == _user.id)
     if type:
@@ -91,15 +90,6 @@ async def list_watchers(type: Optional[str] = None, db: Session = Depends(get_db
 
 @router.get("/{id}")
 async def get_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
-    if not db_w:
-        raise HTTPException(status_code=404, detail="Watcher not found")
-    return watcher_to_dict(db_w)
-
-
-# Handle trailing slash variant
-@router.get("/{id}/")
-async def get_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
@@ -129,8 +119,8 @@ async def create_event_watcher(request: CreateWatcherRequest, db: Session = Depe
 
 # Handle trailing slash variant
 @router.post("/event/")
-async def create_event_watcher_with_slash(request: CreateWatcherRequest, db: Session = Depends(get_db)):
-    return await create_event_watcher(request, db)
+async def create_event_watcher_with_slash(request: CreateWatcherRequest, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    return await create_event_watcher(request, db, _user)
 
 
 @router.post("/account")
@@ -155,15 +145,16 @@ async def create_account_watcher(request: Dict[str, Any], db: Session = Depends(
 
 # Handle trailing slash variant
 @router.post("/account/")
-async def create_account_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db)):
-    return await create_account_watcher(request, db)
+async def create_account_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    return await create_account_watcher(request, db, _user)
 
 
 @router.post("/lead")
-async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get_db)):
+async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get_db), _user=Depends(get_current_user)):
     wid = f"w-{uuid4().hex[:8]}"
     db_w = WatcherModel(
         id=wid,
+        user_id=_user.id,
         name=request.get("name", request.get("leadName", "Lead Watcher")),
         description=request.get("description"),
         type="lead",
@@ -187,23 +178,13 @@ async def create_lead_watcher(request: Dict[str, Any], db: Session = Depends(get
 
 # Handle trailing slash variant
 @router.post("/lead/")
-async def create_lead_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db)):
-    return await create_lead_watcher(request, db)
+async def create_lead_watcher_with_slash(request: Dict[str, Any], db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    return await create_lead_watcher(request, db, _user)
 
 
 @router.post("/{id}/toggle")
 async def toggle_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
-    if not db_w:
-        raise HTTPException(status_code=404, detail="Watcher not found")
-    db_w.status = "paused" if db_w.status == "active" else "active"
-    db.commit(); db.refresh(db_w)
-    return watcher_to_dict(db_w)
-
-# Handle trailing slash variant for toggle
-@router.post("/{id}/toggle/")
-async def toggle_watcher_with_slash(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
     db_w.status = "paused" if db_w.status == "active" else "active"
@@ -219,19 +200,10 @@ async def delete_watcher(id: str, db: Session = Depends(get_db), _user=Depends(g
     db.delete(db_w); db.commit()
     return {"status": "success"}
 
-# Handle trailing slash variant for delete
-@router.delete("/{id}/")
-async def delete_watcher_with_slash(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
-    if not db_w:
-        raise HTTPException(status_code=404, detail="Watcher not found")
-    db.delete(db_w); db.commit()
-    return {"status": "success"}
-
 
 @router.post("/{id}/sync")
-async def sync_watcher(id: str, db: Session = Depends(get_db)):
-    db_w = db.query(WatcherModel).filter(WatcherModel.id == id).first()
+async def sync_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
+    db_w = db.query(WatcherModel).filter(WatcherModel.id == id, WatcherModel.user_id == _user.id).first()
     if not db_w:
         raise HTTPException(status_code=404, detail="Watcher not found")
 
@@ -660,9 +632,9 @@ async def sync_watcher(id: str, db: Session = Depends(get_db)):
 
 # Handle trailing slash variant for sync
 @router.post("/{id}/sync/")
-async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     # Delegate to sync_watcher - same implementation
-    return await sync_watcher(id, db)
+    return await sync_watcher(id, db, _user)
 
 
 async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
@@ -711,9 +683,9 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
 
 # Handle trailing slash variant for sync
 @router.post("/{id}/sync/")
-async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
+async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     # Delegate to the main sync_watcher function
-    return await sync_watcher(id, db)
+    return await sync_watcher(id, db, _user)
 
 
 # ─────────────────────────────────────────
@@ -725,7 +697,6 @@ async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db)):
 legacy_router.get("/api/watchers")(list_watchers)
 legacy_router.get("/api/watchers/")(list_watchers)
 legacy_router.get("/api/watchers/{id}")(get_watcher)
-legacy_router.get("/api/watchers/{id}/")(get_watcher_with_slash)
 legacy_router.post("/api/watchers/event")(create_event_watcher)
 legacy_router.post("/api/watchers/account")(create_account_watcher)
 legacy_router.post("/api/watchers/lead")(create_lead_watcher)

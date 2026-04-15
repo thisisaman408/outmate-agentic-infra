@@ -33,6 +33,7 @@ import {
   ExternalLink,
   Radar,
   Zap,
+  Database,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -65,11 +66,13 @@ const sections: NavSection[] = [
     items: [
       { name: "Website Visitors", href: "/visitors", icon: Eye, badge: "Live", badgeColor: "green" },
       { name: "Intent Signals", href: "/signals", icon: Radar, badge: "AI", badgeColor: "indigo" },
+      { name: "Watchers", href: "/leads/watcher", icon: Bell, badge: "AI", badgeColor: "indigo" },
     ],
   },
   {
     label: "Database",
     items: [
+      { name: "Database", href: "/database", icon: Database, badge: "New", badgeColor: "green" },
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "People", href: "/leads/prospects", icon: Users },
       { name: "AI Powered Search", href: "/ai-powered-search", icon: Sparkles, badge: "AI", badgeColor: "indigo" },

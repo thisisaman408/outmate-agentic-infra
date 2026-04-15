@@ -27,10 +27,12 @@ class CampaignDashboardService:
         objective: str,
         leads: List[str],
         schedule: Optional[Dict[str, Any]] = None,
+        campaign_type: str = "email",
     ) -> Dict[str, Any]:
         campaign = {
             "id": str(uuid.uuid4()),
             "name": name,
+            "type": campaign_type,
             "status": "draft",
             "objective": objective,
             "message": "",

@@ -1,18 +1,20 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { 
   User, Users, Bell, Shield, Wallet, BarChart3, FileText, 
-  Building2, Settings2, Code2, History, AlertTriangle,
-  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2
+  Building2, Settings2, Code2, History, AlertTriangle, Key,
+  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2, Loader2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { settingsApi, type UserProfile, type WorkspaceSettings, type NotificationSettings } from "@/lib/api/settings"
 
 type SettingsNavItem = {
   id: string
@@ -56,12 +58,52 @@ const NAV_SECTIONS: SettingsSection[] = [
   },
   {
     label: "System",
-    items: [{ id: "danger", icon: AlertTriangle, name: "Danger zone", danger: true }],
+    items: [
+      { id: "byok", icon: Key, name: "API Keys (BYOK)" },
+      { id: "danger", icon: AlertTriangle, name: "Danger zone", danger: true }
+    ],
   },
 ]
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("profile")
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null)
+  const [notifications, setNotifications] = useState<NotificationSettings | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        setLoading(true)
+        const [profile, ws, notifs] = await Promise.all([
+          settingsApi.getUserProfile(),
+          settingsApi.getWorkspaceSettings(),
+          settingsApi.getNotificationSettings(),
+        ])
+        setUserProfile(profile)
+        setWorkspace(ws)
+        setNotifications(notifs)
+      } catch (error) {
+        console.error("Failed to load settings:", error)
+        toast.error("Failed to load settings")
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadSettings()
+  }, [])
+
+  const handleUpdateNotifications = async (updates: Partial<NotificationSettings>) => {
+    try {
+      const updated = { ...notifications, ...updates } as NotificationSettings
+      setNotifications(updated)
+      await settingsApi.updateNotificationSettings(updates)
+      toast.success("Notification preferences updated")
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update notifications")
+    }
+  }
 
   return (
     <div className="flex h-full bg-background overflow-hidden font-sans">
@@ -127,32 +169,52 @@ export default function SettingsPage() {
         </div>
 
         <div className="p-8 border-t border-border bg-muted/5">
+           {loading ? (
+             <div className="flex items-center gap-3">
+               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+               <span className="text-[11px] font-medium text-muted-foreground">Loading...</span>
+             </div>
+           ) : userProfile ? (
            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-black text-white shadow-lg">GS</div>
+              <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-black text-white shadow-lg">
+                {userProfile.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
               <div className="flex-1 min-w-0">
-                 <div className="text-[11px] font-black text-foreground truncate uppercase tracking-widest">Gautam Singh</div>
-                 <div className="text-[10px] font-bold text-muted-foreground/40 truncate">Growth Plan</div>
+                 <div className="text-[11px] font-black text-foreground truncate uppercase tracking-widest">{userProfile.name}</div>
+                 <div className="text-[10px] font-bold text-muted-foreground/40 truncate">{workspace?.plan || 'Pro'} Plan</div>
               </div>
            </div>
+           ) : null}
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto no-scrollbar bg-background">
         <div className="max-w-4xl mx-auto p-12">
-           {activeTab === 'profile' && <ProfileSettings />}
-           {activeTab === 'team' && <TeamSettings />}
-           {(activeTab !== 'profile' && activeTab !== 'team') && (
+           {loading ? (
              <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6">
-                   <Settings2 className="w-6 h-6 text-muted-foreground/30" />
-                </div>
-                <h2 className="text-xl font-black tracking-tight text-foreground uppercase tracking-widest">{activeTab} section</h2>
-                <p className="text-xs font-medium text-muted-foreground/40 mt-2">Section content placeholder. Components will be dynamically loaded here.</p>
-                <Button variant="outline" className="mt-8 h-10 px-6 font-black uppercase tracking-widest text-[10px] rounded-xl border-border" onClick={() => setActiveTab('profile')}>
-                   Return to Profile
-                </Button>
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mb-4" />
+                <p className="text-sm font-medium text-muted-foreground">Loading settings...</p>
              </div>
+           ) : (
+             <>
+               {activeTab === 'profile' && <ProfileSettings userProfile={userProfile} workspace={workspace} />}
+               {activeTab === 'team' && <TeamSettings />}
+               {activeTab === 'notifications' && <NotificationsSettings notifications={notifications} onUpdate={handleUpdateNotifications} />}
+               {activeTab === 'byok' && <BYOKSettings />}
+               {(activeTab !== 'profile' && activeTab !== 'team' && activeTab !== 'notifications' && activeTab !== 'byok') && (
+                 <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                    <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6">
+                       <Settings2 className="w-6 h-6 text-muted-foreground/30" />
+                    </div>
+                    <h2 className="text-xl font-black tracking-tight text-foreground uppercase tracking-widest">{activeTab} section</h2>
+                    <p className="text-xs font-medium text-muted-foreground/40 mt-2">Section content placeholder. Components will be dynamically loaded here.</p>
+                    <Button variant="outline" className="mt-8 h-10 px-6 font-black uppercase tracking-widest text-[10px] rounded-xl border-border" onClick={() => setActiveTab('profile')}>
+                       Return to Profile
+                    </Button>
+                 </div>
+               )}
+             </>
            )}
         </div>
       </main>
@@ -160,69 +222,196 @@ export default function SettingsPage() {
   )
 }
 
-function ProfileSettings() {
+function ProfileSettings({ userProfile, workspace }: { userProfile: UserProfile | null; workspace: WorkspaceSettings | null }) {
+  const [name, setName] = useState(userProfile?.name || "")
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    setName(userProfile?.name || "")
+  }, [userProfile])
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await settingsApi.updateUserProfile({ name })
+      toast.success("Profile updated successfully")
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update profile")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <User className="w-5 h-5 text-primary" />
+          Profile Settings
+        </CardTitle>
+        <CardDescription>
+          Manage your personal identity and workspace preferences
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="flex items-center gap-6">
+          <div className="relative">
+            <div className="w-20 h-20 rounded-full bg-primary text-white flex items-center justify-center text-xl font-black">
+              {userProfile?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold">{userProfile?.name}</h3>
+            <p className="text-sm text-muted-foreground">{userProfile?.role || 'Member'} · {workspace?.name || 'Workspace'}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Full Name</label>
+            <Input 
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name" 
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Email Address</label>
+            <Input value={userProfile?.email || ''} disabled />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <Button 
+            onClick={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            {isSaving ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function NotificationsSettings({ 
+  notifications, 
+  onUpdate 
+}: { 
+  notifications: NotificationSettings | null
+  onUpdate: (updates: Partial<NotificationSettings>) => void 
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="w-5 h-5 text-primary" />
+          Notification Preferences
+        </CardTitle>
+        <CardDescription>
+          Control how and when you receive notifications
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-4">
+          <h4 className="font-medium">Channel Preferences</h4>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Email Notifications</p>
+                <p className="text-sm text-muted-foreground">Receive updates via email</p>
+              </div>
+              <Switch
+                checked={notifications?.emailNotifications}
+                onCheckedChange={(checked) => onUpdate({ emailNotifications: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Slack Notifications</p>
+                <p className="text-sm text-muted-foreground">Get notified in Slack</p>
+              </div>
+              <Switch
+                checked={notifications?.slackNotifications}
+                onCheckedChange={(checked) => onUpdate({ slackNotifications: checked })}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t pt-6 space-y-4">
+          <h4 className="font-medium">Event Notifications</h4>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">New Leads</p>
+                <p className="text-sm text-muted-foreground">Get notified when new leads are generated</p>
+              </div>
+              <Switch
+                checked={notifications?.newLeads}
+                onCheckedChange={(checked) => onUpdate({ newLeads: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Campaign Updates</p>
+                <p className="text-sm text-muted-foreground">Get updates on campaign performance</p>
+              </div>
+              <Switch
+                checked={notifications?.campaignUpdates}
+                onCheckedChange={(checked) => onUpdate({ campaignUpdates: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Signal Alerts</p>
+                <p className="text-sm text-muted-foreground">Get alerted for high-confidence signals</p>
+              </div>
+              <Switch
+                checked={notifications?.signalAlerts}
+                onCheckedChange={(checked) => onUpdate({ signalAlerts: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Weekly Report</p>
+                <p className="text-sm text-muted-foreground">Receive weekly performance summary</p>
+              </div>
+              <Switch
+                checked={notifications?.weeklyReport}
+                onCheckedChange={(checked) => onUpdate({ weeklyReport: checked })}
+              />
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function BYOKSettings() {
   return (
     <div className="space-y-12">
       <header>
-        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">Profile Settings</h2>
-        <p className="text-sm font-medium text-muted-foreground/60">Manage your personal identity, roles, and preferences across Outmate.</p>
+        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">API Keys (BYOK)</h2>
+        <p className="text-sm font-medium text-muted-foreground/60">Bring Your Own Keys - Manage your API keys for external services.</p>
       </header>
 
-      <div className="bg-card border border-border rounded-3xl overflow-hidden shadow-xl shadow-black/5">
-        <div className="p-8">
-           <div className="flex items-center gap-8 mb-10 pb-10 border-b border-border">
-              <div className="relative group">
-                 <div className="w-24 h-24 rounded-[32px] bg-primary text-white flex items-center justify-center text-2xl font-black shadow-2xl shadow-primary/40 group-hover:scale-105 transition-transform duration-500">GS</div>
-                 <button className="absolute -bottom-2 -right-2 w-10 h-10 rounded-2xl bg-white text-foreground shadow-xl border border-border flex items-center justify-center hover:bg-muted transition-all active:scale-95">
-                    <Upload className="w-4 h-4" />
-                 </button>
-              </div>
-              <div>
-                 <h3 className="text-lg font-black tracking-tight text-foreground uppercase tracking-widest">Gautam Singh</h3>
-                 <p className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em] mt-1 opacity-60">Account Holder · Administrator</p>
-                 <div className="flex gap-2 mt-4">
-                    <Button variant="outline" size="sm" className="h-8 px-4 text-[9px] font-black uppercase tracking-widest rounded-xl border-border">Change Photo</Button>
-                    <Button variant="ghost" size="sm" className="h-8 px-4 text-[9px] font-black uppercase tracking-widest rounded-xl text-red-500 hover:bg-red-500/5">Remove</Button>
-                 </div>
-              </div>
-           </div>
-
-           <div className="grid grid-cols-2 gap-8">
-              <div className="space-y-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Full Name</label>
-                    <Input defaultValue="Gautam Singh" className="h-12 bg-muted/20 border-transparent focus:bg-background focus:ring-0 text-sm font-bold rounded-2xl" />
-                 </div>
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Email Address</label>
-                    <Input defaultValue="gautam@outmate.ai" disabled className="h-12 bg-muted/40 border-transparent text-sm font-bold rounded-2xl opacity-60" />
-                 </div>
-              </div>
-              <div className="space-y-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Organization Role</label>
-                    <Input defaultValue="Chief Executive Officer" className="h-12 bg-muted/20 border-transparent focus:bg-background focus:ring-0 text-sm font-bold rounded-2xl" />
-                 </div>
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Timezone</label>
-                    <div className="h-12 bg-muted/20 border border-transparent rounded-2xl flex items-center px-4 text-sm font-bold text-foreground">
-                       (GMT+5:30) Asia/Kolkata
-                       <ChevronRight className="w-4 h-4 ml-auto text-muted-foreground/30" />
-                    </div>
-                 </div>
-              </div>
-           </div>
+      <div className="bg-card border border-border rounded-3xl overflow-hidden shadow-xl shadow-black/5 p-8">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+            <Key className="w-6 h-6 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-lg font-black tracking-tight uppercase tracking-widest">Bring Your Own Keys</h3>
+            <p className="text-sm text-muted-foreground">Manage your API keys for external services like OpenAI, CrustData, etc.</p>
+          </div>
         </div>
-
-        <div className="px-8 py-6 bg-muted/10 border-t border-border flex items-center justify-between">
-           <div className="flex items-center gap-3">
-              <span className="w-2 h-2 rounded-full bg-primary" />
-              <p className="text-[10px] font-bold text-muted-foreground/60">Changes will apply across all linked Outmate organizations.</p>
-           </div>
-           <Button className="h-11 px-8 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
-              <Save className="w-4 h-4 mr-2" />
-              Save Changes
-           </Button>
+        <div className="bg-muted/50 rounded-2xl p-8 border border-dashed border-border">
+          <p className="text-center text-muted-foreground text-sm">
+            BYOK management interface coming soon...
+          </p>
         </div>
       </div>
     </div>
@@ -258,7 +447,7 @@ function TeamSettings() {
              <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 mb-1">
                    <h3 className="text-[15px] font-black tracking-tight text-foreground truncate uppercase tracking-widest">{member.name}</h3>
-                   <Badge variant="outline" className={cn("text-[9px] font-black uppercase tracking-widest border-transparent px-2", 
+                   <Badge variant="outline" className={cn("text-[9px] font-black uppercase tracking-widest border-transparent px-2",
                      member.status === 'Active' ? 'bg-green-500/10 text-green-500' : 'bg-amber-500/10 text-amber-500')}>
                      {member.status}
                    </Badge>

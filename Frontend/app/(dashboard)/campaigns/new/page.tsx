@@ -14,6 +14,8 @@ import { NotificationsPanel } from "@/components/workflow-canvas/notifications-p
 import { findNode } from "@/components/workflow-canvas/helpers";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { campaignsApi } from "@/lib/api/campaigns";
+import { Loader2 } from "lucide-react";
 
 export default function WorkflowCanvasPage() {
   const router = useRouter();
@@ -70,8 +72,42 @@ export default function WorkflowCanvasPage() {
     });
   };
 
-  const handleSave = () => toast.success("Workflow saved successfully");
-  const toggleLive = () => setIsLive(!isLive);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      // Create campaign from workflow data
+      const campaign = await campaignsApi.createCampaign({
+        name: workflowName,
+        objective: "Workflow automation campaign",
+        leads: [], // Workflow-based campaigns start with empty leads
+        schedule: {
+          startDate: new Date().toISOString(),
+          frequency: "manual"
+        },
+        type: "workflow"
+      });
+      toast.success("Workflow saved successfully");
+      // Redirect to campaigns list after save
+      router.push("/campaigns");
+    } catch (error) {
+      console.error("Failed to save workflow:", error);
+      toast.error("Failed to save workflow");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleLive = async () => {
+    const newLiveState = !isLive;
+    setIsLive(newLiveState);
+    if (newLiveState) {
+      toast.success("Workflow activated - leads will now be enrolled");
+    } else {
+      toast.info("Workflow paused - no new leads will be enrolled");
+    }
+  };
   const sel = selectedNode ? findNode(nodes, selectedNode) : null;
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
@@ -198,11 +234,16 @@ export default function WorkflowCanvasPage() {
             >Share</button>
 
             <button onClick={handleSave}
-              className="h-[30px] px-4 rounded-[8px] text-[10px] font-medium cursor-pointer flex items-center gap-1.5 transition-colors"
+              disabled={isSaving}
+              className="h-[30px] px-4 rounded-[8px] text-[10px] font-medium cursor-pointer flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ color: T.text70, border: `1px solid ${T.border}` }}
             >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" strokeWidth="2"/></svg>
-              Save
+              {isSaving ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" strokeWidth="2"/></svg>
+              )}
+              {isSaving ? "Saving..." : "Save"}
             </button>
 
             <button onClick={toggleLive}

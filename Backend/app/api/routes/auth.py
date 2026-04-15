@@ -779,3 +779,96 @@ async def update_icp_config(
     except Exception as e:
         logger.error(f"ICP config update error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update ICP configuration")
+
+
+# ─── Settings Management ─────────────────────────────────────────────────────
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+
+class UpdateWorkspaceRequest(BaseModel):
+    name: Optional[str] = None
+    plan: Optional[str] = None
+    billing_email: Optional[str] = None
+
+class UpdateNotificationsRequest(BaseModel):
+    email_notifications: Optional[bool] = None
+    slack_notifications: Optional[bool] = None
+    new_leads: Optional[bool] = None
+    campaign_updates: Optional[bool] = None
+    signal_alerts: Optional[bool] = None
+    weekly_report: Optional[bool] = None
+
+
+@router.post("/update-profile")
+async def update_profile(
+    request: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update user profile (name, etc.)."""
+    try:
+        if request.name is not None:
+            current_user.name = request.name
+        db.commit()
+        return {"success": True, "message": "Profile updated"}
+    except Exception as e:
+        logger.error(f"Profile update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update profile")
+
+
+@router.post("/update-workspace")
+async def update_workspace(
+    request: UpdateWorkspaceRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update workspace settings."""
+    try:
+        # Store in onboarding_data or user metadata
+        onboarding = current_user.onboarding_data or {}
+        if request.name is not None:
+            onboarding["org_name"] = request.name
+        if request.plan is not None:
+            onboarding["plan"] = request.plan
+        if request.billing_email is not None:
+            onboarding["billing_email"] = request.billing_email
+        current_user.onboarding_data = onboarding
+        db.commit()
+        return {"success": True, "message": "Workspace updated"}
+    except Exception as e:
+        logger.error(f"Workspace update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update workspace")
+
+
+@router.post("/update-notifications")
+async def update_notifications(
+    request: UpdateNotificationsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update notification preferences."""
+    try:
+        # Store in integrations or user metadata
+        prefs = (current_user.integrations or {}).get("notifications", {})
+        if request.email_notifications is not None:
+            prefs["email"] = request.email_notifications
+        if request.slack_notifications is not None:
+            prefs["slack"] = request.slack_notifications
+        if request.new_leads is not None:
+            prefs["newLeads"] = request.new_leads
+        if request.campaign_updates is not None:
+            prefs["campaigns"] = request.campaign_updates
+        if request.signal_alerts is not None:
+            prefs["signals"] = request.signal_alerts
+        if request.weekly_report is not None:
+            prefs["weeklyReport"] = request.weekly_report
+        
+        integrations = current_user.integrations or {}
+        integrations["notifications"] = prefs
+        current_user.integrations = integrations
+        db.commit()
+        return {"success": True, "message": "Notification preferences updated"}
+    except Exception as e:
+        logger.error(f"Notifications update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update notifications")
