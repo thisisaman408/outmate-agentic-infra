@@ -34,6 +34,7 @@ import {
   Radar,
   Zap,
   Database,
+  Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -75,6 +76,7 @@ const sections: NavSection[] = [
       { name: "Database", href: "/database", icon: Database, badge: "New", badgeColor: "green" },
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "People", href: "/leads/prospects", icon: Users },
+      { name: "History", href: "/leads/history", icon: Clock },
       { name: "AI Powered Search", href: "/ai-powered-search", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
       { name: "Segments & Lists", href: "/lists", icon: ListTree },
       { name: "Knowledge Base", href: "/knowledge", icon: BookOpen },
@@ -84,7 +86,7 @@ const sections: NavSection[] = [
     label: "Execution",
     items: [
       { name: "Unified Copilot", href: "/copilot", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
-      { name: "Workflows", href: "/campaigns", icon: GitBranch },
+      { name: "Campaigns", href: "/campaigns", icon: GitBranch },
       { name: "Social Agent", href: "/social-agent", icon: Share2, badge: "Hot", badgeColor: "indigo" },
       { name: "Voice Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
       { name: "Enrichment", href: "/enrichment", icon: Zap, badge: "AI", badgeColor: "indigo" },
@@ -99,8 +101,6 @@ const sections: NavSection[] = [
   {
     label: "System",
     items: [
-      { name: "Home Dashboard", href: "/dashboard", icon: Home },
-      { name: "Analytics", href: "/analytics", icon: BarChart3 },
       { name: "Integrations", href: "/integrations", icon: Plug },
       { name: "Settings", href: "/settings", icon: Settings },
     ],

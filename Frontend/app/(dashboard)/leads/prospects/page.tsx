@@ -36,6 +36,7 @@ import { searchProspects, type ProspectProfile, type ProspectSearchFilters } fro
 import { toast } from "sonner"
 import { Separator } from "@/components/ui/separator"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
+import { integrationsApi } from "@/lib/api/integrations"
 
 /* ─── types ─── */
 
@@ -317,13 +318,69 @@ export default function PeoplePage() {
   const [prospects, setProspects] = useState<ProspectProfile[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
+  const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
   
   // Stubs for table compatibility
   const handleLoadMore = async () => {}
   const onEnrichReveal = async () => {}
-  const handleWaterfallResult = () => {}
+  const handleWaterfallResult = (linkedinUrl: string, field: 'email' | 'phone', result: any) => {
+    setEnrichedData(prev => ({
+      ...prev,
+      [linkedinUrl]: {
+        ...prev[linkedinUrl],
+        [field]: result
+      }
+    }))
+  }
 
-  const toggleFilter = (label: string) => setExpandedFilters((p) => ({ ...p, [label]: !p[label] }))
+  const handleAddToCRM = async (rows: ProspectProfile[]) => {
+    try {
+      // Get integration status to determine which CRM to use
+      const status = await integrationsApi.getStatus()
+      const integrations = status.integrations
+      
+      // Determine which CRM is connected
+      let crmType: 'hubspot' | 'salesforce' | 'zoho_crm' | null = null
+      if (integrations.hubspot?.connected) crmType = 'hubspot'
+      else if (integrations.salesforce?.connected) crmType = 'salesforce'
+      else if (integrations.zoho_crm?.connected) crmType = 'zoho_crm'
+      
+      if (!crmType) {
+        toast.error("No CRM connected. Please connect a CRM in the Integrations page.")
+        return
+      }
+      
+      // Convert prospects to contact format
+      const contacts = rows.map(prospect => ({
+        email: prospect.emails?.[0] || '',
+        firstname: prospect.first_name || '',
+        lastname: prospect.last_name || '',
+        phone: prospect.phones?.[0] || '',
+        company: prospect.current_employers?.[0]?.name || '',
+        jobtitle: prospect.current_employers?.[0]?.title || '',
+        linkedin: prospect.linkedin_profile_url || '',
+      }))
+      
+      // Call the appropriate CRM API
+      let result
+      if (crmType === 'hubspot') {
+        result = await integrationsApi.hubspotAddContacts(contacts)
+      } else if (crmType === 'salesforce') {
+        result = await integrationsApi.salesforceAddContacts(contacts)
+      } else if (crmType === 'zoho_crm') {
+        result = await integrationsApi.zohoCrmAddContacts(contacts)
+      }
+      
+      if (result.success) {
+        toast.success(`Added ${result.successful} of ${result.total} contacts to ${crmType.replace('_', ' ').toUpperCase()}`)
+      } else {
+        toast.error(`Failed to add contacts to CRM`)
+      }
+    } catch (error: any) {
+      toast.error(error.message || `Failed to add contacts to CRM`)
+    }
+  }
+
   const removeChip = (filter: string, chip: string) => {
     setFilterChips((p) => ({ ...p, [filter]: (p[filter] || []).filter((c) => c !== chip) }))
     setPendingChange(true)
@@ -634,6 +691,7 @@ export default function PeoplePage() {
                   enrichCache={{}}
                   enrichingRows={{}}
                   tableId="prospects_v2"
+                  onAddToCRM={handleAddToCRM}
                />
             </div>
           </div>

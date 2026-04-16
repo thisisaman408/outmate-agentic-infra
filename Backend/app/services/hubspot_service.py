@@ -183,54 +183,149 @@ class HubSpotService:
         row = self._get_integration_row(user_id)
         if not row:
             return None
-        return (row.get("credentials") or {}).get("access_token")
+        # Check for OAuth access token first, then API key
+        creds = row.get("credentials") or {}
+        if creds.get("access_token"):
+            return creds.get("access_token")
+        return creds.get("api_key")
+
+    def store_api_key(self, user_id, api_key: str, description: str = "") -> None:
+        """Store HubSpot API key with description in user_integrations table."""
+        if not self.db:
+            raise RuntimeError("db session required")
+
+        creds = {
+            "api_key": api_key,
+            "description": description,
+        }
+
+        row = self._get_integration_row(user_id)
+        if row:
+            self.db.execute(
+                text(
+                    "UPDATE user_integrations SET "
+                    "credentials_encrypted = :creds, status = 'connected', "
+                    "connected_at = :now, updated_at = :now "
+                    "WHERE id = :row_id"
+                ),
+                {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
+            )
+        else:
+            self.db.execute(
+                text(
+                    "INSERT INTO user_integrations "
+                    "(id, user_id, status, credentials_encrypted, config, metadata, connected_at, created_at, updated_at) "
+                    "VALUES (:id, :user_id, 'connected', :creds, :config, :meta, :now, :now, :now)"
+                ),
+                {
+                    "id": str(uuid4()),
+                    "user_id": str(user_id),
+                    "creds": json.dumps(creds),
+                    "config": json.dumps({"type": INTEGRATION_TYPE}),
+                    "meta": json.dumps({"provider": "hubspot", "auth_type": "api_key"}),
+                    "now": datetime.now(timezone.utc),
+                },
+            )
+        self.db.commit()
 
     async def create_contact(self, user_id, properties: Dict[str, str]) -> Dict[str, Any]:
-        token = self._get_access_token(user_id)
-        if not token:
-            token = await self.refresh_token(user_id)
-        if not token:
+        row = self._get_integration_row(user_id)
+        if not row:
             raise RuntimeError("HubSpot not connected")
-
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"properties": properties},
-            )
-            if resp.status_code == 401:
+        
+        creds = row.get("credentials") or {}
+        auth_type = creds.get("auth_type", "oauth")
+        
+        if auth_type == "api_key" or "api_key" in creds:
+            # Use API key authentication
+            api_key = creds.get("api_key")
+            if not api_key:
+                raise RuntimeError("HubSpot API key not found")
+            
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"properties": properties},
+                )
+                resp.raise_for_status()
+                return resp.json()
+        else:
+            # Use OAuth authentication
+            token = creds.get("access_token")
+            if not token:
                 token = await self.refresh_token(user_id)
-                if not token:
-                    raise RuntimeError("HubSpot token expired")
+            if not token:
+                raise RuntimeError("HubSpot not connected")
+
+            async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(
                     f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                     json={"properties": properties},
                 )
-            resp.raise_for_status()
-            return resp.json()
+                if resp.status_code == 401:
+                    token = await self.refresh_token(user_id)
+                    if not token:
+                        raise RuntimeError("HubSpot token expired")
+                    resp = await client.post(
+                        f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json={"properties": properties},
+                    )
+                resp.raise_for_status()
+                return resp.json()
 
     async def search_contact(self, user_id, email: str) -> Optional[Dict[str, Any]]:
-        token = self._get_access_token(user_id)
-        if not token:
-            token = await self.refresh_token(user_id)
-        if not token:
+        row = self._get_integration_row(user_id)
+        if not row:
             return None
+        
+        creds = row.get("credentials") or {}
+        auth_type = creds.get("auth_type", "oauth")
+        
+        if auth_type == "api_key" or "api_key" in creds:
+            # Use API key authentication
+            api_key = creds.get("api_key")
+            if not api_key:
+                return None
+            
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "filterGroups": [{
+                            "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
+                        }]
+                    },
+                )
+                if resp.status_code == 200:
+                    results = resp.json().get("results", [])
+                    return results[0] if results else None
+            return None
+        else:
+            # Use OAuth authentication
+            token = creds.get("access_token")
+            if not token:
+                token = await self.refresh_token(user_id)
+            if not token:
+                return None
 
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
-                    "filterGroups": [{
-                        "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
-                    }]
-                },
-            )
-            if resp.status_code == 200:
-                results = resp.json().get("results", [])
-                return results[0] if results else None
-        return None
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={
+                        "filterGroups": [{
+                            "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
+                        }]
+                    },
+                )
+                if resp.status_code == 200:
+                    results = resp.json().get("results", [])
+                    return results[0] if results else None
+            return None
 
     # ── Internal ─────────────────────────────────────────────────────
 

@@ -40,24 +40,6 @@ const copilotFeatures: CopilotFeature[] = [
     href: "/copilot",
   },
   { 
-    id: "ai-assistant", 
-    name: "AI Assistant", 
-    description: "Get help with any feature", 
-    icon: Sparkles, 
-    href: "/copilot",
-    badge: "Help",
-    badgeColor: "indigo"
-  },
-  { 
-    id: "automation-agent", 
-    name: "Automation Agent", 
-    description: "Automate tasks with AI", 
-    icon: Bot, 
-    href: "/copilot",
-    badge: "AI",
-    badgeColor: "violet"
-  },
-  { 
     id: "daily-brief", 
     name: "Daily Brief", 
     description: "AI-generated daily insights", 

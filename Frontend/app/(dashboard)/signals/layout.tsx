@@ -7,10 +7,7 @@ import { cn } from "@/lib/utils"
 const NAV_ITEMS = [
   { name: "Overview", href: "/signals" },
   { name: "Events", href: "/signals/events" },
-  { name: "Intents", href: "/signals/intent" },
   { name: "Trackers", href: "/signals/tracker" },
-  { name: "Websights", href: "/signals/websights" },
-  { name: "Form Complete", href: "/signals/formcomplete" },
 ]
 
 export default function SignalsLayout({ children }: { children: React.ReactNode }) {

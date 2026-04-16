@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -27,14 +27,85 @@ interface Integration {
   lastSync?: string
 }
 
-const categories = ["CRM", "Outbound & email", "Enrichment & data", "Messaging", "AI models"]
+const categories = ["CRM", "Outbound & email", "Messaging", "AI models", "Social Media", "Calendar", "Analytics", "Communication", "Productivity", "Enrichment & data"]
 
 // Map backend integration IDs to frontend display config
 const integrationConfig: Record<string, Partial<Integration>> = {
+  // Email & Outreach
   gmail: { icon: "✉", description: "Send and receive emails", category: "Outbound & email", badges: ["popular", "gtm"] },
-  slack: { icon: "#", description: "Team notifications and alerts", category: "Messaging", badges: ["popular"] },
+  outlook: { icon: "📧", description: "Microsoft Outlook email integration", category: "Outbound & email", badges: ["popular"] },
+  sendgrid: { icon: "📨", description: "Transactional email service", category: "Outbound & email" },
+  smtp: { icon: "🔌", description: "Custom SMTP server", category: "Outbound & email" },
+  reply_io: { icon: "💬", description: "Email reply management", category: "Outbound & email" },
+  woodpecker: { icon: "🪶", description: "Cold email follow-up tool", category: "Outbound & email" },
+  lemlist: { icon: "📋", description: "B2B lead generation platform", category: "Outbound & email" },
+  salesloft: { icon: "🚀", description: "Sales engagement platform", category: "Outbound & email", badges: ["gtm"] },
+  outreach_io: { icon: "📢", description: "Sales engagement and analytics", category: "Outbound & email" },
+  
+  // CRM
   hubspot: { icon: "⊞", description: "Sync contacts, deals, companies, notes", category: "CRM", badges: ["popular", "gtm"], syncType: "Bi-directional", records: "12,400" },
   salesforce: { icon: "☁", description: "Enterprise CRM sync", category: "CRM", badges: ["popular", "gtm"] },
+  pipedrive: { icon: "📊", description: "Sales pipeline management", category: "CRM", badges: ["gtm"] },
+  zoho_crm: { icon: "🏢", description: "Zoho CRM integration", category: "CRM" },
+  close: { icon: "🔒", description: "CRM for startups", category: "CRM" },
+  freshsales: { icon: "🌱", description: "Freshworks CRM", category: "CRM" },
+  monday: { icon: "📅", description: "Work management and CRM", category: "CRM" },
+  streak: { icon: "🔗", description: "CRM inside Gmail", category: "CRM" },
+  
+  // Messaging
+  slack: { icon: "#", description: "Team notifications and alerts", category: "Messaging", badges: ["popular"] },
+  teams: { icon: "👥", description: "Microsoft Teams integration", category: "Messaging", badges: ["popular"] },
+  discord: { icon: "🎮", description: "Community management", category: "Messaging" },
+  whatsapp: { icon: "📱", description: "WhatsApp Business API", category: "Messaging" },
+  twilio: { icon: "📞", description: "SMS and voice communication", category: "Messaging" },
+  ringcentral: { icon: "📞", description: "Cloud phone system", category: "Messaging" },
+  
+  // Social Media
+  linkedin: { icon: "💼", description: "LinkedIn connections and DMs", category: "Social Media", badges: ["popular", "gtm"] },
+  twitter: { icon: "🐦", description: "Twitter/X integration", category: "Social Media" },
+  twitter_ads: { icon: "📢", description: "Twitter advertising", category: "Social Media" },
+  facebook: { icon: "📘", description: "Facebook integration", category: "Social Media" },
+  instagram: { icon: "📷", description: "Instagram integration", category: "Social Media" },
+  
+  // Enrichment & Data
+  clearbit: { icon: "💎", description: "Company and contact enrichment", category: "Enrichment & data", badges: ["gtm"] },
+  apollo: { icon: "🚀", description: "B2B contact database", category: "Enrichment & data", badges: ["gtm"] },
+  zoominfo: { icon: "🔍", description: "B2B intelligence platform", category: "Enrichment & data", badges: ["gtm"] },
+  hunter: { icon: "🎯", description: "Email finder and verifier", category: "Enrichment & data" },
+  rocketreach: { icon: "🚀", description: "Contact finder platform", category: "Enrichment & data" },
+  lusha: { icon: "💎", description: "B2B contact database", category: "Enrichment & data" },
+  snov_io: { icon: "❄", description: "Email finder and verifier", category: "Enrichment & data" },
+  kaspr: { icon: "🔑", description: "B2B contact enrichment", category: "Enrichment & data" },
+  
+  // Calendar
+  google_calendar: { icon: "📅", description: "Google Calendar sync", category: "Calendar", badges: ["popular"] },
+  outlook_calendar: { icon: "📆", description: "Microsoft Outlook calendar", category: "Calendar" },
+  calendly: { icon: "📅", description: "Meeting scheduling automation", category: "Calendar", badges: ["gtm"] },
+  
+  // Analytics
+  google_analytics: { icon: "📈", description: "Website analytics", category: "Analytics", badges: ["popular"] },
+  segment: { icon: "📊", description: "Customer data platform", category: "Analytics" },
+  mixpanel: { icon: "📊", description: "Product analytics", category: "Analytics" },
+  amplitude: { icon: "📊", description: "Digital analytics platform", category: "Analytics" },
+  
+  // Communication
+  intercom: { icon: "💬", description: "Customer messaging platform", category: "Communication" },
+  zendesk: { icon: "🎫", description: "Customer support platform", category: "Communication" },
+  helpscout: { icon: "💁", description: "Help desk software", category: "Communication" },
+  
+  // Productivity
+  notion: { icon: "📝", description: "Productivity and knowledge base", category: "Productivity", badges: ["popular"] },
+  airtable: { icon: "📊", description: "Spreadsheet-database hybrid", category: "Productivity" },
+  trello: { icon: "📋", description: "Project management", category: "Productivity" },
+  asana: { icon: "✅", description: "Work management platform", category: "Productivity" },
+  
+  // Automation
+  zapier: { icon: "⚡", description: "Connect 7000+ apps via Zapier", category: "AI models", badges: ["popular"] },
+  make: { icon: "🔧", description: "Automation platform", category: "AI models" },
+  n8n: { icon: "🔗", description: "Workflow automation", category: "AI models" },
+  webhooks: { icon: "🔗", description: "Custom webhook integrations", category: "AI models", badges: ["popular"] },
+  
+  // Outreach (legacy support)
   outreach: { icon: "◈", description: "Outreach automation via Instantly or Smartlead", category: "Outbound & email", badges: ["gtm"] },
 }
 
@@ -48,38 +119,138 @@ export default function IntegrationsPage() {
   const [testingOutreach, setTestingOutreach] = useState(false)
   const [outreachApiKey, setOutreachApiKey] = useState("")
   const [outreachService, setOutreachService] = useState<"instantly" | "smartlead">("instantly")
+  const [connectingCrm, setConnectingCrm] = useState<string | null>(null)
+  const [crmAuthMethod, setCrmAuthMethod] = useState<"oauth" | "api_key">("oauth")
+  const [crmApiKey, setCrmApiKey] = useState("")
+  const [crmDescription, setCrmDescription] = useState("")
+  const [crmInstanceUrl, setCrmInstanceUrl] = useState("")
+  const [crmApiDomain, setCrmApiDomain] = useState("")
+  const [savingApiKey, setSavingApiKey] = useState(false)
 
   // Fetch integrations from API
-  useEffect(() => {
-    const loadIntegrations = async () => {
-      try {
-        setLoading(true)
-        const status = await integrationsApi.getStatus()
-        const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
-          const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
-          return {
-            id,
-            name: int.name,
-            icon: config.icon,
-            description: config.description,
-            connected: int.connected,
-            badges: config.badges || [],
-            category: config.category,
-            syncType: config.syncType,
-            records: config.records,
-            lastSync: int.connected ? "Active" : undefined,
-          } as Integration
-        })
-        setIntegrations(mapped)
-      } catch (error) {
-        console.error("Failed to load integrations:", error)
-        toast.error("Failed to load integrations")
-      } finally {
-        setLoading(false)
-      }
+  const loadIntegrations = useCallback(async () => {
+    try {
+      setLoading(true)
+      const status = await integrationsApi.getStatus()
+      const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+        const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
+        return {
+          id,
+          name: int.name,
+          icon: config.icon,
+          description: config.description,
+          connected: int.connected,
+          badges: config.badges || [],
+          category: config.category,
+          syncType: config.syncType,
+          records: config.records,
+          lastSync: int.connected ? "Active" : undefined,
+        } as Integration
+      })
+      setIntegrations(mapped)
+    } catch (error) {
+      console.error("Failed to load integrations:", error)
+      toast.error("Failed to load integrations")
+    } finally {
+      setLoading(false)
     }
-    loadIntegrations()
   }, [])
+
+  useEffect(() => {
+    loadIntegrations()
+  }, [loadIntegrations])
+
+  // Handle CRM OAuth connection
+  const handleConnectCrm = async (crmId: string) => {
+    try {
+      setConnectingCrm(crmId)
+      let authUrl
+      if (crmId === "hubspot") {
+        const result = await integrationsApi.getHubspotAuthUrl()
+        authUrl = result.auth_url
+      } else if (crmId === "salesforce") {
+        const result = await integrationsApi.getSalesforceAuthUrl()
+        authUrl = result.auth_url
+      } else if (crmId === "zoho_crm") {
+        const result = await integrationsApi.getZohoCrmAuthUrl()
+        authUrl = result.auth_url
+      } else if (crmId === "outlook") {
+        const result = await integrationsApi.getOutlookAuthUrl()
+        authUrl = result.auth_url
+      } else {
+        return
+      }
+
+      // Open OAuth in popup
+      const popup = window.open(authUrl, "oauth-popup", "width=600,height=600")
+      if (popup) {
+        // Poll for popup close or handle callback via message
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed)
+            setConnectingCrm(null)
+            // Refresh integrations list
+            loadIntegrations()
+          }
+        }, 500)
+      }
+    } catch (error: any) {
+      toast.error(error.message || `Failed to connect ${crmId}`)
+      setConnectingCrm(null)
+    }
+  }
+
+  // Handle CRM disconnect
+  const handleDisconnectCrm = async (crmId: string) => {
+    try {
+      if (crmId === "hubspot") {
+        await integrationsApi.hubspotDisconnect()
+      } else if (crmId === "salesforce") {
+        await integrationsApi.salesforceDisconnect()
+      } else if (crmId === "zoho_crm") {
+        await integrationsApi.zohoCrmDisconnect()
+      } else if (crmId === "outlook") {
+        await integrationsApi.outlookDisconnect()
+      } else {
+        return
+      }
+      toast.success(`${crmId.replace("_", " ").toUpperCase()} disconnected successfully`)
+      // Refresh integrations list
+      loadIntegrations()
+    } catch (error: any) {
+      toast.error(error.message || `Failed to disconnect ${crmId}`)
+    }
+  }
+
+  // Handle CRM API key storage
+  const handleStoreApiKey = async (crmId: string) => {
+    try {
+      setSavingApiKey(true)
+      if (crmId === "hubspot") {
+        await integrationsApi.hubspotStoreApiKey(crmApiKey, crmDescription)
+      } else if (crmId === "salesforce") {
+        await integrationsApi.salesforceStoreApiKey(crmApiKey, crmDescription, crmInstanceUrl)
+      } else if (crmId === "zoho_crm") {
+        await integrationsApi.zohoCrmStoreApiKey(crmApiKey, crmDescription, crmApiDomain)
+      } else if (crmId === "outlook") {
+        await integrationsApi.outlookStoreApiKey(crmApiKey, crmDescription)
+      } else {
+        return
+      }
+      toast.success(`${crmId.replace("_", " ").toUpperCase()} API key connected successfully`)
+      // Reset form
+      setCrmApiKey("")
+      setCrmDescription("")
+      setCrmInstanceUrl("")
+      setCrmApiDomain("")
+      // Refresh integrations list
+      loadIntegrations()
+    } catch (error: any) {
+      toast.error(error.message || `Failed to connect ${crmId} API key`)
+    } finally {
+      setSavingApiKey(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     let items = integrations
@@ -342,7 +513,15 @@ export default function IntegrationsPage() {
                      </div>
                   </div>
 
-                  <Button variant="outline" className="w-full h-11 border-red-500/20 text-red-500 hover:bg-red-500/5 hover:border-red-500/30 font-black uppercase tracking-widest text-[10px] rounded-xl transition-all">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      if (selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm") {
+                        handleDisconnectCrm(selected.id)
+                      }
+                    }}
+                    className="w-full h-11 border-red-500/20 text-red-500 hover:bg-red-500/5 hover:border-red-500/30 font-black uppercase tracking-widest text-[10px] rounded-xl transition-all"
+                  >
                      Disconnect Integration
                   </Button>
                </>
@@ -425,6 +604,109 @@ export default function IntegrationsPage() {
                           "Connect Outreach"
                         )}
                       </Button>
+                    </div>
+                  ) : selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm" || selected.id === "outlook" ? (
+                    <div className="space-y-4">
+                      {/* Auth Method Toggle */}
+                      <div className="flex gap-2 p-1 bg-muted/20 rounded-lg">
+                        <button
+                          onClick={() => setCrmAuthMethod("oauth")}
+                          className={cn(
+                            "flex-1 py-2 px-3 rounded-md text-[11px] font-black uppercase tracking-wider transition-all",
+                            crmAuthMethod === "oauth"
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          OAuth
+                        </button>
+                        <button
+                          onClick={() => setCrmAuthMethod("api_key")}
+                          className={cn(
+                            "flex-1 py-2 px-3 rounded-md text-[11px] font-black uppercase tracking-wider transition-all",
+                            crmAuthMethod === "api_key"
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          API Key
+                        </button>
+                      </div>
+
+                      {crmAuthMethod === "oauth" ? (
+                        <Button
+                          onClick={() => handleConnectCrm(selected.id)}
+                          disabled={connectingCrm === selected.id}
+                          className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                        >
+                          {connectingCrm === selected.id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Connecting...
+                            </>
+                          ) : (
+                            `Connect with OAuth`
+                          )}
+                        </Button>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">API Key</label>
+                            <Input
+                              type="password"
+                              value={crmApiKey}
+                              onChange={(e) => setCrmApiKey(e.target.value)}
+                              placeholder="Enter your API key"
+                              className="h-10 text-xs"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Description (Optional)</label>
+                            <Input
+                              value={crmDescription}
+                              onChange={(e) => setCrmDescription(e.target.value)}
+                              placeholder="e.g., Production account"
+                              className="h-10 text-xs"
+                            />
+                          </div>
+                          {selected.id === "salesforce" && (
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Instance URL (Optional)</label>
+                              <Input
+                                value={crmInstanceUrl}
+                                onChange={(e) => setCrmInstanceUrl(e.target.value)}
+                                placeholder="https://your-instance.salesforce.com"
+                                className="h-10 text-xs"
+                              />
+                            </div>
+                          )}
+                          {selected.id === "zoho_crm" && (
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">API Domain (Optional)</label>
+                              <Input
+                                value={crmApiDomain}
+                                onChange={(e) => setCrmApiDomain(e.target.value)}
+                                placeholder="https://www.zohoapis.com"
+                                className="h-10 text-xs"
+                              />
+                            </div>
+                          )}
+                          <Button
+                            onClick={() => handleStoreApiKey(selected.id)}
+                            disabled={savingApiKey || !crmApiKey}
+                            className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                          >
+                            {savingApiKey ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Saving...
+                              </>
+                            ) : (
+                              `Connect with API Key`
+                            )}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <Button className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20">

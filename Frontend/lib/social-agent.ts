@@ -192,7 +192,7 @@ function matchLine(text: string, re: RegExp): string | null {
 // belonging to the current Outmate user.
 // ---------------------------------------------------------------------------
 
-const API_BASE = "/api/v1/agents/social-listening"
+const API_BASE = "/api/v1/social"
 
 interface BackendLead {
   name: string

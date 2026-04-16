@@ -677,7 +677,7 @@ export default function EventsPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Events</h1>
                     <p className="text-muted-foreground">
-                        Track business milestones and prospect career changes via Explorium.
+                        Track business milestones and prospect career changes.
                     </p>
                 </div>
                 <div className="flex gap-2 flex-wrap">

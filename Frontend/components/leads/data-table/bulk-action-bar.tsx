@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Download, Zap, ListPlus, X } from "lucide-react"
+import { Download, Zap, ListPlus, X, Building2 } from "lucide-react"
 
 interface BulkActionBarProps {
     selectedCount: number
@@ -9,6 +9,7 @@ interface BulkActionBarProps {
     onExportSelected?: () => void
     onEnrichAll?: () => void
     onAddToList?: () => void
+    onAddToCRM?: () => void
 }
 
 export function BulkActionBar({
@@ -17,6 +18,7 @@ export function BulkActionBar({
     onExportSelected,
     onEnrichAll,
     onAddToList,
+    onAddToCRM,
 }: BulkActionBarProps) {
     return (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 duration-200">
@@ -41,6 +43,12 @@ export function BulkActionBar({
                     <Button variant="secondary" size="sm" className="h-7" onClick={onAddToList}>
                         <ListPlus className="h-3.5 w-3.5 mr-1.5" />
                         Add to List
+                    </Button>
+                )}
+                {onAddToCRM && (
+                    <Button variant="secondary" size="sm" className="h-7" onClick={onAddToCRM}>
+                        <Building2 className="h-3.5 w-3.5 mr-1.5" />
+                        Add to CRM
                     </Button>
                 )}
                 <Button variant="ghost" size="sm" className="h-7 text-primary-foreground hover:text-primary-foreground/80 hover:bg-primary-foreground/10"

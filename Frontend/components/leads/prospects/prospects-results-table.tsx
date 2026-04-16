@@ -39,6 +39,7 @@ interface ProspectsResultsTableProps {
     enrichCache?: Record<string, { email?: any, phone?: any }>
     enrichingRows?: Record<string, boolean>
     tableId?: string
+    onAddToCRM?: (rows: ProspectProfile[]) => void
 }
 
 // ── Utility functions (preserved from original) ──
@@ -202,6 +203,7 @@ export function ProspectsResultsTable({
     enrichCache,
     enrichingRows,
     tableId = "prospects",
+    onAddToCRM,
 }: ProspectsResultsTableProps) {
     const actualProfiles = profiles || data || []
     const router = useRouter()
@@ -937,6 +939,9 @@ export function ProspectsResultsTable({
                     onExportSelected={() => handleExport(table.selectedData)}
                     onEnrichAll={onEnrichReveal ? () => {
                         table.selectedData.forEach(p => onEnrichReveal(p, 'email'))
+                    } : undefined}
+                    onAddToCRM={onAddToCRM ? () => {
+                        onAddToCRM(table.selectedData)
                     } : undefined}
                 />
             )}
