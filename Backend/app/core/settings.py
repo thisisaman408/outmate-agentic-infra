@@ -292,6 +292,10 @@ class Settings(BaseSettings):
         description="Public URL for Google Calendar push notifications (e.g. ngrok tunnel)"
     )
 
+    # Outlook OAuth
+    OUTLOOK_CLIENT_ID: str = Field("", description="Outlook/Microsoft OAuth app client ID")
+    OUTLOOK_CLIENT_SECRET: str = Field("", description="Outlook/Microsoft OAuth app client secret")
+
     # HubSpot OAuth
     HUBSPOT_CLIENT_ID: str = Field("", description="HubSpot OAuth app client ID")
     HUBSPOT_CLIENT_SECRET: str = Field("", description="HubSpot OAuth app client secret")
@@ -301,6 +305,52 @@ class Settings(BaseSettings):
     )
     HUBSPOT_PKCE_VERIFIER: str = Field("", description="HubSpot MCP Auth App PKCE code verifier (from dashboard)")
     HUBSPOT_PKCE_CHALLENGE: str = Field("", description="HubSpot MCP Auth App PKCE code challenge (from dashboard)")
+
+    # Salesforce OAuth
+    SALESFORCE_CLIENT_ID: str = Field("", description="Salesforce OAuth app client ID")
+    SALESFORCE_CLIENT_SECRET: str = Field("", description="Salesforce OAuth app client secret")
+    SALESFORCE_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/salesforce/callback",
+        description="Salesforce OAuth redirect URI (goes through Next.js proxy)",
+    )
+
+    # Zoho CRM OAuth
+    ZOHO_CLIENT_ID: str = Field("", description="Zoho CRM OAuth app client ID")
+    ZOHO_CLIENT_SECRET: str = Field("", description="Zoho CRM OAuth app client secret")
+    ZOHO_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/zoho-crm/callback",
+        description="Zoho CRM OAuth redirect URI (goes through Next.js proxy)",
+    )
+
+    # Slack OAuth
+    SLACK_CLIENT_ID: str = Field("", description="Slack OAuth app client ID")
+    SLACK_CLIENT_SECRET: str = Field("", description="Slack OAuth app client secret")
+    SLACK_SIGNING_SECRET: str = Field("", description="Slack signing secret for webhook verification")
+    SLACK_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/slack/callback",
+        description="Slack OAuth redirect URI (goes through Next.js proxy)",
+    )
+
+    # Discord OAuth
+    DISCORD_CLIENT_ID: str = Field("", description="Discord OAuth app client ID")
+    DISCORD_CLIENT_SECRET: str = Field("", description="Discord OAuth app client secret")
+    DISCORD_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/discord/callback",
+        description="Discord OAuth redirect URI (goes through Next.js proxy)",
+    )
+
+    # Microsoft Teams OAuth (uses Microsoft Graph API)
+    TEAMS_CLIENT_ID: str = Field("", description="Microsoft Teams OAuth app client ID")
+    TEAMS_CLIENT_SECRET: str = Field("", description="Microsoft Teams OAuth app client secret")
+    TEAMS_REDIRECT_URI: str = Field(
+        "http://localhost:3000/api/v1/social/teams/callback",
+        description="Microsoft Teams OAuth redirect URI (goes through Next.js proxy)",
+    )
+
+    # WhatsApp Business OAuth
+    WHATSAPP_PHONE_NUMBER_ID: str = Field("", description="WhatsApp Business phone number ID")
+    WHATSAPP_ACCESS_TOKEN: str = Field("", description="WhatsApp Business access token")
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: str = Field("", description="WhatsApp Business webhook verify token")
 
     # Calendly Webhook
     CALENDLY_WEBHOOK_SIGNING_KEY: str = Field(

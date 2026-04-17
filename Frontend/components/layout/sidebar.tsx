@@ -101,6 +101,7 @@ const sections: NavSection[] = [
   {
     label: "System",
     items: [
+      { name: "Home Dashboard", href: "/dashboard", icon: Home },
       { name: "Integrations", href: "/integrations", icon: Plug },
       { name: "Settings", href: "/settings", icon: Settings },
     ],

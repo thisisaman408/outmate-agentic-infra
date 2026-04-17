@@ -63,6 +63,7 @@ from app.api.routes import events_routes
 from app.api.routes import database_finder
 from app.api.routes import outmate_agentic
 from app.api.routes import integrations
+from app.api.routes import integrations_v2
 from app.api.routes import support
 from app.api.routes import social_listening
 
@@ -330,6 +331,10 @@ logger.info("Database Finder router registered")
 app.include_router(integrations.router, dependencies=auth_dependencies)
 logger.info("Integrations router registered")
 
+app.include_router(integrations_v2.router, prefix="/api/v1/integrations", dependencies=auth_dependencies)
+app.include_router(integrations_v2.public_router, prefix="/api/v1/integrations")
+logger.info("Integrations v2 router registered")
+
 app.include_router(support.router, dependencies=auth_dependencies)
 logger.info("Support router registered")
 
@@ -595,6 +600,19 @@ async def startup_event():
         logger.info("✓ Social Listening flow resolved: flow=%s node=%s type=%s", flow_id, node_id, node_type)
     except Exception as e:
         logger.warning("⚠ Social Listening flow resolution failed (will retry on first call): %s", e)
+
+    # Seed integration catalog
+    try:
+        from app.services.integration_engine.registry import IntegrationRegistry
+        from app.db.deps import get_db
+        db = next(get_db())
+        seeded = IntegrationRegistry.seed_catalog(db)
+        if seeded:
+            logger.info("✓ Seeded %d integrations into catalog", seeded)
+        else:
+            logger.info("✓ Integration catalog up to date")
+    except Exception as e:
+        logger.warning("⚠ Integration catalog seed failed: %s", e)
 
     logger.info("✓ Application startup (optimized) complete")
     logger.info("================================")

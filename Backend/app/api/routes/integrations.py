@@ -887,3 +887,209 @@ async def outlook_get_emails(
     except Exception as e:
         logger.error(f"Outlook get emails error: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to get emails: {str(e)}")
+
+# ── Slack OAuth ─────────────────────────────────────────────
+
+@router.get("/slack/auth-url")
+async def slack_get_auth_url(user: User = Depends(get_current_user)):
+    """Get the Slack OAuth authorization URL."""
+    from app.services.slack_service import SlackService
+    if not SlackService.is_available():
+        raise HTTPException(status_code=400, detail="Slack integration is not configured")
+    state = str(user.id)
+    auth_url = SlackService.get_auth_url(state)
+    return {"auth_url": auth_url}
+
+@router.post("/slack/callback")
+async def slack_callback(
+    code: str = Body(..., embed=True),
+    state: str = Body(..., embed=True),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Handle Slack OAuth callback."""
+    try:
+        from app.services.slack_service import SlackService
+        service = SlackService(db)
+        token_data = await service.exchange_code(code, state)
+        service.store_tokens(user.id, token_data)
+        return {"success": True, "message": "Slack connected successfully"}
+    except Exception as e:
+        logger.error(f"Slack callback error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect Slack: {str(e)}")
+
+@router.post("/slack/disconnect")
+async def slack_disconnect(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Disconnect Slack integration."""
+    try:
+        from app.services.slack_service import SlackService
+        service = SlackService(db)
+        service.disconnect(user.id)
+
+        # Update user integrations status
+        ints = user.integrations or {}
+        ints["slack"] = {"connected": False, "skipped": False}
+        user.integrations = ints
+        db.commit()
+
+        return {"success": True, "message": "Slack disconnected successfully"}
+    except Exception as e:
+        logger.error(f"Slack disconnect error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to disconnect Slack: {str(e)}")
+
+# ── Discord OAuth ─────────────────────────────────────────────
+
+@router.get("/discord/auth-url")
+async def discord_get_auth_url(user: User = Depends(get_current_user)):
+    """Get the Discord OAuth authorization URL."""
+    from app.services.discord_service import DiscordService
+    if not DiscordService.is_available():
+        raise HTTPException(status_code=400, detail="Discord integration is not configured")
+    state = str(user.id)
+    auth_url = DiscordService.get_auth_url(state)
+    return {"auth_url": auth_url}
+
+@router.post("/discord/callback")
+async def discord_callback(
+    code: str = Body(..., embed=True),
+    state: str = Body(..., embed=True),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Handle Discord OAuth callback."""
+    try:
+        from app.services.discord_service import DiscordService
+        service = DiscordService(db)
+        token_data = await service.exchange_code(code, state)
+        service.store_tokens(user.id, token_data)
+        return {"success": True, "message": "Discord connected successfully"}
+    except Exception as e:
+        logger.error(f"Discord callback error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect Discord: {str(e)}")
+
+@router.post("/discord/disconnect")
+async def discord_disconnect(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Disconnect Discord integration."""
+    try:
+        from app.services.discord_service import DiscordService
+        service = DiscordService(db)
+        service.disconnect(user.id)
+
+        # Update user integrations status
+        ints = user.integrations or {}
+        ints["discord"] = {"connected": False, "skipped": False}
+        user.integrations = ints
+        db.commit()
+
+        return {"success": True, "message": "Discord disconnected successfully"}
+    except Exception as e:
+        logger.error(f"Discord disconnect error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to disconnect Discord: {str(e)}")
+
+# ── Microsoft Teams OAuth ─────────────────────────────────────
+
+@router.get("/teams/auth-url")
+async def teams_get_auth_url(user: User = Depends(get_current_user)):
+    """Get the Microsoft Teams OAuth authorization URL."""
+    from app.services.teams_service import TeamsService
+    if not TeamsService.is_available():
+        raise HTTPException(status_code=400, detail="Teams integration is not configured")
+    state = str(user.id)
+    auth_url = TeamsService.get_auth_url(state)
+    return {"auth_url": auth_url}
+
+@router.post("/teams/callback")
+async def teams_callback(
+    code: str = Body(..., embed=True),
+    state: str = Body(..., embed=True),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Handle Microsoft Teams OAuth callback."""
+    try:
+        from app.services.teams_service import TeamsService
+        service = TeamsService(db)
+        token_data = await service.exchange_code(code, state)
+        service.store_tokens(user.id, token_data)
+        return {"success": True, "message": "Teams connected successfully"}
+    except Exception as e:
+        logger.error(f"Teams callback error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect Teams: {str(e)}")
+
+@router.post("/teams/disconnect")
+async def teams_disconnect(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Disconnect Teams integration."""
+    try:
+        from app.services.teams_service import TeamsService
+        service = TeamsService(db)
+        service.disconnect(user.id)
+
+        # Update user integrations status
+        ints = user.integrations or {}
+        ints["teams"] = {"connected": False, "skipped": False}
+        user.integrations = ints
+        db.commit()
+
+        return {"success": True, "message": "Teams disconnected successfully"}
+    except Exception as e:
+        logger.error(f"Teams disconnect error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to disconnect Teams: {str(e)}")
+
+# ── WhatsApp Business (Unipile) ─────────────────────────────────────────────
+
+@router.post("/whatsapp/connect")
+async def whatsapp_connect(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Connect WhatsApp Business via Unipile."""
+    try:
+        from app.services.whatsapp_service import WhatsAppService
+        service = WhatsAppService(db)
+        await service._ensure_account_id()
+        if not service.account_id:
+            raise HTTPException(status_code=400, detail="No WhatsApp account connected in Unipile")
+
+        service.store_api_key(user.id, account_id=service.account_id)
+
+        # Update user integrations status
+        ints = user.integrations or {}
+        ints["whatsapp"] = {"connected": True, "skipped": False}
+        user.integrations = ints
+        db.commit()
+
+        return {"success": True, "message": "WhatsApp Business connected successfully via Unipile"}
+    except Exception as e:
+        logger.error(f"WhatsApp connect error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect WhatsApp Business: {str(e)}")
+
+@router.post("/whatsapp/disconnect")
+async def whatsapp_disconnect(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Disconnect WhatsApp Business integration."""
+    try:
+        from app.services.whatsapp_service import WhatsAppService
+        service = WhatsAppService(db)
+        service.disconnect(user.id)
+
+        # Update user integrations status
+        ints = user.integrations or {}
+        ints["whatsapp"] = {"connected": False, "skipped": False}
+        user.integrations = ints
+        db.commit()
+
+        return {"success": True, "message": "WhatsApp Business disconnected successfully"}
+    except Exception as e:
+        logger.error(f"WhatsApp disconnect error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to disconnect WhatsApp Business: {str(e)}")

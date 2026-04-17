@@ -9,8 +9,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Search, X, Eye, EyeOff, Copy, ExternalLink, Blocks, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
-import { integrationsApi, type IntegrationStatus } from "@/lib/api/integrations"
+import { integrationsApi } from "@/lib/api/integrations"
 import { toast } from "sonner"
+
+const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 type FilterType = "all" | "connected" | "gtm" | "ai"
 
@@ -114,7 +116,7 @@ export default function IntegrationsPage() {
   const [filter, setFilter] = useState<FilterType>("all")
   const [selectedId, setSelectedId] = useState<string>("gmail")
   const [showKey, setShowKey] = useState(false)
-  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [integrations, setIntegrations] = useState<any>([])
   const [loading, setLoading] = useState(true)
   const [testingOutreach, setTestingOutreach] = useState(false)
   const [outreachApiKey, setOutreachApiKey] = useState("")
@@ -132,7 +134,7 @@ export default function IntegrationsPage() {
     try {
       setLoading(true)
       const status = await integrationsApi.getStatus()
-      const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+      const mapped = Object.entries(status.integrations).map(([id, int]: [string, any]) => {
         const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
         return {
           id,
@@ -160,40 +162,91 @@ export default function IntegrationsPage() {
     loadIntegrations()
   }, [loadIntegrations])
 
-  // Handle CRM OAuth connection
+  // Handle CRM connection
   const handleConnectCrm = async (crmId: string) => {
     try {
       setConnectingCrm(crmId)
-      let authUrl
       if (crmId === "hubspot") {
-        const result = await integrationsApi.getHubspotAuthUrl()
-        authUrl = result.auth_url
+        const { auth_url } = await integrationsApi.getHubspotAuthUrl()
+        const popup = window.open(auth_url, "hubspot-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
       } else if (crmId === "salesforce") {
-        const result = await integrationsApi.getSalesforceAuthUrl()
-        authUrl = result.auth_url
+        const { auth_url } = await integrationsApi.getSalesforceAuthUrl()
+        const popup = window.open(auth_url, "salesforce-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
       } else if (crmId === "zoho_crm") {
-        const result = await integrationsApi.getZohoCrmAuthUrl()
-        authUrl = result.auth_url
+        const { auth_url } = await integrationsApi.getZohoCrmAuthUrl()
+        const popup = window.open(auth_url, "zoho-crm-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
       } else if (crmId === "outlook") {
-        const result = await integrationsApi.getOutlookAuthUrl()
-        authUrl = result.auth_url
+        const { auth_url } = await integrationsApi.getOutlookAuthUrl()
+        const popup = window.open(auth_url, "outlook-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
+      } else if (crmId === "slack") {
+        const { auth_url } = await integrationsApi.getSlackAuthUrl()
+        const popup = window.open(auth_url, "slack-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
+      } else if (crmId === "discord") {
+        const { auth_url } = await integrationsApi.getDiscordAuthUrl()
+        const popup = window.open(auth_url, "discord-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
+      } else if (crmId === "teams") {
+        const { auth_url } = await integrationsApi.getTeamsAuthUrl()
+        const popup = window.open(auth_url, "teams-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
       } else {
         return
       }
-
-      // Open OAuth in popup
-      const popup = window.open(authUrl, "oauth-popup", "width=600,height=600")
-      if (popup) {
-        // Poll for popup close or handle callback via message
-        const checkClosed = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(checkClosed)
-            setConnectingCrm(null)
-            // Refresh integrations list
-            loadIntegrations()
-          }
-        }, 500)
-      }
+      setConnectingCrm(null)
     } catch (error: any) {
       toast.error(error.message || `Failed to connect ${crmId}`)
       setConnectingCrm(null)
@@ -211,6 +264,14 @@ export default function IntegrationsPage() {
         await integrationsApi.zohoCrmDisconnect()
       } else if (crmId === "outlook") {
         await integrationsApi.outlookDisconnect()
+      } else if (crmId === "slack") {
+        await integrationsApi.slackDisconnect()
+      } else if (crmId === "discord") {
+        await integrationsApi.discordDisconnect()
+      } else if (crmId === "teams") {
+        await integrationsApi.teamsDisconnect()
+      } else if (crmId === "whatsapp") {
+        await integrationsApi.whatsappDisconnect()
       } else {
         return
       }
@@ -219,6 +280,42 @@ export default function IntegrationsPage() {
       loadIntegrations()
     } catch (error: any) {
       toast.error(error.message || `Failed to disconnect ${crmId}`)
+    }
+  }
+
+  // Handle generic integration connection (for Gmail, etc.)
+  const handleConnectGeneric = async (integrationId: string) => {
+    try {
+      if (integrationId === "gmail") {
+        // Use the Google OAuth endpoint for Gmail
+        const response = await fetch(`${BACKEND_BASE}/api/v1/auth/google/auth-url`, {
+          credentials: "include",
+        })
+        if (!response.ok) {
+          throw new Error("Failed to get Gmail authorization URL")
+        }
+        const data = await response.json()
+        const authUrl = data.auth_url
+        // Open OAuth in popup
+        const popup = window.open(authUrl, "gmail-oauth-popup", "width=600,height=600")
+        if (popup) {
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed)
+              loadIntegrations()
+            }
+          }, 500)
+        }
+        toast.success("Gmail authorization started. Please complete it in the popup.")
+      } else {
+        // For other integrations, try the catalog connect endpoint
+        await integrationsApi.connectIntegration(integrationId)
+        toast.success(`${integrationId.replace("_", " ").toUpperCase()} authorization started`)
+      }
+      // Refresh integrations list
+      loadIntegrations()
+    } catch (error: any) {
+      toast.error(error.message || `Failed to connect ${integrationId}`)
     }
   }
 
@@ -282,7 +379,7 @@ export default function IntegrationsPage() {
         toast.success(result.message)
         // Refresh integrations list
         const status = await integrationsApi.getStatus()
-        const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+        const mapped = Object.entries(status.integrations).map(([id, int]: [string, any]) => {
           const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
           return {
             id,
@@ -315,7 +412,7 @@ export default function IntegrationsPage() {
       toast.success(`Skipped ${service}`)
       // Refresh list
       const status = await integrationsApi.getStatus()
-      const mapped = Object.entries(status.integrations).map(([id, int]: [string, IntegrationStatus]) => {
+      const mapped = Object.entries(status.integrations).map(([id, int]: [string, any]) => {
         const config = integrationConfig[id] || { icon: "◈", description: int.name, category: "Other", badges: [] }
         return {
           id,
@@ -605,7 +702,27 @@ export default function IntegrationsPage() {
                         )}
                       </Button>
                     </div>
-                  ) : selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm" || selected.id === "outlook" ? (
+                  ) : selected.id === "whatsapp" ? (
+                    <div className="space-y-4">
+                      <p className="text-xs text-muted-foreground">
+                        Connect WhatsApp Business via Unipile. Make sure your WhatsApp account is connected in Unipile first.
+                      </p>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            await integrationsApi.whatsappConnect()
+                            toast.success("WhatsApp Business connected successfully via Unipile")
+                            loadIntegrations()
+                          } catch (error: any) {
+                            toast.error(error.message || "Failed to connect WhatsApp Business")
+                          }
+                        }}
+                        className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                      >
+                        Connect WhatsApp Business
+                      </Button>
+                    </div>
+                  ) : selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm" || selected.id === "outlook" || selected.id === "slack" || selected.id === "discord" || selected.id === "teams" ? (
                     <div className="space-y-4">
                       {/* Auth Method Toggle */}
                       <div className="flex gap-2 p-1 bg-muted/20 rounded-lg">
@@ -709,7 +826,10 @@ export default function IntegrationsPage() {
                       )}
                     </div>
                   ) : (
-                    <Button className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20">
+                    <Button
+                      onClick={() => handleConnectGeneric(selected.id)}
+                      className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                    >
                       Authorize {selected.name}
                     </Button>
                   )}
