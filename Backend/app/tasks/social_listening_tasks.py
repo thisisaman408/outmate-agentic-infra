@@ -102,3 +102,50 @@ def poll_due_social_searches() -> Dict[str, Any]:
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()
     logger.info("poll_due_social_searches summary=%s", summary)
     return summary
+
+
+@shared_task(
+    name="app.tasks.social_listening_tasks.run_social_search",
+    bind=True,
+)
+def run_social_search(self, watcher_id: str, user_id: str, agent_run_id: str) -> Dict[str, Any]:
+    """Run discovery for a single watcher in the background.
+
+    Called by `POST /searches/{id}/run-now`.  The endpoint has already
+    pre-created an AgentRun row with status='queued' so the client can
+    poll; this task flips it to running and then success/error via the
+    service layer.
+    """
+    db = SessionLocal()
+    try:
+        watcher = (
+            db.query(Watcher)
+            .filter(Watcher.id == watcher_id, Watcher.user_id == user_id)
+            .first()
+        )
+        if not watcher:
+            return {"ok": False, "reason": "watcher_not_found"}
+        if watcher.status != "active":
+            return {"ok": False, "reason": "watcher_paused"}
+
+        service = SocialListeningService(db)
+        summary = asyncio.run(service.run_for_watcher(watcher, agent_run_id=agent_run_id))
+        db.commit()
+        return {"ok": True, "summary": summary}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("run_social_search failed for watcher %s: %s", watcher_id, exc)
+        db.rollback()
+        # Best-effort: mark the AgentRun as errored so the client stops polling.
+        try:
+            from app.db.models.agent_run import AgentRun
+            run = db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
+            if run and run.status in ("queued", "running"):
+                run.status = "error"
+                run.error_message = str(exc)[:1000]
+                run.finished_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        return {"ok": False, "reason": str(exc)[:300]}
+    finally:
+        db.close()

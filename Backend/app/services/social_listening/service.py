@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.db.models.agent_run import AgentRun
 from app.db.models.signal_event import SignalEvent
 from app.db.models.signal_watcher_match import SignalWatcherMatch
 from app.db.models.watcher import Watcher
@@ -73,8 +74,15 @@ class SocialListeningService:
     async def run_for_watcher(
         self,
         watcher: Watcher,
+        agent_run_id: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Execute the dispatcher for one watcher.  Returns a summary dict."""
+        """Execute the dispatcher for one watcher.  Returns a summary dict.
+
+        Always writes an AgentRun row for audit trail.  If `agent_run_id`
+        is provided (e.g. from the HTTP endpoint that pre-created a row
+        with status='queued' so it could return an ID to the client), we
+        update that row in place; otherwise we create a fresh one.
+        """
         if watcher.type != "social_listening":
             raise ValueError(
                 f"watcher {watcher.id} is type={watcher.type!r}, not 'social_listening'"
@@ -86,6 +94,29 @@ class SocialListeningService:
             raise ValueError(f"watcher {watcher.id} has no keywords")
 
         max_leads = int(criteria.get("max_leads", 5))
+
+        if agent_run_id is not None:
+            run = self.db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
+            if run is None:
+                run = AgentRun(
+                    user_id=watcher.user_id,
+                    agent_type="social-listening",
+                    input=criteria,
+                    status="running",
+                )
+                self.db.add(run)
+                self.db.flush()
+        else:
+            run = AgentRun(
+                user_id=watcher.user_id,
+                agent_type="social-listening",
+                input=criteria,
+                status="running",
+            )
+            self.db.add(run)
+            self.db.flush()
+        run.status = "running"
+        self.db.commit()
 
         started = time.monotonic()
         try:
@@ -105,8 +136,14 @@ class SocialListeningService:
                 watcher.user_id,
                 exc,
             )
+            run.status = "error"
+            run.error_message = str(exc)[:1000]
+            run.duration_ms = duration_ms
+            run.finished_at = datetime.now(timezone.utc)
+            self.db.commit()
             return {
                 "watcher_id": watcher.id,
+                "run_id": str(run.id),
                 "status": "error",
                 "error": str(exc),
                 "discovered": 0,
@@ -155,8 +192,29 @@ class SocialListeningService:
             enriched_count,
             duration_ms,
         )
+
+        run.status = "success"
+        run.duration_ms = duration_ms
+        run.finished_at = datetime.now(timezone.utc)
+        run.leads = [
+            {
+                "signal_id": str(s.id),
+                "company_name": s.company_name,
+                "prospect_name": s.prospect_name,
+                "prospect_email": s.prospect_email,
+                "signal_type": s.signal_type,
+                "icp_score": s.icp_score,
+            }
+            for s in signals_created
+        ]
+        run.output_text = (
+            f"Discovered {discovered} signal(s); enriched {enriched_count}."
+        )
+        self.db.commit()
+
         return {
             "watcher_id": watcher.id,
+            "run_id": str(run.id),
             "status": "success",
             "discovered": discovered,
             "enriched": enriched_count,
