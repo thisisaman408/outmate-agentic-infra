@@ -135,6 +135,33 @@ export default function CampaignDetailPage() {
         </CardContent></Card>
       </div>
 
+      {data.enrich_first && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-medium text-sm">Enrichment pass</div>
+              <span className="text-xs text-muted-foreground">
+                {data.enrichment_credits_used} credits used
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground">Enriched</div>
+                <div className="text-xl font-semibold text-green-600">{data.prospects_enriched}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Failed</div>
+                <div className="text-xl font-semibold text-amber-600">{data.prospects_enrichment_failed}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Credits per success</div>
+                <div className="text-xl font-semibold">1</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-0">
           <div className="divide-y text-sm">

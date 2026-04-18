@@ -26,6 +26,7 @@ export interface CreateCampaignRequest {
   source_params?: Record<string, unknown>
   max_calls_per_day?: number
   manual_prospects?: ManualProspect[]
+  enrich_first?: boolean
 }
 
 export interface Campaign {
@@ -41,6 +42,10 @@ export interface Campaign {
   calls_made: number
   calls_booked: number
   calls_failed: number
+  enrich_first: boolean
+  enrichment_credits_used: number
+  prospects_enriched: number
+  prospects_enrichment_failed: number
   created_at: string | null
   started_at: string | null
   finished_at: string | null
@@ -72,6 +77,13 @@ export interface HubSpotList {
 export interface PreviewResult {
   total: number
   preview: ManualProspect[]
+  /** Hot-signals only — breakdown of callable vs. enrichable prospects */
+  callable_now?: number
+  enrichable?: number
+  total_matching?: number
+  enrichment_cost_credits?: number
+  call_cost_credits_without_enrichment?: number
+  call_cost_credits_with_enrichment?: number
 }
 
 // ---------- API functions ----------

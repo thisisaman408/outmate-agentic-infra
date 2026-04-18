@@ -68,6 +68,9 @@ export function CampaignWizard({ open, onOpenChange, onCreated }: Props) {
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
+  // Hot signals: let user opt in to enrichment pass BEFORE calls begin
+  const [enrichFirst, setEnrichFirst] = useState(false)
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
 
@@ -75,6 +78,7 @@ export function CampaignWizard({ open, onOpenChange, onCreated }: Props) {
     setStep("source"); setSource(null); setName(""); setObjective("discovery")
     setMaxPerDay(50); setMinIntent(70); setDays(7); setHsListId("")
     setHsError(null); setManualText(""); setPreview(null); setSubmitError("")
+    setEnrichFirst(false)
   }, [])
 
   useEffect(() => {
@@ -148,6 +152,7 @@ export function CampaignWizard({ open, onOpenChange, onCreated }: Props) {
         source_params: sourceParams,
         max_calls_per_day: maxPerDay,
         manual_prospects: source === "manual" ? manualProspects : undefined,
+        enrich_first: source === "hot_signals" ? enrichFirst : undefined,
       })
       onCreated(c)
       onOpenChange(false)
@@ -284,18 +289,82 @@ export function CampaignWizard({ open, onOpenChange, onCreated }: Props) {
 
         {step === "preview" && (
           <div className="space-y-3">
-            <div className="text-sm">
-              <span className="font-medium">{preview?.total ?? manualProspects.length}</span> prospects will be called.
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Credit cost: <span className="font-medium text-foreground">{(preview?.total ?? manualProspects.length) * 5}</span> credits (5 per call).
-              Calls will spread across {Math.ceil((preview?.total ?? manualProspects.length) / maxPerDay)} day(s) at {maxPerDay}/day.
-            </div>
+            {source === "hot_signals" && preview ? (
+              <>
+                <div className="text-sm space-y-1">
+                  <div>
+                    <span className="font-medium">{preview.total_matching ?? 0}</span> matching signals
+                  </div>
+                  <div className="text-xs text-muted-foreground pl-4">
+                    ✓ {preview.callable_now ?? 0} callable now (have phones)
+                  </div>
+                  <div className="text-xs text-muted-foreground pl-4">
+                    ⚠ {preview.enrichable ?? 0} need enrichment to be callable
+                  </div>
+                </div>
+
+                {(preview.enrichable ?? 0) > 0 && (
+                  <label className="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-accent/30 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={enrichFirst}
+                      onChange={(e) => setEnrichFirst(e.target.checked)}
+                    />
+                    <div className="text-sm">
+                      <div className="font-medium">
+                        Enrich the {preview.enrichable} unreachable prospects before calling
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Charges 1 credit per successful enrichment. Failed enrichments are free.
+                        Prospects we can&apos;t enrich will be skipped automatically.
+                      </div>
+                    </div>
+                  </label>
+                )}
+
+                <div className="rounded-md border p-3 bg-muted/20 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Enrichment (up to):</span>
+                    <span className="font-medium">{enrichFirst ? (preview.enrichment_cost_credits ?? 0) : 0} credits</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Voice calls ({enrichFirst ? (preview.callable_now ?? 0) + (preview.enrichable ?? 0) : preview.callable_now ?? 0} × 5 credits):</span>
+                    <span className="font-medium">{enrichFirst ? (preview.call_cost_credits_with_enrichment ?? 0) : (preview.call_cost_credits_without_enrichment ?? 0)} credits</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t mt-1">
+                    <span className="font-medium">Total (max):</span>
+                    <span className="font-semibold text-foreground">
+                      {enrichFirst
+                        ? (preview.enrichment_cost_credits ?? 0) + (preview.call_cost_credits_with_enrichment ?? 0)
+                        : (preview.call_cost_credits_without_enrichment ?? 0)} credits
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-muted-foreground">
+                  Calls will spread across {Math.ceil(
+                    (enrichFirst ? (preview.callable_now ?? 0) + (preview.enrichable ?? 0) : preview.callable_now ?? 0) / maxPerDay,
+                  )} day(s) at {maxPerDay}/day.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm">
+                  <span className="font-medium">{preview?.total ?? manualProspects.length}</span> prospects will be called.
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Credit cost: <span className="font-medium text-foreground">{(preview?.total ?? manualProspects.length) * 5}</span> credits (5 per call).
+                  Calls will spread across {Math.ceil((preview?.total ?? manualProspects.length) / maxPerDay)} day(s) at {maxPerDay}/day.
+                </div>
+              </>
+            )}
+
             <div className="border rounded-md divide-y max-h-64 overflow-y-auto text-sm">
               {(preview?.preview ?? manualProspects.slice(0, 10)).map((p, i) => (
                 <div key={i} className="px-3 py-2 flex justify-between">
                   <span>{p.prospect_name} — {p.prospect_company}</span>
-                  <span className="text-muted-foreground text-xs">{p.prospect_phone}</span>
+                  <span className="text-muted-foreground text-xs">{p.prospect_phone || "— no phone —"}</span>
                 </div>
               ))}
             </div>
