@@ -239,6 +239,28 @@ async def get_recent_calls(
     db: Session = Depends(get_db),
 ):
     """Get recent calls from agent_runs table — real data only."""
+    # Stale "running" cleanup — if a call has been in "running" for > 5min,
+    # the Retell webhook either never fired (dead webhook URL) or the sync
+    # flow crashed.  Mark as "error" so the UI stops lying.
+    from datetime import timedelta
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    stale = (
+        db.query(AgentRun)
+        .filter(
+            AgentRun.user_id == user.id,
+            AgentRun.agent_type == "voice-agent",
+            AgentRun.status == "running",
+            AgentRun.created_at < stale_cutoff,
+        )
+        .all()
+    )
+    for s in stale:
+        s.status = "error"
+        s.error_message = s.error_message or "Call timed out — no Retell webhook received within 5min"
+        s.finished_at = datetime.now(timezone.utc)
+    if stale:
+        db.commit()
+
     runs = (
         db.query(AgentRun)
         .filter(AgentRun.user_id == user.id, AgentRun.agent_type == "voice-agent")
@@ -258,7 +280,32 @@ async def get_recent_calls(
         mins = dur_ms // 60000
         secs = (dur_ms % 60000) // 1000
 
-        status_map = {"success": "Booked", "error": "No answer", "running": "In progress"}
+        # Derive the user-facing label.  "success" alone just means Retell
+        # accepted the call; we only show "Booked" if the Retell webhook
+        # came back with an extracted `next_steps` mentioning a meeting.
+        label = "No answer"
+        if run.status == "running":
+            label = "In progress"
+        elif run.status == "error":
+            label = "Failed"
+        elif run.status == "success":
+            booked = False
+            leads = run.leads or []
+            if leads and isinstance(leads[0], dict):
+                extracted = (leads[0].get("extracted") or {})
+                next_steps = (extracted.get("next_steps") or "").lower()
+                if next_steps and any(
+                    kw in next_steps for kw in ["book", "schedule", "demo", "meeting", "follow up"]
+                ):
+                    booked = True
+            if booked:
+                label = "Booked"
+            elif dur_ms > 0:
+                label = "Completed"
+            else:
+                # Call dispatched but no webhook data yet — likely Retell
+                # still mid-call OR webhook URL is misconfigured.
+                label = "Call made"
 
         calls.append(RecentCall(
             id=str(run.id),
@@ -266,7 +313,7 @@ async def get_recent_calls(
             name=name,
             company=company,
             signal_type=objective,
-            status=status_map.get(run.status, "No answer"),
+            status=label,
             duration=f"{mins}:{secs:02d}",
             timestamp=run.created_at.isoformat() if run.created_at else None,
         ))

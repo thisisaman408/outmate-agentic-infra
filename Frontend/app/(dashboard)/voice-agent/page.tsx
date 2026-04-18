@@ -69,9 +69,12 @@ import Link from "next/link"
 
 const STATUS_COLORS: Record<string, string> = {
   Booked: "bg-green-100 text-green-700",
+  Completed: "bg-blue-100 text-blue-700",
+  "Call made": "bg-blue-50 text-blue-600",
   "Call back": "bg-blue-100 text-blue-700",
   Voicemail: "bg-purple-100 text-purple-700",
   "No answer": "bg-gray-100 text-gray-500",
+  Failed: "bg-red-100 text-red-700",
   "In progress": "bg-amber-100 text-amber-700",
 }
 
