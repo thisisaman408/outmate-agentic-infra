@@ -41,6 +41,8 @@ from app.db.models.signal_watcher_match import SignalWatcherMatch
 from app.db.models.champion_change_event import ChampionChangeEvent
 # Outmate-agentic backed agent runs (tenant-isolated)
 from app.db.models.agent_run import AgentRun
+# Voice campaigns
+from app.db.models.voice_campaign import VoiceCampaign, VoiceCampaignProspect
 
 __all__ = [
     "AgentRun",
@@ -87,4 +89,7 @@ __all__ = [
     "SignalSequenceDraft",
     # Champion alerts
     "ChampionChangeEvent",
+    # Voice campaigns
+    "VoiceCampaign",
+    "VoiceCampaignProspect",
 ]
