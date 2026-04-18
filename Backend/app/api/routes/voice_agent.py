@@ -338,13 +338,33 @@ async def trigger_voice_call(
     except Exception:
         pass
 
+    # Load the user's company profile — this is how Retell knows what we sell,
+    # what our pitch is, and how to handle objections.  Lazily created on
+    # first read so the call never fails on a missing row.
+    from app.api.routes.company_profile import get_or_create_profile as _get_profile
+    profile_row = _get_profile(db, user.id)
+    company_profile = {
+        "company_name": profile_row.company_name,
+        "website_url": profile_row.website_url,
+        "one_liner": profile_row.one_liner,
+        "product_description": profile_row.product_description,
+        "pricing_summary": profile_row.pricing_summary,
+        "icp_description": profile_row.icp_description,
+        "objection_handling": profile_row.objection_handling,
+        "key_differentiators": profile_row.key_differentiators,
+        "additional_context": profile_row.additional_context,
+        "agent_persona_name": profile_row.agent_persona_name,
+        "agent_persona_role": profile_row.agent_persona_role,
+        "calendar_booking_url": profile_row.calendar_booking_url,
+    }
+
     started_at = time.monotonic()
     result: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
     try:
         if settings.RETELL_API_KEY:
-            result = await _call_via_retell(req, call_script, voice_config)
+            result = await _call_via_retell(req, call_script, voice_config, company_profile)
         else:
             result = await _call_via_agentic_infra(req, call_script)
     except HTTPException:
@@ -485,14 +505,25 @@ async def _call_via_retell(
     req: TriggerCallRequest,
     call_script: Optional[Dict] = None,
     voice_config: Optional[Dict] = None,
+    company_profile: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """Create an outbound phone call via the Retell AI API.
 
-    Sends ``retell_llm_dynamic_variables`` matching the Retell Conversation
-    Flow Agent's global prompt variables:
-      agent_name, agent_role, company_name  — about Outmate
-      lead_name, lead_company, lead_role, lead_city, lead_industry — prospect
-      lead_context, call_objective — call context
+    Sends ``retell_llm_dynamic_variables`` for the Retell Conversation Flow
+    Agent's prompt template.  Variables split into three groups:
+
+    About the user's own company (from UserCompanyProfile — filled in
+    Settings → Company Profile so agents aren't hardcoded to "Outmate"):
+      agent_name, agent_role, my_company_name, product_pitch,
+      product_description, pricing_summary, icp_description,
+      objection_handling, key_differentiators, booking_link,
+      additional_context
+
+    About the prospect (from TriggerCallRequest):
+      lead_name, lead_company, lead_role, lead_city, lead_industry
+
+    About this specific call:
+      lead_context, call_objective
     """
     if not settings.RETELL_AGENT_ID:
         raise HTTPException(
@@ -500,16 +531,35 @@ async def _call_via_retell(
             detail="RETELL_AGENT_ID not configured",
         )
 
-    # Map voice persona selector → agent name shown to prospect
-    persona = (voice_config or {}).get("voice_persona", "Alex (Neutral EN-US)")
-    agent_display_name = persona.split("(")[0].strip() if persona else "Alex"
+    # Agent persona precedence:
+    #   1) company_profile.agent_persona_name/role  (set once in Settings)
+    #   2) voice_config.voice_persona                (per-call override picker)
+    #   3) "Alex" / "GTM Specialist" defaults
+    profile = company_profile or {}
+    persona_from_profile = (profile.get("agent_persona_name") or "").strip()
+    if persona_from_profile:
+        agent_display_name = persona_from_profile
+    else:
+        persona = (voice_config or {}).get("voice_persona", "Alex (Neutral EN-US)")
+        agent_display_name = persona.split("(")[0].strip() if persona else "Alex"
 
-    # Build dynamic variables matching the Retell agent's global prompt
+    agent_role = (profile.get("agent_persona_role") or "").strip() or "GTM Specialist"
+    my_company_name = (profile.get("company_name") or "").strip() or "our company"
+
     dynamic_vars: Dict[str, Any] = {
-        # About Outmate
+        # About the user's own company (for "who am I selling for?")
         "agent_name": agent_display_name,
-        "agent_role": "GTM Specialist",
-        "company_name": "Outmate",
+        "agent_role": agent_role,
+        "company_name": my_company_name,       # back-compat name; some old Retell prompts still reference this
+        "my_company_name": my_company_name,    # new canonical name
+        "product_pitch": profile.get("one_liner", ""),
+        "product_description": profile.get("product_description", ""),
+        "pricing_summary": profile.get("pricing_summary", ""),
+        "icp_description": profile.get("icp_description", ""),
+        "objection_handling": profile.get("objection_handling", ""),
+        "key_differentiators": profile.get("key_differentiators", ""),
+        "booking_link": profile.get("calendar_booking_url", ""),
+        "additional_context": profile.get("additional_context", ""),
         # About the prospect
         "lead_name": req.prospect_name,
         "lead_company": req.prospect_company,

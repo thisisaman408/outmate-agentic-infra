@@ -82,6 +82,7 @@ async def _run_async(db: Session, campaign_id: str) -> Dict[str, Any]:
     )
 
     call_script, voice_config = await _load_user_voice_config(campaign.user_id)
+    company_profile = _load_user_company_profile(db, campaign.user_id)
 
     while True:
         db.expire(campaign)
@@ -119,7 +120,7 @@ async def _run_async(db: Session, campaign_id: str) -> Dict[str, Any]:
             logger.info("run_voice_campaign: campaign %s completed", campaign.id)
             return {"ok": True, "reason": "completed"}
 
-        await _call_one(db, campaign, prospect, call_script, voice_config)
+        await _call_one(db, campaign, prospect, call_script, voice_config, company_profile)
         calls_today += 1
 
         await asyncio.sleep(BETWEEN_CALLS_SECONDS)
@@ -134,12 +135,37 @@ async def _load_user_voice_config(user_id) -> Tuple[Optional[Dict], Optional[Dic
     return cfg.get("call_script"), cfg
 
 
+def _load_user_company_profile(db: Session, user_id) -> Dict[str, str]:
+    """Load the user's company profile so Retell dynamic vars are populated
+    with the user's own company identity, pitch, pricing, etc.  Mirrors
+    the lazy-create behaviour of the HTTP endpoint so a missing row
+    returns a usable empty dict rather than blowing up the whole campaign.
+    """
+    from app.api.routes.company_profile import get_or_create_profile
+    p = get_or_create_profile(db, user_id)
+    return {
+        "company_name": p.company_name,
+        "website_url": p.website_url,
+        "one_liner": p.one_liner,
+        "product_description": p.product_description,
+        "pricing_summary": p.pricing_summary,
+        "icp_description": p.icp_description,
+        "objection_handling": p.objection_handling,
+        "key_differentiators": p.key_differentiators,
+        "additional_context": p.additional_context,
+        "agent_persona_name": p.agent_persona_name,
+        "agent_persona_role": p.agent_persona_role,
+        "calendar_booking_url": p.calendar_booking_url,
+    }
+
+
 async def _call_one(
     db: Session,
     campaign: VoiceCampaign,
     prospect: VoiceCampaignProspect,
     call_script: Optional[Dict],
     voice_config: Optional[Dict],
+    company_profile: Optional[Dict],
 ) -> None:
     """Execute one call.  Persists result on the prospect row + campaign counters."""
     if not check_sufficient_credits(db, campaign.user_id, VOICE_CALL_COST):
@@ -182,7 +208,7 @@ async def _call_one(
     err: Optional[str] = None
     try:
         if settings.RETELL_API_KEY:
-            result = await _call_via_retell(req, call_script, voice_config)
+            result = await _call_via_retell(req, call_script, voice_config, company_profile)
         else:
             result = await _call_via_agentic_infra(req, call_script)
     except Exception as exc:

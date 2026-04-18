@@ -65,6 +65,7 @@ from app.api.routes import outmate_agentic
 from app.api.routes import social_listening
 from app.api.routes import voice_agent
 from app.api.routes import voice_campaigns
+from app.api.routes import company_profile
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -351,6 +352,10 @@ logger.info("Voice Agent router registered")
 # Voice Campaigns — background multi-prospect call batches via Celery
 app.include_router(voice_campaigns.router)
 logger.info("Voice Campaigns router registered")
+
+# Company Profile — single source of truth for GTM context across all agents
+app.include_router(company_profile.router)
+logger.info("Company Profile router registered")
 
 @app.on_event("startup")
 async def startup_event():
