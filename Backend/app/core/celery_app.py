@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.sequence_tasks",
         "app.tasks.champion_tasks",
         "app.tasks.social_listening_tasks",
+        "app.tasks.voice_campaign_tasks",
     ]
 )
 
