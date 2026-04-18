@@ -63,6 +63,8 @@ from app.api.routes import events_routes
 from app.api.routes import database_finder
 from app.api.routes import outmate_agentic
 from app.api.routes import social_listening
+from app.api.routes import voice_agent
+from app.api.routes import voice_campaigns
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -341,6 +343,14 @@ logger.info("Outmate-agentic agents router registered")
 # the signal_watcher_matches.user_id denormalised join column.
 app.include_router(social_listening.router)
 logger.info("Social Listening router registered")
+
+# Voice AI Agent — Retell AI outbound calls, config, stats, analytics, CSV upload
+app.include_router(voice_agent.router)
+logger.info("Voice Agent router registered")
+
+# Voice Campaigns — background multi-prospect call batches via Celery
+app.include_router(voice_campaigns.router)
+logger.info("Voice Campaigns router registered")
 
 @app.on_event("startup")
 async def startup_event():
