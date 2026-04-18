@@ -31,7 +31,7 @@ import {
   createSearch,
   updateSearch,
   deleteSearch,
-  runSearchNow,
+  runSearchAndWait,
   fetchSignals,
   fetchStats,
   enrichSignal,
@@ -119,7 +119,14 @@ export default function SocialListeningPage() {
         const resumed = await updateSearch(id, { status: "active" })
         setSearches((prev) => prev.map((s) => (s.id === id ? resumed : s)))
       }
-      const updated = await runSearchNow(id)
+      // Background run — survives tab close.  Polls for completion every 3s.
+      const updated = await runSearchAndWait(id, {
+        onProgress: (s) => {
+          if (s.status === "running" || s.status === "queued") {
+            // Keep the running indicator visible; could expose s.leads_count later.
+          }
+        },
+      })
       setSearches((prev) => prev.map((s) => (s.id === id ? updated : s)))
       await Promise.all([loadSignals(), fetchStats().then(setStats)])
     } catch {

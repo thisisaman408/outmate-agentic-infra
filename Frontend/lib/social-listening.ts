@@ -147,9 +147,57 @@ export async function deleteSearch(id: string): Promise<void> {
   await fetch(`${API}/searches/${id}`, { method: "DELETE" })
 }
 
-export async function runSearchNow(id: string): Promise<SocialSearch> {
+export interface RunNowResponse {
+  run_id: string
+  task_id: string
+  status: string
+  watcher_id: string
+}
+
+export interface RunStatusResponse {
+  run_id: string
+  status: "queued" | "running" | "success" | "error"
+  leads_count: number
+  error_message: string | null
+  started_at: string | null
+  finished_at: string | null
+  search: SocialSearch | null
+}
+
+export async function runSearchNow(id: string): Promise<RunNowResponse> {
   const res = await fetch(`${API}/searches/${id}/run-now`, { method: "POST" })
-  return json<SocialSearch>(res)
+  return json<RunNowResponse>(res)
+}
+
+export async function getRunStatus(searchId: string, runId: string): Promise<RunStatusResponse> {
+  const res = await fetch(`${API}/searches/${searchId}/run-status/${runId}`)
+  return json<RunStatusResponse>(res)
+}
+
+/**
+ * Kick off a background run and resolve only when it finishes (or errors).
+ * Survives page navigation because the work happens in Celery; the UI just
+ * polls for completion.  Caller can cancel via the AbortSignal.
+ */
+export async function runSearchAndWait(
+  searchId: string,
+  opts?: {
+    onProgress?: (s: RunStatusResponse) => void
+    signal?: AbortSignal
+    intervalMs?: number
+  },
+): Promise<SocialSearch> {
+  const { run_id } = await runSearchNow(searchId)
+  const interval = opts?.intervalMs ?? 3000
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (opts?.signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    const status = await getRunStatus(searchId, run_id)
+    opts?.onProgress?.(status)
+    if (status.status === "success" && status.search) return status.search
+    if (status.status === "error") throw new Error(status.error_message || "Run failed")
+    await new Promise((r) => setTimeout(r, interval))
+  }
 }
 
 // ---------- Signal feed ----------
