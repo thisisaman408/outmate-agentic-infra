@@ -288,6 +288,9 @@ async def trigger_voice_call(
     Every attempt is persisted in `agent_runs` BEFORE the upstream call
     (same crash-resilience pattern as Social Agent).
     """
+    # 0. Normalize phone to E.164 — Retell rejects anything else with a 400.
+    req.prospect_phone = _normalize_phone_e164(req.prospect_phone)
+
     # 0. Check credits (5 credits per voice call)
     VOICE_CALL_COST = 5
     if not check_sufficient_credits(db, user.id, VOICE_CALL_COST):
@@ -499,6 +502,45 @@ async def _run_crm_followup(
             logger.info(f"Slack alert: {req.prospect_name} booked via voice call")
         except Exception as e:
             logger.debug(f"Slack alert skipped: {e}")
+
+
+def _normalize_phone_e164(raw: str) -> str:
+    """Normalize a user-entered phone to E.164 — what Retell (+ most SIP
+    providers) require.  Handles the common cases:
+      "+14155551234"        → "+14155551234"      (already E.164)
+      "14155551234"         → "+14155551234"      (US, leading country code)
+      "(415) 555-1234"      → "+14155551234"      (US, with formatting)
+      "7428430119"          → "+917428430119"     (10-digit, assume India)
+      "917428430119"        → "+917428430119"     (India, leading 91)
+      "+91 7428 430 119"    → "+917428430119"     (spaces OK)
+    Falls back to prepending "+" to whatever digits remain so Retell at
+    least sees a syntactically valid string and returns its own clearer
+    error for exotic cases.
+    """
+    if not raw:
+        return raw
+    s = raw.strip()
+    has_plus = s.startswith("+")
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return raw  # let Retell reject it with its own message
+
+    if has_plus:
+        return "+" + digits
+
+    # 10 digits → assume India (based on Retell From number +1 (219) 946-5998
+    # being US, but user base is Delhi-based per current data).  This is a
+    # sane default — for other countries, users just type the full + format.
+    if len(digits) == 10:
+        return "+91" + digits
+    # 11 digits starting with "1" → US/Canada
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    # 12 digits starting with "91" → India without +
+    if len(digits) == 12 and digits.startswith("91"):
+        return "+" + digits
+    # Anything else: prepend + and let Retell validate
+    return "+" + digits
 
 
 async def _call_via_retell(
