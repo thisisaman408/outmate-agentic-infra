@@ -556,6 +556,21 @@ export default function VoiceAgentPage() {
             </CardContent>
           </Card>
 
+          {/* Company Profile quick-link */}
+          <Card className="border-primary/40 bg-primary/5">
+            <CardContent className="p-4 flex items-center justify-between gap-4">
+              <div>
+                <div className="font-medium text-sm">Your company profile</div>
+                <div className="text-xs text-muted-foreground">
+                  What the voice agent tells prospects about your company, pitch, pricing, and objection handling. Set once, used on every call.
+                </div>
+              </div>
+              <Link href="/settings/company-profile">
+                <Button size="sm" variant="outline" className="shrink-0">Configure</Button>
+              </Link>
+            </CardContent>
+          </Card>
+
           {/* Campaigns */}
           <Card>
             <CardContent className="p-6">
