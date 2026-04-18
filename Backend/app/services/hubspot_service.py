@@ -10,7 +10,7 @@ import json
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import httpx
@@ -231,6 +231,71 @@ class HubSpotService:
                 results = resp.json().get("results", [])
                 return results[0] if results else None
         return None
+
+    async def list_contact_lists(self, user_id, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return all HubSpot contact lists the user can see.
+
+        Uses HubSpot's v3 lists endpoint.  Each result has {listId, name,
+        processingType, additionalProperties}.
+        """
+        token = await self._get_or_refresh_token(user_id)
+        if not token:
+            return []
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{HUBSPOT_API_BASE}/crm/v3/lists",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"count": limit},
+            )
+            if resp.status_code != 200:
+                return []
+            body = resp.json()
+            return body.get("lists", []) or body.get("results", [])
+
+    async def list_contacts_in_list(
+        self, user_id, list_id: str, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        """Return contacts in a specific HubSpot list.
+
+        Calls GET /crm/v3/lists/{listId}/memberships then fetches contact
+        details in bulk to get phone + company properties.
+        """
+        token = await self._get_or_refresh_token(user_id)
+        if not token:
+            return []
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            mem_resp = await client.get(
+                f"{HUBSPOT_API_BASE}/crm/v3/lists/{list_id}/memberships",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"limit": limit},
+            )
+            if mem_resp.status_code != 200:
+                return []
+            record_ids = [m.get("recordId") for m in mem_resp.json().get("results", []) if m.get("recordId")]
+            if not record_ids:
+                return []
+
+            batch_resp = await client.post(
+                f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/batch/read",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "properties": ["firstname", "lastname", "email", "phone",
+                                   "mobilephone", "company", "jobtitle", "city"],
+                    "inputs": [{"id": rid} for rid in record_ids],
+                },
+            )
+            if batch_resp.status_code != 200:
+                return []
+            return batch_resp.json().get("results", [])
+
+    async def _get_or_refresh_token(self, user_id) -> Optional[str]:
+        """Get a valid token, refreshing if the stored one is expired."""
+        token = self._get_access_token(user_id)
+        if token:
+            return token
+        return await self.refresh_token(user_id)
 
     # ── Internal ─────────────────────────────────────────────────────
 
