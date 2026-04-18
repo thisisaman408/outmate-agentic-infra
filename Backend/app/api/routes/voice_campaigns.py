@@ -23,7 +23,7 @@ from app.db.models.user import User
 from app.db.models.voice_campaign import VoiceCampaign, VoiceCampaignProspect
 from app.services.hubspot_service import HubSpotService
 from app.services.voice_campaign.hubspot_list_resolver import resolve_hubspot_list
-from app.services.voice_campaign.segment_resolver import resolve_hot_signals
+from app.services.voice_campaign.segment_resolver import count_hot_signals_breakdown, resolve_hot_signals
 from app.tasks.voice_campaign_tasks import run_voice_campaign
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,10 @@ class CreateCampaignRequest(BaseModel):
     source_params: Dict[str, Any] = {}
     max_calls_per_day: int = Field(50, ge=1, le=500)
     manual_prospects: Optional[List[ManualProspect]] = None
+    # Only honored when source_type == "hot_signals".  If True, the worker
+    # runs an enrichment pass on signals without phones (1 credit per success)
+    # before the call pass begins.
+    enrich_first: bool = False
 
 
 class CampaignProspectOut(BaseModel):
@@ -77,6 +81,10 @@ class CampaignOut(BaseModel):
     calls_made: int
     calls_booked: int
     calls_failed: int
+    enrich_first: bool
+    enrichment_credits_used: int
+    prospects_enriched: int
+    prospects_enrichment_failed: int
     created_at: Optional[str]
     started_at: Optional[str]
     finished_at: Optional[str]
@@ -113,6 +121,10 @@ def _serialize(c: VoiceCampaign) -> CampaignOut:
         calls_made=c.calls_made,
         calls_booked=c.calls_booked,
         calls_failed=c.calls_failed,
+        enrich_first=c.enrich_first,
+        enrichment_credits_used=c.enrichment_credits_used,
+        prospects_enriched=c.prospects_enriched,
+        prospects_enrichment_failed=c.prospects_enrichment_failed,
         created_at=c.created_at.isoformat() if c.created_at else None,
         started_at=c.started_at.isoformat() if c.started_at else None,
         finished_at=c.finished_at.isoformat() if c.finished_at else None,
@@ -136,8 +148,8 @@ def _serialize_prospect(p: VoiceCampaignProspect) -> CampaignProspectOut:
 
 async def _resolve_source(
     db: Session, user_id: UUID, source_type: str, params: Dict[str, Any],
-    manual: Optional[List[ManualProspect]],
-) -> List[Dict[str, str]]:
+    manual: Optional[List[ManualProspect]], enrich_first: bool = False,
+) -> List[Dict[str, Any]]:
     if source_type == "manual":
         return [p.model_dump() for p in (manual or [])]
     if source_type == "csv":
@@ -156,7 +168,9 @@ async def _resolve_source(
             "context": "Imported from CSV upload.",
         } for r in rows if r.get("name") and r.get("phone")]
     if source_type == "hot_signals":
-        return resolve_hot_signals(db, user_id, params)
+        # Include enrichable prospects only when the user opted in — the
+        # worker will attempt enrichment (charging credits) before calling.
+        return resolve_hot_signals(db, user_id, params, include_without_phone=enrich_first)
     if source_type == "hubspot":
         return await resolve_hubspot_list(db, user_id, params)
     return []
@@ -179,20 +193,42 @@ def list_campaigns(
     return [_serialize(r) for r in rows]
 
 
+VOICE_CALL_COST = 5
+ENRICHMENT_COST_PER_SUCCESS = 1
+
+
 @router.post("/preview")
 async def preview_source(
     req: PreviewRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Dry-run a source to show how many prospects a campaign would include."""
+    """Dry-run a source to show what a campaign would cost.
+
+    For ``hot_signals``, the response also breaks down callable-now vs.
+    enrichable prospects and the credit cost of each path so the wizard
+    can show the user exactly what they'll spend BEFORE they commit.
+    """
     if req.source_type == "hot_signals":
-        rows = resolve_hot_signals(db, user.id, req.source_params)
-    elif req.source_type == "hubspot":
+        breakdown = count_hot_signals_breakdown(db, user.id, req.source_params)
+        callable_now = breakdown["callable_now"]
+        enrichable = breakdown["enrichable"]
+        # Preview a handful of the callable-now prospects so the user sees who they're calling.
+        sample = resolve_hot_signals(db, user.id, req.source_params)[:10]
+        return {
+            "total": callable_now,                # default (no enrichment) — only callable rows
+            "preview": sample,
+            "callable_now": callable_now,
+            "enrichable": enrichable,
+            "total_matching": breakdown["total_matching"],
+            "enrichment_cost_credits": enrichable * ENRICHMENT_COST_PER_SUCCESS,
+            "call_cost_credits_without_enrichment": callable_now * VOICE_CALL_COST,
+            "call_cost_credits_with_enrichment": (callable_now + enrichable) * VOICE_CALL_COST,
+        }
+    if req.source_type == "hubspot":
         rows = await resolve_hubspot_list(db, user.id, req.source_params)
-    else:
-        rows = []
-    return {"total": len(rows), "preview": rows[:10]}
+        return {"total": len(rows), "preview": rows[:10]}
+    return {"total": 0, "preview": []}
 
 
 @router.get("/hubspot-lists", response_model=List[HubSpotListOut])
@@ -241,6 +277,7 @@ async def create_campaign(
 
     prospect_dicts = await _resolve_source(
         db, user.id, req.source_type, req.source_params, req.manual_prospects,
+        enrich_first=req.enrich_first,
     )
     if not prospect_dicts:
         raise HTTPException(status_code=400, detail="Source resolved to zero callable prospects")
@@ -254,11 +291,13 @@ async def create_campaign(
         max_calls_per_day=req.max_calls_per_day,
         total_prospects=len(prospect_dicts),
         status="queued",
+        enrich_first=req.enrich_first and req.source_type == "hot_signals",
     )
     db.add(campaign)
     db.flush()
 
     for p in prospect_dicts:
+        signal_event_id = p.get("signal_event_id")
         db.add(VoiceCampaignProspect(
             campaign_id=campaign.id,
             user_id=user.id,
@@ -269,6 +308,8 @@ async def create_campaign(
             prospect_city=p.get("prospect_city", ""),
             prospect_industry=p.get("prospect_industry", ""),
             context=p.get("context", ""),
+            needs_enrichment=bool(p.get("needs_enrichment", False)),
+            signal_event_id=signal_event_id if signal_event_id else None,
         ))
     db.commit()
     db.refresh(campaign)

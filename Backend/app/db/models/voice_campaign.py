@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -44,6 +44,12 @@ class VoiceCampaign(Base):
 
     max_calls_per_day = Column(Integer, nullable=False, default=50)
 
+    # User opt-in to enrich phone-less prospects before the call pass.  Only
+    # meaningful for source_type='hot_signals' (other sources bring their own
+    # phone numbers).  When True, the Celery worker runs an enrichment pass
+    # that charges 1 credit per successful enrichment BEFORE dialling begins.
+    enrich_first = Column(Boolean, nullable=False, default=False)
+
     # queued | running | paused | completed | cancelled | error
     status = Column(String(32), nullable=False, default="queued", index=True)
     error_message = Column(Text, nullable=True)
@@ -52,6 +58,11 @@ class VoiceCampaign(Base):
     calls_made = Column(Integer, nullable=False, default=0)
     calls_booked = Column(Integer, nullable=False, default=0)
     calls_failed = Column(Integer, nullable=False, default=0)
+
+    # Enrichment pass stats (all zero unless enrich_first=True)
+    enrichment_credits_used = Column(Integer, nullable=False, default=0)
+    prospects_enriched = Column(Integer, nullable=False, default=0)
+    prospects_enrichment_failed = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -111,6 +122,21 @@ class VoiceCampaignProspect(Base):
     agent_run_id = Column(
         UUID(as_uuid=True),
         ForeignKey("outmate_agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # True for prospects that entered the campaign without a phone number and
+    # need the enrichment pass before they're callable.  Set at campaign
+    # creation time when source_type='hot_signals' + enrich_first=True.
+    needs_enrichment = Column(Boolean, nullable=False, default=False)
+
+    # Back-reference to the signal this prospect came from (hot_signals only).
+    # Enables the enrichment pass to read the signal's LinkedIn URL to hand
+    # to the enrichment provider.
+    signal_event_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("signal_events.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

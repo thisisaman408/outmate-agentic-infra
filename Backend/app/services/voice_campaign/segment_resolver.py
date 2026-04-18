@@ -26,20 +26,11 @@ from app.db.models.signal_event import SignalEvent
 from app.db.models.signal_watcher_match import SignalWatcherMatch
 
 
-def resolve_hot_signals(
-    db: Session, user_id: UUID, params: Dict[str, Any]
-) -> List[Dict[str, str]]:
-    """Return a list of prospect dicts ready for `TriggerCallRequest`.
-
-    Joins signal_events → signal_watcher_matches (to enforce user scope) →
-    prospects (to pull a callable phone number).  Signals without a
-    matched prospect that has a phone are filtered out.
-    """
+def _base_query(db: Session, user_id: UUID, params: Dict[str, Any]):
+    """Shared filter — signals joined to prospects, scoped to the user."""
     min_intent = int(params.get("min_intent", 70))
     days = int(params.get("days", 7))
     signal_types = params.get("signal_types") or []
-    max_prospects = int(params.get("max_prospects", 200))
-
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     q = (
@@ -51,38 +42,95 @@ def resolve_hot_signals(
         .filter(SignalEvent.discovered_at >= since)
         .filter(SignalEvent.icp_score.isnot(None))
         .filter(SignalEvent.icp_score >= min_intent)
-        .filter(Prospect.phone.isnot(None))
-        .filter(Prospect.phone != "")
     )
-
     if signal_types:
         q = q.filter(SignalEvent.signal_type.in_(signal_types))
+    return q.order_by(SignalEvent.icp_score.desc(), SignalEvent.discovered_at.desc())
 
-    q = q.order_by(SignalEvent.icp_score.desc(), SignalEvent.discovered_at.desc()).limit(max_prospects)
 
-    rows = q.all()
+def resolve_hot_signals(
+    db: Session,
+    user_id: UUID,
+    params: Dict[str, Any],
+    include_without_phone: bool = False,
+) -> List[Dict[str, Any]]:
+    """Return a list of prospect dicts ready for `TriggerCallRequest`.
 
-    # Dedup by phone — one prospect, one call, regardless of how many signals.
-    seen_phones: set[str] = set()
-    prospects: List[Dict[str, str]] = []
+    By default only returns prospects that *already* have a phone (safe to
+    call right now).  When ``include_without_phone`` is True, also returns
+    prospects without phones — each marked with ``needs_enrichment: True``
+    and carrying their ``signal_event_id`` so the Celery enrichment pass
+    can look up the signal's LinkedIn URL and try to populate a phone.
+
+    The user opts into this wider net via the campaign wizard's "enrich
+    first" toggle.  No enrichment happens inside this function — it just
+    decides which rows make it into the campaign.
+    """
+    max_prospects = int(params.get("max_prospects", 200))
+
+    q = _base_query(db, user_id, params)
+    if not include_without_phone:
+        q = q.filter(Prospect.phone.isnot(None)).filter(Prospect.phone != "")
+    rows = q.limit(max_prospects).all()
+
+    # Dedup by prospect_id (one prospect, one call, however many signals).
+    seen_prospect_ids: set = set()
+    prospects: List[Dict[str, Any]] = []
     for signal, prospect in rows:
-        if not prospect.phone or prospect.phone in seen_phones:
+        if prospect.id in seen_prospect_ids:
             continue
-        seen_phones.add(prospect.phone)
+        seen_prospect_ids.add(prospect.id)
 
+        phone = (prospect.phone or "").strip()
+        needs_enrichment = not phone
         name = prospect.full_name or f"{prospect.first_name or ''} {prospect.last_name or ''}".strip() or "Unknown"
-        signal_blurb = _describe_signal(signal)
+
         prospects.append({
             "prospect_name": name,
-            "prospect_phone": prospect.phone,
+            "prospect_phone": phone,
             "prospect_company": signal.company_name or "",
             "prospect_role": prospect.job_title or signal.prospect_title or "",
             "prospect_city": prospect.city or "",
             "prospect_industry": "",
-            "context": signal_blurb,
+            "context": _describe_signal(signal),
+            "needs_enrichment": needs_enrichment,
+            "signal_event_id": str(signal.id),
         })
-
     return prospects
+
+
+def count_hot_signals_breakdown(
+    db: Session, user_id: UUID, params: Dict[str, Any]
+) -> Dict[str, int]:
+    """Return counts used by the campaign wizard's preview step so the user
+    sees cost + callability BEFORE committing credits.
+
+    Returned keys:
+        - total_matching: every signal passing the filters (de-duped by prospect)
+        - callable_now:   subset whose prospect already has a phone
+        - enrichable:     subset whose prospect is missing a phone
+    """
+    q = _base_query(db, user_id, params)
+    rows = q.limit(int(params.get("max_prospects", 200))).all()
+
+    seen_prospect_ids: set = set()
+    total = 0
+    callable_now = 0
+    enrichable = 0
+    for signal, prospect in rows:
+        if prospect.id in seen_prospect_ids:
+            continue
+        seen_prospect_ids.add(prospect.id)
+        total += 1
+        if (prospect.phone or "").strip():
+            callable_now += 1
+        else:
+            enrichable += 1
+    return {
+        "total_matching": total,
+        "callable_now": callable_now,
+        "enrichable": enrichable,
+    }
 
 
 def _describe_signal(signal: SignalEvent) -> str:

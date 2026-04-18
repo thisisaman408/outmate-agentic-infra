@@ -37,12 +37,15 @@ from app.core.config import settings
 from app.core.redis import RedisManager
 from app.db.deps import SessionLocal
 from app.db.models.agent_run import AgentRun
+from app.db.models.prospect import Prospect
+from app.db.models.signal_event import SignalEvent
 from app.db.models.voice_campaign import VoiceCampaign, VoiceCampaignProspect
 from app.db.utils import check_sufficient_credits, deduct_credits
 
 logger = logging.getLogger(__name__)
 
 VOICE_CALL_COST = 5
+ENRICHMENT_COST_PER_SUCCESS = 1
 BETWEEN_CALLS_SECONDS = 2
 
 
@@ -83,6 +86,15 @@ async def _run_async(db: Session, campaign_id: str) -> Dict[str, Any]:
 
     call_script, voice_config = await _load_user_voice_config(campaign.user_id)
     company_profile = _load_user_company_profile(db, campaign.user_id)
+
+    # Enrichment pass — runs once, on first dispatch, when the user opted
+    # into "enrich before calling" on the wizard.  Idempotency guard: if
+    # the two counters are both 0 we haven't done the pass yet.  Each
+    # successful enrichment charges 1 credit; failures are free.
+    if campaign.enrich_first and (campaign.prospects_enriched + campaign.prospects_enrichment_failed) == 0:
+        await _run_enrichment_pass(db, campaign)
+        db.expire(campaign)
+        db.refresh(campaign)
 
     while True:
         db.expire(campaign)
@@ -133,6 +145,88 @@ async def _load_user_voice_config(user_id) -> Tuple[Optional[Dict], Optional[Dic
         return None, None
     cfg = json.loads(raw)
     return cfg.get("call_script"), cfg
+
+
+async def _run_enrichment_pass(db: Session, campaign: VoiceCampaign) -> None:
+    """Best-effort enrichment of every prospect marked needs_enrichment=True.
+
+    Reuses the social-listening enrichment helper which internally tries
+    BetterContact then CrustData.  For each prospect:
+      * Success (phone returned): persist phone on both the prospect row
+        and the shared Prospect table, clear needs_enrichment, deduct 1
+        credit, bump counters.
+      * Failure: mark the row status='skipped' with a clear reason, bump
+        the failed counter, no credit charged.
+
+    Runs inside the Celery task's asyncio loop — sequential to avoid
+    hammering upstream enrichment APIs.  No backoff/retry here; users
+    re-run or manually enrich.
+    """
+    from app.services.social_listening.enrichment import enrich_signal
+
+    candidates = (
+        db.query(VoiceCampaignProspect)
+        .filter(
+            VoiceCampaignProspect.campaign_id == campaign.id,
+            VoiceCampaignProspect.needs_enrichment == True,  # noqa: E712
+            VoiceCampaignProspect.status == "queued",
+        )
+        .all()
+    )
+    if not candidates:
+        return
+
+    logger.info(
+        "voice-campaign enrichment pass: campaign=%s candidates=%d",
+        campaign.id, len(candidates),
+    )
+
+    for cp in candidates:
+        signal: SignalEvent | None = None
+        if cp.signal_event_id:
+            signal = db.query(SignalEvent).filter(SignalEvent.id == cp.signal_event_id).first()
+
+        phone: str | None = None
+        if signal is not None:
+            if not check_sufficient_credits(db, campaign.user_id, ENRICHMENT_COST_PER_SUCCESS):
+                cp.status = "skipped"
+                cp.error_message = "Insufficient credits for enrichment"
+                cp.finished_at = datetime.now(timezone.utc)
+                campaign.prospects_enrichment_failed += 1
+                db.commit()
+                continue
+            try:
+                result = await enrich_signal(signal, db)
+                phone = (result or {}).get("phone") or None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("enrich_signal raised for %s: %s", cp.id, exc)
+                phone = None
+
+        if phone:
+            cp.prospect_phone = phone
+            cp.needs_enrichment = False
+            # Also persist on the shared Prospect row so future campaigns
+            # and other agents benefit from the enriched number.
+            if signal and signal.prospect_id:
+                prospect_row = db.query(Prospect).filter(Prospect.id == signal.prospect_id).first()
+                if prospect_row is not None and not (prospect_row.phone or "").strip():
+                    prospect_row.phone = phone
+            campaign.prospects_enriched += 1
+            campaign.enrichment_credits_used += ENRICHMENT_COST_PER_SUCCESS
+            db.commit()
+            deduct_credits(
+                db=db,
+                user_id=campaign.user_id,
+                amount=ENRICHMENT_COST_PER_SUCCESS,
+                reference_id=cp.id,
+                description=f"Voice campaign enrichment → {cp.prospect_name}",
+            )
+        else:
+            cp.status = "skipped"
+            cp.error_message = "Enrichment failed — no phone found"
+            cp.finished_at = datetime.now(timezone.utc)
+            campaign.prospects_enrichment_failed += 1
+            db.commit()
 
 
 def _load_user_company_profile(db: Session, user_id) -> Dict[str, str]:
