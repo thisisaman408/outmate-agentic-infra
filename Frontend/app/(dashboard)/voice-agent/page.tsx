@@ -59,6 +59,9 @@ import {
   type UploadResult,
   type CallDetails,
 } from "@/lib/api/voice-agent"
+import { CampaignWizard } from "@/components/voice-agent/campaign-wizard"
+import { listCampaigns, type Campaign } from "@/lib/api/voice-campaigns"
+import Link from "next/link"
 
 // ============================================================================
 // Status badge colors
@@ -133,6 +136,20 @@ export default function VoiceAgentPage() {
   const [callDetailOpen, setCallDetailOpen] = useState(false)
   const [callDetail, setCallDetail] = useState<CallDetails | null>(null)
   const [callDetailLoading, setCallDetailLoading] = useState(false)
+
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+
+  const loadCampaigns = useCallback(async () => {
+    try { setCampaigns(await listCampaigns()) } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { loadCampaigns() }, [loadCampaigns])
+
+  useEffect(() => {
+    const t = setInterval(loadCampaigns, 10_000)
+    return () => clearInterval(t)
+  }, [loadCampaigns])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -360,8 +377,12 @@ export default function VoiceAgentPage() {
             <Upload className="h-4 w-4" />
             Upload list
           </Button>
-          <Button size="sm" className="gap-2 bg-primary" onClick={() => { setCampaignOpen(true); setCampaignResult(null); setCampaignError("") }}>
-            <Plus className="h-4 w-4" />
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => { setCampaignOpen(true); setCampaignResult(null); setCampaignError("") }}>
+            <Phone className="h-4 w-4" />
+            Quick call
+          </Button>
+          <Button size="sm" className="gap-2 bg-primary" onClick={() => setWizardOpen(true)}>
+            <Sparkles className="h-4 w-4" />
             New campaign
           </Button>
         </div>
@@ -535,12 +556,49 @@ export default function VoiceAgentPage() {
             </CardContent>
           </Card>
 
+          {/* Campaigns */}
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Campaigns</h2>
+                <span className="text-xs text-muted-foreground">{campaigns.length} total</span>
+              </div>
+              {campaigns.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No campaigns yet. Click <span className="font-medium">New campaign</span> to launch a background call batch.
+                </p>
+              ) : (
+                <div className="divide-y text-sm">
+                  {campaigns.slice(0, 10).map((c) => {
+                    const pct = c.total_prospects ? Math.round((c.calls_made / c.total_prospects) * 100) : 0
+                    return (
+                      <Link key={c.id} href={`/voice-agent/campaigns/${c.id}`} className="flex items-center justify-between py-2 hover:bg-accent/30 -mx-6 px-6 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{c.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {c.source_type} &middot; {c.calls_made}/{c.total_prospects} calls &middot; {c.calls_booked} booked
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="w-24 h-1 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                          </div>
+                          <Badge variant="outline" className="text-xs capitalize">{c.status}</Badge>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Recent Calls */}
           <Card>
             <CardContent className="p-6">
               <h2 className="text-lg font-semibold mb-4">Recent calls</h2>
               {calls.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">No calls yet. Use "New campaign" to make your first call.</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">No calls yet. Use &quot;Quick call&quot; or launch a campaign to start.</p>
               ) : (
                 <div className="space-y-3">
                   {calls.map((call) => (
@@ -759,8 +817,8 @@ export default function VoiceAgentPage() {
       <Dialog open={campaignOpen} onOpenChange={setCampaignOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>New Voice Campaign</DialogTitle>
-            <DialogDescription>Trigger a voice call to a prospect. Costs 5 credits.</DialogDescription>
+            <DialogTitle>Quick call</DialogTitle>
+            <DialogDescription>One-off call to a single prospect — for bulk or signal-triggered calls use &quot;+ New campaign&quot; instead. Costs 5 credits.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -951,6 +1009,12 @@ export default function VoiceAgentPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CampaignWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        onCreated={(c) => { setCampaigns((prev) => [c, ...prev]) }}
+      />
     </div>
   )
 }
