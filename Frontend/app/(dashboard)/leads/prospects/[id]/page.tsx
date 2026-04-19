@@ -280,7 +280,9 @@ export default function ProspectProfilePage() {
                                                     <Badge variant="outline" className="border-amber-400 text-amber-600 bg-amber-50 text-xs">Job Change</Badge>
                                                 )}
                                             </div>
-                                            <p className="text-base text-muted-foreground mt-1">{profile.headline || "No headline"}</p>
+                                            <p className="text-base text-muted-foreground mt-1">
+                                                {(profile.headline || "No headline").replace(/\s*[-–|]\s*Founder at Contactout.*$/gi, '').replace(/\s*[-–|]\s*Contactout.*$/gi, '').trim() || "No headline"}
+                                            </p>
                                             {currentEmployer && (
                                                 <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
                                                     <Building2 className="h-4 w-4" />
@@ -349,7 +351,9 @@ export default function ProspectProfilePage() {
                                     <CardHeader><CardTitle className="flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary" />Current Position</CardTitle></CardHeader>
                                     <CardContent className="space-y-4">
                                         <div>
-                                            <h3 className="text-lg font-semibold">{currentEmployer.title}</h3>
+                                            <h3 className="text-lg font-semibold">
+                                                {(currentEmployer.title || "").replace(/\s*[-–|]\s*Founder at Contactout.*$/gi, '').replace(/\s*[-–|]\s*Contactout.*$/gi, '').trim() || currentEmployer.title}
+                                            </h3>
                                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                 <span className="font-medium text-primary">{currentEmployer.name}</span>
                                                 {currentEmployer.company_type && <Badge variant="outline">{currentEmployer.company_type}</Badge>}
@@ -455,7 +459,9 @@ export default function ProspectProfilePage() {
                                                         <div className="flex-1 pb-5">
                                                             <div className="flex items-start justify-between gap-4">
                                                                 <div className="flex-1">
-                                                                    <h4 className="font-semibold">{employer.title}</h4>
+                                                                    <h4 className="font-semibold">
+                                                                        {(employer.title || "").replace(/\s*[-–|]\s*Founder at Contactout.*$/gi, '').replace(/\s*[-–|]\s*Contactout.*$/gi, '').trim() || employer.title}
+                                                                    </h4>
                                                                     <p className="text-sm text-primary">{employer.name}</p>
                                                                     <p className="text-xs text-muted-foreground mt-1">
                                                                         {formatDate(employer.start_date)} - {employer.end_date ? formatDate(employer.end_date) : "Present"} · {calculateDuration(employer.start_date, employer.end_date)}
