@@ -149,7 +149,17 @@ export default function ProspectProfilePage() {
         if (storedProfiles) {
             const profiles: ProspectProfile[] = JSON.parse(storedProfiles)
             const rawId = params.id as string
-            const id = decodeURIComponent(rawId)
+            // Try to decode if it's base64 encoded
+            let id = rawId
+            try {
+                // Check if it's base64 encoded (LinkedIn URLs are base64 encoded to avoid URL issues)
+                const decoded = atob(rawId)
+                if (decoded.includes('linkedin.com') || decoded.includes('/')) {
+                    id = decoded
+                }
+            } catch {
+                // Not base64, use as-is
+            }
             const found = profiles.find((p) => {
                 // First check _stableId (set by ProspectsResultsTable before navigation)
                 if ((p as any)._stableId && ((p as any)._stableId === id || (p as any)._stableId === rawId)) return true

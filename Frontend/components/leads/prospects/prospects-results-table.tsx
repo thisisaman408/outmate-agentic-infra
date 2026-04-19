@@ -316,7 +316,14 @@ export function ProspectsResultsTable({
             const tagged = actualProfiles.map((p, i) => ({ ...p, _stableId: getStableId(p, i) }))
             localStorage.setItem("prospect_search_results", JSON.stringify(tagged))
         } catch {}
-        router.push(`/leads/prospects/${encodeURIComponent(stableId)}`)
+        // Use a more reliable ID for the route - prefer person_id or use base64 encoded stableId
+        const profile = actualProfiles.find((p, i) => getStableId(p, i) === stableId)
+        let routeId = profile?.person_id || stableId
+        // If routeId is a LinkedIn URL (contains special characters), use base64 encoding
+        if (routeId.includes('linkedin.com') || routeId.includes('/')) {
+            routeId = btoa(routeId)
+        }
+        router.push(`/leads/prospects/${routeId}`)
     }
 
     const getRowId = useCallback((profile: ProspectProfile, idx: number) => getStableId(profile, idx), [])
