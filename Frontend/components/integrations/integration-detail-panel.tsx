@@ -1301,10 +1301,15 @@ function NotConnectedPanel({
   const [connecting, setConnecting] = useState(false)
 
   const isApiKeySupported = i.auth_type === "api_key" || i.category === "crm"
+  const isWebhook = i.auth_type === "webhook"
 
   const handleConnect = async () => {
     setConnecting(true)
     try {
+      if (isWebhook && apiKey.trim()) {
+        await onConnect(i.slug, apiKey)
+        return
+      }
       if (isApiKeySupported && apiKey.trim()) {
         await onConnect(i.slug, apiKey)
         return
@@ -1329,7 +1334,25 @@ function NotConnectedPanel({
         {i.description || i.short_description}
       </p>
 
-      {isApiKeySupported && (
+      {isWebhook && (
+        <div className="space-y-2">
+          <Label>Webhook URL</Label>
+          <Input
+            type="text"
+            placeholder={`Paste your ${i.name} Incoming Webhook URL...`}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleConnect()}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            {i.slug === "slack"
+              ? "Go to api.slack.com/apps → Your App → Incoming Webhooks → Copy the webhook URL."
+              : `Paste your ${i.name} webhook URL to receive notifications and alerts.`}
+          </p>
+        </div>
+      )}
+
+      {isApiKeySupported && !isWebhook && (
         <div className="space-y-2">
           <Label>API Key (or OAuth)</Label>
           <Input
@@ -1349,7 +1372,7 @@ function NotConnectedPanel({
 
       <Button
         className="w-full"
-        disabled={connecting || (i.auth_type === "api_key" && !apiKey.trim())}
+        disabled={connecting || ((isApiKeySupported || isWebhook) && !apiKey.trim())}
         onClick={handleConnect}
       >
         {connecting ? "Connecting..." : "Connect"}

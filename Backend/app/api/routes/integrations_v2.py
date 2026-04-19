@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.db.deps import get_db
 from app.db.models.user import User
 from app.db.models.integration import Integration, UserIntegration
+from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.services.integration_engine.registry import IntegrationRegistry
 from app.services.integration_engine.credential_vault import encrypt_credentials
 from app.services.crm_oauth_service import CrmOAuthService
@@ -179,17 +180,54 @@ async def connect_integration(
 
     # ── Webhook / automation / built-in / none ───────────────────
     if integration.auth_type in ("webhook", "none") or integration.is_built_in:
+        config = body.config or {}
+        credentials = None
+        # Webhook type: store the webhook URL or API key if provided
+        if integration.auth_type == "webhook" and (body.api_key or config.get("webhook_url")):
+            webhook_url = body.api_key or config.get("webhook_url", "")
+            credentials = encrypt_credentials({"webhook_url": webhook_url})
+            config["webhook_url"] = webhook_url
+        elif body.api_key:
+            credentials = encrypt_credentials({"api_key": body.api_key})
+
         if not existing:
             existing = UserIntegration(
                 user_id=user.id,
                 integration_id=integration.id,
                 status="connected",
-                config=body.config or {},
+                config=config,
+                credentials_encrypted=credentials,
             )
             db.add(existing)
         else:
             existing.status = "connected"
             existing.error_message = None
+            existing.config = config
+            if credentials:
+                existing.credentials_encrypted = credentials
+
+        # Slack webhook: also sync to CopilotUserPreferences so all
+        # notification features (daily briefs, pipeline alerts, signals,
+        # meeting briefs) pick up the webhook URL automatically.
+        if slug == "slack" and integration.auth_type == "webhook":
+            webhook_url = body.api_key or (config or {}).get("webhook_url", "")
+            if webhook_url:
+                prefs = (
+                    db.query(CopilotUserPreferences)
+                    .filter(CopilotUserPreferences.user_id == user.id)
+                    .first()
+                )
+                if prefs:
+                    prefs.slack_webhook_url = webhook_url
+                    prefs.notify_slack = True
+                else:
+                    prefs = CopilotUserPreferences(
+                        user_id=user.id,
+                        slack_webhook_url=webhook_url,
+                        notify_slack=True,
+                    )
+                    db.add(prefs)
+
         db.commit()
         return {"success": True, "status": "connected", "slug": slug}
 
@@ -266,6 +304,18 @@ async def disconnect_integration(
         raise HTTPException(status_code=404, detail="Integration is not connected")
 
     db.delete(user_conn)
+
+    # Slack: also clear webhook URL from copilot preferences
+    if slug == "slack":
+        prefs = (
+            db.query(CopilotUserPreferences)
+            .filter(CopilotUserPreferences.user_id == user.id)
+            .first()
+        )
+        if prefs and prefs.slack_webhook_url:
+            prefs.slack_webhook_url = None
+            prefs.notify_slack = False
+
     db.commit()
     return {"success": True, "status": "disconnected"}
 

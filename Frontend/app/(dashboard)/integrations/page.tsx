@@ -128,6 +128,8 @@ export default function IntegrationsPage() {
   const [crmInstanceUrl, setCrmInstanceUrl] = useState("")
   const [crmApiDomain, setCrmApiDomain] = useState("")
   const [savingApiKey, setSavingApiKey] = useState(false)
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("")
+  const [connectingSlackWebhook, setConnectingSlackWebhook] = useState(false)
 
   // Fetch integrations from API
   const loadIntegrations = useCallback(async () => {
@@ -498,7 +500,10 @@ export default function IntegrationsPage() {
                           {items.map(item => (
                              <button
                                 key={item.id}
-                                onClick={() => setSelectedId(item.id)}
+                                onClick={() => {
+                                  setSelectedId(item.id)
+                                  setCrmAuthMethod(item.id === "slack" ? "api_key" : "oauth")
+                                }}
                                 className={cn(
                                    "flex flex-col p-4 rounded-2xl border transition-all text-left group relative backdrop-blur-sm",
                                    selectedId === item.id
@@ -722,7 +727,98 @@ export default function IntegrationsPage() {
                         Connect WhatsApp Business
                       </Button>
                     </div>
-                  ) : selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm" || selected.id === "outlook" || selected.id === "slack" || selected.id === "discord" || selected.id === "teams" ? (
+                  ) : selected.id === "slack" ? (
+                    <div className="space-y-4">
+                      {/* Auth Method Toggle: Webhook vs OAuth */}
+                      <div className="flex gap-2 p-1 bg-muted/20 rounded-lg">
+                        <button
+                          onClick={() => setCrmAuthMethod("api_key")}
+                          className={cn(
+                            "flex-1 py-2 px-3 rounded-md text-[11px] font-black uppercase tracking-wider transition-all",
+                            crmAuthMethod === "api_key"
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          Webhook
+                        </button>
+                        <button
+                          onClick={() => setCrmAuthMethod("oauth")}
+                          className={cn(
+                            "flex-1 py-2 px-3 rounded-md text-[11px] font-black uppercase tracking-wider transition-all",
+                            crmAuthMethod === "oauth"
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          OAuth
+                        </button>
+                      </div>
+
+                      {crmAuthMethod === "api_key" ? (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Webhook URL</label>
+                            <Input
+                              type="text"
+                              value={slackWebhookUrl}
+                              onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                              placeholder="https://hooks.slack.com/services/T.../B.../..."
+                              className="h-10 text-xs"
+                            />
+                          </div>
+                          <p className="text-[10px] font-medium text-muted-foreground/50 leading-relaxed">
+                            Go to <span className="text-foreground">api.slack.com/apps</span> → Your App → Incoming Webhooks → Copy the webhook URL.
+                          </p>
+                          <Button
+                            onClick={async () => {
+                              if (!slackWebhookUrl.trim()) {
+                                toast.error("Please enter a Slack webhook URL")
+                                return
+                              }
+                              setConnectingSlackWebhook(true)
+                              try {
+                                await integrationsApi.connectIntegration("slack", slackWebhookUrl)
+                                toast.success("Slack webhook connected successfully")
+                                setSlackWebhookUrl("")
+                                loadIntegrations()
+                              } catch (error: any) {
+                                toast.error(error.message || "Failed to connect Slack webhook")
+                              } finally {
+                                setConnectingSlackWebhook(false)
+                              }
+                            }}
+                            disabled={connectingSlackWebhook || !slackWebhookUrl.trim()}
+                            className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                          >
+                            {connectingSlackWebhook ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Connecting...
+                              </>
+                            ) : (
+                              "Connect with Webhook"
+                            )}
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => handleConnectCrm("slack")}
+                          disabled={connectingCrm === "slack"}
+                          className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
+                        >
+                          {connectingCrm === "slack" ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Connecting...
+                            </>
+                          ) : (
+                            "Connect with OAuth"
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  ) : selected.id === "hubspot" || selected.id === "salesforce" || selected.id === "zoho_crm" || selected.id === "outlook" || selected.id === "discord" || selected.id === "teams" ? (
                     <div className="space-y-4">
                       {/* Auth Method Toggle */}
                       <div className="flex gap-2 p-1 bg-muted/20 rounded-lg">

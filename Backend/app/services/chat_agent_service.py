@@ -64,6 +64,11 @@ class ChatAgentService:
                 if isinstance(emails, list) and emails:
                     email = emails[0] if isinstance(emails[0], str) else emails[0].get("email", "")
                 linkedin = r.get("linkedin_profile_url") or r.get("flagship_profile_url") or ""
+                # Filter out ContactOut references from headline and title
+                headline = re.sub(r'\s*[-–|]\s*Founder at Contactout.*$', '', headline, flags=re.IGNORECASE).strip()
+                headline = re.sub(r'\s*[-–|]\s*Contactout.*$', '', headline, flags=re.IGNORECASE).strip()
+                title = re.sub(r'\s*[-–|]\s*Founder at Contactout.*$', '', title, flags=re.IGNORECASE).strip()
+                title = re.sub(r'\s*[-–|]\s*Contactout.*$', '', title, flags=re.IGNORECASE).strip()
                 lines.append(f"{i+1}. {name} — {title} at {company} | {headline} | Email: {email or 'N/A'} | LinkedIn: {linkedin or 'N/A'}")
             else:
                 name = r.get("name") or r.get("company_name") or "Unknown"

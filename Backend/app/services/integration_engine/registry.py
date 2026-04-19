@@ -146,7 +146,7 @@ INTEGRATION_CATALOG: List[Dict] = [
     {"slug": "mixmax", "name": "Mixmax", "category": "email", "short_description": "Sales engagement platform built for Gmail power users", "auth_type": "oauth2", "is_coming_soon": True, "credit_cost": "BYOK"},
 
     # ── Category 4: Communication (10) ─────────────────────────────
-    {"slug": "slack", "name": "Slack", "category": "communication", "short_description": "Pipeline alerts, daily briefs, and signal notifications in Slack channels", "auth_type": "oauth2", "is_active": True, "is_built_in": True, "credit_cost": "Free"},
+    {"slug": "slack", "name": "Slack", "category": "communication", "short_description": "Pipeline alerts, daily briefs, and signal notifications in Slack channels", "auth_type": "webhook", "is_active": True, "is_built_in": False, "credit_cost": "Free"},
     {"slug": "teams", "name": "Microsoft Teams", "category": "communication", "short_description": "Deliver notifications and alerts to Teams channels", "auth_type": "oauth2", "is_coming_soon": True, "credit_cost": "Free"},
     {"slug": "linkedin-dm", "name": "LinkedIn DM", "category": "communication", "short_description": "Send connection requests and direct messages via LinkedIn", "auth_type": "none", "is_active": True, "is_built_in": True, "credit_cost": "Free"},
     {"slug": "twilio", "name": "Twilio SMS", "category": "communication", "short_description": "Send SMS messages and track delivery for outreach campaigns", "auth_type": "api_key", "is_coming_soon": True, "credit_cost": "BYOK"},
@@ -235,16 +235,28 @@ class IntegrationRegistry:
     @staticmethod
     def seed_catalog(db: Session) -> int:
         """
-        Seed all integrations into the DB if missing. Returns count of new rows added.
-        Idempotent — skips existing slugs.
+        Seed all integrations into the DB if missing, and update existing ones
+        if key fields (auth_type, is_active, etc.) have changed.
+        Returns count of new rows added.
         """
-        existing_slugs = {
-            row[0] for row in db.query(Integration.slug).all()
+        existing = {
+            row.slug: row for row in db.query(Integration).all()
         }
 
         new_count = 0
+        updated_count = 0
         for entry in INTEGRATION_CATALOG:
-            if entry["slug"] in existing_slugs:
+            if entry["slug"] in existing:
+                # Update existing record if key fields changed
+                row = existing[entry["slug"]]
+                changed = False
+                for field in ("auth_type", "is_active", "is_coming_soon", "is_built_in", "short_description", "credit_cost"):
+                    catalog_val = entry.get(field, {"auth_type": "api_key", "is_active": False, "is_coming_soon": False, "is_built_in": False}.get(field))
+                    if catalog_val is not None and getattr(row, field, None) != catalog_val:
+                        setattr(row, field, catalog_val)
+                        changed = True
+                if changed:
+                    updated_count += 1
                 continue
 
             integration = Integration(
@@ -265,9 +277,12 @@ class IntegrationRegistry:
             db.add(integration)
             new_count += 1
 
-        if new_count > 0:
+        if new_count > 0 or updated_count > 0:
             db.commit()
-            logger.info("Seeded %d new integrations into catalog", new_count)
+            if new_count:
+                logger.info("Seeded %d new integrations into catalog", new_count)
+            if updated_count:
+                logger.info("Updated %d existing integrations in catalog", updated_count)
 
         return new_count
 

@@ -2961,7 +2961,7 @@ export default function DatabaseFinderPage() {
                         </div>
                       )}
                       <div className={cn(
-                        "rounded-lg px-3 py-2 max-w-[80%] text-sm whitespace-pre-wrap",
+                        "rounded-lg px-3 py-2 max-w-[80%] text-sm whitespace-pre-wrap break-all",
                         msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border"
                       )}>
                         {msg.content}
