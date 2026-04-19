@@ -821,7 +821,19 @@ async def reveal_contact_info(request: ContactRevealRequest):
                 detail="linkedin_url is required"
             )
 
+        # Check if ContactOut is configured
+        from app.services.contactout_service import ContactOutService
         service = ContactOutService()
+        if not service.api_key:
+            logger.warning("ContactOut API key not configured")
+            return {
+                "success": False,
+                "linkedin_url": linkedin_url,
+                "emails": [],
+                "phones": [],
+                "error": "ContactOut service not configured"
+            }
+
         result = await service.reveal_contact_info(
             linkedin_url=linkedin_url,
             include_phone=True
@@ -845,11 +857,24 @@ async def reveal_contact_info(request: ContactRevealRequest):
             "emails": sanitized_emails,
             "phones": sanitized_phones,
         }
+    except ValueError as ve:
+        # Handle specific validation errors (e.g., company/school LinkedIn URLs)
+        logger.warning(f"Contact reveal validation failed for {linkedin_url}: {str(ve)}")
+        return {
+            "success": False,
+            "linkedin_url": linkedin_url,
+            "emails": [],
+            "phones": [],
+            "error": str(ve)
+        }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Contact reveal fallback failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch contact info"
-        )
+        logger.error(f"Contact reveal fallback failed: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "linkedin_url": linkedin_url,
+            "emails": [],
+            "phones": [],
+            "error": "Failed to fetch contact info"
+        }
