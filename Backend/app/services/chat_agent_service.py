@@ -130,6 +130,7 @@ Instructions:
 - If the user wants to run a completely new/different search, respond with your message AND include exactly this on its own line: ACTION:NEW_SEARCH|<the new query>
 - If the user asks to detect signals or analyze signals, include: ACTION:DETECT_SIGNALS
 - If the user asks to create a campaign or write emails, include: ACTION:GENERATE_CAMPAIGN
+- If the user asks to show more results, load more leads, get more profiles, or similar requests to expand the results, include: ACTION:LOAD_MORE
 - Otherwise, just respond conversationally. Most messages won't need an action."""
 
     def _parse_action(self, text: str) -> tuple:
@@ -148,6 +149,8 @@ Instructions:
                 action = "detect_signals"
             elif stripped == "ACTION:GENERATE_CAMPAIGN":
                 action = "generate_campaign"
+            elif stripped == "ACTION:LOAD_MORE":
+                action = "load_more"
             else:
                 cleaned_lines.append(line)
 

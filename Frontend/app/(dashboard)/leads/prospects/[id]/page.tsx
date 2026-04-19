@@ -149,29 +149,32 @@ export default function ProspectProfilePage() {
         if (storedProfiles) {
             const profiles: ProspectProfile[] = JSON.parse(storedProfiles)
             const rawId = params.id as string
-            // Try to decode if it's base64 encoded
-            let id = rawId
-            try {
-                // Check if it's base64 encoded (LinkedIn URLs are base64 encoded to avoid URL issues)
-                const decoded = atob(rawId)
-                if (decoded.includes('linkedin.com') || decoded.includes('/')) {
-                    id = decoded
+            let found: ProspectProfile | null = null
+
+            // Check if it's an index-based ID (idx_0, idx_1, etc.)
+            if (rawId.startsWith('idx_')) {
+                const index = parseInt(rawId.replace('idx_', ''), 10)
+                if (!isNaN(index) && index >= 0 && index < profiles.length) {
+                    found = profiles[index]
                 }
-            } catch {
-                // Not base64, use as-is
+            } else {
+                // Use person_id or other ID matching
+                found = profiles.find((p) => {
+                    // Check _stableId first
+                    if ((p as any)._stableId && (p as any)._stableId === rawId) return true
+                    
+                    // Check all candidate IDs
+                    const candidates = [
+                        (p as any).person_id,
+                        (p as any).prospect_id,
+                        (p as any).linkedin_profile_urn,
+                        p.linkedin_profile_url,
+                        p.flagship_profile_url,
+                    ]
+                    
+                    return candidates.some((c) => c && String(c) === rawId)
+                }) || null
             }
-            const found = profiles.find((p) => {
-                // First check _stableId (set by ProspectsResultsTable before navigation)
-                if ((p as any)._stableId && ((p as any)._stableId === id || (p as any)._stableId === rawId)) return true
-                const candidates = [
-                    (p as any).person_id,
-                    (p as any).prospect_id,
-                    (p as any).linkedin_profile_urn,
-                    p.linkedin_profile_url,
-                    p.flagship_profile_url,
-                ]
-                return candidates.some((c) => c && (String(c) === id || String(c) === rawId))
-            })
             setProfile(found || null)
         }
         const cachedEmail = localStorage.getItem(`email_${params.id}`)

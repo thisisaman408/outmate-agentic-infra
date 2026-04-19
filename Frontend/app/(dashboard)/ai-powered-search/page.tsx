@@ -1072,6 +1072,71 @@ export default function DatabaseFinderPage() {
     }
   }
 
+  const handleLoadMore = async () => {
+    if (isSearching) return
+
+    const filters = latestExtractedFilters || {}
+    if (!filters || Object.keys(filters).length === 0) return
+
+    setIsSearching(true)
+    try {
+      const currentLimit = results.length
+      const targetLimit = currentLimit + 25
+      const endpoint = intent === "business" ? `/api/v1/leads/search/companies` : `/api/v1/leads/search/prospects`
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filters,
+          options: {
+            limit: targetLimit,
+            page: 1,
+            enrich: true,
+          },
+        }),
+      })
+
+      if (!response.ok) throw new Error(`Failed to load more ${intent === "business" ? "companies" : "prospects"}`)
+
+      const payload = await response.json()
+      let mappedResults
+
+      if (intent === "business") {
+        const rawCompanies = payload?.data?.companies || []
+        mappedResults = mapCompanyResults(rawCompanies)
+      } else {
+        const rawProspects = payload?.data?.prospects || []
+        mappedResults = mapProspectResults(rawProspects)
+      }
+
+      setResults(mappedResults)
+      setTamPreview((prev) => ({
+        ...prev,
+        count: payload?.data?.total_count || mappedResults.length || prev.count,
+        cost: mappedResults.length * 0.1,
+      }))
+
+      // Add assistant message about loading more results
+      const assistantMsg: { role: "user" | "assistant", content: string } = {
+        role: "assistant",
+        content: `Loaded ${mappedResults.length} ${intent === "business" ? "companies" : "prospects"} for you.`
+      }
+      setAgentMessages(prev => [...prev, assistantMsg])
+    } catch (e) {
+      console.error("Load more failed:", e)
+      const errorMsg: { role: "user" | "assistant", content: string } = {
+        role: "assistant",
+        content: "Sorry, I couldn't load more results. Please try again."
+      }
+      setAgentMessages(prev => [...prev, errorMsg])
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
   const computeIcpScore = (result: any, icp: Record<string, any>): { score: number, tier: 'Hot' | 'Warm' | 'Cold', breakdown: Record<string, number>, timestamp: number } => {
     let score = 0
     const breakdown: Record<string, number> = { title: 0, industry: 0, location: 0, size: 0, seniority: 0, keywords: 0 }
@@ -2119,6 +2184,9 @@ export default function DatabaseFinderPage() {
         handleDetectSignals(sessionResults2, intent)
       } else if (data.action === "generate_campaign") {
         handleGenerateCampaign()
+      } else if (data.action === "load_more") {
+        // Trigger load more results
+        handleLoadMore()
       }
     } catch (e: any) {
       console.error("Agent chat error:", e)
