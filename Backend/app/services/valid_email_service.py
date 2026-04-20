@@ -7,11 +7,11 @@ logger = logging.getLogger(__name__)
 
 class ValidEmailService:
     """
-    Email Prediction and Verification Service using ValidEmailAPI.com
+    Email Prediction and Verification Service using ValidEmail.net
     """
     def __init__(self):
         self.api_key = getattr(settings, "VALIDEMAIL_API_KEY", None) or ""
-        self.base_url = "https://api.validemailapi.com/v1/verify"
+        self.base_url = "https://api.ValidEmail.net/"
 
     def predict_emails(self, first_name: str, last_name: str, domain: str) -> List[str]:
         """Generate common email patterns for a person and domain."""
