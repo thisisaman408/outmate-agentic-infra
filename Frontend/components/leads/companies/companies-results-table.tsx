@@ -758,7 +758,7 @@ export function CompaniesResultsTable({
     return (
         <Card className="p-0 border-border/60 shadow-sm overflow-hidden flex flex-col">
             <TableToolbar
-                tableId="companies"
+                tableId={tableId}
                 columns={columns}
                 visibility={table.visibility}
                 onToggleColumn={table.toggleColumn}

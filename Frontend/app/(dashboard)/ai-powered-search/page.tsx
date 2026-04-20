@@ -3674,7 +3674,7 @@ export default function DatabaseFinderPage() {
                         companies={results}
                         isLoading={false}
                         hasSearched={true}
-                        tableId="ai-powered-companies-v2"
+                        tableId="ai-powered-companies-v3"
                         onEnrichReveal={async (companyId, field) => {
                           if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
                           const company = results.find((c: any) => (c.domain || c.id) === companyId)
