@@ -55,10 +55,12 @@ export function useTableState<T>({
     // Reset if no existing prefs, or if column set changed (new/removed columns)
     const defaultKeys = Object.keys(defaults).sort().join(',')
     const existingKeys = existing ? Object.keys(existing).sort().join(',') : ''
-    if (!existing || defaultKeys !== existingKeys) {
+    // Also force reset if tableId contains a version suffix (e.g., -v2, -v3) to apply new defaults
+    const hasVersionSuffix = /-v\d+$/.test(tableId)
+    if (!existing || defaultKeys !== existingKeys || hasVersionSuffix) {
       setColumnVisibility(tableId, defaults)
     }
-  }, [tableId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tableId, columns]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibility = columnVisibility[tableId] || {}
 

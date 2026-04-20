@@ -3727,13 +3727,13 @@ export default function DatabaseFinderPage() {
                 )}
                 {intent === "prospect" ? (
                   <ProspectsResultsTable
-                    data={results}
+                    profiles={results as ProspectProfile[]}
+                    isLoading={isSearching}
                     totalCount={tamPreview.count}
+                    onLoadMore={handleLoadMore}
                     enableContactReveal={true}
-                    tableId="ai-powered-prospects"
                     onEnrichReveal={handleProspectEnrichReveal}
-                    enrichCache={enrichedData}
-                    enrichingRows={enrichingRows}
+                    tableId="prospects-search-v2"
                   />
                 ) : (
                   <>
