@@ -906,6 +906,10 @@ export default function DatabaseFinderPage() {
     }
   }
 
+  const mapProspectResults = (rawList: any[]): ProspectProfile[] => {
+    return (Array.isArray(rawList) ? rawList : []).map((item: any) => normalizeProspect(item))
+  }
+
   const mapCompanyResults = (rawList: any[]): CompanyData[] => {
     return (Array.isArray(rawList) ? rawList : []).map((item: any) => {
       const raw = (item?.raw_data && typeof item.raw_data === "object")
