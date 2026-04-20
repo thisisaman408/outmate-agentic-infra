@@ -24,7 +24,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from celery import shared_task
 from sqlalchemy.orm import Session
 
 from app.api.routes.voice_agent import (
@@ -33,6 +32,11 @@ from app.api.routes.voice_agent import (
     _call_via_retell,
     _config_key,
 )
+# Bind tasks directly to our configured Celery app instead of using
+# `@shared_task` — avoids the "current_app falls through to amqp://localhost"
+# trap that caused .delay() to ConnectionRefusedError when called from
+# FastAPI endpoints.  See social_listening_tasks.py for the same pattern.
+from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.redis import RedisManager
 from app.db.deps import SessionLocal
@@ -49,7 +53,7 @@ ENRICHMENT_COST_PER_SUCCESS = 1
 BETWEEN_CALLS_SECONDS = 2
 
 
-@shared_task(name="app.tasks.voice_campaign_tasks.run_voice_campaign", bind=True)
+@celery_app.task(name="app.tasks.voice_campaign_tasks.run_voice_campaign", bind=True)
 def run_voice_campaign(self, campaign_id: str) -> Dict[str, Any]:
     """Drive one campaign to completion (or until daily cap / pause)."""
     db: Session = SessionLocal()
@@ -297,23 +301,27 @@ async def _call_one(
     prospect.agent_run_id = run.id
     db.commit()
 
-    started = time.monotonic()
     result: Dict[str, Any] = {}
     err: Optional[str] = None
     try:
         if settings.RETELL_API_KEY:
-            result = await _call_via_retell(req, call_script, voice_config, company_profile)
+            # run_id goes into Retell's metadata so the webhook can look this
+            # exact AgentRun up by primary key when the call actually ends.
+            result = await _call_via_retell(
+                req, call_script, voice_config, company_profile, run_id=str(run.id)
+            )
         else:
             result = await _call_via_agentic_infra(req, call_script)
     except Exception as exc:
         err = str(exc)[:500]
 
-    run.duration_ms = int((time.monotonic() - started) * 1000)
-    run.finished_at = datetime.now(timezone.utc)
-
     if err:
+        # Dispatch failed — Retell never accepted the call, so the webhook
+        # will never fire to correct this row.  Terminal on our side.
         run.status = "error"
         run.error_message = err
+        run.finished_at = datetime.now(timezone.utc)
+        run.duration_ms = 0
         prospect.status = "error"
         prospect.error_message = err
         prospect.finished_at = run.finished_at
@@ -322,15 +330,25 @@ async def _call_one(
         db.commit()
         return
 
-    run.status = "success"
+    # Dispatch succeeded — the call is now LIVE.  We intentionally do NOT
+    # set run.status="success", run.duration_ms, run.finished_at, or
+    # prospect.status="success" here: those get stamped by the Retell
+    # webhook when the call actually ends.  Previously this block set
+    # "success" + duration=HTTP-request-time, which is how the UI ended
+    # up showing "success / 0:01" on calls that hadn't finished yet.
+    #
+    # calls_made is bumped on dispatch (it counts attempts).  calls_booked
+    # is bumped by the webhook IFF the extracted next_steps indicates a
+    # booking was actually scheduled during the conversation.
     run.output_text = json.dumps(result)
     run.leads = [{"call_id": result.get("call_id"), "prospect": req.prospect_name}]
-    prospect.status = "success"
-    prospect.finished_at = run.finished_at
+    prospect.status = "calling"
     campaign.calls_made += 1
-    campaign.calls_booked += 1
     db.commit()
 
+    # Credits are deducted on dispatch — reversing mid-call if the prospect
+    # hangs up in 2 seconds is messy and every voice provider charges us
+    # the moment the call connects anyway.
     deduct_credits(
         db=db,
         user_id=campaign.user_id,

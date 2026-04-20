@@ -683,43 +683,211 @@ export default function VoiceAgentPage() {
       {/* Analytics Dialog */}
       {/* ================================================================ */}
       <Dialog open={analyticsOpen} onOpenChange={setAnalyticsOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Voice Agent Analytics</DialogTitle>
-            <DialogDescription>Detailed performance breakdown</DialogDescription>
+            <DialogDescription>Outcomes, conversation quality, and what's blocking conversion</DialogDescription>
           </DialogHeader>
           {analyticsLoading ? (
             <div className="py-8 text-center text-muted-foreground">Loading analytics...</div>
           ) : analyticsData ? (
             <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{analyticsData.total_calls}</p>
-                  <p className="text-xs text-muted-foreground">Total Calls</p>
+
+              {/* Headline rates */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total calls</p>
+                  <p className="text-2xl font-bold mt-0.5">{analyticsData.total_calls}</p>
                 </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold text-green-600">{analyticsData.successful}</p>
-                  <p className="text-xs text-muted-foreground">Successful</p>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Connect rate</p>
+                  <p className="text-2xl font-bold mt-0.5">{analyticsData.connect_rate}%</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{analyticsData.outcomes.booked + analyticsData.outcomes.completed} of {analyticsData.total_calls} connected</p>
                 </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold text-red-500">{analyticsData.failed}</p>
-                  <p className="text-xs text-muted-foreground">Failed</p>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Booking rate</p>
+                  <p className="text-2xl font-bold mt-0.5">{analyticsData.booking_rate}%</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{analyticsData.outcomes.booked} booked</p>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{analyticsData.booking_rate}%</p>
-                  <p className="text-xs text-muted-foreground">Booking Rate</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{analyticsData.avg_duration_seconds}s</p>
-                  <p className="text-xs text-muted-foreground">Avg Duration</p>
-                </div>
-                <div className="rounded-lg border p-4 text-center">
-                  <p className="text-2xl font-bold">{analyticsData.total_credits_spent}</p>
-                  <p className="text-xs text-muted-foreground">Credits Spent</p>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Credits</p>
+                  <p className="text-2xl font-bold mt-0.5">{analyticsData.total_credits_spent}</p>
                 </div>
               </div>
+
+              {/* Outcome breakdown */}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Outcome breakdown</h4>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="rounded-lg border p-3 bg-green-50/50 dark:bg-green-950/20">
+                    <p className="text-xl font-bold text-green-700 dark:text-green-400">{analyticsData.outcomes.booked}</p>
+                    <p className="text-xs text-muted-foreground">Booked</p>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-emerald-50/50 dark:bg-emerald-950/20">
+                    <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{analyticsData.outcomes.completed}</p>
+                    <p className="text-xs text-muted-foreground">Completed</p>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-slate-50/50 dark:bg-slate-900/20">
+                    <p className="text-xl font-bold text-slate-600 dark:text-slate-300">{analyticsData.outcomes.no_answer}</p>
+                    <p className="text-xs text-muted-foreground">No answer</p>
+                  </div>
+                  <div className="rounded-lg border p-3 bg-red-50/50 dark:bg-red-950/20">
+                    <p className="text-xl font-bold text-red-600 dark:text-red-400">{analyticsData.outcomes.failed}</p>
+                    <p className="text-xs text-muted-foreground">Failed</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conversation stats */}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Conversation stats (connected calls only)</h4>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">Avg duration</p>
+                    <p className="text-xl font-bold mt-0.5">
+                      {analyticsData.avg_connected_duration_seconds > 0
+                        ? `${Math.floor(analyticsData.avg_connected_duration_seconds / 60)}m ${Math.round(analyticsData.avg_connected_duration_seconds % 60)}s`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">Total talk time</p>
+                    <p className="text-xl font-bold mt-0.5">
+                      {analyticsData.total_talk_time_seconds > 0
+                        ? `${Math.floor(analyticsData.total_talk_time_seconds / 60)}m ${Math.round(analyticsData.total_talk_time_seconds % 60)}s`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">No-answer rate</p>
+                    <p className="text-xl font-bold mt-0.5">{analyticsData.no_answer_rate}%</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Disconnection mix — tells user *why* calls end; key telco-block signal */}
+              {analyticsData.disconnection_breakdown.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Why calls end</h4>
+                  <div className="space-y-1.5">
+                    {analyticsData.disconnection_breakdown.map((d) => {
+                      const max = Math.max(...analyticsData.disconnection_breakdown.map((x) => x.count), 1)
+                      const pct = (d.count / max) * 100
+                      const isBad = ["user_declined", "dial_no_answer", "dial_busy", "machine_detected"].includes(d.reason)
+                      return (
+                        <div key={d.reason} className="flex items-center gap-3 text-xs">
+                          <span className="w-40 shrink-0 font-mono">{d.reason}</span>
+                          <div className="flex-1 h-5 rounded bg-muted relative overflow-hidden">
+                            <div
+                              className={cn("absolute inset-y-0 left-0", isBad ? "bg-red-300/70 dark:bg-red-900/60" : "bg-primary/50")}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="w-8 text-right text-muted-foreground">{d.count}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {analyticsData.disconnection_breakdown.find((d) => d.reason === "user_declined" && d.count >= 3) && (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-2 italic">
+                      Multiple user_declined events — your caller-ID is likely being flagged by the carrier. Consider rotating From number or using a local DID.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Extracted insights from transcripts — only render if the
+                  agent's Extract Variables flow actually produced data */}
+              {(analyticsData.top_pain_points.length +
+                analyticsData.top_objections.length +
+                analyticsData.top_competitors.length +
+                analyticsData.top_next_steps.length) > 0 ? (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Conversation insights</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    {analyticsData.top_pain_points.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Top pain points</p>
+                        <ul className="text-xs space-y-0.5">
+                          {analyticsData.top_pain_points.map((p) => (
+                            <li key={p.label} className="flex justify-between gap-2">
+                              <span className="truncate">{p.label}</span>
+                              <span className="text-muted-foreground shrink-0">×{p.count}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analyticsData.top_objections.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">Top objections</p>
+                        <ul className="text-xs space-y-0.5">
+                          {analyticsData.top_objections.map((p) => (
+                            <li key={p.label} className="flex justify-between gap-2">
+                              <span className="truncate">{p.label}</span>
+                              <span className="text-muted-foreground shrink-0">×{p.count}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analyticsData.top_competitors.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-orange-600 dark:text-orange-400 mb-1">Competitors mentioned</p>
+                        <ul className="text-xs space-y-0.5">
+                          {analyticsData.top_competitors.map((p) => (
+                            <li key={p.label} className="flex justify-between gap-2">
+                              <span className="truncate">{p.label}</span>
+                              <span className="text-muted-foreground shrink-0">×{p.count}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analyticsData.top_next_steps.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 mb-1">Next steps captured</p>
+                        <ul className="text-xs space-y-0.5">
+                          {analyticsData.top_next_steps.map((p) => (
+                            <li key={p.label} className="flex justify-between gap-2">
+                              <span className="truncate">{p.label}</span>
+                              <span className="text-muted-foreground shrink-0">×{p.count}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  No conversation insights yet. Once your Retell agent's <span className="font-mono">Extract Variables</span> node populates <span className="font-mono">pain_points</span>, <span className="font-mono">objections</span>, etc., they'll aggregate here.
+                </div>
+              )}
+
+              {/* Hour-of-day — quick read on when you're calling */}
+              {analyticsData.hour_of_day_utc.some((n) => n > 0) && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Calls by hour (UTC)</h4>
+                  <div className="flex items-end gap-0.5 h-16">
+                    {analyticsData.hour_of_day_utc.map((count, hr) => {
+                      const max = Math.max(...analyticsData.hour_of_day_utc, 1)
+                      return (
+                        <div key={hr} className="flex-1 flex flex-col items-center justify-end gap-0.5">
+                          <div
+                            className="w-full bg-primary/70 rounded-sm"
+                            style={{ height: `${(count / max) * 100}%`, minHeight: count > 0 ? 2 : 0 }}
+                            title={`${hr}:00 UTC — ${count} call${count === 1 ? "" : "s"}`}
+                          />
+                          {hr % 6 === 0 && <span className="text-[9px] text-muted-foreground">{hr}</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Daily chart + top companies (kept from v1) */}
               {analyticsData.daily_calls.length > 0 && (
                 <div>
                   <h4 className="text-sm font-medium mb-2">Calls per day (last 7 days)</h4>
@@ -923,7 +1091,18 @@ export default function VoiceAgentPage() {
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg border p-3">
                   <p className="text-xs text-muted-foreground">Status</p>
-                  <Badge variant="secondary" className={cn("mt-1", callDetail.status === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      "mt-1",
+                      callDetail.status === "Booked" && "bg-green-100 text-green-700",
+                      callDetail.status === "Completed" && "bg-emerald-100 text-emerald-700",
+                      callDetail.status === "In progress" && "bg-blue-100 text-blue-700",
+                      callDetail.status === "No answer" && "bg-slate-100 text-slate-700",
+                      callDetail.status === "Failed" && "bg-red-100 text-red-700",
+                      callDetail.status === "Timed out (no webhook)" && "bg-amber-100 text-amber-800",
+                    )}
+                  >
                     {callDetail.status}
                   </Badge>
                 </div>

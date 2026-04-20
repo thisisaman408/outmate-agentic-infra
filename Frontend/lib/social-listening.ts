@@ -50,6 +50,11 @@ export interface SocialSignal {
   signal_strength?: string | null
   funnel_stage?: string | null
   trigger_type?: string | null
+  // Media — surfaced by the scrapers when available.  Keep optional with
+  // safe defaults ([], null) so older /signals responses don't break the
+  // card renderer.
+  post_images?: string[]
+  profile_picture_url?: string | null
 }
 
 export interface SocialStats {

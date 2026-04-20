@@ -74,12 +74,32 @@ async def search_linkedin_posts(
         "Authorization": f"Bearer {key}",
     }
 
+    # Freshness filter — BrightData Discover accepts Google-style date
+    # qualifiers ("d", "w", "m", "y").  We map our internal names.  Without
+    # this, results have been returning months-old LinkedIn posts because
+    # Google ranks by relevance, not recency.
+    _DATE_RANGE = {
+        "hour": "d",   # BrightData doesn't have sub-day granularity; go day
+        "day": "d",
+        "week": "w",
+        "month": "m",
+        "year": "y",
+        "all": "y",    # cap at a year even when caller says "all"
+    }
+    date_range = _DATE_RANGE.get((time_frame or "week").lower(), "w")
+
     payload: Dict[str, Any] = {
         "query": query,
         "intent": intent,
         "remove_duplicates": True,
         "include_content": True,
         "num_results": min(max_results, 20),  # BrightData max is 20
+        # Apply the freshness filter at the search layer so we don't waste
+        # credits on ancient posts.  Keys intentionally duplicated — the
+        # BrightData API has shipped both `date_range` and `freshness` as
+        # the accepted filter name across versions; extra keys are ignored.
+        "date_range": date_range,
+        "freshness": date_range,
     }
 
     try:
@@ -114,10 +134,29 @@ async def search_linkedin_posts(
         content = item.get("content", "") or item.get("description", "")
         relevance = item.get("relevance_score", 0)
 
-        # Extract person name from title (format: "Post Title | Person Name posted on...")
-        person_name = _extract_person_from_title(title)
-        # Extract LinkedIn profile URL from post URL
+        # ── Name resolution ───────────────────────────────────────────
+        # Try multiple extractors.  BrightData's output shape varies by
+        # post type (posts/pulse/activity), and the person's name can
+        # appear in the title, inside the content blob between pipes, or
+        # only recoverable from the post URL's `/posts/<username>-…` slug.
+        person_name = (
+            _extract_person_from_title(title)
+            or _extract_person_from_content(content)
+            or _humanize_username(link)
+        )
+
+        # ── Profile URL ───────────────────────────────────────────────
         linkedin_profile = _extract_profile_from_post_url(link)
+
+        # ── Company (best-effort) ─────────────────────────────────────
+        company = _extract_company_from_content(content)
+
+        # ── Media — post images + author's profile picture ────────────
+        # BrightData returns these under several possible keys depending
+        # on the post type; collect all of them so the UI can render a
+        # thumbnail + avatar without an extra scrape.
+        post_images = _extract_post_images(item)
+        profile_pic = _extract_profile_picture(item)
 
         # Clean content — remove LinkedIn boilerplate
         clean_content = _clean_linkedin_content(content)
@@ -126,10 +165,12 @@ async def search_linkedin_posts(
             "source": "brightdata_discover",
             "name": person_name,
             "title": "",  # BrightData doesn't return person's job title
-            "company": "",
+            "company": company,
             "linkedin": linkedin_profile,
             "post_url": link,
             "post_snippet": clean_content[:500] if clean_content else "",
+            "post_images": post_images,           # list of image URLs from the post
+            "profile_picture_url": profile_pic,   # author's DP if BrightData gave us one
             "email": "",
             "email_unverified": False,
             "likes": 0,
@@ -216,7 +257,161 @@ def _clean_linkedin_content(content: str) -> str:
         r"LinkedIn.*?© \d{4}",
         r"Skip to main content",
         r"LinkedIn and 3rd parties.*?Cookie Policy\.",
+        # Cookie / footer / legal chunks that appear in discovered snippets
+        r",?\s*you agree to\s*\*?\s*\[About\].*$",
+        r"\*\s*\[(About|Accessibility|User Agreement|Privacy Policy|Cookie Policy|Copyright Policy|Brand Policy|Guest Controls|Community Guidelines)\][^*]*",
     ]
     for p in patterns:
         content = re.sub(p, "", content, flags=re.DOTALL | re.IGNORECASE)
     return content.strip()[:2000]
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Parsing helpers — name, company, images, DP
+#
+# BrightData Discover doesn't return structured author/post-media fields,
+# and the shape of its `content` blob varies per post type.  The helpers
+# below try several patterns from most-specific to most-forgiving so the
+# UI can stop showing "Unknown" on every card.
+# ────────────────────────────────────────────────────────────────────────
+
+# "| Dirk Sahlmer | 17 comments", "| Neil Griffin, you agree to …",
+# "| Jane Doe · 3h", "| John Smith posted…"  →  extracts the name token
+_CONTENT_NAME_RE = re.compile(
+    r"\|\s*"                                      # pipe separator
+    r"([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){1,3})"   # 2-4 capitalised words
+    r"\s*(?:\||,|·|\s+posted|\s+\d+\s+(?:comments?|reactions?|likes?))",
+    re.UNICODE,
+)
+
+# Rough "Name at/@ Company" patterns.  Weak by design — we'd rather miss
+# a company than mis-attribute one.  Returns empty string on ambiguity.
+_CONTENT_COMPANY_RES = [
+    re.compile(r"(?:works?|working|founder|ceo|cto|vp|head)\s+(?:at|@|of)\s+([A-Z][\w&\. -]{2,40})", re.IGNORECASE),
+    re.compile(r"\b@\s*([A-Z][\w&\. -]{2,40})(?:\s|$|\|)"),
+]
+
+
+def _extract_person_from_content(content: str) -> str:
+    """Pull the author's name out of the LinkedIn post content blob.
+
+    Handles the format visible in prod screenshots, e.g.
+      '#saas #startups #vc | Dirk Sahlmer | 17 comments , you agree …'
+      'Technation Scale Up Playbook | Neil Griffin , you agree to …'
+    """
+    if not content:
+        return ""
+    match = _CONTENT_NAME_RE.search(content)
+    if not match:
+        return ""
+    name = re.sub(r"[^\w\s\'-]", "", match.group(1)).strip()
+    return name if 1 < len(name) < 60 else ""
+
+
+def _extract_company_from_content(content: str) -> str:
+    """Best-effort company extraction from a post body."""
+    if not content:
+        return ""
+    for pattern in _CONTENT_COMPANY_RES:
+        m = pattern.search(content)
+        if m:
+            candidate = m.group(1).strip().rstrip(".,;:|")
+            # Filter generic words that aren't companies
+            if candidate.lower() in {"linkedin", "google", "home", "the", "a"}:
+                continue
+            if 2 < len(candidate) < 50:
+                return candidate
+    return ""
+
+
+def _humanize_username(post_url: str) -> str:
+    """Fallback: turn a LinkedIn post-url slug into a plausible display name.
+
+    'linkedin.com/posts/dirk-sahlmer_activity-…'  →  'Dirk Sahlmer'
+    Used only when title + content parsers both came up empty; marks the
+    card as something-instead-of-Unknown even for low-signal scrapes.
+    """
+    match = re.search(r"linkedin\.com/posts/([a-zA-Z0-9_-]+)", post_url or "")
+    if not match:
+        return ""
+    slug = match.group(1).split("_", 1)[0]   # drop activity suffix
+    if not slug or len(slug) > 80:
+        return ""
+    # Strip trailing numeric IDs like '-1a2b3c' LinkedIn sometimes appends
+    slug = re.sub(r"-[a-f0-9]{4,}$", "", slug)
+    parts = [p for p in re.split(r"[-\.]+", slug) if p]
+    if not parts:
+        return ""
+    humanized = " ".join(p.capitalize() for p in parts if not p.isdigit())
+    return humanized if 1 < len(humanized) < 80 else ""
+
+
+# BrightData has shipped post-media under at least four different keys
+# depending on account + product version.  We collect from all of them
+# and dedupe.
+_IMAGE_FIELDS = ("images", "image_urls", "media", "thumbnails", "photos")
+_SINGLE_IMAGE_FIELDS = ("image", "image_url", "thumbnail", "og_image")
+
+
+def _extract_post_images(item: Dict[str, Any]) -> List[str]:
+    """Return an ordered, deduped list of post image URLs from a result."""
+    urls: List[str] = []
+    seen: set = set()
+
+    def _add(value: Any) -> None:
+        if not value:
+            return
+        if isinstance(value, str):
+            if value.startswith(("http://", "https://")) and value not in seen:
+                seen.add(value)
+                urls.append(value)
+        elif isinstance(value, dict):
+            _add(value.get("url") or value.get("src") or value.get("href"))
+        elif isinstance(value, list):
+            for v in value:
+                _add(v)
+
+    for key in _SINGLE_IMAGE_FIELDS:
+        _add(item.get(key))
+    for key in _IMAGE_FIELDS:
+        _add(item.get(key))
+
+    # Sometimes BrightData nests media inside a `raw` sub-object
+    raw = item.get("raw") or item.get("metadata") or {}
+    if isinstance(raw, dict):
+        for key in _SINGLE_IMAGE_FIELDS + _IMAGE_FIELDS:
+            _add(raw.get(key))
+
+    # Filter out LinkedIn's static/UI assets — we only want content media
+    return [
+        u for u in urls
+        if "static.licdn.com" not in u
+        and "static-exp" not in u
+        and "/emoji/" not in u
+    ][:5]  # cap to 5 — the frontend only renders a small carousel
+
+
+def _extract_profile_picture(item: Dict[str, Any]) -> str:
+    """Return the post author's LinkedIn profile picture URL, if present."""
+    for key in ("profile_picture", "profile_pic_url", "author_image", "author_picture", "avatar", "author_avatar"):
+        value = item.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+        if isinstance(value, dict):
+            url = value.get("url") or value.get("src")
+            if url:
+                return url
+
+    # Nested under author/profile objects
+    for parent_key in ("author", "profile", "user"):
+        parent = item.get(parent_key)
+        if isinstance(parent, dict):
+            for inner_key in ("picture", "profile_picture", "image", "avatar"):
+                v = parent.get(inner_key)
+                if isinstance(v, str) and v.startswith(("http://", "https://")):
+                    return v
+                if isinstance(v, dict):
+                    url = v.get("url") or v.get("src")
+                    if url:
+                        return url
+    return ""

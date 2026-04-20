@@ -1220,7 +1220,7 @@ async def chat_with_tools(
         for t in request.tools
     ]
 
-    svc = OpenRouterService()
+    svc = OpenRouterService(user_id=str(current_user.id))
     result = await svc.chat_with_tools(
         system_prompt=system_prompt,
         messages=messages,
@@ -1275,8 +1275,9 @@ async def chat_with_tools_stream(
         for t in request.tools
     ]
 
+    _uid = str(current_user.id)
     async def event_generator():
-        svc = OpenRouterService()
+        svc = OpenRouterService(user_id=_uid)
         try:
             async for chunk in svc.chat_with_tools_stream(
                 system_prompt=system_prompt,

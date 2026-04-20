@@ -72,6 +72,45 @@ class ByokStatusResponse(BaseModel):
     has_key: bool
 
 
+class OnboardingUpdateRequest(BaseModel):
+    """Partial update for user onboarding state.  All fields optional — only
+    the ones present in the request body get persisted."""
+    step: Optional[int] = None
+    completed: Optional[bool] = None
+    website_url: Optional[str] = None
+    user_role: Optional[str] = None
+    onboarding_data: Optional[dict] = None
+    icp_config: Optional[dict] = None
+
+
+class ICPConfigRequest(BaseModel):
+    """Full ICP configuration payload — replaces the stored config on save."""
+    industries: Optional[list] = None
+    company_sizes: Optional[list] = None
+    geographies: Optional[list] = None
+    job_titles: Optional[list] = None
+    funding_stages: Optional[list] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+
+
+class UpdateWorkspaceRequest(BaseModel):
+    name: Optional[str] = None
+    plan: Optional[str] = None
+    billing_email: Optional[str] = None
+
+
+class UpdateNotificationsRequest(BaseModel):
+    email_notifications: Optional[bool] = None
+    slack_notifications: Optional[bool] = None
+    new_leads: Optional[bool] = None
+    campaign_updates: Optional[bool] = None
+    signal_alerts: Optional[bool] = None
+    weekly_report: Optional[bool] = None
+
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
@@ -120,6 +159,12 @@ def user_response(user: User) -> dict:
         "credits": user.credits_balance,
         "plan": user.subscription_tier,
         "is_email_verified": bool(user.is_email_verified),
+        # The frontend's AuthProvider checks onboarding_completed to decide
+        # between dashboard and onboarding-wizard redirects after login.
+        # Omitting these here causes the UI to always think the user hasn't
+        # finished onboarding.  getattr() in case a row pre-dates the columns.
+        "onboarding_completed": bool(getattr(user, "onboarding_completed", False)),
+        "onboarding_step": int(getattr(user, "onboarding_step", None) or 1),
     }
 
 
@@ -170,6 +215,18 @@ async def _verify_google_token(credential: str) -> dict:
 
 
 # ─── Routes ─────────────────────────────────────────────────────────────────
+
+@router.get("/me")
+async def get_me(user: User = Depends(get_current_user)):
+    """Verify the current user's token and return their profile.
+
+    Called by the frontend's AuthProvider on every app mount to rehydrate
+    the session.  Must stay in sync with user_response().  A 404 here
+    makes the frontend interpret it as 'session expired' and wipes
+    localStorage, which looks like a login → logout loop to the user.
+    """
+    return {"user": user_response(user)}
+
 
 @router.post("/register")
 @limiter.limit(RateLimits.AUTH)
@@ -666,3 +723,170 @@ async def disable_byok(
     except Exception as e:
         logger.error(f"BYOK disable error: {e}")
         raise HTTPException(status_code=500, detail="Failed to disable BYOK")
+
+
+# ─── Onboarding / ICP / Settings ────────────────────────────────────────────
+# These were accidentally dropped from the local codebase by a merge but the
+# frontend at prod SHA 066fd6d5 still calls them.  Losing them caused 404s on
+# every settings save and a logout loop on /me checks.  Restoring keeps the
+# frontend contract intact.  Underlying DB columns live on `users` — see
+# app/db/models/user.py for the migration-backed schema.
+
+@router.post("/onboarding/update")
+async def update_onboarding(
+    body: OnboardingUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patch the authenticated user's onboarding progress.
+
+    Every field is optional; only the ones present in the request body get
+    written.  `icp_config` is versioned — we bump the `version` counter and
+    stamp `created_at` / `updated_at` so the frontend can detect staleness
+    without another round-trip.
+    """
+    try:
+        if body.step is not None:
+            user.onboarding_step = body.step
+        if body.completed is not None:
+            user.onboarding_completed = body.completed
+        if body.website_url is not None:
+            user.website_url = body.website_url
+        if body.user_role is not None:
+            user.user_role = body.user_role
+        if body.onboarding_data is not None:
+            user.onboarding_data = body.onboarding_data
+        if body.icp_config is not None:
+            now = datetime.utcnow().isoformat()
+            existing = user.icp_config or {}
+            version = int(existing.get("version") or 0) + 1
+            user.icp_config = {
+                **body.icp_config,
+                "version": version,
+                "created_at": existing.get("created_at", now),
+                "updated_at": now,
+            }
+        db.commit()
+        db.refresh(user)
+        return {"success": True, "user": user_response(user)}
+    except Exception as e:
+        logger.error("Onboarding update error: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update onboarding progress")
+
+
+@router.get("/icp")
+async def get_icp_config(user: User = Depends(get_current_user)):
+    """Return the authenticated user's current ICP configuration."""
+    return {"success": True, "icp_config": user.icp_config or {}}
+
+
+@router.post("/icp/update")
+async def update_icp_config(
+    body: ICPConfigRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Replace the user's ICP configuration.  Unlike /onboarding/update this
+    overwrites the five core ICP lists atomically rather than merging."""
+    try:
+        now = datetime.utcnow().isoformat()
+        existing = user.icp_config or {}
+        version = int(existing.get("version") or 0) + 1
+        user.icp_config = {
+            "industries": body.industries or [],
+            "company_sizes": body.company_sizes or [],
+            "geographies": body.geographies or [],
+            "job_titles": body.job_titles or [],
+            "funding_stages": body.funding_stages or [],
+            "version": version,
+            "created_at": existing.get("created_at", now),
+            "updated_at": now,
+        }
+        db.commit()
+        db.refresh(user)
+        return {"success": True, "version": version, "icp_config": user.icp_config}
+    except Exception as e:
+        logger.error("ICP config update error: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update ICP configuration")
+
+
+@router.post("/update-profile")
+async def update_profile(
+    body: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update basic profile fields on the user row.
+
+    Note: the User ORM column is `full_name`, not `name` — the prod version
+    of this endpoint assigned `current_user.name = request.name` which
+    silently created an attribute on the instance but never persisted to
+    Postgres.  Fixed here to write the right column.
+    """
+    try:
+        if body.name is not None:
+            user.full_name = body.name
+        db.commit()
+        return {"success": True, "message": "Profile updated"}
+    except Exception as e:
+        logger.error("Profile update error: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update profile")
+
+
+@router.post("/update-workspace")
+async def update_workspace(
+    body: UpdateWorkspaceRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update workspace settings — name, plan, billing email."""
+    try:
+        onboarding = user.onboarding_data or {}
+        if body.name is not None:
+            onboarding["org_name"] = body.name
+        if body.plan is not None:
+            onboarding["plan"] = body.plan
+        if body.billing_email is not None:
+            onboarding["billing_email"] = body.billing_email
+        user.onboarding_data = onboarding
+        db.commit()
+        return {"success": True, "message": "Workspace updated"}
+    except Exception as e:
+        logger.error("Workspace update error: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update workspace")
+
+
+@router.post("/update-notifications")
+async def update_notifications(
+    body: UpdateNotificationsRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update notification preferences inside user.integrations.notifications."""
+    try:
+        integrations = user.integrations or {}
+        prefs = dict(integrations.get("notifications") or {})
+        field_map = {
+            "email_notifications": "email",
+            "slack_notifications": "slack",
+            "new_leads": "newLeads",
+            "campaign_updates": "campaigns",
+            "signal_alerts": "signals",
+            "weekly_report": "weeklyReport",
+        }
+        for request_field, pref_key in field_map.items():
+            value = getattr(body, request_field, None)
+            if value is not None:
+                prefs[pref_key] = value
+        integrations["notifications"] = prefs
+        user.integrations = integrations
+        db.commit()
+        return {"success": True, "message": "Notification preferences updated"}
+    except Exception as e:
+        logger.error("Notifications update error: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update notifications")

@@ -35,6 +35,9 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
     fetchSuggestions("").then(setSuggestions)
   }, [])
 
+  // Step 1 state
+  const [name, setName] = useState("")
+
   // Debounced suggestion fetch on name change
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -44,9 +47,6 @@ export function CreateSearchWizard({ onClose, onCreate }: CreateSearchWizardProp
     }, 300)
     return () => clearTimeout(timer)
   }, [name])
-
-  // Step 1 state
-  const [name, setName] = useState("")
   const [source, setSource] = useState<MonitorSource>("linkedin_posts")
 
   // Step 2 state

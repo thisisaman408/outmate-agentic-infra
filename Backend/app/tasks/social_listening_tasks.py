@@ -18,7 +18,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from celery import shared_task
+# We bind tasks to our configured Celery app explicitly via
+# `@celery_app.task(...)` rather than Celery's `@shared_task`.  `shared_task`
+# resolves to a global "current_app" at decoration time, which falls through
+# to a default `Celery()` (amqp://localhost:5672) if our app isn't already
+# imported when this module loads — a race that actually bit us, causing
+# `run_social_search.delay()` from FastAPI to throw ConnectionRefusedError.
+# Direct binding removes the import-order magic entirely.
+from app.core.celery_app import celery_app
 
 from app.db.deps import SessionLocal
 from app.db.models.watcher import Watcher
@@ -35,7 +42,7 @@ SCHEDULE_TO_INTERVAL = {
 }
 
 
-@shared_task(name="app.tasks.social_listening_tasks.poll_due_social_searches")
+@celery_app.task(name="app.tasks.social_listening_tasks.poll_due_social_searches")
 def poll_due_social_searches() -> Dict[str, Any]:
     """Run discovery for every active social_listening watcher that's due.
 
@@ -104,7 +111,7 @@ def poll_due_social_searches() -> Dict[str, Any]:
     return summary
 
 
-@shared_task(
+@celery_app.task(
     name="app.tasks.social_listening_tasks.run_social_search",
     bind=True,
 )

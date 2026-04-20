@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -24,6 +24,21 @@ class User(Base):
     google_calendar_channel_id = Column(Text, nullable=True)
     google_calendar_resource_id = Column(Text, nullable=True)
     google_calendar_webhook_expiry = Column(DateTime(timezone=True), nullable=True)
+
+    # Onboarding + settings state.  Restored 2026-04-18 after a merge accidentally
+    # dropped these from the ORM — the columns still exist in the Supabase
+    # schema (see alembic history) and the `/api/v1/auth/{me,onboarding,icp,
+    # update-*}` endpoints in auth.py rely on them.  Removing the ORM fields
+    # without removing the endpoints caused prod auth to 404 and kick users
+    # into a logout loop.
+    onboarding_completed = Column(Boolean, default=False)
+    onboarding_step = Column(Integer, default=1)
+    website_url = Column(String(500))
+    user_role = Column(String(100))
+    onboarding_data = Column(JSONB, default={})   # flexible extra onboarding blob
+    icp_config = Column(JSONB, default={})        # versioned ICP configuration
+    integrations = Column(JSONB, default={})      # Slack / HubSpot / Salesforce status + tokens
+
     # HubSpot tokens stored in user_integrations table (not here)
     # to avoid Supabase ALTER TABLE timeout issues.
     # BYOK (Bring Your Own Key) for AI services

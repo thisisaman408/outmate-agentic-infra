@@ -254,12 +254,36 @@ class SocialListeningService:
 
         if existing:
             signal = existing
-            # Back-fill taxonomy on existing signals that were ingested before
-            # the classifier was added.
             raw = dict(signal.raw_data or {})
             if "taxonomy" not in raw:
                 raw["taxonomy"] = taxonomy
-                signal.raw_data = raw
+
+            # Back-fill identity fields when the original scrape came up
+            # empty and a later run discovered a richer value.  Without
+            # this, rows ingested before the name/company extractors were
+            # strengthened stay "Unknown" forever.  Only WRITE when the
+            # existing value is empty — never clobber a richer value with
+            # a weaker re-scrape.
+            lead_name = (lead.get("name") or "").strip()
+            if lead_name and not (signal.prospect_name or "").strip():
+                signal.prospect_name = lead_name
+            lead_company = (lead.get("company") or "").strip()
+            if lead_company and not (signal.company_name or "").strip():
+                signal.company_name = lead_company
+            lead_title = (lead.get("title") or "").strip()
+            if lead_title and not (signal.prospect_title or "").strip():
+                signal.prospect_title = lead_title
+
+            # Refresh scrape-captured media/snippet when the new pass has
+            # something and the old row didn't.
+            if lead.get("post_snippet") and not raw.get("post_snippet"):
+                raw["post_snippet"] = lead["post_snippet"]
+            if lead.get("post_images") and not raw.get("post_images"):
+                raw["post_images"] = lead["post_images"]
+            if lead.get("profile_picture_url") and not raw.get("profile_picture_url"):
+                raw["profile_picture_url"] = lead["profile_picture_url"]
+
+            signal.raw_data = raw
         else:
             raw_data = {
                 "linkedin": linkedin,
@@ -273,6 +297,12 @@ class SocialListeningService:
                 "tone": lead.get("tone") or "",
                 "email_unverified": lead.get("email_unverified") or False,
                 "taxonomy": taxonomy,
+                # Media — BrightData + other sources may surface these;
+                # stored so the SignalResponse can render the post
+                # thumbnails and the author's profile picture without
+                # an extra scrape.
+                "post_images": lead.get("post_images") or [],
+                "profile_picture_url": lead.get("profile_picture_url") or "",
             }
             # Use the classified signal name (e.g. "champion_job_change")
             # instead of the generic "social_post" constant.  The column is

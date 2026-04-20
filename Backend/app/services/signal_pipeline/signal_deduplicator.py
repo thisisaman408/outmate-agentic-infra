@@ -20,12 +20,33 @@ DEDUP_WINDOW_SECONDS = 24 * 3600
 
 
 class SignalDeduplicator:
-    """Check and enforce 24-hour signal dedup window."""
+    """Check and enforce 24-hour signal dedup window.
+
+    Uses a loop-local async Redis client — see
+    RedisManager.new_loop_local_client for why the singleton breaks
+    inside Celery tasks that spawn fresh event loops per call.
+    """
 
     def __init__(self):
-        self.redis = RedisManager.client
+        try:
+            self.redis = RedisManager.new_loop_local_client()
+            self._owns_client = True
+        except Exception as exc:
+            logger.warning("SignalDeduplicator couldn't open its own Redis "
+                           "client (%s); falling back to singleton", exc)
+            self.redis = RedisManager.client
+            self._owns_client = False
         if not self.redis:
             logger.warning("Redis not available for SignalDeduplicator")
+
+    async def aclose(self) -> None:
+        """Release the loop-local TCP connection.  Safe to call twice."""
+        if self._owns_client and self.redis is not None:
+            try:
+                await self.redis.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("SignalDeduplicator close failed (non-fatal): %s", exc)
+            self.redis = None
 
     async def should_suppress(
         self,

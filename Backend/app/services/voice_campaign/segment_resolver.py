@@ -16,7 +16,7 @@ Params schema (`source_params`):
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -27,7 +27,22 @@ from app.db.models.signal_watcher_match import SignalWatcherMatch
 
 
 def _base_query(db: Session, user_id: UUID, params: Dict[str, Any]):
-    """Shared filter — signals joined to prospects, scoped to the user."""
+    """Shared filter — signals scoped to the user, LEFT-joined to prospects.
+
+    History note (2026-04):  Originally this INNER-joined ``prospects`` on
+    ``SignalEvent.prospect_id``.  That silently dropped every signal whose
+    pipeline hadn't resolved a specific person yet — which is most of them
+    for signal types like "funding" or "hiring" that fire at company level.
+    For a tenant with 141 matched signals and 0 prospect_ids populated,
+    the old query returned zero rows, making Hot Signals campaigns
+    impossible to launch.
+
+    Current behaviour: outer-join, so signals without a resolved prospect
+    still come through.  Callers fall back to the signal's inline
+    ``prospect_name``/``prospect_email``/``prospect_title`` columns and
+    flag the row ``needs_enrichment=True`` so the Celery enrichment pass
+    tries to find a phone number before dialling.
+    """
     min_intent = int(params.get("min_intent", 70))
     days = int(params.get("days", 7))
     signal_types = params.get("signal_types") or []
@@ -36,7 +51,7 @@ def _base_query(db: Session, user_id: UUID, params: Dict[str, Any]):
     q = (
         db.query(SignalEvent, Prospect)
         .join(SignalWatcherMatch, SignalWatcherMatch.signal_id == SignalEvent.id)
-        .join(Prospect, Prospect.id == SignalEvent.prospect_id)
+        .outerjoin(Prospect, Prospect.id == SignalEvent.prospect_id)
         .filter(SignalWatcherMatch.user_id == user_id)
         .filter(SignalEvent.is_archived == False)  # noqa: E712
         .filter(SignalEvent.discovered_at >= since)
@@ -46,6 +61,61 @@ def _base_query(db: Session, user_id: UUID, params: Dict[str, Any]):
     if signal_types:
         q = q.filter(SignalEvent.signal_type.in_(signal_types))
     return q.order_by(SignalEvent.icp_score.desc(), SignalEvent.discovered_at.desc())
+
+
+def _dedup_key(signal: SignalEvent, prospect: Optional[Prospect]) -> Optional[str]:
+    """Stable identity for de-duplication across multiple signals.
+
+    Preference order — use the most specific identifier we have:
+      1. Prospect.id               (best — real identity)
+      2. prospect_email            (very likely unique per person)
+      3. (prospect_name, company)  (weak but better than losing rows)
+    Returns None for rows with zero identifying info — caller should skip.
+    """
+    if prospect is not None:
+        return f"pid:{prospect.id}"
+    email = (signal.prospect_email or "").strip().lower()
+    if email:
+        return f"email:{email}"
+    name = (signal.prospect_name or "").strip().lower()
+    company = (signal.company_name or signal.company_domain or "").strip().lower()
+    if name and company:
+        return f"namecompany:{name}|{company}"
+    if name:
+        return f"name:{name}"
+    return None
+
+
+def _compose_prospect_dict(signal: SignalEvent, prospect: Optional[Prospect]) -> Dict[str, Any]:
+    """Assemble the TriggerCallRequest-shaped dict, preferring Prospect
+    fields and falling back to the signal's inline columns."""
+    if prospect is not None:
+        phone = (prospect.phone or "").strip()
+        name = (
+            prospect.full_name
+            or f"{prospect.first_name or ''} {prospect.last_name or ''}".strip()
+            or signal.prospect_name
+            or "Unknown"
+        )
+        role = prospect.job_title or signal.prospect_title or ""
+        city = prospect.city or ""
+    else:
+        phone = ""  # phantom prospect — no phone on file, enrichment must find one
+        name = signal.prospect_name or "Unknown"
+        role = signal.prospect_title or ""
+        city = ""
+
+    return {
+        "prospect_name": name,
+        "prospect_phone": phone,
+        "prospect_company": signal.company_name or "",
+        "prospect_role": role,
+        "prospect_city": city,
+        "prospect_industry": "",
+        "context": _describe_signal(signal),
+        "needs_enrichment": not phone,
+        "signal_event_id": str(signal.id),
+    }
 
 
 def resolve_hot_signals(
@@ -65,37 +135,32 @@ def resolve_hot_signals(
     The user opts into this wider net via the campaign wizard's "enrich
     first" toggle.  No enrichment happens inside this function — it just
     decides which rows make it into the campaign.
+
+    With the outer-join in `_base_query`, rows where ``prospect`` is None
+    are "phantom prospects" — the signal fired but hasn't been resolved to
+    a specific person yet.  We return them (if opted-in) with empty phone
+    and needs_enrichment=True so the Celery pass tries to find a number.
     """
     max_prospects = int(params.get("max_prospects", 200))
 
-    q = _base_query(db, user_id, params)
-    if not include_without_phone:
-        q = q.filter(Prospect.phone.isnot(None)).filter(Prospect.phone != "")
-    rows = q.limit(max_prospects).all()
+    rows = _base_query(db, user_id, params).limit(max_prospects).all()
 
-    # Dedup by prospect_id (one prospect, one call, however many signals).
-    seen_prospect_ids: set = set()
+    seen_keys: set = set()
     prospects: List[Dict[str, Any]] = []
     for signal, prospect in rows:
-        if prospect.id in seen_prospect_ids:
+        key = _dedup_key(signal, prospect)
+        if not key or key in seen_keys:
             continue
-        seen_prospect_ids.add(prospect.id)
 
-        phone = (prospect.phone or "").strip()
-        needs_enrichment = not phone
-        name = prospect.full_name or f"{prospect.first_name or ''} {prospect.last_name or ''}".strip() or "Unknown"
+        record = _compose_prospect_dict(signal, prospect)
 
-        prospects.append({
-            "prospect_name": name,
-            "prospect_phone": phone,
-            "prospect_company": signal.company_name or "",
-            "prospect_role": prospect.job_title or signal.prospect_title or "",
-            "prospect_city": prospect.city or "",
-            "prospect_industry": "",
-            "context": _describe_signal(signal),
-            "needs_enrichment": needs_enrichment,
-            "signal_event_id": str(signal.id),
-        })
+        # If the user opted out of enrichment, only include rows we can
+        # dial right now (real phone on a real Prospect row).
+        if not include_without_phone and record["needs_enrichment"]:
+            continue
+
+        seen_keys.add(key)
+        prospects.append(record)
     return prospects
 
 
@@ -106,23 +171,25 @@ def count_hot_signals_breakdown(
     sees cost + callability BEFORE committing credits.
 
     Returned keys:
-        - total_matching: every signal passing the filters (de-duped by prospect)
-        - callable_now:   subset whose prospect already has a phone
-        - enrichable:     subset whose prospect is missing a phone
+        - total_matching: every signal passing the filters (de-duped)
+        - callable_now:   subset with a phone already on file
+        - enrichable:     subset with no phone, but enrichable via BetterContact/CrustData
+                          (includes phantom prospects — signals with no prospect_id yet)
     """
-    q = _base_query(db, user_id, params)
-    rows = q.limit(int(params.get("max_prospects", 200))).all()
+    rows = _base_query(db, user_id, params).limit(int(params.get("max_prospects", 200))).all()
 
-    seen_prospect_ids: set = set()
+    seen_keys: set = set()
     total = 0
     callable_now = 0
     enrichable = 0
     for signal, prospect in rows:
-        if prospect.id in seen_prospect_ids:
+        key = _dedup_key(signal, prospect)
+        if not key or key in seen_keys:
             continue
-        seen_prospect_ids.add(prospect.id)
+        seen_keys.add(key)
         total += 1
-        if (prospect.phone or "").strip():
+        phone = (prospect.phone or "").strip() if prospect is not None else ""
+        if phone:
             callable_now += 1
         else:
             enrichable += 1

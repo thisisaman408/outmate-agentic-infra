@@ -181,6 +181,18 @@ async def _process_signal_events():
         logger.error(f"Signal processing task failed: {e}", exc_info=True)
         return {"processed": 0, "suppressed": 0, "errors": 1}
     finally:
+        # Release every loop-local async Redis client this task opened so
+        # we don't leak TCP sockets across Celery task invocations and so
+        # we don't spam "Unclosed client session" warnings on GC.  Each
+        # aclose is best-effort — exceptions here don't matter, the loop
+        # is about to be torn down by asyncio.run() anyway.
+        for closable in (event_bus, deduplicator):
+            try:
+                close_fn = getattr(closable, "aclose", None)
+                if close_fn is not None:
+                    await close_fn()
+            except Exception:  # noqa: BLE001
+                pass
         db.close()
 
 

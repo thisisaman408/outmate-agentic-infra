@@ -66,6 +66,7 @@ from app.api.routes import social_listening
 from app.api.routes import voice_agent
 from app.api.routes import voice_campaigns
 from app.api.routes import company_profile
+from app.api.routes import retell_public
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -356,6 +357,12 @@ logger.info("Voice Campaigns router registered")
 # Company Profile — single source of truth for GTM context across all agents
 app.include_router(company_profile.router)
 logger.info("Company Profile router registered")
+
+# Retell public endpoints — top-level, auth-free routes Retell AI calls into.
+# /retell-webhook (call lifecycle events) and /knowledge-search (custom tool).
+# See Backend/app/api/routes/retell_public.py for the security model.
+app.include_router(retell_public.router)
+logger.info("Retell public router registered (/retell-webhook, /knowledge-search)")
 
 @app.on_event("startup")
 async def startup_event():

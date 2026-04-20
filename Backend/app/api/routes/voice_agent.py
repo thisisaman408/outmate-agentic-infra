@@ -288,6 +288,8 @@ async def get_recent_calls(
             label = "In progress"
         elif run.status == "error":
             label = "Failed"
+        elif run.status == "no_answer":
+            label = "No answer"
         elif run.status == "success":
             booked = False
             leads = run.leads or []
@@ -408,13 +410,16 @@ async def trigger_voice_call(
         "calendar_booking_url": profile_row.calendar_booking_url,
     }
 
-    started_at = time.monotonic()
     result: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
     try:
         if settings.RETELL_API_KEY:
-            result = await _call_via_retell(req, call_script, voice_config, company_profile)
+            # run_id lets the Retell webhook do an O(1) PK match when the
+            # call ends, instead of substring-scanning recent output_text.
+            result = await _call_via_retell(
+                req, call_script, voice_config, company_profile, run_id=str(run.id)
+            )
         else:
             result = await _call_via_agentic_infra(req, call_script)
     except HTTPException:
@@ -422,19 +427,21 @@ async def trigger_voice_call(
     except Exception as exc:
         error_message = str(exc)
 
-    # 3. Finalize the run row.
-    duration_ms = int((time.monotonic() - started_at) * 1000)
-    run.duration_ms = duration_ms
-    run.finished_at = datetime.now(timezone.utc)
-
     if error_message:
+        # Dispatch itself failed — Retell never accepted the call, so the
+        # webhook will never fire to correct this row.  Terminal on our side.
         run.status = "error"
         run.error_message = error_message
+        run.finished_at = datetime.now(timezone.utc)
         db.add(run)
         db.commit()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_message)
 
-    run.status = "success"
+    # Dispatch succeeded — the call is now live.  Keep status="running" and
+    # leave duration_ms / finished_at unset; the Retell webhook will stamp
+    # the real values when the call actually ends.  (Previously this block
+    # set status="success" and duration=HTTP-request-time which is how the
+    # UI ended up showing "success / 0:01" on calls that hadn't finished.)
     run.output_text = json.dumps(result)
     run.leads = [{"call_id": result.get("call_id"), "prospect": req.prospect_name}]
     db.add(run)
@@ -595,6 +602,7 @@ async def _call_via_retell(
     call_script: Optional[Dict] = None,
     voice_config: Optional[Dict] = None,
     company_profile: Optional[Dict] = None,
+    run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create an outbound phone call via the Retell AI API.
 
@@ -636,6 +644,12 @@ async def _call_via_retell(
     my_company_name = (profile.get("company_name") or "").strip() or "our company"
 
     dynamic_vars: Dict[str, Any] = {
+        # Tenant identity — embedded so Retell's custom-tool request body
+        # templates can reference {{run_id}} to tell /knowledge-search which
+        # user's profile to serve.  Retell ONLY templates variables that live
+        # under retell_llm_dynamic_variables; the `metadata` field (below) is
+        # echoed on webhooks but NOT exposed to the in-call prompt/tool layer.
+        "run_id": str(run_id) if run_id else "",
         # About the user's own company (for "who am I selling for?")
         "agent_name": agent_display_name,
         "agent_role": agent_role,
@@ -670,15 +684,22 @@ async def _call_via_retell(
             + f"CLOSING: {call_script.get('closing', '')}"
         ).strip()
 
+    # Metadata is echoed verbatim in every webhook + custom-tool payload, so
+    # put the AgentRun.id here to make webhook matching an O(1) PK lookup
+    # instead of a substring scan over recent runs.
+    call_metadata: Dict[str, Any] = {
+        "prospect_name": req.prospect_name,
+        "company": req.prospect_company,
+        "objective": req.call_objective,
+    }
+    if run_id:
+        call_metadata["run_id"] = str(run_id)
+
     payload: Dict[str, Any] = {
         "agent_id": settings.RETELL_AGENT_ID,
         "to_number": req.prospect_phone,
         "retell_llm_dynamic_variables": dynamic_vars,
-        "metadata": {
-            "prospect_name": req.prospect_name,
-            "company": req.prospect_company,
-            "objective": req.call_objective,
-        },
+        "metadata": call_metadata,
     }
     if settings.RETELL_FROM_NUMBER:
         payload["from_number"] = settings.RETELL_FROM_NUMBER
@@ -852,38 +873,126 @@ async def get_voice_analytics(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Detailed analytics for voice agent — breakdown by day, outcomes, credits."""
-    from sqlalchemy import func as sqlfunc, cast, Date
-    from datetime import date, timedelta
+    """Detailed voice-agent analytics.
+
+    Backs the "Voice Agent Analytics" modal.  Goal: give a GTM user enough
+    signal to answer three questions in one glance:
+      (a) Is the dialer actually reaching people? → connect_rate + no_answer
+      (b) Are calls productive?                   → booked + avg connected dur
+      (c) What's blocking conversion?             → top objections/competitors
+
+    All aggregates are per-user and scoped to agent_type='voice-agent'.
+    Returned keys are stable; add-only — never rename existing keys without
+    the frontend following in the same PR.
+    """
+    from collections import Counter
+    from datetime import timedelta
+    from sqlalchemy import Date, cast, func as sqlfunc
 
     uid = user.id
 
-    # Total calls + outcomes
-    total = db.query(sqlfunc.count(AgentRun.id)).filter(
-        AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent"
-    ).scalar() or 0
+    base = db.query(AgentRun).filter(
+        AgentRun.user_id == uid,
+        AgentRun.agent_type == "voice-agent",
+    )
 
-    success = db.query(sqlfunc.count(AgentRun.id)).filter(
-        AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent", AgentRun.status == "success"
-    ).scalar() or 0
+    # ------------------------------------------------------------------
+    # Headline counters
+    # ------------------------------------------------------------------
+    total = base.count()
+    n_success = base.filter(AgentRun.status == "success").count()
+    n_error = base.filter(AgentRun.status == "error").count()
+    n_no_answer = base.filter(AgentRun.status == "no_answer").count()
+    n_running = base.filter(AgentRun.status == "running").count()
+    # "success" collapses completed + booked; we split it below using the
+    # leads JSON so the UI can show "Booked" separately from "Completed".
 
-    errors = db.query(sqlfunc.count(AgentRun.id)).filter(
-        AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent", AgentRun.status == "error"
-    ).scalar() or 0
-
-    # Credits spent
     total_credits = db.query(sqlfunc.sum(AgentRun.cost_credits)).filter(
         AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent"
     ).scalar() or 0
 
-    # Avg duration
-    avg_ms = db.query(sqlfunc.avg(AgentRun.duration_ms)).filter(
-        AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent",
+    # Average duration across *all* rows — legacy key, kept for back-compat.
+    avg_ms_all = db.query(sqlfunc.avg(AgentRun.duration_ms)).filter(
+        AgentRun.user_id == uid,
+        AgentRun.agent_type == "voice-agent",
         AgentRun.duration_ms.isnot(None),
     ).scalar()
-    avg_dur_secs = round((avg_ms or 0) / 1000, 1)
+    avg_dur_secs = round((avg_ms_all or 0) / 1000, 1)
 
-    # Calls per day (last 7 days)
+    # Average duration only across *connected* calls — much more useful for
+    # conversation-quality tracking since no_answers drag the overall avg to 0.
+    connected_durs = [
+        r.duration_ms for r in base.filter(
+            AgentRun.status == "success",
+            AgentRun.duration_ms.isnot(None),
+            AgentRun.duration_ms > 0,
+        ).all()
+    ]
+    avg_connected_secs = round(sum(connected_durs) / len(connected_durs) / 1000, 1) if connected_durs else 0.0
+    total_talk_secs = round(sum(connected_durs) / 1000, 1) if connected_durs else 0.0
+
+    # ------------------------------------------------------------------
+    # Per-row scan for things that can't be aggregated in SQL:
+    #   - disconnection_reason breakdown   (stored inside output_text JSON)
+    #   - booked vs completed split         (stored inside leads[0].extracted)
+    #   - top pain points / objections / competitors
+    # We cap at the most recent 500 runs so a giant tenant doesn't blow
+    # the endpoint's latency budget.
+    # ------------------------------------------------------------------
+    recent = base.order_by(AgentRun.created_at.desc()).limit(500).all()
+
+    disconnect_counter: Counter = Counter()
+    pain_counter: Counter = Counter()
+    objection_counter: Counter = Counter()
+    competitor_counter: Counter = Counter()
+    next_step_counter: Counter = Counter()
+    booked = 0
+    completed = 0
+    hour_buckets: List[int] = [0] * 24
+
+    booking_keywords = ("book", "schedule", "demo", "meeting", "follow up", "follow-up", "call back")
+
+    for r in recent:
+        # Hour-of-day histogram (UTC — the UI labels it as such)
+        if r.created_at:
+            hour_buckets[r.created_at.hour] += 1
+
+        # Parse the webhook-written JSON; skip silently on malformed rows
+        try:
+            payload = json.loads(r.output_text) if r.output_text else {}
+        except (TypeError, ValueError):
+            payload = {}
+
+        dr = (payload.get("disconnection_reason") or "").strip().lower()
+        if dr:
+            disconnect_counter[dr] += 1
+
+        ev = payload.get("extracted_variables") or {}
+        for field, counter in (
+            ("pain_points", pain_counter),
+            ("objections", objection_counter),
+            ("competitor_mentioned", competitor_counter),
+            ("next_steps", next_step_counter),
+        ):
+            v = (ev.get(field) or "").strip()
+            if v:
+                counter[v[:120]] += 1  # truncate long free-text so the top-N is stable
+
+        # Booked vs completed split — only meaningful for already-successful
+        # rows; mirrors the derivation in get_recent_calls to stay consistent.
+        if r.status == "success":
+            leads = r.leads or []
+            next_steps_txt = ""
+            if leads and isinstance(leads[0], dict):
+                next_steps_txt = ((leads[0].get("extracted") or {}).get("next_steps") or "").lower()
+            if next_steps_txt and any(k in next_steps_txt for k in booking_keywords):
+                booked += 1
+            else:
+                completed += 1
+
+    # ------------------------------------------------------------------
+    # Calls-per-day (last 7 days) — kept from v1 because the chart uses it.
+    # ------------------------------------------------------------------
     seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
     daily_rows = (
         db.query(
@@ -901,29 +1010,62 @@ async def get_voice_analytics(
     )
     daily = [{"date": str(r.day), "calls": r.count} for r in daily_rows]
 
-    # Top companies called
-    top_companies: List[Dict[str, Any]] = []
-    runs = db.query(AgentRun).filter(
-        AgentRun.user_id == uid, AgentRun.agent_type == "voice-agent"
-    ).order_by(AgentRun.created_at.desc()).limit(100).all()
-
+    # ------------------------------------------------------------------
+    # Top companies called — same as v1, based on prospect_company input.
+    # ------------------------------------------------------------------
     company_counts: Dict[str, int] = {}
-    for r in runs:
-        co = (r.input or {}).get("prospect_company", "")
+    for r in recent:
+        co = ((r.input or {}).get("prospect_company") or "").strip()
         if co:
             company_counts[co] = company_counts.get(co, 0) + 1
-    for co, cnt in sorted(company_counts.items(), key=lambda x: -x[1])[:10]:
-        top_companies.append({"company": co, "calls": cnt})
+    top_companies = [
+        {"company": co, "calls": cnt}
+        for co, cnt in sorted(company_counts.items(), key=lambda x: -x[1])[:10]
+    ]
+
+    # ------------------------------------------------------------------
+    # Derived rates.  Guard against div-by-zero on brand-new tenants.
+    # ------------------------------------------------------------------
+    denom = total or 1
+    connect_rate = round((n_success / denom) * 100, 1) if total else 0.0
+    booking_rate = round((booked / denom) * 100, 1) if total else 0.0
+    no_answer_rate = round((n_no_answer / denom) * 100, 1) if total else 0.0
+
+    def _top(counter: Counter, n: int) -> List[Dict[str, Any]]:
+        return [{"label": label, "count": count} for label, count in counter.most_common(n)]
 
     return {
+        # Back-compat keys (old UI still reads these)
         "total_calls": total,
-        "successful": success,
-        "failed": errors,
-        "booking_rate": round(success / total * 100, 1) if total > 0 else 0,
+        "successful": n_success,
+        "failed": n_error,
+        "booking_rate": booking_rate,
         "total_credits_spent": total_credits,
         "avg_duration_seconds": avg_dur_secs,
         "daily_calls": daily,
         "top_companies": top_companies,
+
+        # Richer breakdown — new UI surfaces these.
+        "outcomes": {
+            "booked": booked,
+            "completed": completed,
+            "no_answer": n_no_answer,
+            "failed": n_error,
+            "in_progress": n_running,
+        },
+        "connect_rate": connect_rate,          # % of dials that became conversations
+        "no_answer_rate": no_answer_rate,      # % declined/unanswered by the other side
+        "avg_connected_duration_seconds": avg_connected_secs,
+        "total_talk_time_seconds": total_talk_secs,
+        "disconnection_breakdown": [
+            {"reason": reason, "count": cnt}
+            for reason, cnt in disconnect_counter.most_common(8)
+        ],
+        "top_pain_points": _top(pain_counter, 5),
+        "top_objections": _top(objection_counter, 5),
+        "top_competitors": _top(competitor_counter, 5),
+        "top_next_steps": _top(next_step_counter, 5),
+        "hour_of_day_utc": hour_buckets,       # 24 ints — UTC, UI can convert
     }
 
 
@@ -953,125 +1095,52 @@ async def ai_rewrite_script(
 
 
 # ---------------------------------------------------------------------------
-# Retell Webhook — receives call status updates (public, no auth)
+# Retell Webhook has moved to app/api/routes/retell_public.py where it lives
+# at the top-level /retell-webhook path (no /api/v1/voice-agent prefix).
+# This keeps the URL Retell needs to POST to stable and easy to register on
+# their dashboard, and removes the need for auth on a callback Retell has no
+# way to sign.
 # ---------------------------------------------------------------------------
 
-@router.post("/retell-webhook")
-async def retell_webhook(payload: Dict[str, Any]):
-    """Receive post-call data from Retell AI.
 
-    Retell sends call_id, call_status, transcript, and the variables
-    extracted during the call by the "Extract Variables" node:
-      name, pain_points, current_tools, budget_mentioned, decision_maker,
-      next_steps, objections, competitor_mentioned, timeline, key_quotes
+def _derived_call_label(run: AgentRun) -> str:
+    """Translate the raw DB status into what the UI should actually show.
 
-    We persist all of this on the matching AgentRun row.
+    Why this function exists:
+      - run.status="running" right after dispatch means "call is live",
+        not "we are processing something" — UI should say "In progress".
+      - run.status="success" can mean either "call completed + meeting
+        booked" or "call completed, no booking".  Only the first deserves
+        a green "Booked" badge; the second should read "Completed".
+      - A stale "running" beyond 5 minutes is the Retell webhook never
+        firing — we flag that explicitly so the user knows to check their
+        webhook configuration instead of assuming the call is ongoing.
     """
-    from app.db.session import SessionLocal
-
-    event = payload.get("event", "")
-    call_data = payload.get("call", payload)
-    call_id = call_data.get("call_id", "")
-    call_status = call_data.get("call_status", "")
-    transcript = call_data.get("transcript", "")
-    call_analysis = call_data.get("call_analysis", {})
-    # Retell puts extracted variables here after the conversation flow
-    extracted_vars = call_data.get("variables", {}) or call_data.get("custom_analysis_data", {})
-    disconnection_reason = call_data.get("disconnection_reason", "")
-
-    logger.info(
-        f"Retell webhook: event={event} call_id={call_id} "
-        f"status={call_status} disconnect={disconnection_reason}"
-    )
-
-    if not call_id:
-        return {"ok": True}
-
-    db = SessionLocal()
-    try:
-        runs = (
-            db.query(AgentRun)
-            .filter(AgentRun.agent_type == "voice-agent")
-            .order_by(AgentRun.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        matched_run = None
-        for r in runs:
-            if r.output_text and call_id in r.output_text:
-                matched_run = r
-                break
-
-        if matched_run:
-            # Determine final status
-            if call_status in ("ended", "transferred"):
-                # Check if a meeting was booked (next_steps mentions a meeting)
-                next_steps = extracted_vars.get("next_steps", "")
-                if next_steps and any(
-                    kw in next_steps.lower()
-                    for kw in ["book", "schedule", "demo", "meeting", "call back", "follow up"]
-                ):
-                    matched_run.status = "success"
-                else:
-                    matched_run.status = "success"
-            elif call_status in ("error", "failed"):
-                matched_run.status = "error"
-                matched_run.error_message = disconnection_reason or "Call failed"
-
-            # Calculate real duration from Retell timestamps
-            start_ts = call_data.get("start_timestamp", 0)
-            end_ts = call_data.get("end_timestamp", 0)
-            real_duration_ms = 0
-            if start_ts and end_ts:
-                real_duration_ms = int(end_ts - start_ts)
-                matched_run.duration_ms = real_duration_ms
-
-            # Build comprehensive result with extracted conversation variables
-            result_data = json.loads(matched_run.output_text) if matched_run.output_text else {}
-            result_data["call_status_final"] = call_status
-            result_data["disconnection_reason"] = disconnection_reason
-            result_data["duration_ms"] = real_duration_ms
-            result_data["transcript"] = transcript
-            result_data["call_analysis"] = call_analysis
-
-            # Store the extracted variables from the conversation flow
-            result_data["extracted_variables"] = {
-                "name": extracted_vars.get("name", ""),
-                "pain_points": extracted_vars.get("pain_points", ""),
-                "current_tools": extracted_vars.get("current_tools", ""),
-                "budget_mentioned": extracted_vars.get("budget_mentioned", ""),
-                "decision_maker": extracted_vars.get("decision_maker", ""),
-                "next_steps": extracted_vars.get("next_steps", ""),
-                "objections": extracted_vars.get("objections", ""),
-                "competitor_mentioned": extracted_vars.get("competitor_mentioned", ""),
-                "timeline": extracted_vars.get("timeline", ""),
-                "key_quotes": extracted_vars.get("key_quotes", ""),
-            }
-
-            matched_run.output_text = json.dumps(result_data)
-
-            # Also store extracted variables as structured leads data
-            existing_leads = matched_run.leads or []
-            if existing_leads:
-                existing_leads[0]["extracted"] = result_data["extracted_variables"]
-                existing_leads[0]["transcript_preview"] = transcript[:500] if transcript else ""
-                matched_run.leads = existing_leads
-
-            db.commit()
-            logger.info(
-                f"Retell webhook: updated AgentRun {matched_run.id} — "
-                f"status={call_status}, duration={real_duration_ms}ms, "
-                f"pain_points={extracted_vars.get('pain_points', 'none')}"
-            )
-        else:
-            logger.warning(f"Retell webhook: no matching AgentRun for call_id={call_id}")
-    except Exception as e:
-        logger.error(f"Retell webhook processing error: {e}", exc_info=True)
-        db.rollback()
-    finally:
-        db.close()
-
-    return {"ok": True}
+    if run.status == "error":
+        return "Failed"
+    if run.status == "no_answer":
+        # "No answer" covers: dial_no_answer, user_declined, dial_busy,
+        # machine_detected, voicemail_reached, session_status=not_connected.
+        # Retell's exact sub-reason is in run.error_message for the tooltip.
+        return "No answer"
+    if run.status == "running":
+        # Mirror the 5-minute staleness rule from get_recent_calls().
+        if run.created_at:
+            age = datetime.now(timezone.utc) - run.created_at
+            if age.total_seconds() > 5 * 60:
+                return "Timed out (no webhook)"
+        return "In progress"
+    if run.status == "success":
+        leads = run.leads or []
+        if leads and isinstance(leads[0], dict):
+            extracted = (leads[0].get("extracted") or {})
+            next_steps = (extracted.get("next_steps") or "").lower()
+            if next_steps and any(
+                kw in next_steps for kw in ("book", "schedule", "demo", "meeting", "follow up", "follow-up")
+            ):
+                return "Booked"
+        return "Completed"
+    return run.status or "Unknown"
 
 
 @router.get("/call-details/{run_id}")
@@ -1096,9 +1165,13 @@ async def get_call_details(
     mins = dur_ms // 60000
     secs = (dur_ms % 60000) // 1000
 
+    # Raw status is preserved on `raw_status` for debugging; the UI should
+    # read `status` (the derived human label) so it stops surfacing "success"
+    # for calls that are still mid-dial or that completed without booking.
     return {
         "id": str(run.id),
-        "status": run.status,
+        "status": _derived_call_label(run),
+        "raw_status": run.status,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "duration": f"{mins}:{secs:02d}",
         "duration_ms": dur_ms,
@@ -1116,5 +1189,6 @@ async def get_call_details(
         "extracted_variables": result_data.get("extracted_variables", {}),
         "call_analysis": result_data.get("call_analysis", {}),
         "disconnection_reason": result_data.get("disconnection_reason", ""),
+        "error_message": run.error_message or "",
         "credits_used": run.cost_credits or 0,
     }

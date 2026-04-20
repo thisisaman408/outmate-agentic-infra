@@ -28,6 +28,7 @@ import {
   Sparkles,
   Cpu,
   ExternalLink,
+  Phone,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
@@ -86,6 +87,7 @@ const navItems: NavItem[] = [
   { name: "Co-Pilot", href: "/copilot", icon: Sparkles },
   { name: "AI Agents", href: "/ai-agents", icon: Bot },
   { name: "Social Agent", href: "/social-agent", icon: Radar, badge: "New" },
+  { name: "Voice AI Agent", href: "/voice-agent", icon: Phone, badge: "AI" },
   // Only render the canvas link when a URL is configured (dev only by default).
   ...(AGENTIC_INFRA_URL
     ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]

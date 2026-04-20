@@ -31,10 +31,28 @@ async def search_linkedin_posts(
 
     query = " ".join(keywords)
 
+    # Map our freshness window to the Apify actor's datePosted enum.
+    # The `curious_coder~linkedin-post-search-scraper` actor (and most
+    # LinkedIn search actors) accept LinkedIn's native filter values;
+    # anything unrecognised makes the actor return all posts regardless
+    # of age — which is exactly the bug we hit.
+    _DATE_FILTER = {
+        "hour": "past-24h",
+        "day": "past-24h",
+        "week": "past-week",
+        "month": "past-month",
+        "year": "past-year",
+        "all": "past-year",  # hard cap at a year even when caller says "all"
+    }
+    date_posted = _DATE_FILTER.get((time_frame or "week").lower(), "past-week")
+
     input_data = {
         "searchTerms": [query],
         "maxResults": max_results,
         "sortBy": "date_posted",
+        # Multiple key names in case the actor's schema differs between versions
+        "datePosted": date_posted,
+        "dateFilter": date_posted,
     }
 
     try:
@@ -87,15 +105,54 @@ async def search_linkedin_posts(
 
     results: List[Dict[str, Any]] = []
     for item in (items if isinstance(items, list) else []):
-        name = item.get("authorName") or item.get("author", {}).get("name", "") or ""
+        author = item.get("author") if isinstance(item.get("author"), dict) else {}
+        name = item.get("authorName") or author.get("name") or ""
+
+        # Author DP — different Apify LinkedIn actors name this differently,
+        # so check every common variant plus the nested author object.
+        profile_pic = (
+            item.get("authorAvatar")
+            or item.get("authorProfilePicture")
+            or item.get("authorProfilePictureUrl")
+            or item.get("authorImage")
+            or author.get("avatar")
+            or author.get("profilePicture")
+            or author.get("picture")
+            or ""
+        )
+
+        # Post images — actors that scrape post bodies return a list under
+        # keys like `images`, `media`, `attachments`, or a single
+        # `imageUrl`.  Normalise everything to a List[str] of absolute URLs.
+        post_images: List[str] = []
+        for key in ("images", "media", "attachments", "post_images"):
+            value = item.get(key)
+            if isinstance(value, list):
+                for v in value:
+                    if isinstance(v, str) and v.startswith("http"):
+                        post_images.append(v)
+                    elif isinstance(v, dict):
+                        url = v.get("url") or v.get("src") or v.get("href")
+                        if url and url.startswith("http"):
+                            post_images.append(url)
+        for key in ("imageUrl", "image_url", "thumbnail", "image"):
+            value = item.get(key)
+            if isinstance(value, str) and value.startswith("http"):
+                post_images.append(value)
+        # Dedup preserving order, cap at 5
+        seen: set = set()
+        post_images = [u for u in post_images if not (u in seen or seen.add(u))][:5]
+
         results.append({
             "source": "apify_linkedin",
             "name": name,
-            "title": item.get("authorHeadline") or item.get("author", {}).get("headline", "") or "",
+            "title": item.get("authorHeadline") or author.get("headline", "") or "",
             "company": item.get("authorCompany") or "",
             "linkedin": item.get("authorProfileUrl") or item.get("authorUrl") or "",
             "post_url": item.get("url") or item.get("postUrl") or "",
             "post_snippet": (item.get("text") or item.get("content") or "")[:500],
+            "post_images": post_images,
+            "profile_picture_url": profile_pic,
             "email": "",
             "likes": item.get("likesCount", 0) or 0,
             "comments_count": item.get("commentsCount", 0) or 0,

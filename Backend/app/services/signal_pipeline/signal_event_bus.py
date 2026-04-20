@@ -108,12 +108,44 @@ class EnrichedSignal:
 
 
 class SignalEventBus:
-    """Redis Streams orchestrator for signal events."""
+    """Redis Streams orchestrator for signal events.
+
+    Why we don't just reuse RedisManager.client:
+      redis.asyncio clients are bound to the event loop they were created
+      on.  Our singleton client is created under FastAPI's uvicorn loop,
+      but Celery tasks call this class inside `asyncio.run(...)` which
+      creates a fresh loop per task.  Reusing the singleton raises
+      `Event loop is closed` on the first await.  Solution: open a
+      throwaway client bound to the current loop.  Cheap — one TCP
+      connection that lives for the ~100ms duration of the task.
+    """
 
     def __init__(self):
-        self.redis = RedisManager.client
+        # Fresh loop-local client — see RedisManager.new_loop_local_client
+        # for why reusing the singleton across asyncio.run() loops fails.
+        try:
+            self.redis = RedisManager.new_loop_local_client()
+            self._owns_client = True
+        except Exception as exc:
+            logger.warning("SignalEventBus couldn't open its own Redis client (%s); "
+                           "falling back to RedisManager singleton", exc)
+            self.redis = RedisManager.client
+            self._owns_client = False
+
         if not self.redis:
             logger.warning("Redis not available for SignalEventBus")
+
+    async def aclose(self) -> None:
+        """Close the loop-local client.  Safe to call multiple times.
+        Invoke at the end of the task to release the TCP connection
+        immediately; otherwise GC handles it but triggers a harmless
+        `Unclosed client session` warning."""
+        if self._owns_client and self.redis is not None:
+            try:
+                await self.redis.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("SignalEventBus close failed (non-fatal): %s", exc)
+            self.redis = None
 
     async def ensure_consumer_group(self) -> bool:
         """Ensure consumer group exists. Create if missing (idempotent)."""
@@ -175,11 +207,17 @@ class SignalEventBus:
             # Ensure consumer group exists
             await self.ensure_consumer_group()
 
-            # Read pending messages from consumer group
+            # Read pending messages from consumer group.
+            # redis-py signature is xreadgroup(groupname, consumername,
+            # streams, count=None, block=None) — the original code had
+            # the first three args in the wrong order, which made the
+            # library validate `streams` against the consumername string
+            # and throw "XREADGROUP streams must be a non empty dict"
+            # on every call.  Fixed here.
             messages = await self.redis.xreadgroup(
-                {SIGNAL_STREAM_KEY: ">"},
                 CONSUMER_GROUP,
                 CONSUMER_NAME,
+                {SIGNAL_STREAM_KEY: ">"},
                 count=count,
                 block=block_ms,
             )

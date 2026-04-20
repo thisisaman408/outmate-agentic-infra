@@ -139,6 +139,7 @@ export interface UploadResult {
 }
 
 export interface VoiceAnalytics {
+  // Back-compat primitives (legacy UI read these; kept for stability)
   total_calls: number
   successful: number
   failed: number
@@ -147,6 +148,24 @@ export interface VoiceAnalytics {
   avg_duration_seconds: number
   daily_calls: { date: string; calls: number }[]
   top_companies: { company: string; calls: number }[]
+  // Richer v2 fields
+  outcomes: {
+    booked: number
+    completed: number
+    no_answer: number
+    failed: number
+    in_progress: number
+  }
+  connect_rate: number
+  no_answer_rate: number
+  avg_connected_duration_seconds: number
+  total_talk_time_seconds: number
+  disconnection_breakdown: { reason: string; count: number }[]
+  top_pain_points: { label: string; count: number }[]
+  top_objections: { label: string; count: number }[]
+  top_competitors: { label: string; count: number }[]
+  top_next_steps: { label: string; count: number }[]
+  hour_of_day_utc: number[]
 }
 
 export async function uploadContactList(file: File): Promise<UploadResult> {
@@ -168,14 +187,52 @@ export async function fetchContactList(): Promise<{ contacts: any[]; total: numb
 }
 
 export async function fetchVoiceAnalytics(): Promise<VoiceAnalytics> {
-  return apiFetch<VoiceAnalytics>("/analytics")
+  // Backfill v2-only keys with sane defaults so the UI renders even when
+  // the deployed backend is still on the old analytics response shape
+  // (e.g. during a rolling restart or if the user forgot to reload
+  // uvicorn after pulling code).  Without this the modal crashes on
+  // `analyticsData.outcomes.booked` when the field is absent.
+  const raw = await apiFetch<Partial<VoiceAnalytics>>("/analytics")
+  return {
+    total_calls: raw.total_calls ?? 0,
+    successful: raw.successful ?? 0,
+    failed: raw.failed ?? 0,
+    booking_rate: raw.booking_rate ?? 0,
+    total_credits_spent: raw.total_credits_spent ?? 0,
+    avg_duration_seconds: raw.avg_duration_seconds ?? 0,
+    daily_calls: raw.daily_calls ?? [],
+    top_companies: raw.top_companies ?? [],
+    outcomes: raw.outcomes ?? {
+      booked: 0,
+      // If we're on the old shape, "successful" is the closest proxy for
+      // "connected calls" — surface it under Completed so the UI isn't empty.
+      completed: raw.successful ?? 0,
+      no_answer: 0,
+      failed: raw.failed ?? 0,
+      in_progress: 0,
+    },
+    connect_rate: raw.connect_rate ?? 0,
+    no_answer_rate: raw.no_answer_rate ?? 0,
+    avg_connected_duration_seconds: raw.avg_connected_duration_seconds ?? raw.avg_duration_seconds ?? 0,
+    total_talk_time_seconds: raw.total_talk_time_seconds ?? 0,
+    disconnection_breakdown: raw.disconnection_breakdown ?? [],
+    top_pain_points: raw.top_pain_points ?? [],
+    top_objections: raw.top_objections ?? [],
+    top_competitors: raw.top_competitors ?? [],
+    top_next_steps: raw.top_next_steps ?? [],
+    hour_of_day_utc: raw.hour_of_day_utc ?? Array(24).fill(0),
+  }
 }
 
 // ---------- Call Details ----------
 
 export interface CallDetails {
   id: string
+  // Human label: "Booked" | "Completed" | "In progress" |
+  //              "Timed out (no webhook)" | "Failed" | raw DB value
   status: string
+  // Raw DB enum: running | success | error | queued | skipped
+  raw_status?: string
   created_at: string | null
   duration: string
   duration_ms: number
@@ -204,6 +261,7 @@ export interface CallDetails {
   }
   call_analysis: Record<string, any>
   disconnection_reason: string
+  error_message?: string
   credits_used: number
 }
 

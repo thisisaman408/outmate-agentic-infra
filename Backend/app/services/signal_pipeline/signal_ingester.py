@@ -144,11 +144,105 @@ class SignalIngester:
                 f"domain={company_domain}, fingerprint={fingerprint}, id={signal_event.id}"
             )
 
+            # Auto-trigger voice call if user has matching signal trigger enabled
+            try:
+                await self._check_voice_agent_triggers(
+                    signal_event, signal_type, prospect_name, prospect_email, company_name
+                )
+            except Exception as vex:
+                logger.debug(f"Voice agent trigger check skipped: {vex}")
+
             return signal_event
         except Exception as e:
             logger.error(f"Failed to ingest signal: {e}", exc_info=True)
             self.db.rollback()
             return None
+
+    # Signal type → voice agent trigger ID mapping
+    SIGNAL_TO_TRIGGER = {
+        "funding": "funding",
+        "funding_round": "funding",
+        "job_change": "vp_hired",
+        "hiring": "hiring_spike",
+        "hiring_signal": "hiring_spike",
+        "website_visit": "website_visitor",
+        "tech_change": "tech_stack",
+        "technographic": "tech_stack",
+    }
+
+    async def _check_voice_agent_triggers(
+        self, signal_event, signal_type: str, prospect_name, prospect_email, company_name
+    ):
+        """Check all users' voice agent configs — if they have a matching trigger enabled, queue a call."""
+        import json as _json
+        from app.core.redis import RedisManager
+        from app.db.models.user import User as UserModel
+
+        trigger_id = self.SIGNAL_TO_TRIGGER.get(signal_type)
+        if not trigger_id:
+            return
+
+        # Find all users who might have this trigger enabled
+        users = self.db.query(UserModel).filter(UserModel.is_active == True).all()
+        # Loop-local client — this method is called from Celery tasks
+        # which spawn fresh asyncio loops; the singleton would be bound
+        # to FastAPI's uvicorn loop and error with "Event loop is closed".
+        # See RedisManager.new_loop_local_client for the full explanation.
+        redis = RedisManager.new_loop_local_client()
+        try:
+            for user in users:
+                config_key = f"voice_agent:config:{user.id}"
+                raw = await redis.get(config_key)
+                if not raw:
+                    continue
+                config = _json.loads(raw)
+                if config.get("status") != "active":
+                    continue
+                triggers = config.get("signal_triggers", [])
+                matching = [t for t in triggers if t.get("id") == trigger_id and t.get("enabled")]
+                if not matching:
+                    continue
+
+                # Trigger is enabled for this user — queue the call
+                phone = (signal_event.raw_data or {}).get("phone", "")
+                if not phone and prospect_email:
+                    # No phone available — skip (can't call without a number)
+                    logger.info(f"Voice trigger matched for user {user.id} but no phone for {prospect_name}")
+                    continue
+
+                from app.db.models.agent_run import AgentRun
+                from app.db.utils import check_sufficient_credits, deduct_credits
+
+                if not check_sufficient_credits(self.db, user.id, 5):
+                    logger.info(f"Voice trigger matched for user {user.id} but insufficient credits")
+                    continue
+
+                run = AgentRun(
+                    user_id=user.id,
+                    agent_type="voice-agent",
+                    flow_id="signal-triggered",
+                    input={
+                        "prospect_name": prospect_name or "Unknown",
+                        "prospect_phone": phone,
+                        "prospect_company": company_name or "",
+                        "call_objective": "discovery",
+                        "context": f"Auto-triggered by {signal_type} signal",
+                    },
+                    status="queued",
+                    cost_credits=5,
+                )
+                self.db.add(run)
+                self.db.commit()
+
+                deduct_credits(self.db, user.id, 5, run.id, f"Voice call auto-triggered by {signal_type} signal")
+                logger.info(f"Voice call queued for user {user.id} — trigger={trigger_id}, prospect={prospect_name}")
+        finally:
+            # Release the loop-local TCP connection so we don't leak
+            # sockets across Celery task invocations.
+            try:
+                await redis.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Ingester voice-trigger redis close failed (non-fatal): %s", exc)
 
     async def bulk_ingest_signals(self, signals: list[Dict[str, Any]]) -> list[SignalEvent]:
         """

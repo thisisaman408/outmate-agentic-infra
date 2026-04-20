@@ -163,6 +163,10 @@ class SignalResponse(BaseModel):
     signal_strength: Optional[str] = None   # High, Medium, Low
     funnel_stage: Optional[str] = None      # Awareness, Consideration, etc.
     trigger_type: Optional[str] = None      # History-Based, Behavioral, etc.
+    # Media — pulled from raw_data when the scraper surfaced them.  Empty
+    # defaults mean the UI should render initials / no thumbnail, not fail.
+    post_images: List[str] = []             # post attachment image URLs
+    profile_picture_url: Optional[str] = None   # author's DP
 
 
 class StatsResponse(BaseModel):
@@ -1026,6 +1030,11 @@ def _serialize_signal(
         signal_strength=taxonomy.get("strength"),
         funnel_stage=taxonomy.get("funnel_stage"),
         trigger_type=taxonomy.get("trigger_type"),
+        # Media — empty list/None when the scraper didn't provide them.
+        # Tolerates both new-style keys and older scrapes that only
+        # stored singular `image`/`profile_picture`.
+        post_images=list(raw.get("post_images") or ([raw["image"]] if raw.get("image") else [])),
+        profile_picture_url=raw.get("profile_picture_url") or raw.get("profile_picture") or None,
     )
 
 

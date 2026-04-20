@@ -1,7 +1,7 @@
 """add outmate_agent_runs table for outmate-agentic backed agent runs
 
 Revision ID: t7u8v9w0x1y2
-Revises: u8v9w0x1y2z3
+Revises: 860ea7a80510
 Create Date: 2026-04-08 00:00:00.000000
 
 This table is the single source of truth for tenant isolation between Outmate
@@ -29,7 +29,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "t7u8v9w0x1y2"
-down_revision: Union[str, None] = "u8v9w0x1y2z3"
+down_revision: Union[str, None] = "860ea7a80510"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

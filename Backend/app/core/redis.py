@@ -98,6 +98,34 @@ class RedisManager:
         instead of also hitting a dead socket."""
         cls.client = None
         cls.ready = False
+
+    @classmethod
+    def new_loop_local_client(cls) -> redis.Redis:
+        """Return a FRESH async Redis client, not the singleton.
+
+        Why this exists:
+          redis.asyncio clients bind their ConnectionPool to the event
+          loop they're first awaited on.  Our cls.client singleton is
+          created under FastAPI's uvicorn loop; any other context that
+          needs async Redis (Celery task threads calling `asyncio.run`,
+          each of which creates a NEW short-lived event loop) will get
+          `Event loop is closed` on first await if they reuse that
+          singleton.
+
+          Each `asyncio.run(...)` inside a Celery task should therefore
+          build its own client via this helper, then `await client.close()`
+          in a finally block.  Cheap: one TCP connection for ~100ms.
+
+        Do NOT call this from FastAPI request handlers — they share
+        uvicorn's loop and should reuse the singleton via `get_client()`.
+        """
+        return redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=10,
+            socket_timeout=10,
+            socket_keepalive=True,
+            decode_responses=True,
+        )
         cls.connect()  # reconnect immediately — avoids a second failure
 
     @classmethod

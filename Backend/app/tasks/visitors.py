@@ -842,11 +842,19 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
 
                 # Build a chain of jsonb_set calls from the patches dict
                 # e.g. jsonb_set(jsonb_set(resolution, '{email}', '"foo"'), '{company}', '"Bar"')
+                #
+                # We deliberately use CAST(:p AS text) instead of `:p::text`.
+                # SQLAlchemy's text() bind-param tokenizer reads `::` as the
+                # escape for a literal colon, so `:p_0::text` gets interpreted
+                # as `:p_0` followed by literal `:text` — neither the bind nor
+                # the cast survives, and Postgres receives `:p_0` raw and
+                # throws "syntax error at or near ':'".  CAST(...) syntax is
+                # unambiguous and works the same at the Postgres layer.
                 expr = "COALESCE(resolution, '{}'::jsonb)"
                 params: dict = {"org_id": org_id, "visitor_id": visitor_id, "current_id": str(new_visit.id)}
                 for idx, (key, val) in enumerate(patches.items()):
                     param_name = f"p_{idx}"
-                    expr = f"jsonb_set({expr}, '{{{key}}}', to_jsonb(:{param_name}::text))"
+                    expr = f"jsonb_set({expr}, '{{{key}}}', to_jsonb(CAST(:{param_name} AS text)))"
                     params[param_name] = str(val)
 
                 updated = db.execute(
@@ -868,7 +876,17 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
                         updated.rowcount, visitor_id, list(patches.keys()),
                     )
             except Exception as e:
+                # Rollback is CRITICAL here.  Without it, psycopg2 leaves the
+                # transaction in an aborted state and every subsequent query
+                # in this task (site_config lookup, webhook enqueue, SSE
+                # publish) fails with InFailedSqlTransaction.  The task then
+                # bubbles the error up as a WorkerLostError even though the
+                # retroactive backfill itself is best-effort.
                 logger.warning("Retroactive backfill failed: %s", e)
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
 
         # Real-time SSE publish (best-effort)
         await _publish_visit_event(org_id=str(new_visit.org_id), visit=new_visit)
