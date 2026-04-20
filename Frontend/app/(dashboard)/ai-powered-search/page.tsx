@@ -1075,19 +1075,30 @@ export default function DatabaseFinderPage() {
   const handleLoadMore = async () => {
     if (isSearching) return
 
-    const filters = latestExtractedFilters || {}
+    // Get filters and intent from component state or active chat session
+    let filters = latestExtractedFilters || {}
+    let currentIntent = intent
+    if (!filters || Object.keys(filters).length === 0) {
+      const activeChat = chats.find(c => c.id === activeChatId)
+      if (activeChat?.extractedFilters) {
+        filters = activeChat.extractedFilters
+        currentIntent = activeChat.intent || intent
+      }
+    }
     if (!filters || Object.keys(filters).length === 0) return
 
     setIsSearching(true)
     try {
       const currentLimit = results.length
       const targetLimit = currentLimit + 25
-      const endpoint = intent === "business" ? `/api/v1/leads/search/companies` : `/api/v1/leads/search/prospects`
+      const endpoint = currentIntent === "business" ? `/api/v1/leads/search/companies` : `/api/v1/prospects/search`
 
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           filters,
@@ -1099,12 +1110,16 @@ export default function DatabaseFinderPage() {
         }),
       })
 
-      if (!response.ok) throw new Error(`Failed to load more ${intent === "business" ? "companies" : "prospects"}`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`Load more API error (${response.status}):`, errorText)
+        throw new Error(`Failed to load more ${currentIntent === "business" ? "companies" : "prospects"}: ${errorText || response.status}`)
+      }
 
       const payload = await response.json()
       let mappedResults
 
-      if (intent === "business") {
+      if (currentIntent === "business") {
         const rawCompanies = payload?.data?.companies || []
         mappedResults = mapCompanyResults(rawCompanies)
       } else {
@@ -1118,13 +1133,7 @@ export default function DatabaseFinderPage() {
         count: payload?.data?.total_count || mappedResults.length || prev.count,
         cost: mappedResults.length * 0.1,
       }))
-
-      // Add assistant message about loading more results
-      const assistantMsg: { role: "user" | "assistant", content: string } = {
-        role: "assistant",
-        content: `Loaded ${mappedResults.length} ${intent === "business" ? "companies" : "prospects"} for you.`
-      }
-      setAgentMessages(prev => [...prev, assistantMsg])
+      // Don't add assistant message - user only wants results table to update
     } catch (e) {
       console.error("Load more failed:", e)
       const errorMsg: { role: "user" | "assistant", content: string } = {
@@ -2168,25 +2177,36 @@ export default function DatabaseFinderPage() {
 
       const data = await res.json()
 
-      // Add assistant reply
-      const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
-      setAgentMessages(prev => [...prev, assistantMsg])
-
-      // Persist to chat session
-      persistCurrentChat({ userPrompt: trimmedQuery, assistantMessage: data.reply })
-
       // Handle actions returned by the agent
       if (data.action === "new_search") {
         setNaturalLanguageQuery(data.action_data?.query || trimmedQuery)
         setTimeout(() => handleClarifyFilters(), 100)
+        // Add assistant reply for new search
+        const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
+        setAgentMessages(prev => [...prev, assistantMsg])
+        persistCurrentChat({ userPrompt: trimmedQuery, assistantMessage: data.reply })
       } else if (data.action === "detect_signals") {
         const sessionResults2 = results.length > 0 ? results : (chats.find(c => c.id === activeChatId)?.results || [])
         handleDetectSignals(sessionResults2, intent)
+        // Add assistant reply for detect signals
+        const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
+        setAgentMessages(prev => [...prev, assistantMsg])
+        persistCurrentChat({ userPrompt: trimmedQuery, assistantMessage: data.reply })
       } else if (data.action === "generate_campaign") {
         handleGenerateCampaign()
+        // Add assistant reply for campaign generation
+        const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
+        setAgentMessages(prev => [...prev, assistantMsg])
+        persistCurrentChat({ userPrompt: trimmedQuery, assistantMessage: data.reply })
       } else if (data.action === "load_more") {
-        // Trigger load more results
+        // Trigger load more results - no text response, just load more
         handleLoadMore()
+        // Don't add assistant message for load_more - user only wants results table to update
+      } else {
+        // Regular conversational response
+        const assistantMsg: { role: "user" | "assistant", content: string } = { role: "assistant", content: data.reply }
+        setAgentMessages(prev => [...prev, assistantMsg])
+        persistCurrentChat({ userPrompt: trimmedQuery, assistantMessage: data.reply })
       }
     } catch (e: any) {
       console.error("Agent chat error:", e)

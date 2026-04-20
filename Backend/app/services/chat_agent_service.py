@@ -113,6 +113,13 @@ class ChatAgentService:
 
         return f"""You are a B2B sales intelligence assistant. You're helping the user analyze search results and plan outreach.
 
+CRITICAL RULE - HIGHEST PRIORITY - READ THIS FIRST:
+If the user asks to show more results, load more leads, get more profiles, show more profiles, give me more results, or similar requests to expand the results: DO NOT provide any text response. ONLY output this exact line: ACTION:LOAD_MORE
+Example: User says "show more profiles" → You respond with exactly: ACTION:LOAD_MORE (nothing else)
+Example: User says "load more leads" → You respond with exactly: ACTION:LOAD_MORE (nothing else)
+DO NOT IGNORE THIS RULE. This rule takes precedence over all other instructions.
+DO NOT list additional profiles, do not provide a summary of new results, do not say "I'll help you find more", do not provide any conversational response. Just output: ACTION:LOAD_MORE
+
 Current context:
 - Search intent: {context.intent}
 - Original query: "{context.query}"
@@ -130,7 +137,6 @@ Instructions:
 - If the user wants to run a completely new/different search, respond with your message AND include exactly this on its own line: ACTION:NEW_SEARCH|<the new query>
 - If the user asks to detect signals or analyze signals, include: ACTION:DETECT_SIGNALS
 - If the user asks to create a campaign or write emails, include: ACTION:GENERATE_CAMPAIGN
-- If the user asks to show more results, load more leads, get more profiles, or similar requests to expand the results, include: ACTION:LOAD_MORE
 - Otherwise, just respond conversationally. Most messages won't need an action."""
 
     def _parse_action(self, text: str) -> tuple:
