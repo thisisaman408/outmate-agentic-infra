@@ -1082,19 +1082,31 @@ export default function DatabaseFinderPage() {
     // Get filters and intent from component state or active chat session
     let filters = latestExtractedFilters || {}
     let currentIntent = intent
+    console.log("Load more - latestExtractedFilters:", latestExtractedFilters)
     if (!filters || Object.keys(filters).length === 0) {
       const activeChat = chats.find(c => c.id === activeChatId)
+      console.log("Load more - activeChat:", activeChat)
       if (activeChat?.extractedFilters) {
-        filters = activeChat.extractedFilters
+        filters = { ...activeChat.extractedFilters }
         currentIntent = activeChat.intent || intent
+        console.log("Load more - using filters from chat session:", filters)
       }
     }
     if (!filters || Object.keys(filters).length === 0) return
+
+    // Remove limit from filters to prevent it from interfering with targetLimit
+    delete filters.limit
+
+    console.log("Load more filters:", filters)
+    console.log("Load more intent:", currentIntent)
+    console.log("Load more current results length:", results.length)
 
     setIsSearching(true)
     try {
       const currentLimit = results.length
       const targetLimit = currentLimit + 25
+      console.log("Load more - currentLimit:", currentLimit)
+      console.log("Load more - targetLimit:", targetLimit)
       const endpoint = currentIntent === "business" ? `/api/v1/leads/search/companies` : `/api/v1/prospects/search`
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
@@ -1123,6 +1135,7 @@ export default function DatabaseFinderPage() {
         }
       } else {
         // For prospects, use the same structure as original search
+        // Don't use limit from filters - always use targetLimit for load more
         payload = {
           current_title: toArray(filters.current_title),
           location: toArray(filters.location),
@@ -1132,6 +1145,9 @@ export default function DatabaseFinderPage() {
           limit: targetLimit,
         }
       }
+
+      console.log("Load more payload:", payload)
+      console.log("Load more endpoint:", endpoint)
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -1149,15 +1165,21 @@ export default function DatabaseFinderPage() {
       }
 
       const responseData = await response.json()
+      console.log("Load more API response:", responseData)
+
       let mappedResults
 
       if (currentIntent === "business") {
         const rawCompanies = responseData?.data?.companies || []
         mappedResults = mapCompanyResults(rawCompanies)
       } else {
-        const rawProspects = responseData?.data?.prospects || []
+        // Prospects API might return results directly or under different structure
+        const rawProspects = responseData?.data?.prospects || responseData?.prospects || responseData?.results || []
+        console.log("Load more raw prospects:", rawProspects)
         mappedResults = mapProspectResults(rawProspects)
       }
+
+      console.log("Load more mapped results:", mappedResults)
 
       setResults(mappedResults)
       setTamPreview((prev) => ({
