@@ -2838,14 +2838,8 @@ export default function DatabaseFinderPage() {
 
     setEnrichingRows(prev => ({ ...prev, [enrichmentKey]: true }))
     
-    // 1. Primary: ContactOut
-    let result = await enrichProspectContactOut(linkedinKey, field === 'phone')
-    
-    // 2. Fallback: Crustdata (via BetterContact waterfall which includes Crustdata)
-    if (!result.success || result.not_found) {
-      console.log(`ContactOut failed for ${field}, falling back to Crustdata/BetterContact...`)
-      result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinKey, field)
-    }
+    // Zap icon: BetterContact waterfall (20+ data sources)
+    const result = await enrichProspect(firstName, lastName, companyName, companyDomain, linkedinKey, field)
 
     setEnrichedData(prev => ({
       ...prev,
@@ -3681,14 +3675,8 @@ export default function DatabaseFinderPage() {
                           if (!company) return
                           setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
                           
-                          // 1. Primary: ContactOut
-                          let result = await enrichCompanyContactOut(company.domain, field === 'phone')
-                          
-                          // 2. Fallback: Explorium (via BetterContact waterfall or specific Explorium logic)
-                          if (!result.success || result.not_found) {
-                            console.log(`ContactOut failed for company ${field}, falling back to Explorium...`)
-                            result = await enrichCompany(company.name, company.domain, field)
-                          }
+                          // Zap icon: BetterContact waterfall (20+ data sources)
+                          const result = await enrichCompany(company.name, company.domain, field)
 
                           setEnrichedData(prev => {
                             const existing = prev[companyId] || {}

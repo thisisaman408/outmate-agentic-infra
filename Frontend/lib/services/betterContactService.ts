@@ -3,7 +3,18 @@
  * Calls the backend API which handles the async BetterContact flow.
  */
 
+import { authService } from "@/lib/auth"
+
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const authHeaders = authService.getAuthHeaders()
+  Object.entries(authHeaders).forEach(([key, value]) => {
+    if (value) headers[key] = value
+  })
+  return headers
+}
 
 export interface ProspectEnrichmentResult {
   success: boolean
@@ -38,7 +49,7 @@ export async function enrichProspectContactOut(
   try {
     const res = await fetch(`${API}/api/v1/contactout/reveal-contact`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         linkedin_url: linkedinUrl,
         include_phone: includePhone
@@ -72,7 +83,7 @@ export async function enrichCompanyContactOut(
   try {
     const res = await fetch(`${API}/api/v1/contactout/reveal-company-contact`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         domain: domain,
         include_phone: includePhone
@@ -111,7 +122,7 @@ export async function enrichProspect(
   try {
     const res = await fetch(`${API}/api/v1/bettercontact/enrich-prospect`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         first_name: firstName,
         last_name: lastName,
@@ -143,7 +154,7 @@ export async function enrichCompany(
   try {
     const res = await fetch(`${API}/api/v1/bettercontact/enrich-company`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         company_name: companyName,
         company_domain: companyDomain || "",
@@ -159,22 +170,19 @@ export async function enrichCompany(
     const result = await res.json()
     console.log('enrichCompany API result:', result)
 
-    // Return only the requested field to make enrichment field-specific
-    const fieldResult: CompanyEnrichmentResult = {
+    // Return both email and phone when available to avoid wasting API calls
+    return {
       success: result.success,
+      email: result.email,
+      phone: result.phone,
+      contact_name: result.contact_name,
+      contact_title: result.contact_title,
+      linkedin_url: result.linkedin_url,
       error: result.error,
       not_found: result.not_found,
       credits_consumed: result.credits_consumed,
-      credits_left: result.credits_left
+      credits_left: result.credits_left,
     }
-
-    if (field === 'email') {
-      fieldResult.email = result.email
-    } else if (field === 'phone') {
-      fieldResult.phone = result.phone
-    }
-
-    return fieldResult
   } catch (err: any) {
     console.error("BetterContact company enrichment error:", err)
     return { success: false, error: err.message || "Network error" }

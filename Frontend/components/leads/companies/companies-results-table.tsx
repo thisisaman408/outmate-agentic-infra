@@ -392,24 +392,29 @@ export function CompaniesResultsTable({
                 : (Array.isArray(data?.phones) ? data.phones : [])
             let sanitized = field === 'email' ? sanitizeEmails(values) : sanitizePhones(values)
 
-            // CrustData email fallback when ContactOut returned nothing
-            if (sanitized.length === 0 && field === 'email' && company.linkedin_url) {
+            // Explorium fallback for company when ContactOut returned nothing
+            if (sanitized.length === 0 && isCompanyPage && company.domain) {
                 try {
-                    const crustRes = await fetch(`/api/v1/crustdata/person/enrich`, {
+                    const exploriumRes = await fetch(`/api/v1/explorium/enrich-company`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ linkedin_profile_url: company.linkedin_url }),
+                        body: JSON.stringify({ domain: company.domain }),
                     })
-                    if (crustRes.ok) {
-                        const crustData = await crustRes.json()
-                        const crustEmails = sanitizeEmails(
-                            Array.isArray(crustData?.business_email) ? crustData.business_email : []
+                    if (exploriumRes.ok) {
+                        const exploriumData = await exploriumRes.json()
+                        const exploriumEmails = sanitizeEmails(
+                            Array.isArray(exploriumData?.emails) ? exploriumData.emails : []
                         )
-                        if (crustEmails.length > 0) {
-                            sanitized = crustEmails
+                        const exploriumPhones = sanitizePhones(
+                            Array.isArray(exploriumData?.phones) ? exploriumData.phones : []
+                        )
+                        if (field === 'email' && exploriumEmails.length > 0) {
+                            sanitized = exploriumEmails
+                        } else if (field === 'phone' && exploriumPhones.length > 0) {
+                            sanitized = exploriumPhones
                         }
                     }
-                } catch { /* CrustData fallback failed silently */ }
+                } catch { /* Explorium fallback failed silently */ }
             }
 
             setContactCache(prev => ({

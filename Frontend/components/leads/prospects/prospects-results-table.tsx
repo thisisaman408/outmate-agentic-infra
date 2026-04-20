@@ -249,7 +249,7 @@ export function ProspectsResultsTable({
             }
         } catch { /* ContactOut reveal failed */ }
         if (fieldValues.length > 0) { setCacheField(rowId, field, fieldValues, false); return }
-        // CrustData fallback (email + phone when available)
+        // CrustData fallback for people (email + phone when available)
         if (fieldValues.length === 0) {
             const linkedinUrl = profile.flagship_profile_url || profile.linkedin_profile_url
             if (linkedinUrl) {
@@ -284,28 +284,6 @@ export function ProspectsResultsTable({
                 } catch { /* CrustData fallback failed */ }
             }
         }
-        // BetterContact fallback
-        try {
-            const firstName = profile.first_name || profile.name?.split(" ")[0] || ""
-            const lastName = profile.last_name || profile.name?.split(" ").slice(1).join(" ") || ""
-            const employer = profile.current_employers?.[0]
-            const companyName = employer?.name || ""
-            const companyDomain = employer?.company_website_domain || ""
-            const bcRes = await fetch(`/api/v1/bettercontact/enrich-prospect`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ first_name: firstName, last_name: lastName, company_name: companyName, company_domain: companyDomain, linkedin_url: linkedinUrl, field }),
-            })
-            const bcData = bcRes.ok ? await bcRes.json() : null
-            const fallbackValue = field === "email" ? bcData?.email : bcData?.phone
-            const sanitized = field === "email"
-                ? sanitizeEmails(fallbackValue ? [fallbackValue] : [])
-                : sanitizePhones(fallbackValue ? [fallbackValue] : [])
-            if (sanitized.length > 0) setCacheField(rowId, field, sanitized, false)
-            else updateCacheEntry(rowId, { loading: false })
-            if (bcData) onWaterfallResult?.(linkedinUrl, field, bcData)
-            return
-        } catch { /* BetterContact fallback failed */ }
         updateCacheEntry(rowId, { loading: false })
     }
 
