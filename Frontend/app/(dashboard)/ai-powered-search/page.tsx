@@ -1094,20 +1094,48 @@ export default function DatabaseFinderPage() {
       const endpoint = currentIntent === "business" ? `/api/v1/leads/search/companies` : `/api/v1/prospects/search`
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('outmate_auth_token') : null
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
+
+      // Build payload matching the original search structure
+      const toArray = (value: any) => {
+        if (!value) return undefined
+        if (Array.isArray(value)) return value
+        return [value]
+      }
+
+      const keywordsArr = toArray(filters.keywords)
+      const keywordStr = Array.isArray(keywordsArr) && keywordsArr.length > 0
+        ? keywordsArr.join(" ")
+        : undefined
+
+      let payload
+      if (currentIntent === "business") {
+        payload = {
           filters,
           options: {
             limit: targetLimit,
             page: 1,
             enrich: true,
           },
-        }),
+        }
+      } else {
+        // For prospects, use the same structure as original search
+        payload = {
+          current_title: toArray(filters.current_title),
+          location: toArray(filters.location),
+          industry: toArray(filters.industry),
+          employees: toArray(filters.company_size),
+          keyword: keywordStr,
+          limit: targetLimit,
+        }
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok) {
@@ -1116,21 +1144,21 @@ export default function DatabaseFinderPage() {
         throw new Error(`Failed to load more ${currentIntent === "business" ? "companies" : "prospects"}: ${errorText || response.status}`)
       }
 
-      const payload = await response.json()
+      const responseData = await response.json()
       let mappedResults
 
       if (currentIntent === "business") {
-        const rawCompanies = payload?.data?.companies || []
+        const rawCompanies = responseData?.data?.companies || []
         mappedResults = mapCompanyResults(rawCompanies)
       } else {
-        const rawProspects = payload?.data?.prospects || []
+        const rawProspects = responseData?.data?.prospects || []
         mappedResults = mapProspectResults(rawProspects)
       }
 
       setResults(mappedResults)
       setTamPreview((prev) => ({
         ...prev,
-        count: payload?.data?.total_count || mappedResults.length || prev.count,
+        count: responseData?.data?.total_count || mappedResults.length || prev.count,
         cost: mappedResults.length * 0.1,
       }))
       // Don't add assistant message - user only wants results table to update
