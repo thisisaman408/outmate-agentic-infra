@@ -60,7 +60,7 @@ export function useTableState<T>({
     if (!existing || defaultKeys !== existingKeys || hasVersionSuffix) {
       setColumnVisibility(tableId, defaults)
     }
-  }, [tableId, columns]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tableId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibility = columnVisibility[tableId] || {}
 

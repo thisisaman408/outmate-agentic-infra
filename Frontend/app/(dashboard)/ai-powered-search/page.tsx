@@ -1820,9 +1820,29 @@ export default function DatabaseFinderPage() {
       setIntent(searchIntent)
 
       // Handle different response formats from different endpoints
-      const rawList = searchIntent === "prospect"
+      let rawList = searchIntent === "prospect"
         ? (data.profiles || data.data?.profiles || data.results?.data || [])
         : (data.data?.companies || data.companies || data.results?.data || data.data || []);
+
+      // Filter out broad companies (Google, Amazon, LinkedIn, etc.)
+      if (searchIntent === "business" && Array.isArray(rawList)) {
+        const broadCompanies = [
+          "google", "amazon", "linkedin", "microsoft", "apple", "facebook", "meta",
+          "alphabet", "netflix", "twitter", "x", "tesla", "spacex", "uber", "lyft",
+          "airbnb", "booking", "expedia", "salesforce", "oracle", "sap", "ibm",
+          "intel", "amd", "nvidia", "cisco", "vmware", "adobe", "intuit", "zoom",
+          "slack", "atlassian", "shopify", "square", "stripe", "paypal", "visa",
+          "mastercard", "jpmorgan", "chase", "bank of america", "wells fargo", "citi"
+        ]
+
+        rawList = rawList.filter((item: any) => {
+          const companyName = (item?.name || item?.company_name || "").toLowerCase()
+          const domain = (item?.domain || item?.website || "").toLowerCase()
+          return !broadCompanies.some((broad) =>
+            companyName.includes(broad) || domain.includes(broad)
+          )
+        })
+      }
 
       console.log('Raw List:', rawList);
       console.log('Raw List Length:', Array.isArray(rawList) ? rawList.length : 'Not an array');

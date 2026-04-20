@@ -29,12 +29,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { leadsApi, type Lead } from "@/lib/api/leads"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 import { authService } from "@/lib/auth"
 import { toast } from "sonner"
+import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
+import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 
 /* ─── filter data ─── */
 
@@ -151,13 +154,25 @@ export default function CompaniesPage() {
   const [searchQuery, setSearchQuery] = useState("")
 
   // Real Data State
-  const [companies, setCompanies] = useState<Lead[]>([])
+  const [companies, setCompanies] = useState<CompanyData[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Debug: Log companies data when it changes
+  useEffect(() => {
+    if (companies.length > 0) {
+      console.log('Companies state sample:', companies.slice(0, 2).map(c => ({
+        name: c.name,
+        employee_count_range: c.employee_count_range,
+        revenue_exact: c.revenue_exact,
+        headquarters_address: c.headquarters_address,
+      })))
+    }
+  }, [companies])
 
   const searchWithFilters = useCallback(async (filters: Record<string, any>) => {
     if (Object.keys(filters).length === 0) return
@@ -169,7 +184,88 @@ export default function CompaniesPage() {
         filters: filters as any,
         limit: 50,
       })
-      setCompanies(data)
+
+      // Filter out broad companies (Google, Amazon, LinkedIn, etc.)
+      const broadCompanies = [
+        "google", "amazon", "linkedin", "microsoft", "apple", "facebook", "meta",
+        "alphabet", "netflix", "twitter", "x", "tesla", "spacex", "uber", "lyft",
+        "airbnb", "booking", "expedia", "salesforce", "oracle", "sap", "ibm",
+        "intel", "amd", "nvidia", "cisco", "vmware", "adobe", "intuit", "zoom",
+        "slack", "atlassian", "shopify", "square", "stripe", "paypal", "visa",
+        "mastercard", "jpmorgan", "chase", "bank of america", "wells fargo", "citi"
+      ]
+
+      const filteredData = data.filter((item: Lead) => {
+        const companyName = (item?.companyName || "").toLowerCase()
+        const domain = (item?.domain || "").toLowerCase()
+        return !broadCompanies.some((broad) =>
+          companyName.includes(broad) || domain.includes(broad)
+        )
+      })
+
+      // Map Lead to CompanyData format
+      const mappedCompanies = filteredData.map((lead: Lead): CompanyData => ({
+        id: lead.id,
+        name: lead.companyName,
+        domain: lead.companyName.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '') + '.com',
+        industry: lead.industry,
+        employee_count_range: lead.employees,
+        employee_count_exact: undefined,
+        revenue_range: undefined,
+        revenue_exact: undefined,
+        headquarters_address: lead.location,
+        headquarters_city: lead.location.split(',')[0]?.trim() || '',
+        headquarters_state: lead.location.split(',')[1]?.trim() || '',
+        headquarters_country: lead.location.split(',')[2]?.trim() || 'US',
+        location_display: lead.location,
+        email: undefined, // Don't show email, only show "Tap to reveal"
+        phone: lead.phone,
+        linkedin_url: lead.linkedin,
+        technologies: lead.techStack,
+        funding_stage: undefined,
+        funding_total: undefined,
+        last_funding_date: undefined,
+        has_recent_funding: false,
+        investors: [],
+        investors_count: 0,
+        last_raised_amount: undefined,
+        twitter_url: undefined,
+        facebook_url: undefined,
+        instagram_url: undefined,
+        follower_count: undefined,
+        employee_growth_6m: undefined,
+        employee_growth_12m: undefined,
+        employee_growth_6m_percent: undefined,
+        employee_growth_12m_percent: undefined,
+        growth_category: undefined,
+        job_openings_count: undefined,
+        web_traffic: undefined,
+        seo_score: undefined,
+        decision_makers_count: undefined,
+        acquisition_status: undefined,
+        data_quality_score: lead.score,
+        company_type: undefined,
+        founded_year: undefined,
+        ticker: undefined,
+        stock_symbol: undefined,
+        exchange: undefined,
+        market_cap: undefined,
+        fiscal_year_end: undefined,
+        number_of_locations: undefined,
+        street: undefined,
+        zip_code: undefined,
+        locations: [],
+        locations_distribution_count: undefined,
+        personal_email: undefined,
+        work_email: undefined,
+        sub_industry: undefined,
+        linkedin_industry_category: undefined,
+        website: undefined,
+        description: undefined,
+        logo_url: undefined,
+      }))
+
+      setCompanies(mappedCompanies)
     } catch (err: any) {
       toast.error(err.message || "Search failed")
     } finally {
@@ -191,9 +287,9 @@ export default function CompaniesPage() {
     setHasSearched(true)
     setCompanies([])
     try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
+      const headers = {
         ...authService.getAuthHeaders(),
+        "Content-Type": "application/json",
       }
       const response = await fetch("/api/v1/leads/search/companies", {
         method: "POST",
@@ -205,10 +301,88 @@ export default function CompaniesPage() {
       if (!result.success) throw new Error(result.error?.message || "Search failed")
 
       const rawCompanies = result.data?.companies || []
-      // Transform to Lead format
-      const { transformCompanyToLead } = await import("@/lib/api/leads")
-      const leads = rawCompanies.map(transformCompanyToLead)
-      setCompanies(leads)
+
+      // Filter out broad companies (Google, Amazon, LinkedIn, etc.)
+      const broadCompanies = [
+        "google", "amazon", "linkedin", "microsoft", "apple", "facebook", "meta",
+        "alphabet", "netflix", "twitter", "x", "tesla", "spacex", "uber", "lyft",
+        "airbnb", "booking", "expedia", "salesforce", "oracle", "sap", "ibm",
+        "intel", "amd", "nvidia", "cisco", "vmware", "adobe", "intuit", "zoom",
+        "slack", "atlassian", "shopify", "square", "stripe", "paypal", "visa",
+        "mastercard", "jpmorgan", "chase", "bank of america", "wells fargo", "citi"
+      ]
+
+      const filteredCompanies = rawCompanies.filter((item: any) => {
+        const companyName = (item?.name || item?.company_name || "").toLowerCase()
+        const domain = (item?.domain || item?.website || "").toLowerCase()
+        return !broadCompanies.some((broad) =>
+          companyName.includes(broad) || domain.includes(broad)
+        )
+      })
+
+      // Map raw companies to CompanyData format
+      const mappedCompanies = filteredCompanies.map((item: any): CompanyData => ({
+        id: item.id || item.domain || Math.random().toString(36).substr(2, 9),
+        name: item.name || item.company_name || '',
+        domain: item.domain || item.website || '',
+        industry: item.industry || item.linkedin_industries || '',
+        employee_count_range: item.employee_count_range || item.company_size || '',
+        employee_count_exact: item.employee_count || item.employee_count_exact,
+        revenue_range: item.revenue_range || item.estimated_revenue_range || '',
+        revenue_exact: item.revenue_exact || item.estimated_revenue || item.estimated_revenue_lower_bound_usd,
+        headquarters_address: item.headquarters_address || item.location_display || item.location || '',
+        headquarters_city: item.headquarters_city || '',
+        headquarters_state: item.headquarters_state || '',
+        headquarters_country: item.headquarters_country || item.country || 'US',
+        location_display: item.location_display || item.location || '',
+        email: undefined, // Don't show email, only show "Tap to reveal"
+        phone: item.phone || '',
+        linkedin_url: item.linkedin_url || item.linkedin || '',
+        technologies: item.technologies || [],
+        funding_stage: item.funding_stage || '',
+        funding_total: item.funding_total,
+        last_funding_date: item.last_funding_date,
+        has_recent_funding: item.has_recent_funding || false,
+        investors: item.investors || [],
+        investors_count: item.investors_count || 0,
+        last_raised_amount: item.last_raised_amount,
+        twitter_url: item.twitter_url,
+        facebook_url: item.facebook_url,
+        instagram_url: item.instagram_url,
+        follower_count: item.follower_count || item.linkedin_followers,
+        employee_growth_6m: item.employee_growth_6m || item.headcount_growth,
+        employee_growth_12m: item.employee_growth_12m,
+        employee_growth_6m_percent: item.employee_growth_6m_percent,
+        employee_growth_12m_percent: item.employee_growth_12m_percent,
+        growth_category: item.growth_category,
+        job_openings_count: item.job_openings_count || item.job_openings,
+        web_traffic: item.web_traffic,
+        seo_score: item.seo_score,
+        decision_makers_count: item.decision_makers_count,
+        acquisition_status: item.acquisition_status,
+        data_quality_score: item.data_quality_score,
+        company_type: item.company_type,
+        founded_year: item.founded_year || item.year_founded,
+        ticker: item.ticker,
+        stock_symbol: item.stock_symbol,
+        exchange: item.exchange,
+        market_cap: item.market_cap,
+        fiscal_year_end: item.fiscal_year_end,
+        number_of_locations: item.number_of_locations,
+        street: item.street,
+        zip_code: item.zip_code,
+        locations: item.locations || [],
+        locations_distribution_count: item.locations_distribution_count,
+        personal_email: item.personal_email,
+        work_email: item.work_email,
+        sub_industry: item.sub_industry,
+        linkedin_industry_category: item.linkedin_industry_category,
+        website: item.website || item.company_website_url,
+        description: item.description || item.short_description || item.long_description,
+        logo_url: item.logo_url,
+      }))
+
+      setCompanies(mappedCompanies)
     } catch (e: any) {
       toast.error(e.message || "AI Search failed")
     } finally {
@@ -241,8 +415,8 @@ export default function CompaniesPage() {
   const filteredCompanies = useMemo(() => {
     if (!searchQuery) return companies
     return companies.filter(c =>
-      c.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.industry.toLowerCase().includes(searchQuery.toLowerCase())
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.industry && c.industry.toLowerCase().includes(searchQuery.toLowerCase()))
     )
   }, [companies, searchQuery])
 
@@ -250,7 +424,7 @@ export default function CompaniesPage() {
     if (filteredCompanies.length === 0) return
     const headers = ["Company", "Industry", "Employees", "Location", "Score", "Email", "LinkedIn"]
     const rows = filteredCompanies.map((c) => [
-      c.companyName, c.industry, c.employees, c.location, String(c.score), c.email, c.linkedin || ""
+      c.name, c.industry || "", c.employee_count_range || "", c.location_display || "", String(c.data_quality_score || 0), c.email || "", c.linkedin_url || ""
     ])
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${(v || "").replace(/"/g, '""')}"`).join(","))].join("\n")
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
@@ -534,129 +708,19 @@ export default function CompaniesPage() {
               </p>
             </div>
           ) : (
-            <>
-              <table className="w-full text-left border-collapse min-w-[1200px]">
-                <thead className="sticky top-0 z-20 bg-card/95 backdrop-blur-md">
-                  <tr className="border-b border-border shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
-                    <th className="w-14 px-6 py-4 align-middle">
-                       <div className="flex items-center justify-center">
-                         <input type="checkbox" className="w-4 h-4 rounded-md accent-primary border-muted" />
-                       </div>
-                    </th>
-                    {[
-                      { label: "Company", width: "220px" },
-                      { label: "Industry", width: "160px" },
-                      { label: "Employees", width: "120px" },
-                      { label: "Funding", width: "120px" },
-                      { label: "Location", width: "160px" },
-                      { label: "ICP Score", width: "120px" },
-                      { label: "Intent", width: "100px" },
-                      { label: "Action", width: "100px" }
-                    ].map((h) => (
-                      <th key={h.label} className="px-4 py-4 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/50" style={{ width: h.width }}>
-                        <div className="flex items-center gap-1.5 group cursor-pointer hover:text-foreground transition-colors">
-                          {h.label}
-                          <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-40 transition-opacity" />
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {isLoading ? (
-                    Array.from({ length: 12 }).map((_, i) => (
-                      <tr key={i} className="animate-pulse">
-                        <td className="px-6 py-5"><div className="w-4 h-4 rounded bg-muted mx-auto" /></td>
-                        <td className="px-4 py-5 font-medium"><div className="w-32 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-24 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-16 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-20 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-28 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-20 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-16 h-4 rounded bg-muted" /></td>
-                        <td className="px-4 py-5 text-sm"><div className="w-12 h-4 rounded bg-muted" /></td>
-                      </tr>
-                    ))
-                  ) : filteredCompanies.map((c) => (
-                    <tr
-                      key={c.id}
-                      className={cn(
-                        "group transition-all hover:bg-muted/30 border-l-2 border-transparent",
-                        selectedRows[c.id] && "bg-primary/5 border-primary border-l-4"
-                      )}
-                      onClick={() => toggleRow(c.id)}
-                    >
-                      <td className="px-6 py-5 align-middle" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center">
-                         <input
-                            type="checkbox"
-                            checked={!!selectedRows[c.id]}
-                            onChange={() => toggleRow(c.id)}
-                            className="w-4 h-4 rounded-md accent-primary"
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-card border border-border flex items-center justify-center text-xs font-black shadow-sm group-hover:border-primary/30 transition-all overflow-hidden shrink-0">
-                            <Building2 className="w-5 h-5 text-muted-foreground/30" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-[13px] font-black text-foreground hover:text-primary transition-colors cursor-pointer truncate">{c.companyName}</div>
-                            <div className="text-[10px] text-muted-foreground font-bold tracking-tight mt-0.5 truncate flex items-center gap-1.5 opacity-60">
-                               <Globe className="w-3 h-3 text-primary/40 truncate shrink-0" />
-                               {c.linkedin ? new URL(c.linkedin).pathname.split('/').filter(Boolean).pop() : c.companyName.toLowerCase().replace(/\s+/g, '')}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <span className="text-[11px] font-bold text-muted-foreground truncate block">{c.industry}</span>
-                      </td>
-                      <td className="px-4 py-5">
-                        <span className="text-[11px] font-black text-foreground">{c.employees}</span>
-                      </td>
-                      <td className="px-4 py-5">
-                        <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md">
-                          {c.fundingStage || "N/A"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 truncate">
-                           <MapPin className="w-3 h-3 opacity-40 shrink-0" />
-                           {c.location.split(',')[0]}
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        {scoreBar(c.score)}
-                      </td>
-                      <td className="px-4 py-5">
-                        {intentDots(Math.min(5, Math.max(1, Math.round(c.signalsCount / 2))))}
-                      </td>
-                      <td className="px-4 py-5 text-right">
-                        <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all translate-x-1 group-hover:translate-x-0">
-                           <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary">
-                             <Star className="w-4 h-4" />
-                           </Button>
-                           <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary">
-                             <MoreVertical className="w-4 h-4" />
-                           </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Load More */}
-              {!isLoading && filteredCompanies.length > 0 && (
-                 <div className="p-8 flex justify-center border-t border-border bg-muted/5">
-                    <Button variant="outline" className="h-10 px-8 rounded-xl font-bold text-xs gap-2 border-border/60 hover:border-primary transition-all">
-                       Show more companies <ChevronDown className="w-4 h-4 opacity-40" />
-                    </Button>
-                 </div>
-              )}
-            </>
+            <CompaniesResultsTable
+              companies={filteredCompanies}
+              isLoading={isLoading}
+              hasSearched={hasSearched}
+              tableId="companies-page-v3"
+              onEnrichReveal={(companyId, field) => {
+                console.log('Enrich reveal clicked:', companyId, field)
+                // TODO: Implement enrichment functionality
+              }}
+              enrichCache={{}}
+              enrichingRows={{}}
+              waterfallAttempts={{}}
+            />
           )}
         </div>
       </div>
