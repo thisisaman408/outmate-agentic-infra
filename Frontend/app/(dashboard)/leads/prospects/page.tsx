@@ -228,7 +228,7 @@ function UnlockedFilterPanel({
                     className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20"
                   >
                     {c}
-                    <button onClick={() => JSON.stringify(onRemoveChip(c))} className="opacity-60 hover:opacity-100">
+                    <button onClick={() => onRemoveChip(c)} className="opacity-60 hover:opacity-100">
                       <X className="w-2.5 h-2.5" />
                     </button>
                   </span>
@@ -385,6 +385,9 @@ export default function PeoplePage() {
     setFilterChips((p) => ({ ...p, [filter]: (p[filter] || []).filter((c) => c !== chip) }))
     setPendingChange(true)
   }
+  const toggleFilter = (label: string) => {
+    setExpandedFilters((p) => ({ ...p, [label]: !p[label] }))
+  }
   const toggleRow = (id: string) => setSelectedRows((p) => ({ ...p, [id]: !p[id] }))
   const selectedCount = Object.values(selectedRows).filter(Boolean).length
   const activeFilterCount = Object.values(filterChips).filter((v) => v.length > 0).length
@@ -408,7 +411,68 @@ export default function PeoplePage() {
         limit: 50,
       }
       const res = await searchProspects(filters)
-      setProspects(res.profiles)
+      // Map backend response to match frontend interface
+      const mappedProfiles = res.profiles.map((p: any) => {
+        // Parse location string into components
+        const locationParts = (p.location || '').split(',').map((part: string) => part.trim())
+        const locationDetails = {
+          city: locationParts[0] || '',
+          state: locationParts[1] || '',
+          country: locationParts[2] || '',
+          continent: '',
+        }
+
+        // Transform employer array to current_employers
+        const currentEmployers = Array.isArray(p.employer) ? p.employer.map((e: any) => ({
+          name: e.company_name || e.name || '',
+          company_name: e.company_name || e.name || '',
+          title: e.title || '',
+          linkedin_id: e.company_linkedin_id || '',
+          company_id: e.company_linkedin_id || '',
+          company_linkedin_id: e.company_linkedin_id || '',
+          company_website_domain: '',
+          position_id: e.position_id || 0,
+          description: e.description || '',
+          location: e.location || '',
+          start_date: e.start_date || '',
+          end_date: e.end_date,
+          employer_is_default: true,
+          seniority_level: '',
+          function_category: '',
+          years_at_company: '',
+          years_at_company_raw: 0,
+          company_headquarters_country: '',
+          company_hq_location: '',
+          company_hq_location_address_components: [],
+          company_headcount_range: '',
+          company_industries: [],
+          company_linkedin_industry: '',
+          company_type: '',
+          company_headcount_latest: 0,
+          company_website: '',
+          company_linkedin_profile_url: '',
+          business_email_verified: false,
+        })) : []
+
+        return {
+          ...p,
+          current_employers: currentEmployers,
+          past_employers: [], // Backend doesn't provide past employers in this response
+          location_details: p.location_details || locationDetails,
+          region: p.location || locationDetails.country || '',
+          years_of_experience: '', // Backend doesn't provide this field
+          years_of_experience_raw: 0,
+        }
+      })
+      console.log('Prospect search results sample:', mappedProfiles.slice(0, 2).map(p => ({
+        name: p.name,
+        current_employers: p.current_employers,
+        region: p.region,
+        location_details: p.location_details,
+        years_of_experience: p.years_of_experience,
+        years_of_experience_raw: p.years_of_experience_raw,
+      })))
+      setProspects(mappedProfiles)
       setTotalCount(res.total_count)
       // Persist for profile page
       try { localStorage.setItem("prospect_search_results", JSON.stringify(res.profiles)) } catch {}
@@ -521,7 +585,7 @@ export default function PeoplePage() {
           {lockedFilters.map((f) => (
             <Popover key={f.label}>
               <PopoverTrigger asChild>
-                <button className="w-full flex items-center gap-3 px-4 h-11 text-left opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
+                <button suppressHydrationWarning className="w-full flex items-center gap-3 px-4 h-11 text-left opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
                   <span className="flex-1 text-[12px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
                   <Lock className="w-3.5 h-3.5 opacity-30" />
                   {f.tier && tierPill(f.tier)}
@@ -690,7 +754,7 @@ export default function PeoplePage() {
                   onWaterfallResult={handleWaterfallResult}
                   enrichCache={{}}
                   enrichingRows={{}}
-                  tableId="prospects_v2"
+                  tableId="prospects-search-v3"
                   onAddToCRM={handleAddToCRM}
                />
             </div>
