@@ -44,7 +44,7 @@ class NotificationRepository:
         - Publishes to Redis for SSE delivery.
         """
         # 1. Grouping check (skip for types that should never group)
-        if company and type not in ("brief_ready", "meeting_prep_ready"):
+        if company and type not in ("meeting_prep_ready",):
             existing = self._find_group_candidate(user_id, type, company)
             if existing:
                 existing.grouped_count += 1

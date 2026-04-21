@@ -117,7 +117,7 @@ export default function UnifiedCopilotPage() {
     if (messages.length > 0) scrollToBottom()
   }, [messages, isTyping])
 
-  const sendMessage = useCallback((text?: string) => {
+  const sendMessage = useCallback(async (text?: string) => {
     const content = text || input.trim()
     if (!content) return
 
@@ -132,17 +132,50 @@ export default function UnifiedCopilotPage() {
     setInput("")
     setIsTyping(true)
 
-    // Mock AI Response
-    setTimeout(() => {
-      const response: ChatMessage = {
+    try {
+      const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const headers = {
+        "Content-Type": "application/json",
+      }
+      const authHeaders = typeof window !== 'undefined' ? (await import('@/lib/auth')).authService.getAuthHeaders() : {}
+      Object.entries(authHeaders).forEach(([key, value]) => {
+        if (value) headers[key] = value
+      })
+
+      const response = await fetch(`${BACKEND_BASE}/api/copilot/product-assistant`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ question: content }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to get AI response")
+      }
+
+      const data = await response.json()
+      // Remove markdown asterisks for bold formatting
+      const cleanContent = (data.response || data.answer || "I apologize, but I couldn't generate a response.")
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+      const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `I've analyzed your request. Based on the current signals, I found **47 high-intent companies** active on your site today. 12 of them have raised funding in the last 30 days.\n\nWould you like me to trigger the **Series B Prospecting** workflow for these accounts?`,
+        content: cleanContent,
         timestamp: new Date(),
       }
-      setMessages(prev => [...prev, response])
+      setMessages(prev => [...prev, assistantMsg])
+    } catch (error) {
+      console.error("Failed to get AI response:", error)
+      const errorMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "I apologize, but I encountered an error processing your request. Please try again.",
+        timestamp: new Date(),
+      }
+      setMessages(prev => [...prev, errorMsg])
+    } finally {
       setIsTyping(false)
-    }, 1500)
+    }
   }, [input])
 
   const hasMessages = messages.length > 0

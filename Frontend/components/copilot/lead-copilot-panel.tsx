@@ -270,14 +270,27 @@ export function LeadCopilotPanel() {
           setIsDMLoading(true)
           try {
             const domain = selectedProspect.domain || selectedProspect.website || ""
+            console.log('[Decision Makers] Fetching for domain:', domain, 'from selectedProspect:', selectedProspect)
             if (domain) {
               const res = await fetch(`/api/v1/contactout/decision-makers/${encodeURIComponent(domain)}`, {
                 headers: { "Authorization": `Bearer ${localStorage.getItem("outmate_auth_token")}` }
               })
               if (res.ok) {
                 const data = await res.json()
-                setDecisionMakers(data.data || [])
+                console.log('[Decision Makers] Response data:', data)
+                // Filter decision makers to ensure they match the requested domain
+                const filteredDMs = (data.data || []).filter((dm: any) => {
+                  const dmDomain = dm.company_domain || dm.company?.domain || ''
+                  // Check if the decision maker's domain matches or contains the requested domain
+                  return dmDomain === domain || dmDomain.endsWith(domain) || domain.endsWith(dmDomain)
+                })
+                console.log('[Decision Makers] Filtered decision makers:', filteredDMs.length, 'from', (data.data || []).length)
+                setDecisionMakers(filteredDMs)
+              } else {
+                console.error('[Decision Makers] API error:', res.status, res.statusText)
               }
+            } else {
+              console.warn('[Decision Makers] No domain found for selectedProspect:', selectedProspect)
             }
           } catch (err) {
             console.error("Failed to fetch decision makers:", err)

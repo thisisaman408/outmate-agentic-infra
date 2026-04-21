@@ -160,9 +160,6 @@ async def get_daily_brief(
         if was_generated and result.get("status") != "empty":
             cost = COPILOT_CREDIT_COSTS["daily_brief"]
             _deduct(db, current_user.id, cost, "Copilot: Daily brief auto-generated")
-            _notify(db, str(current_user.id), "brief_ready", "Your Daily Brief Is Ready",
-                    "Today's pipeline summary and priority actions are ready to review.",
-                    "/copilot/daily-brief", "green")
         return result
     except HTTPException:
         raise
@@ -195,9 +192,9 @@ async def regenerate_daily_brief(
         )
         if result.get("status") != "empty":
             _deduct(db, current_user.id, cost, "Copilot: Daily brief regenerated")
-            _notify(db, str(current_user.id), "brief_ready", "Your Daily Brief Is Ready",
-                    "Today's pipeline summary and priority actions are ready to review.",
-                    "/copilot/daily-brief", "green")
+            # Send notification for manual regeneration
+            from app.tasks.copilot_tasks import send_brief_notification_task
+            send_brief_notification_task.delay(user_id, result)
         return result
     except HTTPException:
         raise

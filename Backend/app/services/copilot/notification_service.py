@@ -85,6 +85,10 @@ class NotificationService:
     # ------------------------------------------------------------------ #
 
     def _send_email(self, *, to: str, subject: str, html: str, text: str) -> None:
+        logger.info("_send_email: attempting to send to %s | subject: %s", to, subject)
+        logger.info("_send_email: SMTP_HOST=%s, SMTP_USER=%s, SMTP_PORT=%s, SMTP_FROM_EMAIL=%s",
+                    settings.SMTP_HOST, settings.SMTP_USER, settings.SMTP_PORT, settings.SMTP_FROM_EMAIL)
+
         if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
             logger.warning(
                 "SMTP not configured (SMTP_HOST/SMTP_USER/SMTP_PASSWORD missing). "

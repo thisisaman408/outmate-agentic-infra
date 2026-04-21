@@ -184,15 +184,34 @@ async def _generate_for_user(
         # In-app notification
         try:
             from app.db.repositories.notification_repository import NotificationRepository
+            from app.db.models.copilot_notification import CopilotNotification
+            from datetime import datetime, timezone, timedelta
+
             repo = NotificationRepository(db)
-            repo.create(
-                user_id=user_id,
-                type="brief_ready",
-                title="Your Daily Brief Is Ready",
-                body="Today's pipeline summary and priority actions are ready to review.",
-                cta_url="/copilot/daily-brief",
-                priority="green",
+
+            # Check if a brief_ready notification already exists for today (within last 24 hours)
+            one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+            existing = (
+                db.query(CopilotNotification)
+                .filter(
+                    CopilotNotification.user_id == user_id,
+                    CopilotNotification.type == "brief_ready",
+                    CopilotNotification.created_at >= one_day_ago,
+                )
+                .first()
             )
+
+            if not existing:
+                repo.create(
+                    user_id=user_id,
+                    type="brief_ready",
+                    title="Your Daily Brief Is Ready",
+                    body="Today's pipeline summary and priority actions are ready to review.",
+                    cta_url="/copilot/daily-brief",
+                    priority="green",
+                )
+            else:
+                logger.info("brief_ready notification already exists for user %s, skipping creation", user_id)
         except Exception as _ne:
             logger.warning("Failed to create brief_ready notification: %s", _ne)
 
@@ -263,17 +282,24 @@ def send_brief_notification_task(self, user_id: str, brief: dict):
             .first()
         )
         if not prefs:
+            logger.warning("send_brief_notification_task: no prefs found for user %s", user_id)
             return {"status": "no_prefs"}
+
+        logger.info("send_brief_notification_task: prefs for user %s - notify_email=%s, notify_slack=%s, slack_webhook_url=%s",
+                    user_id, prefs.notify_email, prefs.notify_slack, prefs.slack_webhook_url)
 
         notifier = NotificationService()
         to_email = _get_user_email(db, user_id) if prefs.notify_email else None
         slack_url = prefs.slack_webhook_url if prefs.notify_slack else None
+
+        logger.info("send_brief_notification_task: sending - to_email=%s, slack_url=%s", to_email, slack_url)
 
         notifier.send_daily_brief(
             to_email=to_email,
             slack_webhook_url=slack_url,
             brief=brief,
         )
+        logger.info("send_brief_notification_task: sent successfully for user %s", user_id)
         return {"status": "sent"}
     except Exception as exc:
         logger.error("send_brief_notification_task failed for user %s: %s", user_id, exc)
