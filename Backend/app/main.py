@@ -242,6 +242,28 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         content={"detail": safe_errors},
     )
 
+
+# Add global exception handler for all unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc: Exception):
+    """
+    Global exception handler to ensure all errors return JSON responses.
+    Logs the full error server-side; returns a generic error message to the client.
+    """
+    logger.error(
+        "Unhandled exception",
+        extra={
+            "url": str(request.url),
+            "method": request.method,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
 # Register API routers
 app.include_router(prospects.router, dependencies=auth_dependencies)
 logger.info("Prospects router registered")
