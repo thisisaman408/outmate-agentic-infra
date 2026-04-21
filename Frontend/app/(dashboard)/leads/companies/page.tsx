@@ -32,12 +32,14 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
-import { leadsApi, type Lead } from "@/lib/api/leads"
 import { NlpSearchBar } from "@/components/leads/nlp-search-bar"
 import { authService } from "@/lib/auth"
 import { toast } from "sonner"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
+import { enrichCompany } from "@/lib/services/betterContactService"
+
+const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 /* ─── filter data ─── */
 
@@ -158,114 +160,117 @@ export default function CompaniesPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
 
+  // Enrichment State (zap icon = BetterContact)
+  const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
+  const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
+  const [waterfallAttempts, setWaterfallAttempts] = useState<Record<string, { email?: boolean; phone?: boolean }>>({})
+
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Debug: Log companies data when it changes
-  useEffect(() => {
-    if (companies.length > 0) {
-      console.log('Companies state sample:', companies.slice(0, 2).map(c => ({
-        name: c.name,
-        employee_count_range: c.employee_count_range,
-        revenue_exact: c.revenue_exact,
-        headquarters_address: c.headquarters_address,
-      })))
-    }
-  }, [companies])
+  // Map raw backend company data to CompanyData (same logic as AI Powered Search)
+  const mapCompanyResults = useCallback((rawList: any[]): CompanyData[] => {
+    return (Array.isArray(rawList) ? rawList : []).map((item: any) => {
+      const raw = (item?.raw_data && typeof item.raw_data === "object") ? item.raw_data : {}
+      const normalizeDomain = (v?: string) => {
+        if (!v || typeof v !== "string") return ""
+        return v.replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim()
+      }
+      const parseLocation = (v?: string) => {
+        if (!v || typeof v !== "string") return { city: undefined, state: undefined, country: undefined }
+        const parts = v.split(",").map(p => p.trim()).filter(Boolean)
+        if (parts.length >= 3) return { city: parts[0], state: parts[1], country: parts[2] }
+        if (parts.length === 2) return { city: parts[0], state: undefined, country: parts[1] }
+        return { city: parts[0], state: undefined, country: undefined }
+      }
+      const loc = parseLocation(item.location_display || item.location || item.headquarters_address || raw.location_display || raw.location || raw.headquarter)
+      const domain = normalizeDomain(item.domain ?? item.website ?? raw.domain ?? raw.website ?? "")
+
+      return {
+        id: String(item.id ?? item.business_id ?? item.domain ?? ""),
+        name: item.name ?? item.business_name ?? item.company_name ?? "",
+        domain,
+        website: item.website,
+        logo_url: item.logo_url ?? item.business_logo ?? item.logo ?? (domain ? `https://logo.clearbit.com/${domain}` : undefined),
+        description: item.description ?? item.company_description ?? item.business_description,
+        industry: item.industry ?? item.linkedin_industry_category ?? item.primary_industry,
+        sub_industry: item.sub_industry,
+        linkedin_industry_category: item.linkedin_industry_category,
+        company_type: item.company_type ?? item.business_type ?? item.type ?? raw.company_type,
+        founded_year: item.founded_year ?? item.year_founded ?? item.founded_at ?? raw.founded_year,
+        employee_count_exact: item.employee_count_exact ?? item.employee_count ?? item.size ?? raw.employee_count_exact ?? raw.size,
+        employee_count_range: item.employee_count_range ?? item.employee_range ?? item.number_of_employees_range ?? item.company_size ?? item.size_range ?? raw.employee_count_range ?? raw.number_of_employees_range,
+        revenue_exact: item.revenue_exact ?? item.yearly_revenue_exact ?? item.yearly_revenue ?? item.yearly_revenue_usd ?? item.revenue_usd ?? item.annual_revenue_usd ?? item.revenue ?? raw.revenue_exact ?? raw.revenue,
+        revenue_range: item.revenue_range ?? item.yearly_revenue_range ?? item.estimated_revenue_range ?? raw.revenue_range,
+        funding_stage: item.funding_stage ?? item.last_funding_round_type,
+        funding_total: item.funding_total ?? item.known_funding_total_value ?? item.total_funding_usd,
+        last_funding_date: item.last_funding_date ?? item.last_funding_round_date,
+        has_recent_funding: item.has_recent_funding,
+        investors: Array.isArray(item.investors) ? item.investors : [],
+        investors_count: item.investors_count ?? (Array.isArray(item.investors) ? item.investors.length : undefined),
+        headquarters_country: item.headquarters_country ?? item.country_name ?? item.country ?? raw.headquarters_country ?? loc.country,
+        headquarters_state: item.headquarters_state ?? item.region_name ?? item.state ?? raw.headquarters_state ?? loc.state,
+        headquarters_city: item.headquarters_city ?? item.city_name ?? item.city ?? raw.headquarters_city ?? loc.city,
+        headquarters_address: item.headquarters_address ?? item.hq_address ?? item.location_display ?? item.location ?? raw.headquarter ?? raw.headquarters_address,
+        location_display: item.location_display ?? item.location ?? raw.location_display ?? raw.location,
+        street: item.street,
+        zip_code: item.zip_code ?? item.zip ?? raw.zip_code,
+        locations: Array.isArray(item.locations) ? item.locations : [],
+        locations_distribution_count: item.locations_distribution_count,
+        number_of_locations: item.number_of_locations,
+        phone: Array.isArray(item.phone) ? item.phone.join(", ") : item.phone,
+        email: Array.isArray(item.email) ? item.email.join(", ") : item.email,
+        personal_email: item.personal_email,
+        work_email: item.work_email,
+        linkedin_url: item.linkedin_url ?? item.company_linkedin_url ?? item.linkedin_profile_url ?? raw.linkedin_url,
+        twitter_url: item.twitter_url,
+        facebook_url: item.facebook_url,
+        instagram_url: item.instagram_url,
+        follower_count: item.follower_count ?? item.linkedin_followers,
+        technologies: Array.isArray(item.technologies) ? item.technologies : (item.full_tech_stack ?? []),
+        is_tech_heavy: item.is_tech_heavy,
+        employee_growth_6m: item.employee_growth_6m,
+        employee_growth_12m: item.employee_growth_12m,
+        employee_growth_6m_percent: item.employee_growth_6m_percent,
+        employee_growth_12m_percent: item.employee_growth_12m_percent,
+        growth_category: item.growth_category,
+        job_openings_count: item.job_openings_count,
+        web_traffic: item.web_traffic,
+        seo_score: item.seo_score,
+        decision_makers_count: item.decision_makers_count,
+        acquisition_status: item.acquisition_status,
+        data_quality_score: item.data_quality_score ?? item.quality_score ?? raw.data_quality_score,
+        enriched: item.enriched ?? false,
+        last_raised_amount: item.last_raised_amount,
+        market_cap: item.market_cap,
+        fiscal_year_end: item.fiscal_year_end,
+        ticker: item.ticker,
+        stock_symbol: item.stock_symbol,
+      } as CompanyData
+    })
+  }, [])
 
   const searchWithFilters = useCallback(async (filters: Record<string, any>) => {
     if (Object.keys(filters).length === 0) return
     setIsLoading(true)
     setHasSearched(true)
     try {
-      const data = await leadsApi.generateLeads({
-        prompt: "",
-        filters: filters as any,
-        limit: 50,
+      const headers = {
+        ...authService.getAuthHeaders(),
+        "Content-Type": "application/json",
+      }
+      const response = await fetch(`${BACKEND_BASE}/api/v1/leads/search/companies`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ filters, options: { limit: 50 } }),
       })
+      if (!response.ok) throw new Error(`API error: ${response.status}`)
+      const result = await response.json()
+      if (!result.success) throw new Error(result.error?.message || "Search failed")
 
-      // Filter out broad companies (Google, Amazon, LinkedIn, etc.)
-      const broadCompanies = [
-        "google", "amazon", "linkedin", "microsoft", "apple", "facebook", "meta",
-        "alphabet", "netflix", "twitter", "x", "tesla", "spacex", "uber", "lyft",
-        "airbnb", "booking", "expedia", "salesforce", "oracle", "sap", "ibm",
-        "intel", "amd", "nvidia", "cisco", "vmware", "adobe", "intuit", "zoom",
-        "slack", "atlassian", "shopify", "square", "stripe", "paypal", "visa",
-        "mastercard", "jpmorgan", "chase", "bank of america", "wells fargo", "citi"
-      ]
-
-      const filteredData = data.filter((item: Lead) => {
-        const companyName = (item?.companyName || "").toLowerCase()
-        const domain = (item?.domain || "").toLowerCase()
-        return !broadCompanies.some((broad) =>
-          companyName.includes(broad) || domain.includes(broad)
-        )
-      })
-
-      // Map Lead to CompanyData format
-      const mappedCompanies = filteredData.map((lead: Lead): CompanyData => ({
-        id: lead.id,
-        name: lead.companyName,
-        domain: lead.companyName.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '') + '.com',
-        industry: lead.industry,
-        employee_count_range: lead.employees,
-        employee_count_exact: undefined,
-        revenue_range: undefined,
-        revenue_exact: undefined,
-        headquarters_address: lead.location,
-        headquarters_city: lead.location.split(',')[0]?.trim() || '',
-        headquarters_state: lead.location.split(',')[1]?.trim() || '',
-        headquarters_country: lead.location.split(',')[2]?.trim() || 'US',
-        location_display: lead.location,
-        email: undefined, // Don't show email, only show "Tap to reveal"
-        phone: lead.phone,
-        linkedin_url: lead.linkedin,
-        technologies: lead.techStack,
-        funding_stage: undefined,
-        funding_total: undefined,
-        last_funding_date: undefined,
-        has_recent_funding: false,
-        investors: [],
-        investors_count: 0,
-        last_raised_amount: undefined,
-        twitter_url: undefined,
-        facebook_url: undefined,
-        instagram_url: undefined,
-        follower_count: undefined,
-        employee_growth_6m: undefined,
-        employee_growth_12m: undefined,
-        employee_growth_6m_percent: undefined,
-        employee_growth_12m_percent: undefined,
-        growth_category: undefined,
-        job_openings_count: undefined,
-        web_traffic: undefined,
-        seo_score: undefined,
-        decision_makers_count: undefined,
-        acquisition_status: undefined,
-        data_quality_score: lead.score,
-        company_type: undefined,
-        founded_year: undefined,
-        ticker: undefined,
-        stock_symbol: undefined,
-        exchange: undefined,
-        market_cap: undefined,
-        fiscal_year_end: undefined,
-        number_of_locations: undefined,
-        street: undefined,
-        zip_code: undefined,
-        locations: [],
-        locations_distribution_count: undefined,
-        personal_email: undefined,
-        work_email: undefined,
-        sub_industry: undefined,
-        linkedin_industry_category: undefined,
-        website: undefined,
-        description: undefined,
-        logo_url: undefined,
-      }))
-
-      setCompanies(mappedCompanies)
+      const rawCompanies = result.data?.companies || []
+      setCompanies(mapCompanyResults(rawCompanies))
     } catch (err: any) {
       toast.error(err.message || "Search failed")
     } finally {
@@ -291,7 +296,7 @@ export default function CompaniesPage() {
         ...authService.getAuthHeaders(),
         "Content-Type": "application/json",
       }
-      const response = await fetch("/api/v1/leads/search/companies", {
+      const response = await fetch(`${BACKEND_BASE}/api/v1/leads/search/companies`, {
         method: "POST",
         headers,
         body: JSON.stringify({ filters, options: { limit: 50 } }),
@@ -301,88 +306,7 @@ export default function CompaniesPage() {
       if (!result.success) throw new Error(result.error?.message || "Search failed")
 
       const rawCompanies = result.data?.companies || []
-
-      // Filter out broad companies (Google, Amazon, LinkedIn, etc.)
-      const broadCompanies = [
-        "google", "amazon", "linkedin", "microsoft", "apple", "facebook", "meta",
-        "alphabet", "netflix", "twitter", "x", "tesla", "spacex", "uber", "lyft",
-        "airbnb", "booking", "expedia", "salesforce", "oracle", "sap", "ibm",
-        "intel", "amd", "nvidia", "cisco", "vmware", "adobe", "intuit", "zoom",
-        "slack", "atlassian", "shopify", "square", "stripe", "paypal", "visa",
-        "mastercard", "jpmorgan", "chase", "bank of america", "wells fargo", "citi"
-      ]
-
-      const filteredCompanies = rawCompanies.filter((item: any) => {
-        const companyName = (item?.name || item?.company_name || "").toLowerCase()
-        const domain = (item?.domain || item?.website || "").toLowerCase()
-        return !broadCompanies.some((broad) =>
-          companyName.includes(broad) || domain.includes(broad)
-        )
-      })
-
-      // Map raw companies to CompanyData format
-      const mappedCompanies = filteredCompanies.map((item: any): CompanyData => ({
-        id: item.id || item.domain || Math.random().toString(36).substr(2, 9),
-        name: item.name || item.company_name || '',
-        domain: item.domain || item.website || '',
-        industry: item.industry || item.linkedin_industries || '',
-        employee_count_range: item.employee_count_range || item.company_size || '',
-        employee_count_exact: item.employee_count || item.employee_count_exact,
-        revenue_range: item.revenue_range || item.estimated_revenue_range || '',
-        revenue_exact: item.revenue_exact || item.estimated_revenue || item.estimated_revenue_lower_bound_usd,
-        headquarters_address: item.headquarters_address || item.location_display || item.location || '',
-        headquarters_city: item.headquarters_city || '',
-        headquarters_state: item.headquarters_state || '',
-        headquarters_country: item.headquarters_country || item.country || 'US',
-        location_display: item.location_display || item.location || '',
-        email: undefined, // Don't show email, only show "Tap to reveal"
-        phone: item.phone || '',
-        linkedin_url: item.linkedin_url || item.linkedin || '',
-        technologies: item.technologies || [],
-        funding_stage: item.funding_stage || '',
-        funding_total: item.funding_total,
-        last_funding_date: item.last_funding_date,
-        has_recent_funding: item.has_recent_funding || false,
-        investors: item.investors || [],
-        investors_count: item.investors_count || 0,
-        last_raised_amount: item.last_raised_amount,
-        twitter_url: item.twitter_url,
-        facebook_url: item.facebook_url,
-        instagram_url: item.instagram_url,
-        follower_count: item.follower_count || item.linkedin_followers,
-        employee_growth_6m: item.employee_growth_6m || item.headcount_growth,
-        employee_growth_12m: item.employee_growth_12m,
-        employee_growth_6m_percent: item.employee_growth_6m_percent,
-        employee_growth_12m_percent: item.employee_growth_12m_percent,
-        growth_category: item.growth_category,
-        job_openings_count: item.job_openings_count || item.job_openings,
-        web_traffic: item.web_traffic,
-        seo_score: item.seo_score,
-        decision_makers_count: item.decision_makers_count,
-        acquisition_status: item.acquisition_status,
-        data_quality_score: item.data_quality_score,
-        company_type: item.company_type,
-        founded_year: item.founded_year || item.year_founded,
-        ticker: item.ticker,
-        stock_symbol: item.stock_symbol,
-        exchange: item.exchange,
-        market_cap: item.market_cap,
-        fiscal_year_end: item.fiscal_year_end,
-        number_of_locations: item.number_of_locations,
-        street: item.street,
-        zip_code: item.zip_code,
-        locations: item.locations || [],
-        locations_distribution_count: item.locations_distribution_count,
-        personal_email: item.personal_email,
-        work_email: item.work_email,
-        sub_industry: item.sub_industry,
-        linkedin_industry_category: item.linkedin_industry_category,
-        website: item.website || item.company_website_url,
-        description: item.description || item.short_description || item.long_description,
-        logo_url: item.logo_url,
-      }))
-
-      setCompanies(mappedCompanies)
+      setCompanies(mapCompanyResults(rawCompanies))
     } catch (e: any) {
       toast.error(e.message || "AI Search failed")
     } finally {
@@ -712,14 +636,38 @@ export default function CompaniesPage() {
               companies={filteredCompanies}
               isLoading={isLoading}
               hasSearched={hasSearched}
-              tableId="companies-page-v3"
-              onEnrichReveal={(companyId, field) => {
-                console.log('Enrich reveal clicked:', companyId, field)
-                // TODO: Implement enrichment functionality
+              tableId="companies-page-v4"
+              onEnrichReveal={async (companyId, field) => {
+                if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return
+                const company = filteredCompanies.find((c) => (c.domain || c.id) === companyId)
+                if (!company) return
+                setEnrichingRows(prev => ({ ...prev, [companyId]: true }))
+
+                // Zap icon: BetterContact waterfall (20+ data sources)
+                const result = await enrichCompany(company.name, company.domain, field)
+
+                setEnrichedData(prev => {
+                  const existing = prev[companyId] || {}
+                  const updated = { ...existing, success: result.success, not_found: result.not_found }
+                  if (result.email) updated.email = { email: result.email, credits_consumed: result.credits_consumed }
+                  if (result.phone) updated.phone = { phone: result.phone, credits_consumed: result.credits_consumed }
+                  return { ...prev, [companyId]: updated }
+                })
+                setWaterfallAttempts(prev => ({ ...prev, [companyId]: { ...prev[companyId], [field]: true } }))
+                setEnrichingRows(prev => ({ ...prev, [companyId]: false }))
               }}
-              enrichCache={{}}
-              enrichingRows={{}}
-              waterfallAttempts={{}}
+              enrichCache={Object.fromEntries(
+                Object.entries(enrichedData).map(([key, data]) => [
+                  key,
+                  enrichingRows[key]
+                    ? { loading: true }
+                    : data?.success && !data?.not_found
+                      ? { email: data.email || undefined, phone: data.phone || undefined }
+                      : {}
+                ])
+              )}
+              enrichingRows={enrichingRows}
+              waterfallAttempts={waterfallAttempts}
             />
           )}
         </div>

@@ -28,6 +28,8 @@ import { BulkActionBar } from "@/components/leads/data-table/bulk-action-bar"
 import { useTableState, type ColumnDef } from "@/hooks/use-table-state"
 import { useCopilotPanelStore } from "@/hooks/use-copilot-panel"
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
 const CONTACTOUT_EMAIL_COST = 1
 const CONTACTOUT_PHONE_COST = 1
 
@@ -370,13 +372,13 @@ export function CompaniesResultsTable({
 
             let response: Response
             if (isCompanyPage) {
-                response = await fetch('/api/contactout/reveal-company-contact', {
+                response = await fetch(`${API_BASE_URL}/api/v1/contactout/reveal-company-contact`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({ domain: company.domain, include_phone: field === 'phone' }),
                 })
             } else {
-                response = await fetch('/api/contactout/reveal-contact', {
+                response = await fetch(`${API_BASE_URL}/api/v1/contactout/reveal-contact`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({ linkedin_url: linkedinUrl, include_phone: field === 'phone' }),
@@ -395,23 +397,32 @@ export function CompaniesResultsTable({
             // Explorium fallback for company when ContactOut returned nothing
             if (sanitized.length === 0 && isCompanyPage && company.domain) {
                 try {
-                    const exploriumRes = await fetch(`/api/v1/explorium/enrich-company`, {
+                    const exploriumRes = await fetch(`${API_BASE_URL}/api/v1/explorium/company/search`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ domain: company.domain }),
+                        body: JSON.stringify({
+                            filters: { domain: company.domain },
+                            options: { limit: 1, page: 1 },
+                        }),
                     })
                     if (exploriumRes.ok) {
-                        const exploriumData = await exploriumRes.json()
-                        const exploriumEmails = sanitizeEmails(
-                            Array.isArray(exploriumData?.emails) ? exploriumData.emails : []
-                        )
-                        const exploriumPhones = sanitizePhones(
-                            Array.isArray(exploriumData?.phones) ? exploriumData.phones : []
-                        )
-                        if (field === 'email' && exploriumEmails.length > 0) {
-                            sanitized = exploriumEmails
-                        } else if (field === 'phone' && exploriumPhones.length > 0) {
-                            sanitized = exploriumPhones
+                        const exploriumJson = await exploriumRes.json()
+                        const exploriumCompanies = exploriumJson?.data?.companies || []
+                        const first = exploriumCompanies[0]
+                        if (first) {
+                            const exploriumEmails = sanitizeEmails(
+                                Array.isArray(first?.emails) ? first.emails
+                                    : first?.email ? [first.email] : []
+                            )
+                            const exploriumPhones = sanitizePhones(
+                                Array.isArray(first?.phones) ? first.phones
+                                    : first?.phone ? [first.phone] : []
+                            )
+                            if (field === 'email' && exploriumEmails.length > 0) {
+                                sanitized = exploriumEmails
+                            } else if (field === 'phone' && exploriumPhones.length > 0) {
+                                sanitized = exploriumPhones
+                            }
                         }
                     }
                 } catch { /* Explorium fallback failed silently */ }
