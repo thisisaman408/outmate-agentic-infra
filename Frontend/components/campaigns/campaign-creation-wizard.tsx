@@ -220,6 +220,7 @@ export function CampaignCreationWizard() {
         description: "Campaign created successfully",
       })
       router.push("/campaigns")
+      router.refresh()
     } catch (error) {
       toast({
         title: "Error",
@@ -373,9 +374,21 @@ export function CampaignCreationWizard() {
   const personalizetext = (template: string, lead: Lead) => {
     const firstName = getFirstName(lead)
     const companyName = lead.companyName || lead.domain || "your company"
+    // Get user name from localStorage or use placeholder
+    const userName = typeof window !== 'undefined' ? (localStorage.getItem('user_name') || 'Your Name') : 'Your Name'
     return template
       .replace(/\{\{firstName\}\}/g, firstName)
+      .replace(/\{firstName\}/g, firstName)
+      .replace(/\[firstName\]/g, firstName)
       .replace(/\{\{companyName\}\}/g, companyName)
+      .replace(/\{companyName\}/g, companyName)
+      .replace(/\[companyName\]/g, companyName)
+      .replace(/\{\{userName\}\}/g, userName)
+      .replace(/\{userName\}/g, userName)
+      .replace(/\[Your Name\]/g, userName)
+      .replace(/\[userName\]/g, userName)
+      // Remove brackets from any remaining bracketed text (e.g., [Product] -> Product)
+      .replace(/\[([^\]]+)\]/g, '$1')
   }
 
   const handleSendEmail = async (recipientIdx: number, toEmail: string, subject: string, body: string) => {
