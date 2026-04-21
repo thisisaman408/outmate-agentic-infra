@@ -18,7 +18,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from celery import shared_task
+# We bind tasks to our configured Celery app explicitly via
+# `@celery_app.task(...)` rather than Celery's `@shared_task`.  `shared_task`
+# resolves to a global "current_app" at decoration time, which falls through
+# to a default `Celery()` (amqp://localhost:5672) if our app isn't already
+# imported when this module loads — a race that actually bit us, causing
+# `run_social_search.delay()` from FastAPI to throw ConnectionRefusedError.
+# Direct binding removes the import-order magic entirely.
+from app.core.celery_app import celery_app
 
 from app.db.deps import SessionLocal
 from app.db.models.watcher import Watcher
@@ -35,7 +42,7 @@ SCHEDULE_TO_INTERVAL = {
 }
 
 
-@shared_task(name="app.tasks.social_listening_tasks.poll_due_social_searches")
+@celery_app.task(name="app.tasks.social_listening_tasks.poll_due_social_searches")
 def poll_due_social_searches() -> Dict[str, Any]:
     """Run discovery for every active social_listening watcher that's due.
 
@@ -102,3 +109,50 @@ def poll_due_social_searches() -> Dict[str, Any]:
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()
     logger.info("poll_due_social_searches summary=%s", summary)
     return summary
+
+
+@celery_app.task(
+    name="app.tasks.social_listening_tasks.run_social_search",
+    bind=True,
+)
+def run_social_search(self, watcher_id: str, user_id: str, agent_run_id: str) -> Dict[str, Any]:
+    """Run discovery for a single watcher in the background.
+
+    Called by `POST /searches/{id}/run-now`.  The endpoint has already
+    pre-created an AgentRun row with status='queued' so the client can
+    poll; this task flips it to running and then success/error via the
+    service layer.
+    """
+    db = SessionLocal()
+    try:
+        watcher = (
+            db.query(Watcher)
+            .filter(Watcher.id == watcher_id, Watcher.user_id == user_id)
+            .first()
+        )
+        if not watcher:
+            return {"ok": False, "reason": "watcher_not_found"}
+        if watcher.status != "active":
+            return {"ok": False, "reason": "watcher_paused"}
+
+        service = SocialListeningService(db)
+        summary = asyncio.run(service.run_for_watcher(watcher, agent_run_id=agent_run_id))
+        db.commit()
+        return {"ok": True, "summary": summary}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("run_social_search failed for watcher %s: %s", watcher_id, exc)
+        db.rollback()
+        # Best-effort: mark the AgentRun as errored so the client stops polling.
+        try:
+            from app.db.models.agent_run import AgentRun
+            run = db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
+            if run and run.status in ("queued", "running"):
+                run.status = "error"
+                run.error_message = str(exc)[:1000]
+                run.finished_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        return {"ok": False, "reason": str(exc)[:300]}
+    finally:
+        db.close()

@@ -10,7 +10,7 @@ and enforces it at the SQL layer.
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -65,6 +65,16 @@ class AgentRun(Base):
     duration_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Cost tracking (added by migration w0x1y2z3a4b5).  tokens_* for LLM
+    # usage (nullable for runs that don't invoke an LLM, e.g. pure API calls
+    # like a voice trigger).  cost_credits is the internal Outmate credit
+    # charge; cost_usd is the vendor-side spend snapshot.
+    tokens_input = Column(Integer, nullable=True)
+    tokens_output = Column(Integer, nullable=True)
+    cost_credits = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)
+    model_used = Column(String(128), nullable=True)
 
     # ORM convenience
     user = relationship("User", lazy="joined")

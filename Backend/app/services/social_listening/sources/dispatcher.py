@@ -7,6 +7,8 @@ return CrustData results. Nothing breaks.
 
 from __future__ import annotations
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from app.services.social_listening.sources import linkedin_crustdata
 from app.services.social_listening.sources import linkedin_apify
@@ -15,6 +17,107 @@ from app.services.social_listening.sources import job_changes_crustdata
 from app.services.social_listening.sources import brightdata_discover
 
 logger = logging.getLogger(__name__)
+
+
+# ── Freshness enforcement ──────────────────────────────────────────────
+# Defensive client-side filter applied AFTER the source-level filters.
+# BrightData has been observed to ignore `date_range` on some queries,
+# and Apify actors can return posts older than `datePosted` when
+# LinkedIn's own search is loose.  We drop anything older than the
+# caller's window so the UI never shows year-old posts under a
+# "past-week" watcher.
+
+_TIME_FRAME_TO_SECONDS: Dict[str, int] = {
+    "hour":  60 * 60,
+    "day":   60 * 60 * 24,
+    "week":  60 * 60 * 24 * 7,
+    "month": 60 * 60 * 24 * 30,
+    "year":  60 * 60 * 24 * 365,
+    "all":   60 * 60 * 24 * 365,  # hard-cap "all" at 1y
+}
+
+# Human-written "posted 3 weeks ago" / "2mo" / "5h" date hints LinkedIn
+# sprinkles into scraped content.  Used when a result has no explicit
+# `posted_at` / `date` field.
+_RELATIVE_DATE_RE = re.compile(
+    r"\b(\d{1,3})\s*(s|second|sec|m|min|minute|h|hr|hour|d|day|w|wk|week|mo|month|y|yr|year)s?\s*(?:ago)?\b",
+    re.IGNORECASE,
+)
+_UNIT_TO_SECONDS = {
+    "s": 1, "second": 1, "sec": 1,
+    "m": 60, "min": 60, "minute": 60,
+    "h": 3600, "hr": 3600, "hour": 3600,
+    "d": 86400, "day": 86400,
+    "w": 604800, "wk": 604800, "week": 604800,
+    "mo": 2592000, "month": 2592000,
+    "y": 31536000, "yr": 31536000, "year": 31536000,
+}
+
+
+def _parse_age_seconds(item: Dict[str, Any]) -> Optional[int]:
+    """Return the post's age in seconds if we can figure it out, else None.
+
+    Tries (in order): explicit ISO/epoch fields → LinkedIn relative
+    phrases inside the content blob.  Returning None means "don't know" —
+    the caller treats that as pass-through rather than drop, since we'd
+    rather show a possibly-stale post than silently hide a real one.
+    """
+    now = datetime.now(timezone.utc)
+
+    for key in ("posted_at", "published_at", "date", "post_date", "created_at"):
+        value = item.get(key)
+        if not value:
+            continue
+        try:
+            if isinstance(value, (int, float)):
+                ts = float(value)
+                if ts > 1e12:  # milliseconds
+                    ts /= 1000.0
+                return max(0, int((now.timestamp() - ts)))
+            if isinstance(value, str):
+                cleaned = value.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(cleaned)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return max(0, int((now - dt).total_seconds()))
+        except (ValueError, TypeError):
+            continue
+
+    # Fallback: scrape "posted 3d ago" / "2 weeks ago" from the content.
+    blob = " ".join(
+        str(item.get(k) or "") for k in ("content", "description", "snippet", "title")
+    )
+    match = _RELATIVE_DATE_RE.search(blob)
+    if match:
+        qty, unit = match.group(1), match.group(2).lower()
+        seconds = int(qty) * _UNIT_TO_SECONDS.get(unit, 0)
+        if seconds:
+            return seconds
+
+    return None
+
+
+def _filter_by_freshness(
+    results: List[Dict[str, Any]], time_frame: str
+) -> List[Dict[str, Any]]:
+    """Drop results older than the requested window.  Pass-through when
+    we can't determine the age (better to show a maybe-old post than to
+    hide a legitimate one on a parse miss)."""
+    cutoff = _TIME_FRAME_TO_SECONDS.get((time_frame or "week").lower())
+    if not cutoff:
+        return results
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    for item in results:
+        age = _parse_age_seconds(item)
+        if age is None or age <= cutoff:
+            kept.append(item)
+        else:
+            dropped += 1
+    if dropped:
+        logger.info("freshness filter dropped %d/%d results older than %s",
+                    dropped, len(results), time_frame)
+    return kept
 
 # Source name -> handler mapping
 SOURCE_HANDLERS = {
@@ -98,18 +201,34 @@ async def _search_linkedin(
         except Exception as exc:
             logger.warning("CrustData fallback failed: %s", exc)
 
-    # 3. Apify — optional enhancement if still short
-    remaining = max_results - len(all_results)
-    if remaining > 0 and linkedin_apify.is_available():
+    # 3. Apify — always run alongside BrightData (NOT a fallback).
+    #
+    # Historical behaviour was "only call Apify if BrightData came up
+    # short", but BrightData almost always returns the full quota — so
+    # Apify effectively never ran even when configured.  That meant zero
+    # post images or author DPs in the UI, since BrightData Discover is
+    # a search API that doesn't return media.
+    #
+    # Now: always run Apify too, then merge.  On URL collisions Apify's
+    # row wins (richer data incl. images + profile_picture_url).  Apify
+    # costs roughly $0.30-1.00 per 1k posts on typical LinkedIn actors,
+    # which is worth it for the UX improvement.
+    if linkedin_apify.is_available():
         try:
             apify_results = await linkedin_apify.search_linkedin_posts(
                 keywords=keywords,
-                max_results=remaining,
+                max_results=max_results,
                 time_frame=time_frame,
             )
-            all_results = _merge_and_dedupe(all_results, apify_results)
+            # Apify is the richer source — put it first so _merge_and_dedupe
+            # keeps its version when the same post URL appears in both.
+            all_results = _merge_and_dedupe(apify_results, all_results)
         except Exception as exc:
             logger.warning("Apify LinkedIn enhancement failed (non-fatal): %s", exc)
+
+    # Defensive client-side freshness filter — catches stale posts that
+    # slip past the source-level date filters.  See _filter_by_freshness.
+    all_results = _filter_by_freshness(all_results, time_frame)
 
     return all_results[:max_results]
 

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.db.models.agent_run import AgentRun
 from app.db.models.signal_event import SignalEvent
 from app.db.models.signal_watcher_match import SignalWatcherMatch
 from app.db.models.watcher import Watcher
@@ -73,8 +74,15 @@ class SocialListeningService:
     async def run_for_watcher(
         self,
         watcher: Watcher,
+        agent_run_id: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Execute the dispatcher for one watcher.  Returns a summary dict."""
+        """Execute the dispatcher for one watcher.  Returns a summary dict.
+
+        Always writes an AgentRun row for audit trail.  If `agent_run_id`
+        is provided (e.g. from the HTTP endpoint that pre-created a row
+        with status='queued' so it could return an ID to the client), we
+        update that row in place; otherwise we create a fresh one.
+        """
         if watcher.type != "social_listening":
             raise ValueError(
                 f"watcher {watcher.id} is type={watcher.type!r}, not 'social_listening'"
@@ -86,6 +94,29 @@ class SocialListeningService:
             raise ValueError(f"watcher {watcher.id} has no keywords")
 
         max_leads = int(criteria.get("max_leads", 5))
+
+        if agent_run_id is not None:
+            run = self.db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
+            if run is None:
+                run = AgentRun(
+                    user_id=watcher.user_id,
+                    agent_type="social-listening",
+                    input=criteria,
+                    status="running",
+                )
+                self.db.add(run)
+                self.db.flush()
+        else:
+            run = AgentRun(
+                user_id=watcher.user_id,
+                agent_type="social-listening",
+                input=criteria,
+                status="running",
+            )
+            self.db.add(run)
+            self.db.flush()
+        run.status = "running"
+        self.db.commit()
 
         started = time.monotonic()
         try:
@@ -105,8 +136,14 @@ class SocialListeningService:
                 watcher.user_id,
                 exc,
             )
+            run.status = "error"
+            run.error_message = str(exc)[:1000]
+            run.duration_ms = duration_ms
+            run.finished_at = datetime.now(timezone.utc)
+            self.db.commit()
             return {
                 "watcher_id": watcher.id,
+                "run_id": str(run.id),
                 "status": "error",
                 "error": str(exc),
                 "discovered": 0,
@@ -155,8 +192,29 @@ class SocialListeningService:
             enriched_count,
             duration_ms,
         )
+
+        run.status = "success"
+        run.duration_ms = duration_ms
+        run.finished_at = datetime.now(timezone.utc)
+        run.leads = [
+            {
+                "signal_id": str(s.id),
+                "company_name": s.company_name,
+                "prospect_name": s.prospect_name,
+                "prospect_email": s.prospect_email,
+                "signal_type": s.signal_type,
+                "icp_score": s.icp_score,
+            }
+            for s in signals_created
+        ]
+        run.output_text = (
+            f"Discovered {discovered} signal(s); enriched {enriched_count}."
+        )
+        self.db.commit()
+
         return {
             "watcher_id": watcher.id,
+            "run_id": str(run.id),
             "status": "success",
             "discovered": discovered,
             "enriched": enriched_count,
@@ -196,12 +254,36 @@ class SocialListeningService:
 
         if existing:
             signal = existing
-            # Back-fill taxonomy on existing signals that were ingested before
-            # the classifier was added.
             raw = dict(signal.raw_data or {})
             if "taxonomy" not in raw:
                 raw["taxonomy"] = taxonomy
-                signal.raw_data = raw
+
+            # Back-fill identity fields when the original scrape came up
+            # empty and a later run discovered a richer value.  Without
+            # this, rows ingested before the name/company extractors were
+            # strengthened stay "Unknown" forever.  Only WRITE when the
+            # existing value is empty — never clobber a richer value with
+            # a weaker re-scrape.
+            lead_name = (lead.get("name") or "").strip()
+            if lead_name and not (signal.prospect_name or "").strip():
+                signal.prospect_name = lead_name
+            lead_company = (lead.get("company") or "").strip()
+            if lead_company and not (signal.company_name or "").strip():
+                signal.company_name = lead_company
+            lead_title = (lead.get("title") or "").strip()
+            if lead_title and not (signal.prospect_title or "").strip():
+                signal.prospect_title = lead_title
+
+            # Refresh scrape-captured media/snippet when the new pass has
+            # something and the old row didn't.
+            if lead.get("post_snippet") and not raw.get("post_snippet"):
+                raw["post_snippet"] = lead["post_snippet"]
+            if lead.get("post_images") and not raw.get("post_images"):
+                raw["post_images"] = lead["post_images"]
+            if lead.get("profile_picture_url") and not raw.get("profile_picture_url"):
+                raw["profile_picture_url"] = lead["profile_picture_url"]
+
+            signal.raw_data = raw
         else:
             raw_data = {
                 "linkedin": linkedin,
@@ -215,6 +297,12 @@ class SocialListeningService:
                 "tone": lead.get("tone") or "",
                 "email_unverified": lead.get("email_unverified") or False,
                 "taxonomy": taxonomy,
+                # Media — BrightData + other sources may surface these;
+                # stored so the SignalResponse can render the post
+                # thumbnails and the author's profile picture without
+                # an extra scrape.
+                "post_images": lead.get("post_images") or [],
+                "profile_picture_url": lead.get("profile_picture_url") or "",
             }
             # Use the classified signal name (e.g. "champion_job_change")
             # instead of the generic "social_post" constant.  The column is

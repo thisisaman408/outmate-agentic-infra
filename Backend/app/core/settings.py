@@ -447,6 +447,22 @@ class Settings(BaseSettings):
     )
 
     # ========================================================================
+    # RETELL AI — Voice Agent
+    # ========================================================================
+    RETELL_API_KEY: str = Field(
+        "",
+        description="Retell AI API key for outbound voice calls",
+    )
+    RETELL_AGENT_ID: str = Field(
+        "",
+        description="Retell AI agent ID (Conversation Flow Agent)",
+    )
+    RETELL_FROM_NUMBER: str = Field(
+        "",
+        description="Outbound caller ID phone number registered in Retell",
+    )
+
+    # ========================================================================
     # VALIDATORS - Ensure configuration is valid
     # ========================================================================
 

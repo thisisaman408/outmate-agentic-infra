@@ -41,6 +41,12 @@ from app.db.models.signal_watcher_match import SignalWatcherMatch
 from app.db.models.champion_change_event import ChampionChangeEvent
 # Outmate-agentic backed agent runs (tenant-isolated)
 from app.db.models.agent_run import AgentRun
+# Workflows
+from app.db.models.workflow import Workflow, WorkflowExecution
+# Voice campaigns
+from app.db.models.voice_campaign import VoiceCampaign, VoiceCampaignProspect
+# User company profile — global GTM context for every agent
+from app.db.models.company_profile import UserCompanyProfile
 
 __all__ = [
     "AgentRun",
@@ -87,4 +93,12 @@ __all__ = [
     "SignalSequenceDraft",
     # Champion alerts
     "ChampionChangeEvent",
+    # Workflows
+    "Workflow",
+    "WorkflowExecution",
+    # Voice campaigns
+    "VoiceCampaign",
+    "VoiceCampaignProspect",
+    # User company profile
+    "UserCompanyProfile",
 ]

@@ -45,17 +45,48 @@ async def enrich_signal(signal: SignalEvent, db: Session) -> Dict[str, Any]:
                 if v and not result.get(k):
                     result[k] = v
 
-    # Update the signal record
-    if result.get("email"):
+    # Update the signal record.  We only WRITE when the existing column
+    # is empty — never overwrite what the scraper originally captured.
+    # This turns "Reveal contact" into a proper identity backfill: if
+    # the post was ingested as Unknown (empty name/company), the reveal
+    # pass pulls those in alongside the email so the card stops showing
+    # "Unknown" the moment the user clicks through.
+    if result.get("email") and not signal.prospect_email:
         signal.prospect_email = result["email"]
-    if result.get("title") and not signal.prospect_title:
-        signal.prospect_title = result["title"]
+    # Titles: LinkedIn search scrapers (Apify actors, BrightData Discover)
+    # frequently truncate the `headline` to "Founder and CEO" / "VP Sales" —
+    # the UI then looks stripped-down on every card.  CrustData returns the
+    # full headline ("Founder & CEO @ X | Building Y for Z | 10+ yrs…"), so
+    # when the enrichment headline is meaningfully richer, upgrade the row
+    # rather than silently dropping the better data on the floor.
+    enriched_title = result.get("title") or ""
+    current_title = signal.prospect_title or ""
+    if enriched_title and len(enriched_title) > len(current_title) + 10:
+        signal.prospect_title = enriched_title
+    elif enriched_title and not current_title:
+        signal.prospect_title = enriched_title
+    enrichment_name = result.get("name") or result.get("full_name")
+    if enrichment_name and not signal.prospect_name:
+        signal.prospect_name = enrichment_name
+    enrichment_company = result.get("company") or result.get("company_name")
+    if enrichment_company and not signal.company_name:
+        signal.company_name = enrichment_company
 
     # Store enrichment data in raw_data
     enrichment_data = dict(raw)
     enrichment_data["enrichment"] = result
     if result.get("email"):
         enrichment_data["email_unverified"] = not result.get("email_verified", False)
+    # Backfill profile picture on reveal if the scraper didn't have one.
+    # CrustData's person-enrich returns `profile_picture_url`; BetterContact
+    # uses `profile_image`.  Normalise to a single key.
+    picture = (
+        result.get("profile_picture_url")
+        or result.get("profile_image")
+        or result.get("picture")
+    )
+    if picture and not enrichment_data.get("profile_picture_url"):
+        enrichment_data["profile_picture_url"] = picture
     signal.raw_data = enrichment_data
 
     db.add(signal)

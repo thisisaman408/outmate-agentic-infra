@@ -1,22 +1,38 @@
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
-  Search, Filter, Plus, Clock,
-  RefreshCw, X, ChevronDown, TrendingUp,
-  Users, Zap, Eye, Share2, Briefcase, Bell,
-  BarChart3, ArrowUpRight, Flame, Target, UserPlus, Send,
-  Activity, Mail, Shield, Layers
+  Search, Plus, RefreshCw,
+  Share2, ArrowUpRight, Flame, Target, UserPlus, Send,
+  Activity, Mail, Linkedin
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
-import { Separator } from "@/components/ui/separator"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import {
-  fetchSearches, fetchSignals, fetchStats, createSearch, enrichSignal, signalOutreach,
-  SocialSearch, SocialSignal, SocialStats, SignalFeedParams
+  fetchSearches,
+  createSearch,
+  updateSearch,
+  deleteSearch,
+  runSearchAndWait,
+  fetchSignals,
+  fetchStats,
+  enrichSignal,
+  signalOutreach,
+  signalCrmPush,
+  fetchIntegrations,
+  getHubSpotAuthUrl,
+  SIGNAL_TYPE_OPTIONS,
+  SORT_OPTIONS,
+  STRENGTH_OPTIONS,
+  type SocialSearch,
+  type SocialSignal,
+  type SocialStats,
+  type SignalFeedParams,
+  type CreateSearchPayload,
+  type IntegrationStatus,
 } from "@/lib/social-listening"
 
 /* ─── types ─── */
@@ -39,13 +55,6 @@ const SIGNAL_CATEGORIES = [
 
 const INTENT_OPTIONS = ["Highest Intent", "High Intent", "All Intent"] as const
 const TIME_OPTIONS = ["Anytime", "Today", "This Week", "This Month"] as const
-const STRENGTH_OPTIONS = ["All Strength", "High", "Medium", "Low"] as const
-
-const SORT_OPTIONS = [
-  { label: "Most Recent", value: "recent" as const },
-  { label: "Highest Intent", value: "intent" as const },
-  { label: "Most Engagement", value: "engagement" as const },
-]
 
 export default function SocialAgentPage() {
   const [searches, setSearches] = useState<SavedSearch[]>([])
@@ -67,7 +76,7 @@ export default function SocialAgentPage() {
   const [activeCategory, setActiveCategory] = useState("All Signals")
   const [intentFilter, setIntentFilter] = useState<typeof INTENT_OPTIONS[number]>("Highest Intent")
   const [timeFilter, setTimeFilter] = useState<typeof TIME_OPTIONS[number]>("Anytime")
-  const [strengthFilter, setStrengthFilter] = useState<typeof STRENGTH_OPTIONS[number]>("All Strength")
+  const [strengthFilter, setStrengthFilter] = useState<"all" | "High" | "Medium" | "Low">("all")
   const [enrichedOnly, setEnrichedOnly] = useState(false)
   const [hotOnly, setHotOnly] = useState(false)
   const [sortBy, setSortBy] = useState<"recent" | "intent" | "engagement">("recent")
@@ -100,7 +109,7 @@ export default function SocialAgentPage() {
       limit: 50,
       enriched_only: enrichedOnly || undefined,
       hot_only: hotOnly || undefined,
-      strength: strengthFilter === "All Strength" ? undefined : strengthFilter,
+      strength: strengthFilter === "all" ? undefined : strengthFilter,
       since: timeFilter === "Anytime" ? undefined
         : timeFilter === "Today" ? "today"
         : timeFilter === "This Week" ? "week"
@@ -115,25 +124,6 @@ export default function SocialAgentPage() {
       console.error("Failed to load signals:", error)
     }
   }, [selectedSearchId, activeCategory, sortBy, enrichedOnly, hotOnly, strengthFilter, timeFilter, intentFilter])
-
-  useEffect(() => { loadAll() }, [loadAll])
-  useEffect(() => { loadSignals() }, [loadSignals])
-
-  async function handleCreateSearch() {
-    if (!newSearchName.trim() || !newSearchKeywords.trim()) return
-    setCreating(true)
-    try {
-      const keywords = newSearchKeywords.split(',').map(k => k.trim()).filter(k => k)
-      await createSearch({ name: newSearchName, keywords, schedule: "daily", max_leads: 10, source: "linkedin_posts" })
-      setNewSearchName(""); setNewSearchKeywords("")
-      await loadAll()
-      setView('feed')
-    } catch (error) {
-      console.error("Failed to create search:", error)
-    } finally {
-      setCreating(false)
-    }
-  }
 
   async function handleEnrich(signalId: string) {
     setEnrichingId(signalId)
@@ -151,13 +141,6 @@ export default function SocialAgentPage() {
     setLoading(false)
   }
 
-  const statCards = [
-    { label: "Total Signals", value: stats.total_signals, delta: `${stats.total_signals_delta_pct >= 0 ? '+' : ''}${stats.total_signals_delta_pct}%`, icon: Activity, color: "text-indigo-500 bg-indigo-500/10" },
-    { label: "Enriched Contacts", value: stats.enriched_contacts, delta: `${stats.enriched_contacts_delta_pct >= 0 ? '+' : ''}${stats.enriched_contacts_delta_pct}%`, icon: Mail, color: "text-emerald-500 bg-emerald-500/10" },
-    { label: "Hot Intent Leads", value: stats.hot_intent_leads, delta: `+${stats.hot_intent_leads_delta} today`, icon: Flame, color: "text-orange-500 bg-orange-500/10" },
-    { label: "Active Searches", value: stats.active_searches, delta: `${stats.running_searches} running`, icon: Search, color: "text-blue-500 bg-blue-500/10" },
-  ]
-
   return (
     <div className="flex h-full bg-background overflow-hidden font-sans">
       {/* Sidebar */}
@@ -168,315 +151,670 @@ export default function SocialAgentPage() {
             <Plus className="w-4 h-4" />
           </Button>
         </div>
-        <div className="p-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/40" />
-            <Input placeholder="Filter searches..." className="pl-9 h-9 text-[11px] font-medium bg-muted/20 border-border/50 rounded-xl" />
-          </div>
-        </div>
-        <div className="px-3 pb-2 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest">
-          {searches.length} results
-        </div>
-        <div className="flex-1 overflow-auto no-scrollbar px-3 space-y-1">
-          {searches.map(s => (
-            <button
-              key={s.id}
-              onClick={() => { setSelectedSearchId(s.id); setView('feed') }}
-              className={cn("w-full text-left p-3 rounded-2xl border transition-all group",
-                selectedSearchId === s.id && view === 'feed' ? "bg-primary/5 border-primary/20" : "bg-transparent border-transparent hover:bg-muted/30")}>
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  {s.platform === 'linkedin'
-                    ? <div className="w-5 h-5 rounded bg-[#0A66C2] flex items-center justify-center text-[10px] text-white font-bold">in</div>
-                    : <div className="w-5 h-5 rounded bg-black flex items-center justify-center text-[10px] text-white font-bold">𝕏</div>}
-                  <span className={cn("text-[11px] font-black uppercase tracking-tight truncate max-w-[130px]", selectedSearchId === s.id ? "text-primary" : "text-foreground")}>{s.name}</span>
-                </div>
-                <Badge variant="outline" className="text-[8px] font-black uppercase border-border/50 text-muted-foreground/40">{s.frequency}</Badge>
-              </div>
-              <div className="flex items-center gap-3 mt-1">
-                <span className="text-[10px] font-bold text-muted-foreground/40">{s.matchCount} Signals</span>
-                <span className="text-[10px] font-bold text-emerald-500">{s.enrichedCount} Enriched</span>
-              </div>
-            </button>
-          ))}
-          {searches.length === 0 && !loading && (
-            <div className="text-center py-8 text-[11px] text-muted-foreground/40">No searches yet</div>
-          )}
-        </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-muted/5">
-        {view === 'feed' ? (
-          <>
-            {/* Stats Cards */}
-            <div className="px-6 pt-5 pb-3">
-              <div className="grid grid-cols-4 gap-4">
-                {statCards.map(card => (
-                  <div key={card.label} className="bg-card border border-border rounded-2xl p-4 flex items-center gap-4">
-                    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", card.color)}>
-                      <card.icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold tracking-tight">{card.value}</p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{card.label}</p>
-                        <span className="text-[9px] font-bold text-emerald-500">{card.delta}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Filter Bar */}
-            <div className="px-6 py-3 flex items-center gap-2 flex-wrap">
-              {/* Intent dropdown */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider gap-1 border-border/50">
-                    {intentFilter} <ChevronDown className="w-3 h-3 opacity-40" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-44 p-1" align="start">
-                  {INTENT_OPTIONS.map(opt => (
-                    <button key={opt} onClick={() => setIntentFilter(opt)}
-                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-muted/50", intentFilter === opt && "bg-primary/10 text-primary font-bold")}>
-                      {opt}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              {/* Time dropdown */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider gap-1 border-border/50">
-                    {timeFilter} <ChevronDown className="w-3 h-3 opacity-40" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-40 p-1" align="start">
-                  {TIME_OPTIONS.map(opt => (
-                    <button key={opt} onClick={() => setTimeFilter(opt)}
-                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-muted/50", timeFilter === opt && "bg-primary/10 text-primary font-bold")}>
-                      {opt}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              {/* Strength dropdown */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider gap-1 border-border/50">
-                    {strengthFilter} <ChevronDown className="w-3 h-3 opacity-40" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-40 p-1" align="start">
-                  {STRENGTH_OPTIONS.map(opt => (
-                    <button key={opt} onClick={() => setStrengthFilter(opt)}
-                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-muted/50", strengthFilter === opt && "bg-primary/10 text-primary font-bold")}>
-                      {opt}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              <Separator orientation="vertical" className="h-5 mx-1" />
-
-              {/* Toggle filters */}
-              <Button variant={enrichedOnly ? "default" : "outline"} size="sm"
-                onClick={() => setEnrichedOnly(!enrichedOnly)}
-                className={cn("h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider border-border/50", enrichedOnly && "bg-emerald-500 hover:bg-emerald-600 border-emerald-500")}>
-                Enriched only
-              </Button>
-              <Button variant={hotOnly ? "default" : "outline"} size="sm"
-                onClick={() => setHotOnly(!hotOnly)}
-                className={cn("h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider border-border/50", hotOnly && "bg-orange-500 hover:bg-orange-600 border-orange-500")}>
-                Hot leads
-              </Button>
-
-              <div className="flex-1" />
-
-              {/* Refresh */}
-              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}
-                className="h-8 rounded-xl text-[10px] font-bold uppercase tracking-wider gap-1 border-border/50">
-                <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} /> Refresh
+      <main className="flex-1 overflow-auto bg-muted/5">
+        {view === 'builder' ? (
+          <div className="p-6 max-w-2xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold tracking-tight">Create New Search</h1>
+              <Button variant="outline" size="sm" onClick={() => setView('feed')}>
+                Cancel
               </Button>
             </div>
-
-            {/* Signal Category Tabs */}
-            <div className="px-6 pb-3">
-              <div className="flex gap-1 overflow-x-auto no-scrollbar">
-                {SIGNAL_CATEGORIES.map(cat => (
-                  <button key={cat} onClick={() => setActiveCategory(cat)}
-                    className={cn(
-                      "px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all",
-                      activeCategory === cat
-                        ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-                        : "bg-muted/30 text-muted-foreground hover:bg-muted/50"
-                    )}>
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Signal Feed */}
-            <div className="flex-1 overflow-auto px-6 pb-6 space-y-4 no-scrollbar">
-              {loading ? (
-                <div className="flex items-center justify-center py-20">
-                  <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground/40" />
+            <Card>
+              <CardContent className="p-6 space-y-4">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Search Name</label>
+                  <Input
+                    placeholder="e.g., SaaS Companies in Series A"
+                    value={newSearchName}
+                    onChange={(e) => setNewSearchName(e.target.value)}
+                  />
                 </div>
-              ) : signals.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-muted/10 flex items-center justify-center mb-4">
-                    <Search className="w-8 h-8 text-muted-foreground/30" />
-                  </div>
-                  <p className="text-sm font-medium text-muted-foreground/50">No signals yet</p>
-                  <p className="text-xs text-muted-foreground/30 mt-1">Create a search to start monitoring</p>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Keywords</label>
+                  <Input
+                    placeholder="e.g., SaaS, Series A, B2B"
+                    value={newSearchKeywords}
+                    onChange={(e) => setNewSearchKeywords(e.target.value)}
+                  />
                 </div>
-              ) : (
-                signals.map(signal => (
-                  <div key={signal.id} className="bg-card border border-border rounded-2xl p-6 hover:border-primary/20 transition-all">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-sm font-black text-primary">
-                          {signal.person_name?.split(' ').map(n => n[0]).join('').slice(0, 2) || 'NA'}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-[13px] font-bold text-foreground">{signal.person_name || 'Unknown'}</h3>
-                            <div className="w-4 h-4 rounded bg-[#0A66C2] flex items-center justify-center text-[8px] text-white font-bold">in</div>
-                            {signal.signal_category && (
-                              <Badge variant="secondary" className="text-[9px]">{signal.signal_category}</Badge>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            {signal.person_title || 'Unknown'} @ <span className="text-primary font-medium">{signal.person_company || 'Unknown'}</span>
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5">
-                        {signal.intent_score != null && signal.intent_score >= 80 && (
-                          <div className="flex items-center gap-1 text-orange-500 bg-orange-500/10 px-2.5 py-1 rounded-lg border border-orange-500/20">
-                            <Flame className="w-3 h-3" />
-                            <span className="text-[9px] font-bold uppercase tracking-wider">Hot · {signal.intent_score}</span>
-                          </div>
-                        )}
-                        {signal.intent_score != null && signal.intent_score >= 60 && signal.intent_score < 80 && (
-                          <div className="flex items-center gap-1 text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
-                            <TrendingUp className="w-3 h-3" />
-                            <span className="text-[9px] font-bold uppercase tracking-wider">Warm · {signal.intent_score}</span>
-                          </div>
-                        )}
-                        {signal.signal_strength && (
-                          <Badge variant="outline" className="text-[8px] uppercase">{signal.signal_strength}</Badge>
-                        )}
-                        <span className="text-[9px] text-muted-foreground/40">{new Date(signal.discovered_at).toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-[12px] text-foreground/80 leading-relaxed mb-4">
-                      {signal.post_snippet || signal.best_hook || 'No content available'}
-                    </div>
-
-                    {signal.match_factors?.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-4">
-                        {signal.match_factors.map((f, i) => (
-                          <Badge key={i} variant="outline" className="text-[9px] border-border/50 text-muted-foreground/60">{f}</Badge>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-3 border-t border-border/50">
-                      <div className="flex items-center gap-2">
-                        {signal.matched_search_names?.map(name => (
-                          <Badge key={name} variant="outline" className="text-[9px] font-bold border-border/50 text-muted-foreground/40">{name}</Badge>
-                        ))}
-                        {signal.funnel_stage && (
-                          <Badge variant="secondary" className="text-[9px]">{signal.funnel_stage}</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {signal.person_email ? (
-                          <Badge variant="outline" className="text-[9px] text-emerald-600 border-emerald-200 bg-emerald-50">
-                            <Mail className="w-3 h-3 mr-1" />{signal.person_email}
-                          </Badge>
-                        ) : (
-                          <Button variant="outline" size="sm" onClick={() => handleEnrich(signal.id)}
-                            disabled={enrichingId === signal.id}
-                            className="h-7 rounded-lg text-[10px] font-bold uppercase tracking-wider gap-1 text-primary border-primary/20 bg-primary/5">
-                            {enrichingId === signal.id
-                              ? <><RefreshCw className="w-3 h-3 animate-spin" />Enriching...</>
-                              : <><UserPlus className="w-3 h-3" />Enrich Contact</>}
-                          </Button>
-                        )}
-                        {signal.person_linkedin && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-[#0A66C2]" asChild>
-                            <a href={signal.person_linkedin} target="_blank" rel="noopener noreferrer">
-                              <Share2 className="w-3.5 h-3.5" />
-                            </a>
-                          </Button>
-                        )}
-                        <Button variant="outline" size="sm"
-                          className="h-7 rounded-lg text-[10px] font-bold uppercase tracking-wider gap-1">
-                          <Send className="w-3 h-3" /> Draft Outreach
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
-            <div className="w-20 h-20 rounded-[32px] bg-primary/10 flex items-center justify-center mb-8">
-              <Target className="w-10 h-10 text-primary" strokeWidth={1.5} />
-            </div>
-            <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">Signal Intelligence Builder</h1>
-            <p className="max-w-md text-[13px] font-medium text-muted-foreground/60 leading-relaxed mb-12">
-              Configure your autonomous social listening agent to identify high-intent prospects based on real-time activity across LinkedIn and X.
-            </p>
-
-            <div className="w-full max-w-xl mx-auto space-y-4">
-              <div className="bg-card border border-border rounded-3xl p-8 shadow-xl shadow-black/[0.02]">
-                <div className="space-y-6 text-left">
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-2 block">Agent Name</label>
-                    <Input
-                      value={newSearchName}
-                      onChange={(e) => setNewSearchName(e.target.value)}
-                      placeholder="e.g. Founder Intent Radar"
-                      className="h-12 text-sm font-medium bg-muted/20 border-border/50 rounded-2xl px-5"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-2 block">Keywords to Monitor</label>
-                    <Input
-                      value={newSearchKeywords}
-                      onChange={(e) => setNewSearchKeywords(e.target.value)}
-                      placeholder="e.g. hiring, series A, struggling with enrichment"
-                      className="h-12 text-sm font-medium bg-muted/20 border-border/50 rounded-2xl px-5"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-4">
-                <Button onClick={() => setView('feed')} variant="ghost" className="flex-1 h-14 rounded-3xl text-[11px] font-black uppercase tracking-widest text-muted-foreground/60 border border-border">Cancel</Button>
                 <Button
-                  onClick={handleCreateSearch}
-                  disabled={creating || !newSearchName.trim() || !newSearchKeywords.trim()}
-                  className="flex-1 h-14 rounded-3xl text-[11px] font-black uppercase tracking-widest bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-600 transition-all border-none"
+                  className="w-full"
+                  onClick={async () => {
+                    if (!newSearchName || !newSearchKeywords) return
+                    setCreating(true)
+                    try {
+                      await createSearch({
+                        name: newSearchName,
+                        keywords: newSearchKeywords.split(',').map(k => k.trim()),
+                        signal_types: ['Sales-Led'],
+                      })
+                      setNewSearchName('')
+                      setNewSearchKeywords('')
+                      setView('feed')
+                      await loadAll()
+                    } catch (error) {
+                      console.error('Failed to create search:', error)
+                    } finally {
+                      setCreating(false)
+                    }
+                  }}
+                  disabled={creating || !newSearchName || !newSearchKeywords}
                 >
-                  {creating ? 'Creating...' : 'Launch Agent'}
+                  {creating ? 'Creating...' : 'Create Search'}
                 </Button>
-              </div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <div className="p-6 max-w-7xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold tracking-tight">Social Agent</h1>
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleRefresh} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
             </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1">Total Signals</p>
+                  <p className="text-3xl font-bold">{stats.total_signals}</p>
+                  <p className="text-xs text-green-600 mt-1">{stats.total_signals_delta_pct >= 0 ? '+' : ''}{stats.total_signals_delta_pct}%</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1">Enriched Contacts</p>
+                  <p className="text-3xl font-bold">{stats.enriched_contacts}</p>
+                  <p className="text-xs text-green-600 mt-1">{stats.enriched_contacts_delta_pct >= 0 ? '+' : ''}{stats.enriched_contacts_delta_pct}%</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1">Hot Intent Leads</p>
+                  <p className="text-3xl font-bold">{stats.hot_intent_leads}</p>
+                  <p className="text-xs text-green-600 mt-1">+{stats.hot_intent_leads_delta} today</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1">Active Searches</p>
+                  <p className="text-3xl font-bold">{stats.active_searches}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{stats.running_searches} running</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-3 mb-6">
+              <Badge
+                variant={activeCategory === "All Signals" ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setActiveCategory("All Signals")}
+              >
+                All Signals
+              </Badge>
+              {SIGNAL_CATEGORIES.slice(1).map((cat) => (
+                <Badge
+                  key={cat}
+                  variant={activeCategory === cat ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setActiveCategory(cat)}
+                >
+                  {cat}
+                </Badge>
+              ))}
+            </div>
+
+            {/* Signals Grid */}
+            {loading ? (
+              <div className="text-center py-12 text-muted-foreground">Loading signals...</div>
+            ) : signals.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No signals found. Create a search to start monitoring social media.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {signals.map((signal) => (
+                  <SignalCard
+                    key={signal.id}
+                    signal={signal}
+                    expanded={false}
+                    onToggle={() => {}}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </main>
     </div>
+  )
+}
+
+// ============================================================================
+// Signal Card
+// ============================================================================
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "Sales-Led": "bg-blue-500/15 text-blue-400",
+  "Product-Led": "bg-emerald-500/15 text-emerald-400",
+  "Community-Led": "bg-violet-500/15 text-violet-400",
+  "Competitor": "bg-red-500/15 text-red-400",
+  "System": "bg-cyan-500/15 text-cyan-400",
+  "Event": "bg-pink-500/15 text-pink-400",
+  "Partner": "bg-orange-500/15 text-orange-400",
+}
+
+// Deterministic gradient per name so cards look distinct but stable across renders.
+// Scraped data rarely includes a profile picture (BrightData Discover doesn't
+// surface one and many Apify actors return an empty avatar field), so this
+// gradient avatar has to stand on its own as the default.
+const AVATAR_GRADIENTS: string[] = [
+  "from-blue-500 to-indigo-600",
+  "from-emerald-500 to-teal-600",
+  "from-violet-500 to-purple-600",
+  "from-amber-500 to-orange-600",
+  "from-rose-500 to-pink-600",
+  "from-cyan-500 to-sky-600",
+  "from-fuchsia-500 to-purple-600",
+  "from-lime-500 to-emerald-600",
+]
+
+function gradientForName(name: string | null | undefined): string {
+  const s = (name || "?").trim()
+  let hash = 0
+  for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0
+  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length]
+}
+
+/**
+ * Full-bleed LinkedIn-branded thumbnail rendered whenever the scraper
+ * didn't capture raw post imagery.  Designed to occupy the same visual
+ * slot a real thumbnail would — 16:9 hero band on top (gradient + the
+ * LinkedIn glyph as a "cover image") plus a footer strip with the post
+ * preview text, the same way LinkedIn's own link cards are laid out.
+ */
+function LinkedInPostPlaceholder({
+  snippet,
+  postUrl,
+  personName,
+}: {
+  snippet: string | null
+  postUrl: string | null
+  personName: string | null
+}) {
+  const preview = (snippet || "").slice(0, 220).trim()
+  return (
+    <a
+      href={postUrl || "#"}
+      target={postUrl ? "_blank" : undefined}
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        if (!postUrl) e.preventDefault()
+        e.stopPropagation()
+      }}
+      className="group relative block rounded-lg overflow-hidden border border-border/50 hover:border-[#0A66C2]/60 hover:shadow-lg hover:shadow-[#0A66C2]/15 transition-all"
+    >
+      {/* ─── Compact hero band (wide, ~4:1) ─── */}
+      <div className="relative aspect-[4/1] w-full bg-gradient-to-br from-[#0A66C2] via-[#0a5fb2] to-[#003a73] overflow-hidden">
+        {/* Decorative light + grid so the hero reads like a graphic cover */}
+        <div className="absolute inset-0 opacity-25 mix-blend-overlay bg-[radial-gradient(circle_at_top_right,_white,_transparent_55%)]" />
+        <div className="absolute inset-0 opacity-[0.10] bg-[linear-gradient(transparent_95%,white_95%),linear-gradient(90deg,transparent_95%,white_95%)] bg-[length:20px_20px]" />
+
+        {/* Centred LinkedIn glyph — smaller, responsive */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="size-9 sm:size-11 rounded-lg bg-white/15 flex items-center justify-center backdrop-blur-md ring-1 ring-white/25 shadow-md">
+            <span className="text-white font-black text-lg sm:text-xl leading-none">in</span>
+          </div>
+        </div>
+
+        {/* Top-left "LinkedIn Post" chip */}
+        <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/25 backdrop-blur-sm ring-1 ring-white/20">
+          <span className="size-1 rounded-full bg-white animate-pulse" />
+          <span className="text-[9px] uppercase tracking-[0.12em] text-white font-bold">
+            LinkedIn Post
+          </span>
+        </div>
+
+        {/* Top-right "View" CTA */}
+        {postUrl && (
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-white/15 backdrop-blur-sm ring-1 ring-white/25 text-[9px] font-semibold text-white group-hover:bg-white/25 transition-colors">
+            <span>View</span>
+            <ArrowUpRight className="size-2.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+          </div>
+        )}
+      </div>
+
+      {/* ─── Footer strip (post preview) ─── */}
+      <div className="px-3 py-2 bg-card border-t border-border/40">
+        <p className="text-[11px] text-foreground/80 line-clamp-1 leading-snug">
+          <span className="text-muted-foreground font-medium">
+            {personName ? `${personName.split(" ")[0]}:` : "Preview:"}
+          </span>{" "}
+          {preview || "Open on LinkedIn →"}
+        </p>
+      </div>
+    </a>
+  )
+}
+
+// ─── LinkedIn native post embed ─────────────────────────────────────────
+// Pulls the activity ID out of a LinkedIn post URL and renders LinkedIn's
+// own embed iframe, which shows the real post with its actual images,
+// reactions, and comments — the same UX as on linkedin.com.  Beats
+// anything we could scrape ourselves, and works even for signals our
+// scraper captured zero media for.
+
+function getLinkedInActivityId(url: string | null | undefined): string | null {
+  if (!url) return null
+  const patterns = [
+    /-activity[-:](\d{10,25})/i,
+    /urn:li:activity:(\d{10,25})/i,
+    /urn:li:ugcPost:(\d{10,25})/i,
+    /urn:li:share:(\d{10,25})/i,
+  ]
+  for (const p of patterns) {
+    const m = url.match(p)
+    if (m) return m[1]
+  }
+  return null
+}
+
+function LinkedInPostEmbed({ activityId }: { activityId: string }) {
+  return (
+    <div
+      className="rounded-lg overflow-hidden border border-border/50 bg-white"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <iframe
+        src={`https://www.linkedin.com/embed/feed/update/urn:li:activity:${activityId}`}
+        className="w-full block"
+        height={520}
+        loading="lazy"
+        title="LinkedIn post"
+        allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
+      />
+    </div>
+  )
+}
+
+// ─── Post image grid ────────────────────────────────────────────────────
+// LinkedIn-style layout for the cases where the scraper did capture raw
+// image URLs: 1 big / 2 side-by-side / 3 with featured-left / 4 grid
+// (with "+N" overlay for extras).
+
+function PostImageGrid({
+  images,
+  postUrl,
+}: {
+  images: string[]
+  postUrl: string | null
+}) {
+  if (images.length === 0) return null
+  const href = (url: string) => postUrl || url
+
+  const Tile = ({
+    url,
+    className,
+    overlay,
+  }: {
+    url: string
+    className: string
+    overlay?: React.ReactNode
+  }) => (
+    <a
+      href={href(url)}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className={cn(
+        "relative block overflow-hidden bg-muted border border-border/30 hover:border-primary/50 transition-colors",
+        className,
+      )}
+    >
+      <img
+        src={url}
+        alt=""
+        loading="lazy"
+        className="absolute inset-0 w-full h-full object-cover"
+        onError={(e) => {
+          e.currentTarget.parentElement?.remove()
+        }}
+      />
+      {overlay}
+    </a>
+  )
+
+  const n = images.length
+
+  if (n === 1) {
+    return (
+      <div className="rounded-lg overflow-hidden">
+        <Tile url={images[0]} className="aspect-[16/9] rounded-lg" />
+      </div>
+    )
+  }
+  if (n === 2) {
+    return (
+      <div className="grid grid-cols-2 gap-0.5 rounded-lg overflow-hidden">
+        {images.slice(0, 2).map((u, i) => (
+          <Tile key={i} url={u} className="aspect-square" />
+        ))}
+      </div>
+    )
+  }
+  if (n === 3) {
+    return (
+      <div className="grid grid-cols-2 grid-rows-2 gap-0.5 rounded-lg overflow-hidden h-[320px]">
+        <Tile url={images[0]} className="row-span-2 h-full" />
+        <Tile url={images[1]} className="h-full" />
+        <Tile url={images[2]} className="h-full" />
+      </div>
+    )
+  }
+  // 4+
+  const extra = n - 4
+  return (
+    <div className="grid grid-cols-2 gap-0.5 rounded-lg overflow-hidden">
+      {images.slice(0, 4).map((u, i) => (
+        <Tile
+          key={i}
+          url={u}
+          className="aspect-square"
+          overlay={
+            i === 3 && extra > 0 ? (
+              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                <span className="text-white font-bold text-2xl">+{extra}</span>
+              </div>
+            ) : undefined
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+// ─── Render-time sanitizers ────────────────────────────────────────────
+// BrightData Discover's `content` blob ships with LinkedIn's public-page
+// footer appended (`, you agree to * [About](...) * [Accessibility](...)`),
+// and if the scraper couldn't pull the author's name the row lands in the
+// DB as NULL → the UI shows "Unknown".  Rather than depend on a backend
+// backfill migration, clean/recover at render time so every existing row
+// is fixed the moment a user reloads the feed.
+
+const BOILERPLATE_CUTS: RegExp[] = [
+  /\s*,\s*you agree to\b/i,
+  /\s*\*\s*\[About\]/i,
+  /\s*\*\s*\[Accessibility\]/i,
+  /\s*\*\s*\[User Agreement\]/i,
+  /\s*\*\s*\[Privacy Policy\]/i,
+  /\s*\*\s*\[Cookie Policy\]/i,
+  /\s*\*\s*\[Copyright Policy\]/i,
+  /\s*\*\s*\[Brand Policy\]/i,
+  /\s*\*\s*\[Guest Controls\]/i,
+  /\s*\*\s*\[Community Guidelines\]/i,
+  /\s*LinkedIn and 3rd parties/i,
+  /\s*Agree & Join LinkedIn/i,
+  /\s*By clicking Continue to join/i,
+]
+
+function cleanPostSnippet(snippet: string | null | undefined): string {
+  if (!snippet) return ""
+  let out = snippet
+  for (const re of BOILERPLATE_CUTS) {
+    const m = out.match(re)
+    if (m && m.index !== undefined) out = out.slice(0, m.index)
+  }
+  // Drop trailing "… | Firstname Lastname" author tag that LinkedIn
+  // sometimes appends right before the footer cruft.
+  out = out.replace(/\s*\|\s*[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){0,3}\s*$/, "")
+  return out.trim()
+}
+
+function extractNameFromSnippet(snippet: string | null | undefined): string {
+  if (!snippet) return ""
+  // "… | Subbakrishna Rao , you agree to …"  →  "Subbakrishna Rao"
+  const pipe = snippet.match(
+    /\|\s*([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){1,3})\s*(?:,|·|\||$)/,
+  )
+  if (pipe) return pipe[1].trim()
+  return ""
+}
+
+function humanizeLinkedInSlug(postUrl: string | null | undefined): string {
+  if (!postUrl) return ""
+  const m = postUrl.match(/linkedin\.com\/posts\/([a-zA-Z0-9_-]+)/)
+  if (!m) return ""
+  let slug = m[1].split("_")[0]                   // strip activity suffix
+  slug = slug.replace(/-[a-f0-9]{4,}$/, "")       // strip trailing hash
+  const parts = slug.split(/[-.]+/).filter((p) => p && isNaN(Number(p)))
+  if (parts.length === 0) return ""
+  return parts.map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(" ")
+}
+
+function resolvePersonName(signal: SocialSignal): string {
+  const raw = (signal.person_name || "").trim()
+  if (raw && raw.toLowerCase() !== "unknown") return raw
+  return (
+    extractNameFromSnippet(signal.post_snippet) ||
+    humanizeLinkedInSlug(signal.post_url) ||
+    humanizeLinkedInSlug(signal.person_linkedin) ||
+    "Unknown"
+  )
+}
+
+function resolveCompany(signal: SocialSignal): string {
+  const raw = (signal.person_company || "").trim()
+  if (raw && raw.toLowerCase() !== "unknown") return raw
+  return ""   // empty string → the "·" separator + company line hides
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000)
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function IntentBadge({ score, tier }: { score: number; tier?: string }) {
+  const getColor = () => {
+    if (score >= 80) return "bg-orange-500/15 text-orange-400 border-orange-500/30"
+    if (score >= 60) return "bg-amber-500/15 text-amber-400 border-amber-500/30"
+    return "bg-slate-500/15 text-slate-400 border-slate-500/30"
+  }
+  return (
+    <Badge variant="outline" className={cn("text-[9px] font-medium px-1.5 py-0", getColor())}>
+      {score}
+    </Badge>
+  )
+}
+
+function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expanded: boolean; onToggle: () => void }) {
+  const signalName = signal.signal_type?.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || "Activity"
+  const category = signal.signal_category || "Sales-Led"
+  const activityColor = CATEGORY_COLORS[category] || "bg-muted text-muted-foreground"
+  const displayName = resolvePersonName(signal)
+  const displayCompany = resolveCompany(signal)
+  const displaySnippet = cleanPostSnippet(signal.post_snippet)
+  const initials = displayName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?"
+  const ago = signal.discovered_at ? formatTimeAgo(new Date(signal.discovered_at).getTime()) : ""
+
+  const [enriching, setEnriching] = useState(false)
+  const [enrichResult, setEnrichResult] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState(!!signal.person_email)
+  const [outreachLoading, setOutreachLoading] = useState(false)
+  const [outreachDraft, setOutreachDraft] = useState<string | null>(signal.outreach_message || null)
+  const [crmLoading, setCrmLoading] = useState(false)
+  const [crmResult, setCrmResult] = useState<string | null>(null)
+
+  const handleEnrich = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (revealed) return
+    setEnriching(true)
+    try {
+      const res = await enrichSignal(signal.id)
+      if (res?.email) {
+        signal.person_email = res.email
+        signal.person_email_verified = !res.email_unverified
+      }
+      setRevealed(true)
+      setEnrichResult(res?.status === "already_enriched" ? "Already enriched" : res?.email ? `Found: ${res.email}` : "No email found")
+    } catch { setEnrichResult("Failed") }
+    finally { setEnriching(false); setTimeout(() => setEnrichResult(null), 5000) }
+  }
+
+  const handleOutreach = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (outreachDraft) { onToggle(); return }
+    setOutreachLoading(true)
+    try {
+      const res = await signalOutreach(signal.id)
+      const msg = res?.message || res?.error || "No outreach draft available — LLM may be unavailable."
+      setOutreachDraft(msg)
+      if (!expanded) onToggle()
+    } catch { setOutreachDraft("Failed to generate outreach draft.") }
+    finally { setOutreachLoading(false) }
+  }
+
+  const handleCrm = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setCrmLoading(true)
+    try {
+      const res = await signalCrmPush(signal.id)
+      if (res?.status === "not_connected" && res?.auth_url) {
+        window.open(res.auth_url, "_blank", "width=600,height=700")
+        setCrmResult("Connect HubSpot to push contacts")
+      } else if (res?.status === "not_connected") {
+        const authUrl = await getHubSpotAuthUrl()
+        if (authUrl) window.open(authUrl, "_blank", "width=600,height=700")
+        setCrmResult("Connect HubSpot first")
+      } else if (res?.status === "skipped") {
+        setCrmResult(res.note || "Enrich first — no email")
+      } else {
+        setCrmResult(res?.note || "Pushed to HubSpot")
+      }
+      setTimeout(() => setCrmResult(null), 4000)
+    } catch { setCrmResult("CRM push failed") }
+    finally { setCrmLoading(false) }
+  }
+
+  return (
+    <Card className={cn("border-border/60 transition-all cursor-pointer hover:border-primary/30", expanded && "border-primary/50 ring-1 ring-primary/20")} onClick={onToggle}>
+      <CardContent className="py-4 px-5 space-y-3">
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3">
+            {/* Avatar wrapper keeps the LinkedIn "in" corner badge aligned to
+                both real DP + gradient fallback variants. */}
+            <div className="relative shrink-0">
+              {signal.profile_picture_url ? (
+                /* Author DP — falls back to the gradient+initials tile on 404/broken URL.
+                   LinkedIn serves DPs from media.licdn.com which often hot-links fine
+                   from a browser but sometimes returns 403 without a referrer. */
+                <img
+                  src={signal.profile_picture_url}
+                  alt={displayName || "profile"}
+                  className="size-10 rounded-full object-cover ring-1 ring-border/40"
+                  onError={(e) => {
+                    const img = e.currentTarget
+                    img.style.display = "none"
+                    img.nextElementSibling?.classList.remove("hidden")
+                  }}
+                />
+              ) : null}
+              {/* Branded gradient avatar with initials.  Uses a per-name hash so
+                  two different people never share the same colour but the same
+                  person is always the same tile across refreshes.  A ring +
+                  LinkedIn glyph makes it read as a designed template, not a
+                  placeholder for missing data. */}
+              <div className={cn(
+                "size-10 rounded-full text-white flex items-center justify-center text-sm font-bold shadow-sm bg-gradient-to-br ring-1 ring-white/10",
+                gradientForName(displayName),
+                signal.profile_picture_url && "hidden",
+              )}>{initials}</div>
+              {/* Small LinkedIn "in" badge in the corner — shows on both real
+                  DPs and the gradient fallback so every signal card reads as
+                  a LinkedIn-sourced contact. */}
+              <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#0A66C2] flex items-center justify-center ring-2 ring-card shadow-sm">
+                <span className="text-white font-black text-[8px] leading-none">in</span>
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm">{displayName}</span>
+                {signal.person_linkedin && <Linkedin className="size-3.5 text-blue-400" />}
+                <Badge variant="outline" className={cn("text-[10px] font-medium px-1.5 py-0", activityColor)}>
+                  {signalName}
+                </Badge>
+                {signal.signal_strength && (
+                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                    signal.signal_strength === "High" ? "bg-red-500/15 text-red-400" :
+                    signal.signal_strength === "Medium" ? "bg-amber-500/15 text-amber-400" :
+                    "bg-slate-500/15 text-slate-400"
+                  )}>
+                    {signal.signal_strength}
+                  </span>
+                )}
+                {signal.intent_score != null && <IntentBadge score={signal.intent_score} tier={signal.intent_tier} />}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {signal.person_title}{signal.person_title && displayCompany && " · "}
+                {displayCompany && (
+                  <span className="font-medium text-foreground/80">{displayCompany}</span>
+                )}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-muted-foreground">{ago}</span>
+                {signal.matched_search_names.map((name) => (
+                  <Badge key={name} variant="secondary" className="text-[10px] px-1.5 py-0">{name}</Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+        {displaySnippet && (
+          <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3">
+            {displaySnippet}
+            {signal.post_url && (
+              <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary text-xs ml-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+                Read more <ArrowUpRight className="size-3" />
+              </a>
+            )}
+          </p>
+        )}
+
+        {/* Post media — always render SOMETHING so every card has the
+            same visual weight.  Raw images when we've got them, a big
+            LinkedIn-branded thumbnail placeholder when we don't.  No
+            iframes (LinkedIn blocks guest embeds so those went blank). */}
+        {signal.post_images && signal.post_images.length > 0 ? (
+          <PostImageGrid images={signal.post_images} postUrl={signal.post_url} />
+        ) : (
+          <LinkedInPostPlaceholder
+            snippet={displaySnippet}
+            postUrl={signal.post_url}
+            personName={displayName}
+          />
+        )}
+
+        {signal.best_hook && (
+          <p className="text-xs text-muted-foreground italic border-l-2 border-primary/30 pl-3">
+            <strong>Hook:</strong> {signal.best_hook}
+          </p>
+        )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -163,6 +163,10 @@ class SignalResponse(BaseModel):
     signal_strength: Optional[str] = None   # High, Medium, Low
     funnel_stage: Optional[str] = None      # Awareness, Consideration, etc.
     trigger_type: Optional[str] = None      # History-Based, Behavioral, etc.
+    # Media — pulled from raw_data when the scraper surfaced them.  Empty
+    # defaults mean the UI should render initials / no thumbnail, not fail.
+    post_images: List[str] = []             # post attachment image URLs
+    profile_picture_url: Optional[str] = None   # author's DP
 
 
 class StatsResponse(BaseModel):
@@ -380,13 +384,39 @@ def delete_search(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/searches/{search_id}/run-now", response_model=SearchResponse)
-async def run_search_now(
+class RunNowResponse(BaseModel):
+    run_id: str
+    task_id: str
+    status: str
+    watcher_id: str
+
+
+class RunStatusResponse(BaseModel):
+    run_id: str
+    status: str
+    leads_count: int
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    search: Optional[SearchResponse] = None
+
+
+@router.post("/searches/{search_id}/run-now", response_model=RunNowResponse, status_code=202)
+def run_search_now(
     search_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> SearchResponse:
-    """Trigger the agent for this search synchronously and return updated stats."""
+) -> RunNowResponse:
+    """Queue a background discovery run for this watcher.
+
+    Returns immediately with a `run_id` the client can poll via
+    `GET /searches/{id}/run-status/{run_id}`.  The run itself executes in
+    the Celery worker and survives client disconnects.
+    """
+    import uuid
+    from app.db.models.agent_run import AgentRun
+    from app.tasks.social_listening_tasks import run_social_search
+
     watcher = _get_user_search_or_404(db, current_user.id, search_id)
     if watcher.status != "active":
         raise HTTPException(
@@ -394,17 +424,58 @@ async def run_search_now(
             detail="search is paused — resume it before running",
         )
 
-    service = SocialListeningService(db)
-    summary = await service.run_for_watcher(watcher)
+    run = AgentRun(
+        id=uuid.uuid4(),
+        user_id=current_user.id,
+        agent_type="social-listening",
+        flow_id=None,
+        input=watcher.criteria or {},
+        status="queued",
+    )
+    db.add(run)
     db.commit()
-    db.refresh(watcher)
 
-    if summary.get("status") == "error":
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=summary.get("error") or "agentic infra failure",
-        )
-    return _serialize_search(watcher, db)
+    task = run_social_search.delay(str(watcher.id), str(current_user.id), str(run.id))
+
+    return RunNowResponse(
+        run_id=str(run.id),
+        task_id=task.id,
+        status="queued",
+        watcher_id=str(watcher.id),
+    )
+
+
+@router.get("/searches/{search_id}/run-status/{run_id}", response_model=RunStatusResponse)
+def get_run_status(
+    search_id: str,
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RunStatusResponse:
+    """Poll the status of a background run dispatched via /run-now."""
+    from app.db.models.agent_run import AgentRun
+
+    watcher = _get_user_search_or_404(db, current_user.id, search_id)
+    run = (
+        db.query(AgentRun)
+        .filter(AgentRun.id == run_id, AgentRun.user_id == current_user.id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    leads_count = len(run.leads or []) if run.leads else 0
+    search_payload = _serialize_search(watcher, db) if run.status == "success" else None
+
+    return RunStatusResponse(
+        run_id=str(run.id),
+        status=run.status,
+        leads_count=leads_count,
+        error_message=run.error_message,
+        started_at=run.created_at.isoformat() if run.created_at else None,
+        finished_at=run.finished_at.isoformat() if run.finished_at else None,
+        search=search_payload,
+    )
 
 
 # ============================================================================
@@ -959,6 +1030,11 @@ def _serialize_signal(
         signal_strength=taxonomy.get("strength"),
         funnel_stage=taxonomy.get("funnel_stage"),
         trigger_type=taxonomy.get("trigger_type"),
+        # Media — empty list/None when the scraper didn't provide them.
+        # Tolerates both new-style keys and older scrapes that only
+        # stored singular `image`/`profile_picture`.
+        post_images=list(raw.get("post_images") or ([raw["image"]] if raw.get("image") else [])),
+        profile_picture_url=raw.get("profile_picture_url") or raw.get("profile_picture") or None,
     )
 
 
