@@ -531,9 +531,13 @@ GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send
 @router.get("/google/auth-url")
 async def google_oauth_url(terms_accepted: bool = False):
     """Return a Google OAuth2 authorization URL that includes Gmail send scope."""
+    logger.info(f"Google auth URL endpoint called with terms_accepted={terms_accepted}")
     try:
+        logger.info("Attempting to get GOOGLE_CLIENT_ID from settings")
         client_id = settings.GOOGLE_CLIENT_ID
+        logger.info(f"GOOGLE_CLIENT_ID retrieved: {'SET' if client_id else 'NOT SET'}")
         if not client_id:
+            logger.warning("GOOGLE_CLIENT_ID is not configured")
             raise HTTPException(status_code=503, detail="Google OAuth is not configured")
 
         redirect_uri = os.getenv(
