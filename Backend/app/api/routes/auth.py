@@ -531,24 +531,28 @@ GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.send
 @router.get("/google/auth-url")
 async def google_oauth_url(terms_accepted: bool = False):
     """Return a Google OAuth2 authorization URL that includes Gmail send scope."""
-    client_id = settings.GOOGLE_CLIENT_ID
-    if not client_id:
-        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+    try:
+        client_id = settings.GOOGLE_CLIENT_ID
+        if not client_id:
+            raise HTTPException(status_code=503, detail="Google OAuth is not configured")
 
-    redirect_uri = os.getenv(
-        "GOOGLE_REDIRECT_URI",
-        "http://localhost:8000/api/v1/auth/google/callback",
-    )
-    params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": GOOGLE_SCOPES,
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": f"terms={terms_accepted}",
-    }
-    return {"auth_url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+        redirect_uri = os.getenv(
+            "GOOGLE_REDIRECT_URI",
+            "http://localhost:8000/api/v1/auth/google/callback",
+        )
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": GOOGLE_SCOPES,
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": f"terms={terms_accepted}",
+        }
+        return {"auth_url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+    except Exception as e:
+        logger.error(f"Error generating Google auth URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate Google auth URL")
 
 
 @router.get("/google/callback")
