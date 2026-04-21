@@ -118,6 +118,29 @@ const intentDots = (n: number) => (
   </div>
 )
 
+/* ─── broad / mega-corp exclusion list ─── */
+const MEGA_CORPS = new Set([
+  "google", "alphabet", "amazon", "microsoft", "apple", "meta", "facebook",
+  "linkedin", "netflix", "tesla", "nvidia", "intel", "ibm", "oracle", "cisco",
+  "samsung", "sony", "adobe", "salesforce", "uber", "airbnb", "spotify",
+  "twitter", "x corp", "snap", "snapchat", "tiktok", "bytedance", "walmart",
+  "jpmorgan", "jp morgan", "goldman sachs", "bank of america", "wells fargo",
+  "morgan stanley", "citigroup", "hsbc", "disney", "comcast", "at&t",
+  "verizon", "t-mobile", "coca-cola", "pepsi", "pepsico", "mcdonalds",
+  "mcdonald's", "starbucks", "nike", "adidas", "procter & gamble",
+  "johnson & johnson", "pfizer", "moderna", "visa", "mastercard", "paypal",
+])
+
+/** Remove mega-corps unless the user explicitly searched by company name */
+function filterMegaCorps(companies: CompanyData[], filters: Record<string, any>): CompanyData[] {
+  // If user typed a company name, don't exclude anything
+  if (filters.name) return companies
+  return companies.filter(c => {
+    const name = (c.name || "").toLowerCase().trim()
+    return !MEGA_CORPS.has(name)
+  })
+}
+
 /* ─── build backend filters from chips ─── */
 function buildFiltersFromChips(chips: Record<string, string[]>): Record<string, any> {
   const filters: Record<string, any> = {}
@@ -270,7 +293,7 @@ export default function CompaniesPage() {
       if (!result.success) throw new Error(result.error?.message || "Search failed")
 
       const rawCompanies = result.data?.companies || []
-      setCompanies(mapCompanyResults(rawCompanies))
+      setCompanies(filterMegaCorps(mapCompanyResults(rawCompanies), filters))
     } catch (err: any) {
       toast.error(err.message || "Search failed")
     } finally {
@@ -306,7 +329,7 @@ export default function CompaniesPage() {
       if (!result.success) throw new Error(result.error?.message || "Search failed")
 
       const rawCompanies = result.data?.companies || []
-      setCompanies(mapCompanyResults(rawCompanies))
+      setCompanies(filterMegaCorps(mapCompanyResults(rawCompanies), filters))
     } catch (e: any) {
       toast.error(e.message || "AI Search failed")
     } finally {
