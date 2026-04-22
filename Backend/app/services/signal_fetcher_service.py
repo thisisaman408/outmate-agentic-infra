@@ -103,7 +103,7 @@ async def fetch_google_news(
             item = _parse_feed_entry(entry)
             if is_recent(item["pubDate"]):
                 results.append(item)
-        return results
+        return results[:num]
     except Exception as e:
         logger.warning("[signal_fetcher] fetch_google_news error for %s: %s", query, e)
         return []
@@ -192,6 +192,19 @@ async def fetch_google_search(
     return results[:max_results]
 
 
+async def fetch_reddit_mentions(
+    keywords: str, max_results: int = 20, time_frame: str = "7d"
+) -> List[Dict[str, Any]]:
+    """Fetch Reddit mentions using a reddit-only search query."""
+    query = f"site:reddit.com/r {keywords}".strip()
+    results = await fetch_google_news(query, num=max_results, time_frame=time_frame)
+    reddit_results = [
+        item for item in results
+        if "reddit.com" in (item.get("link", "") or "").lower()
+    ]
+    return reddit_results[:max_results]
+
+
 # ---------- Signal type routing ----------
 
 # Map of signal types -> fetch function key
@@ -202,6 +215,7 @@ _TYPE_ROUTES = {
     "monitor_profiles_on_x_by_topic": "x_mentions",
     "x_profiles": "x_mentions",
     "monitor_professional_posts": "professional_posts",
+    "monitor_mentions_on_reddit": "reddit_mentions",
     "monitor_interactions_with_professional_post": "professional_post_interactions",
     "monitor_rss_feed": "rss_feed",
     "monitor_google_search_results": "google_search",
@@ -222,6 +236,27 @@ _REALTIME_TYPES = {
     "monitor_mysql_table_changes",
     "monitor_webhook_events",
 }
+
+
+def _extract_github_repo_query(config: Dict[str, Any], fallback_target: str) -> str:
+    repository_url = str(
+        config.get("repositoryUrl")
+        or config.get("repository_url")
+        or fallback_target
+        or ""
+    ).strip()
+
+    if not repository_url:
+        return ""
+
+    if "github.com/" in repository_url:
+        repo_part = repository_url.split("github.com/", 1)[1]
+        repo_part = repo_part.split("?", 1)[0].split("#", 1)[0].strip("/")
+        segments = [segment for segment in repo_part.split("/") if segment]
+        if len(segments) >= 2:
+            return f"{segments[0]}/{segments[1]}"
+
+    return repository_url
 
 
 async def _dispatch_fetch(
@@ -246,6 +281,9 @@ async def _dispatch_fetch(
     if route == "professional_post_interactions":
         return await fetch_professional_post_interactions(target)
 
+    if route == "reddit_mentions":
+        return await fetch_reddit_mentions(target, max_results=max_results, time_frame=time_frame)
+
     if route == "rss_feed":
         feed_url = config.get("feedUrl") or config.get("feed_url") or target
         return await fetch_rss_feed(feed_url, max_results=max_results)
@@ -254,7 +292,17 @@ async def _dispatch_fetch(
         return await fetch_google_news(target, num=max_results, time_frame=time_frame)
 
     if route == "github":
-        github_query = f"site:github.com {target}"
+        github_target = _extract_github_repo_query(config, target)
+        if github_target:
+            github_query = f'site:github.com "{github_target}"'
+        elif normalized == "monitor_stargazers_on_github":
+            github_query = 'site:github.com "stargazers"'
+        elif normalized == "monitor_contributors_on_github":
+            github_query = 'site:github.com "contributors"'
+        elif normalized == "monitor_forks_on_github":
+            github_query = 'site:github.com "forked from"'
+        else:
+            github_query = "site:github.com github"
         return await fetch_google_news(github_query, num=max_results, time_frame=time_frame)
 
     if route == "youtube":

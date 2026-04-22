@@ -54,6 +54,45 @@ interface SignalDef {
     fields: FieldConfig[];
 }
 
+function getPreviewResultDescription(result: any): string {
+    return (
+        result?.description ||
+        result?.snippet ||
+        result?.summary ||
+        result?.metadata?.description ||
+        "No description available"
+    )
+}
+
+function getPreviewResultUrl(result: any): string {
+    return result?.source_url || result?.link || result?.url || ""
+}
+
+function getPreviewResultSource(result: any): string {
+    return result?.source || result?.metadata?.source || "Search Engine"
+}
+
+function getSingleSelectPlaceholder(field: FieldConfig): string {
+    if (field.id === "xAccount") return "Enter X handle, e.g. @openai"
+    if (field.id === "instagramAccount") return "Enter Instagram handle"
+    if (field.id === "actor") return "Select or enter actor"
+    return `Enter ${field.label.toLowerCase()}`
+}
+
+function getDefaultTableName(configTitle: string, formData: Record<string, any>): string {
+    const repositoryUrl = String(formData.repositoryUrl || "").trim()
+    if (repositoryUrl) {
+        const match = repositoryUrl.match(/github\.com\/([^/\s]+)\/([^/\s?#]+)/i)
+        if (match) {
+            const owner = match[1]
+            const repo = match[2].replace(/\.git$/i, "")
+            return `${owner}/${repo} Stargazers`
+        }
+    }
+
+    return `${configTitle} Results`
+}
+
 const SIGNAL_CONFIGS: Record<string, SignalDef> = {
     'monitor-professional-posts': {
         title: 'Monitor professional posts',
@@ -64,17 +103,6 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
                 label: 'Post type',
                 type: 'dropdown',
                 options: ['Mentions companies', 'Posted by companies', 'Posted by companies\' employees'],
-                required: true
-            },
-            {
-                id: 'companies',
-                label: 'Companies',
-                type: 'multi-select',
-                source: 'Company profile pages',
-                showWhen: {
-                    field: 'postType',
-                    isOneOf: ['Mentions companies', 'Posted by companies', 'Posted by companies\' employees']
-                },
                 required: true
             },
             {
@@ -610,242 +638,10 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
             }
         ]
     },
-    'monitor-profiles-followed-by-an-instagram-user': {
-        title: 'Monitor Instagram followings',
-        description: 'Track new profiles followed by a specific Instagram user.',
-        fields: [
-            {
-                id: 'instagramAccount',
-                label: 'Instagram account',
-                type: 'single-select',
-                required: true
-            },
-            {
-                id: 'profileFilters',
-                label: 'Profile filters',
-                type: 'multi-select',
-                options: ['Category', 'Minimum followers', 'Verified only', 'Location']
-            },
-            {
-                id: 'checkFrequency',
-                label: 'Check frequency',
-                type: 'dropdown',
-                options: ['Hourly', 'Daily']
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top match']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
-    'monitor-followers-on-instagram': {
-        title: 'Monitor Instagram followers',
-        description: 'Track new followers of a specific Instagram account.',
-        fields: [
-            {
-                id: 'instagramAccount',
-                label: 'Instagram account',
-                type: 'single-select',
-                required: true
-            },
-            {
-                id: 'followerFilters',
-                label: 'Follower filters',
-                type: 'multi-select',
-                options: ['Bio keywords', 'Minimum followers', 'Verified only', 'Location']
-            },
-            {
-                id: 'checkFrequency',
-                label: 'Check frequency',
-                type: 'dropdown',
-                options: ['Hourly', 'Daily']
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top match']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
-    'monitor-social-media-influencers-with-modash': {
-        title: 'Monitor influencers',
-        description: 'Discover influencers using Modash on multiple platforms.',
-        fields: [
-            {
-                id: 'platform',
-                label: 'Platform',
-                type: 'dropdown',
-                options: ['Instagram', 'TikTok', 'YouTube', 'Professional network', 'Twitter'],
-                required: true
-            },
-            {
-                id: 'audienceSize',
-                label: 'Audience size',
-                type: 'number-range'
-            },
-            {
-                id: 'audienceCountry',
-                label: 'Audience country',
-                type: 'dropdown',
-                options: ['All countries', 'Specific countries']
-            },
-            {
-                id: 'category',
-                label: 'Category / niche',
-                type: 'multi-select'
-            },
-            {
-                id: 'engagementRate',
-                label: 'Engagement rate',
-                type: 'number'
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top engagement']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
-    'monitor-social-media-micro-influencers-with-upfluence': {
-        title: 'Monitor micro-influencers',
-        description: 'Discover micro-influencers using Upfluence platform based on audience, engagement, and niche.',
-        fields: [
-            {
-                id: 'platform',
-                label: 'Platform',
-                type: 'dropdown',
-                options: ['Instagram', 'TikTok', 'YouTube', 'Professional network', 'Twitter'],
-                required: true
-            },
-            {
-                id: 'followerRange',
-                label: 'Follower range',
-                type: 'number-range',
-                required: true
-            },
-            {
-                id: 'engagementRate',
-                label: 'Engagement rate',
-                type: 'number',
-                required: true
-            },
-            {
-                id: 'category',
-                label: 'Category / niche',
-                type: 'multi-select'
-            },
-            {
-                id: 'audienceLocation',
-                label: 'Audience location',
-                type: 'dropdown',
-                options: ['Global', 'Specific countries']
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top engagement']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
-    'monitor-prospects-engaging-with-professional-posts-using-trigify': {
-        title: 'Monitor prospects with Trigify',
-        description: 'Track prospects engaging with professional posts (likes, comments, reposts) using Trigify.',
-        fields: [
-            {
-                id: 'postSource',
-                label: 'Post source',
-                type: 'multi-select',
-                options: ['Post URLs', 'Company page posts', 'Employee posts'],
-                required: true
-            },
-            {
-                id: 'engagementType',
-                label: 'Engagement type',
-                type: 'multi-select',
-                options: ['Likes', 'Comments', 'Reposts'],
-                required: true
-            },
-            {
-                id: 'prospectFilters',
-                label: 'People filters',
-                type: 'multi-select',
-                options: ['Job title', 'Company', 'Seniority', 'Location']
-            },
-            {
-                id: 'duplicateHandling',
-                label: 'How to handle duplicate interactions',
-                type: 'dropdown',
-                options: [
-                    'One interaction per person/company',
-                    'One interaction per person/company per post',
-                    'Include all interactions'
-                ]
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top engagement']
-            },
-            {
-                id: 'timeFrame',
-                label: 'Time frame',
-                type: 'dropdown',
-                options: ['Last 24 hours', 'Last 7 days', 'Last 30 days']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
     'monitor-stargazers-on-github': {
         title: 'Monitor GitHub stargazers',
         description: 'Track users who have starred a repository.',
         fields: [
-            {
-                id: 'repositoryUrl',
-                label: 'Repository URL',
-                type: 'text',
-                required: true,
-                placeholder: 'https://github.com/owner/repo'
-            },
             {
                 id: 'userFilters',
                 label: 'User filters',
@@ -867,49 +663,10 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
             }
         ]
     },
-    'monitor-contributors-on-github': {
-        title: 'Monitor GitHub contributors',
-        description: 'Track contributors to a repository.',
-        fields: [
-            {
-                id: 'repositoryUrl',
-                label: 'Repository URL',
-                type: 'text',
-                required: true,
-                placeholder: 'https://github.com/owner/repo'
-            },
-            {
-                id: 'contributorFilters',
-                label: 'Contributor filters',
-                type: 'multi-select',
-                options: ['Company', 'Location', 'Account type (Individual/Organization)']
-            },
-            {
-                id: 'sortBy',
-                label: 'Sort by',
-                type: 'dropdown',
-                options: ['Most recent', 'Top commits']
-            },
-            {
-                id: 'maxResults',
-                label: 'Max number of results',
-                type: 'number',
-                min: 1,
-                max: 500
-            }
-        ]
-    },
     'monitor-forks-on-github': {
         title: 'Monitor GitHub forks',
         description: 'Track fork activity of a repository.',
         fields: [
-            {
-                id: 'repositoryUrl',
-                label: 'Repository URL',
-                type: 'text',
-                required: true,
-                placeholder: 'https://github.com/owner/repo'
-            },
             {
                 id: 'userFilters',
                 label: 'User filters',
@@ -1446,43 +1203,8 @@ const SIGNAL_CONFIGS: Record<string, SignalDef> = {
         title: 'Monitor Google Search results',
         description: 'Monitor Google Search results for news and updates.',
         fields: [
-            { id: 'keyword', label: 'Keyword', type: 'text' },
-            { id: 'region', label: 'Region', type: 'dropdown' }
-        ]
-    },
-    'monitor-leads-from-phantombuster': {
-        title: 'Monitor leads from Phantombuster',
-        description: 'Monitor leads from Phantombuster.',
-        fields: [
-            { id: 'actor', label: 'Actor', type: 'single-select' },
-            { id: 'executionId', label: 'Execution ID', type: 'text' }
-        ]
-    },
-    'monitor-data-from-apify-actor': {
-        title: 'Monitor data from Apify actor',
-        description: 'Monitor data from Apify actor.',
-        fields: [
-            { id: 'actorId', label: 'Actor ID', type: 'text' },
-            { id: 'dataset', label: 'Dataset', type: 'text' }
-        ]
-    },
-    'monitor-and-enrich-your-data-from-airtable': {
-        title: 'Monitor and enrich your data from Airtable',
-        description: 'Monitor and enrich your data from Airtable.',
-        fields: [
-            { id: 'base', label: 'Base', type: 'single-select' },
-            { id: 'table', label: 'Table', type: 'single-select' },
-            { id: 'triggerType', label: 'Trigger type', type: 'dropdown' }
-        ]
-    },
-    'monitor-data-from-an-http-api': {
-        title: 'Monitor data from an HTTP API',
-        description: 'Monitor data from an HTTP API.',
-        fields: [
-            { id: 'endpointUrl', label: 'Endpoint URL', type: 'text' },
-            { id: 'authMethod', label: 'Auth method', type: 'dropdown', options: ['None', 'API key', 'Bearer token'] },
-            { id: 'pollingInterval', label: 'Polling interval', type: 'dropdown' },
-            { id: 'triggerCondition', label: 'Trigger condition', type: 'text' }
+            { id: 'keyword', label: 'Keyword', type: 'text', required: true },
+            { id: 'region', label: 'Region', type: 'dropdown', options: ['Global', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Europe', 'Asia'] }
         ]
     }
 };
@@ -1600,11 +1322,11 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
     const [previewResults, setPreviewResults] = useState<any[]>([])
     const [formData, setFormData] = useState<Record<string, any>>({
         frequency: "weekly",
-        destination: "new_table",
+        destination: "new",
     })
 
     const config = SIGNAL_CONFIGS[signalId] || {
-        title: signalId.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+        title: signalId.split('-').map((s: string) => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
         description: 'Configure your signal parameters below.',
         fields: [
             { id: 'target', label: 'Target URL or Keywords', type: 'text' },
@@ -1612,21 +1334,28 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
         ]
     }
 
+    const isFieldMissing = (field: FieldConfig) => {
+        if (!field.required) return false;
+
+        if (field.showWhen) {
+            const depVal = formData[field.showWhen.field];
+            if (!field.showWhen.isOneOf.includes(depVal)) return false;
+        }
+
+        if (field.type === 'number-range') {
+            const minVal = formData[`${field.id}_min`];
+            const maxVal = formData[`${field.id}_max`];
+            return !minVal || !maxVal;
+        }
+
+        const val = formData[field.id];
+        return !val || (Array.isArray(val) && val.length === 0);
+    };
+
     const handleNext = () => {
         if (step === 2) {
             // Validation
-            const missingFields = config.fields.filter(f => {
-                if (!f.required) return false;
-
-                // If it has showWhen, check if it's visible
-                if (f.showWhen) {
-                    const depVal = formData[f.showWhen.field];
-                    if (!f.showWhen.isOneOf.includes(depVal)) return false;
-                }
-
-                const val = formData[f.id];
-                return !val || (Array.isArray(val) && val.length === 0);
-            });
+            const missingFields = config.fields.filter(isFieldMissing);
 
             if (missingFields.length > 0) {
                 toast.error(`Please fill in required fields: ${missingFields.map(f => f.label).join(', ')}`);
@@ -1850,13 +1579,33 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
 
                                         {field.type === 'single-select' && (
                                             <div className="space-y-2">
-                                                <Label className="text-base font-semibold">{field.label}</Label>
-                                                <div className="p-4 border border-dashed rounded-lg text-center bg-muted/10 group hover:bg-muted/20 transition-all cursor-pointer">
-                                                    <div className="mx-auto w-10 h-10 rounded-full bg-background border flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                                                        <Search className="h-5 w-5 text-muted-foreground" />
+                                                <Label htmlFor={field.id} className="text-base font-semibold">{field.label}</Label>
+                                                {field.options && field.options.length > 0 ? (
+                                                    <Select
+                                                        value={formData[field.id]}
+                                                        onValueChange={v => setFormData({ ...formData, [field.id]: v })}
+                                                    >
+                                                        <SelectTrigger className="h-11">
+                                                            <SelectValue placeholder={`Select ${field.label.toLowerCase()}...`} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {field.options.map(opt => (
+                                                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div className="relative">
+                                                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                                        <Input
+                                                            id={field.id}
+                                                            value={formData[field.id] || ""}
+                                                            onChange={e => setFormData({ ...formData, [field.id]: e.target.value })}
+                                                            placeholder={getSingleSelectPlaceholder(field)}
+                                                            className="h-11 pl-9"
+                                                        />
                                                     </div>
-                                                    <span className="text-sm font-medium text-muted-foreground">Search and connect account</span>
-                                                </div>
+                                                )}
                                             </div>
                                         )}
 
@@ -1868,6 +1617,7 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
                                                         type="number"
                                                         placeholder="Min"
                                                         className="h-11"
+                                                        value={formData[field.id + '_min'] || ""}
                                                         onChange={e => setFormData({ ...formData, [field.id + '_min']: e.target.value })}
                                                     />
                                                     <span className="text-muted-foreground font-medium">to</span>
@@ -1875,6 +1625,7 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
                                                         type="number"
                                                         placeholder="Max"
                                                         className="h-11"
+                                                        value={formData[field.id + '_max'] || ""}
                                                         onChange={e => setFormData({ ...formData, [field.id + '_max']: e.target.value })}
                                                     />
                                                 </div>
@@ -1933,26 +1684,39 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
                                         </TableHeader>
                                         <TableBody>
                                             {previewResults.map((result, i) => (
+                                                (() => {
+                                                    const resultUrl = getPreviewResultUrl(result)
+                                                    const resultDescription = getPreviewResultDescription(result)
+                                                    const resultSource = getPreviewResultSource(result)
+                                                    return (
                                                 <TableRow key={i} className="hover:bg-muted/30 transition-colors">
                                                     <TableCell className="font-semibold align-top py-4">
                                                         <div className="flex flex-col gap-1">
                                                             <span>{result.title}</span>
                                                             <span className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                                                                <Globe className="h-3 w-3" /> {result.source || 'Search Engine'}
+                                                                <Globe className="h-3 w-3" /> {resultSource}
                                                             </span>
                                                         </div>
                                                     </TableCell>
                                                     <TableCell className="text-sm text-muted-foreground leading-relaxed py-4">
-                                                        {result.snippet || 'No description available'}
+                                                        {resultDescription}
                                                     </TableCell>
                                                     <TableCell className="py-4">
-                                                        <Button variant="ghost" size="sm" asChild>
-                                                            <a href={result.link} target="_blank" rel="noopener noreferrer">
+                                                        {resultUrl ? (
+                                                            <Button variant="ghost" size="sm" asChild>
+                                                                <a href={resultUrl} target="_blank" rel="noopener noreferrer">
+                                                                    <ExternalLink className="h-4 w-4" />
+                                                                </a>
+                                                            </Button>
+                                                        ) : (
+                                                            <Button variant="ghost" size="sm" disabled title="No source URL available">
                                                                 <ExternalLink className="h-4 w-4" />
-                                                            </a>
-                                                        </Button>
+                                                            </Button>
+                                                        )}
                                                     </TableCell>
                                                 </TableRow>
+                                                    )
+                                                })()
                                             ))}
                                         </TableBody>
                                     </Table>
@@ -2003,7 +1767,16 @@ function SignalWizardPageContent({ params }: SignalWizardPageProps) {
                                     <TabsContent value="new" className="pt-4 space-y-4">
                                         <div className="space-y-2">
                                             <Label className="font-semibold">Table Name</Label>
-                                            <Input defaultValue={`${config.title} Results`} className="h-11" />
+                                            <Input
+                                                value={formData.tableName ?? getDefaultTableName(config.title, formData)}
+                                                onChange={e => setFormData({ ...formData, tableName: e.target.value })}
+                                                className="h-11"
+                                            />
+                                            {formData.repositoryUrl && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    This reuses the repository from Step 1. Here you are only naming the destination table.
+                                                </p>
+                                            )}
                                         </div>
                                     </TabsContent>
                                     <TabsContent value="existing" className="pt-4">

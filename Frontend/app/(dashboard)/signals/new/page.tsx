@@ -18,10 +18,7 @@ const sections = [
         title: "Social Listening",
         items: [
             { label: "Monitor professional posts", icon: Linkedin, color: "text-blue-700", category: "linkedin_post" },
-            { label: "Monitor interactions with professional posts", icon: MessageSquare, color: "text-blue-600", category: "linkedin_post" },
             { label: "Monitor post audiences on social networks", icon: Users, color: "text-blue-500", category: "linkedin_post" },
-            { label: "Monitor for ads with Adbeat", icon: Target, color: "text-red-500", category: "brand_mentions" },
-            { label: "Monitor mentions on Reddit", icon: FileText, color: "text-orange-500", category: "brand_mentions" },
             { label: "Monitor Google News RSS Feed", icon: Rss, color: "text-orange-600", category: "news_funding" },
         ]
     },
@@ -30,54 +27,19 @@ const sections = [
         items: [
             { label: "Monitor mentions from X", icon: Twitter, color: "text-sky-500", category: "brand_mentions" },
             { label: "Monitor profiles on X by topic", icon: User, color: "text-sky-600", category: "custom" },
-            { label: "Monitor followers on X", icon: Twitter, color: "text-sky-500", category: "custom" },
-            { label: "Monitor profiles followed by X user", icon: User, color: "text-sky-600", category: "custom" },
-            { label: "Monitor activity from X accounts", icon: Twitter, color: "text-sky-400", category: "custom" },
         ]
     },
     {
         title: "Media & Influencers",
         items: [
             { label: "Monitor for YouTube videos or creators", icon: Youtube, color: "text-red-600", category: "brand_mentions" },
-            { label: "Monitor profiles followed by an Instagram user", icon: Instagram, color: "text-pink-600", category: "custom" },
-            { label: "Monitor followers on Instagram", icon: Instagram, color: "text-pink-500", category: "custom" },
-            { label: "Monitor social media influencers with Modash", icon: Star, color: "text-yellow-500", category: "brand_mentions" },
-            { label: "Monitor social media micro-influencers with Upfluence", icon: Sparkles, color: "text-purple-500", category: "brand_mentions" },
-        ]
-    },
-    {
-        title: "Trigify",
-        items: [
-            { label: "Monitor prospects engaging with professional posts using Trigify", icon: UserCheck, color: "text-green-600", category: "linkedin_post" },
         ]
     },
     {
         title: "GitHub",
         items: [
             { label: "Monitor stargazers on GitHub", icon: Github, color: "text-slate-800 dark:text-slate-200", category: "custom" },
-            { label: "Monitor contributors on GitHub", icon: GitCommit, color: "text-slate-800 dark:text-slate-300", category: "custom" },
             { label: "Monitor forks on GitHub", icon: GitFork, color: "text-slate-800 dark:text-slate-400", category: "custom" },
-        ]
-    },
-    {
-        title: "1st party signals",
-        items: [
-            { label: "Monitor Snowflake data", icon: Database, color: "text-blue-400", category: "custom" },
-            { label: "Monitor Databricks data", icon: Database, color: "text-orange-500", category: "custom" },
-            { label: "Monitor profiles from a Mixpanel cohort", icon: BarChart, color: "text-purple-500", category: "custom" },
-            { label: "Monitor calls from Gong", icon: Phone, color: "text-pink-500", category: "custom" },
-            { label: "Monitor accounts from Crossbeam", icon: Share2, color: "text-indigo-500", category: "custom" },
-        ]
-    },
-    {
-        title: "Company sourcing",
-        items: [
-            { label: "Monitor companies with buying intent by TrustRadius", icon: ShoppingCart, color: "text-blue-600", category: "custom" },
-            { label: "Monitor companies by product usage with HG Insights", icon: Briefcase, color: "text-slate-600", category: "custom" },
-            { label: "Monitor local businesses using Openmart", icon: Globe, color: "text-green-500", category: "custom" },
-            { label: "Monitor local businesses using Google Maps", icon: Globe, color: "text-green-600", category: "custom" },
-            { label: "Monitor companies with Store Leads", icon: ShoppingBag, color: "text-orange-500", category: "custom" },
-            { label: "Monitor companies from Pitchbook shared search", icon: Search, color: "text-blue-800", category: "custom" },
         ]
     },
     {
@@ -85,10 +47,6 @@ const sections = [
         items: [
             { label: "Monitor RSS Feed", icon: Rss, color: "text-orange-500", category: "custom" },
             { label: "Monitor Google Search results", icon: Search, color: "text-blue-500", category: "web_intent" },
-            { label: "Monitor leads from Phantombuster", icon: Zap, color: "text-amber-500", category: "custom" },
-            { label: "Monitor data from Apify actor", icon: Zap, color: "text-orange-400", category: "custom" },
-            { label: "Monitor and enrich your data from Airtable", icon: Table, color: "text-blue-500", category: "custom" },
-            { label: "Monitor data from an HTTP API", icon: Network, color: "text-gray-600", category: "custom" },
         ]
     }
 ]
