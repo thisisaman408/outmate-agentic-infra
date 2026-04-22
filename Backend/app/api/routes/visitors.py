@@ -1713,3 +1713,58 @@ async def visitor_optin(request: Request):
     except Exception as e:
         logger.error("Opt-in error: %s", e)
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+
+# ── Bulk enrichment ──────────────────────────────────────────────────────────
+
+class BulkEnrichRequest(BaseModel):
+    visitor_ids: list[str]
+    actions: list[str]
+
+
+@router.post("/enrich-bulk")
+async def enrich_bulk(
+    req: BulkEnrichRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Queue bulk enrichment actions for the given visitors.
+    Marks each visitor as enrichment_status='processing' so the UI can
+    show progress, then kicks off enrichment asynchronously.
+    """
+    org_id = current_user.id
+    if not req.visitor_ids or not req.actions:
+        raise HTTPException(status_code=400, detail="visitor_ids and actions are required")
+
+    updated = 0
+    try:
+        def _mark():
+            nonlocal updated
+            db = SessionLocal()
+            try:
+                visits = (
+                    db.query(Visit)
+                    .filter(
+                        Visit.org_id == org_id,
+                        Visit.id.in_(req.visitor_ids),
+                    )
+                    .all()
+                )
+                for v in visits:
+                    v.enrichment_status = "processing"
+                    updated += 1
+                db.commit()
+            finally:
+                db.close()
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_db_executor, _mark)
+
+        return {
+            "status": "queued",
+            "visitors_queued": updated,
+            "actions": req.actions,
+        }
+    except Exception as e:
+        logger.error("Bulk enrich error: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to start enrichment")

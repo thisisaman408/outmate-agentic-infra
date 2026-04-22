@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useMemo, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import {
   CalendarDays,
   ChevronDown,
@@ -44,6 +45,8 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import {
   BarChart,
   Bar,
@@ -209,6 +212,52 @@ function groupByCompany(visits: Visit[]) {
   }).sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime())
 }
 
+function buildVisitorMailtoLink(visit: Visit) {
+  const d = extractVisitData(visit)
+  const email = d.email || visit.email
+  if (!email) return null
+
+  const companyName = d.company || visit.domain || "your team"
+  const personName = d.fullName || ""
+  const firstName = personName.split(" ")[0] || ""
+  const greetingName = firstName || "there"
+  const senderName = "Outmate"
+
+  const subject = d.company
+    ? `Following up - ${companyName}`
+    : personName
+      ? `Following up - ${personName}`
+      : "Following up"
+
+  const bodyLines = [
+    `Hi ${greetingName},`,
+    "",
+    d.company
+      ? `I wanted to follow up about ${companyName} and see if this is relevant for your team.`
+      : "I wanted to follow up and see if this is relevant for your team.",
+    "",
+    "Happy to share more context if helpful.",
+    "",
+    `Best,`,
+    senderName,
+  ]
+
+  const params = new URLSearchParams({
+    subject,
+    body: bodyLines.join("\n"),
+  })
+
+  return `mailto:${email}?${params.toString()}`
+}
+
+async function copyTextToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return true
+  }
+  return false
+}
+
 // ── UI COMPONENTS ────────────────────────────────────────────────
 function LivePill() {
   return (
@@ -252,6 +301,7 @@ function MiniProgressBar({ value, color = "#4F46E5" }: { value: number; color?: 
 // ── MAIN PAGE ────────────────────────────────────────────────────
 export default function VisitorsPage() {
   const { user } = useStore()
+  const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [activeTab, setActiveTab] = useState<"companies" | "people">("companies")
   const [filter, setFilter] = useState("All")
@@ -261,6 +311,8 @@ export default function VisitorsPage() {
   const [enrichOpen, setEnrichOpen] = useState(false)
   const [selectedPeopleIds, setSelectedPeopleIds] = useState<string[]>([])
   const [revealedContacts, setRevealedContacts] = useState<Set<string>>(new Set())
+  const [trackingOpen, setTrackingOpen] = useState(false)
+  const [alertsOpen, setAlertsOpen] = useState(false)
 
   // Core Data State
   const [visits, setVisits] = useState<Visit[]>([])
@@ -342,6 +394,128 @@ export default function VisitorsPage() {
   const selectedGroup = companyGroups.find(g => g.id === selectedId)
   const selectedVisit = visits.find(v => v.id === selectedId)
 
+  // ── ACTION HANDLERS ────────────────────────────────────────────
+  const handleRunEnrichments = useCallback(async (actionIds: string[], credits: number) => {
+    try {
+      const res = await fetch(`/api/v1/visitors/enrich-bulk`, {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitor_ids: selectedPeopleIds.length > 0 ? selectedPeopleIds : filteredVisits.map(v => v.id),
+          actions: actionIds,
+        }),
+      })
+      if (res.ok) {
+        toast.success(`Enrichment started for ${actionIds.length} action(s)`)
+        setEnrichOpen(false)
+        setTimeout(fetchData, 3000)
+      } else {
+        const err = await res.json().catch(() => null)
+        toast.error(err?.detail || "Enrichment failed")
+      }
+    } catch {
+      toast.error("Could not reach enrichment service")
+    }
+  }, [selectedPeopleIds, filteredVisits])
+
+  const handleCopilotCompany = useCallback((companyName: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    router.push(`/copilot?context=company&company=${encodeURIComponent(companyName)}`)
+  }, [router])
+
+  const handleAddCompany = useCallback((company: { name: string; domain?: string | null; industry?: string }, e: React.MouseEvent) => {
+    e.stopPropagation()
+    router.push(`/leads/companies?search=${encodeURIComponent(company.name)}`)
+    toast.success(`Opening ${company.name} in Companies`)
+  }, [router])
+
+  const handleReveal = useCallback(async (visitId: string, field: "email" | "phone") => {
+    const visit = visits.find(v => v.id === visitId)
+    if (!visit) { toast.error("Visitor not found"); return }
+    const linkedinUrl = visit.linkedin_url
+    const domain = visit.domain
+    if (!linkedinUrl && !domain) {
+      toast.error(`Cannot reveal ${field} — no LinkedIn or domain available for this visitor`)
+      return
+    }
+    const tid = toast.loading(`Revealing ${field}...`)
+    try {
+      let res: Response
+      if (linkedinUrl) {
+        res = await fetch(`/api/contactout/reveal-contact`, {
+          method: "POST",
+          headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ linkedin_url: linkedinUrl, include_phone: field === "phone" }),
+        })
+      } else {
+        res = await fetch(`/api/contactout/reveal-company-contact`, {
+          method: "POST",
+          headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ domain, include_phone: field === "phone" }),
+        })
+      }
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        toast.dismiss(tid)
+        toast.error(data?.error?.message || `Reveal failed (${res.status})`)
+        return
+      }
+      const revealedEmail = data?.email || data?.emails?.[0]
+      const revealedPhone = data?.phone || data?.phones?.[0]?.number || data?.phones?.[0]
+      if ((field === "email" && revealedEmail) || (field === "phone" && revealedPhone)) {
+        setVisits(prev => prev.map(v => v.id === visitId ? {
+          ...v,
+          email: revealedEmail || v.email,
+          phone: revealedPhone || v.phone,
+        } : v))
+        setRevealedContacts(prev => new Set(prev).add(visitId))
+        toast.dismiss(tid)
+        toast.success(`${field === "email" ? "Email" : "Phone"} revealed`)
+      } else {
+        toast.dismiss(tid)
+        toast.error(`No ${field} found for this contact`)
+      }
+    } catch (err) {
+      toast.dismiss(tid)
+      toast.error(`Failed to reveal ${field}`)
+    }
+  }, [visits])
+
+  const handleAddToCrm = useCallback(async () => {
+    const visit = selectedGroup ? selectedGroup.visits[0] : selectedVisit
+    if (!visit) return
+    const d = extractVisitData(visit)
+    const contact = {
+      company: d.company || "",
+      name: d.fullName || "",
+      email: visit.email || "",
+      phone: visit.phone || "",
+      linkedin_url: visit.linkedin_url || "",
+      domain: visit.domain || "",
+      job_title: visit.job_title || "",
+    }
+    try {
+      const res = await fetch(`/api/v1/integrations/oauth/hubspot/push`, {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ entities: [contact], type: "contacts" }),
+      })
+      if (res.ok) {
+        toast.success("Contact added to CRM")
+      } else {
+        const err = await res.json().catch(() => null)
+        if (res.status === 404 || err?.detail?.includes("not connected")) {
+          toast.error("No CRM connected. Go to Integrations to connect HubSpot, Salesforce, or Zoho.")
+          router.push("/integrations")
+        } else {
+          toast.error(err?.detail || "Failed to push to CRM")
+        }
+      }
+    } catch {
+      toast.error("Could not reach CRM integration")
+    }
+  }, [selectedGroup, selectedVisit, router])
+
   // ── UI RENDER HELPERS ──────────────────────────────────────────
   const formatTime = (ts: string) => {
     const d = new Date(ts)
@@ -367,10 +541,10 @@ export default function VisitorsPage() {
           <div className="text-[11px] text-muted-foreground font-medium">Tracking since inception · Script v2.1 active</div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[11px] font-bold">
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[11px] font-bold" onClick={() => setTrackingOpen(true)}>
             <Code className="w-3.5 h-3.5" /> Tracking script
           </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[11px] font-bold">
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[11px] font-bold" onClick={() => setAlertsOpen(true)}>
             <Bell className="w-3.5 h-3.5" /> Alert rules
           </Button>
           <Button 
@@ -424,9 +598,29 @@ export default function VisitorsPage() {
                   </button>
               ))}
           </div>
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[11px] font-bold text-muted-foreground">
-            <CalendarDays className="w-3.5 h-3.5" /> Export <ChevronDown className="w-3 h-3" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[11px] font-bold text-muted-foreground">
+                <Download className="w-3.5 h-3.5" /> Export <ChevronDown className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => {
+                const rows = (activeTab === "companies" ? companyGroups : visits).map((r: any) => activeTab === "companies"
+                  ? { company: r.company, domain: r.domain, visits: r.visits?.length ?? r.visitCount, intent: r.totalIntent?.toFixed(2) }
+                  : { ip: r.ip, company: r.company_name, url: r.url, intent: r.intent_score, date: r.created_at }
+                )
+                if (!rows.length) { toast.error("Nothing to export"); return }
+                const header = Object.keys(rows[0]).join(",")
+                const csv = [header, ...rows.map((r: any) => Object.values(r).map((v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))].join("\n")
+                const blob = new Blob([csv], { type: "text/csv" })
+                const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `visitors-${activeTab}-${new Date().toISOString().slice(0,10)}.csv`; a.click()
+                toast.success("CSV exported")
+              }}>
+                <Download className="w-3.5 h-3.5 mr-2" /> Export as CSV
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -436,10 +630,10 @@ export default function VisitorsPage() {
         <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-6 flex flex-col no-scrollbar">
           {/* Metrics */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard label="Companies identified" value={String(stats.matched_visits)} delta="+24% vs last period" isLoading={isLoading} />
-            <MetricCard label="ICP match rate" value={`${stats.match_rate.toFixed(0)}%`} delta="+5% vs last period" isLoading={isLoading} />
-            <MetricCard label="Hot accounts" value={String(companyGroups.filter(g => g.totalIntent >= 0.7).length)} delta="+31% vs last period" isLoading={isLoading} />
-            <MetricCard label="Identification rate" value={`${Math.round(stats.match_rate)}%`} delta="Resets in 18d" isLoading={isLoading} />
+            <MetricCard label="Companies identified" value={String(analytics?.summary.companies ?? stats.matched_visits)} delta={`${PERIODS.find(p => p.hours === period)?.label ?? ""}`} isLoading={analyticsLoading} />
+            <MetricCard label="ICP match rate" value={`${(analytics?.summary.match_rate ?? stats.match_rate).toFixed(0)}%`} delta={`${PERIODS.find(p => p.hours === period)?.label ?? ""}`} isLoading={analyticsLoading} />
+            <MetricCard label="Total visits" value={String(analytics?.summary.total ?? stats.total_visits)} delta={`${PERIODS.find(p => p.hours === period)?.label ?? ""}`} isLoading={analyticsLoading} />
+            <MetricCard label="Live now" value={String(analytics?.live.unique_ips ?? 0)} delta={`${analytics?.live.window_minutes ?? 5}m window`} isLoading={analyticsLoading} />
           </div>
 
           {/* Charts (Always show simplified version) */}
@@ -565,10 +759,18 @@ export default function VisitorsPage() {
                         <td className="px-6 py-4 text-[10px] text-muted-foreground font-medium italic">{c.industry}</td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                            <button
+                              title="Open in Copilot"
+                              onClick={(e) => handleCopilotCompany(c.name, e)}
+                              className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                            >
                               <Sparkles className="w-3.5 h-3.5" />
                             </button>
-                            <button className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                            <button
+                              title="Save to leads"
+                              onClick={(e) => handleAddCompany({ name: c.name, domain: c.visits[0]?.domain, industry: c.industry }, e)}
+                              className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                            >
                               <Plus className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -605,12 +807,32 @@ export default function VisitorsPage() {
                           <td className="px-6 py-4">
                             <Badge variant="outline" className="text-[9px] font-bold border-border bg-muted/30">Not Contacted</Badge>
                           </td>
-                          <td className="px-6 py-4 text-right">
-                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                                <Mail className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                          <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 gap-1.5 text-[10px] font-bold"
+                                onClick={async () => {
+                                  if (v.email) {
+                                    const mailtoLink = buildVisitorMailtoLink(v)
+                                    if (!mailtoLink) {
+                                      toast.error("No email available for this visitor")
+                                      return
+                                    }
+                                    const copied = await copyTextToClipboard(v.email)
+                                    window.location.href = mailtoLink
+                                    if (copied) {
+                                      toast.success(`Email copied: ${v.email}`)
+                                    } else {
+                                      toast.success(`Trying to open mail for ${v.email}`)
+                                    }
+                                  } else {
+                                    handleReveal(v.id, "email")
+                                  }
+                                }}
+                              >
+                                <Mail className="w-3.5 h-3.5" /> {v.email ? "Email" : "Reveal"}
+                              </Button>
                           </td>
                         </tr>
                       )
@@ -686,10 +908,12 @@ export default function VisitorsPage() {
                 <h3 className="text-[11px] font-black text-muted-foreground/40 uppercase tracking-widest">Contact Information</h3>
                 <div className="space-y-1 bg-card border border-border rounded-xl p-1">
                    {[
-                    { label: "Email", value: selectedGroup ? selectedGroup.visits[0].email : selectedVisit?.email, icon: Mail },
-                    { label: "Phone", value: selectedGroup ? selectedGroup.visits[0].phone : selectedVisit?.phone, icon: Phone },
-                    { label: "LinkedIn", value: selectedGroup ? selectedGroup.visits[0].linkedin_url : selectedVisit?.linkedin_url, icon: Linkedin, type: 'link' },
-                  ].map((f, i) => (
+                    { label: "Email", field: "email" as const, value: selectedGroup ? selectedGroup.visits[0].email : selectedVisit?.email, icon: Mail },
+                    { label: "Phone", field: "phone" as const, value: selectedGroup ? selectedGroup.visits[0].phone : selectedVisit?.phone, icon: Phone },
+                    { label: "LinkedIn", field: null, value: selectedGroup ? selectedGroup.visits[0].linkedin_url : selectedVisit?.linkedin_url, icon: Linkedin, type: 'link' as const },
+                  ].map((f, i) => {
+                    const visitId = selectedGroup ? selectedGroup.visits[0].id : selectedVisit?.id
+                    return (
                     <div key={i} className="flex items-center gap-3 p-3 hover:bg-muted/30 rounded-lg transition-all group">
                        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
                          <f.icon className="w-3.5 h-3.5 text-muted-foreground" />
@@ -704,15 +928,23 @@ export default function VisitorsPage() {
                              ) : (
                                <div className="text-[12px] font-bold text-foreground truncate">{f.value}</div>
                              )
-                          ) : (
+                          ) : f.field ? (
                             <div className="flex items-center gap-2">
                                <span className="text-[11px] font-bold text-muted-foreground/40 italic">Hidden (3 credits)</span>
-                               <button className="text-[9px] font-black text-primary hover:underline bg-primary/5 px-2 py-0.5 rounded cursor-pointer transition-all">REVEAL</button>
+                               <button
+                                 onClick={() => visitId && handleReveal(visitId, f.field!)}
+                                 className="text-[9px] font-black text-primary hover:underline bg-primary/5 px-2 py-0.5 rounded cursor-pointer transition-all"
+                               >
+                                 REVEAL
+                               </button>
                             </div>
+                          ) : (
+                            <span className="text-[11px] font-bold text-muted-foreground/40 italic">Not available</span>
                           )}
                        </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
 
@@ -737,10 +969,20 @@ export default function VisitorsPage() {
 
                {/* Actions */}
                <div className="pt-4 space-y-2">
-                  <Button className="w-full bg-primary text-primary-foreground font-black py-6 rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
+                  <Button
+                    className="w-full bg-primary text-primary-foreground font-black py-6 rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                    onClick={() => {
+                      const name = selectedGroup ? selectedGroup.name : extractVisitData(selectedVisit!).company || extractVisitData(selectedVisit!).fullName
+                      router.push(`/campaigns?new=true&company=${encodeURIComponent(name || "")}`)
+                    }}
+                  >
                     <Play className="w-4 h-4 mr-2" /> Start Outreach Flow
                   </Button>
-                  <Button variant="outline" className="w-full font-bold py-6 rounded-xl border-border hover:bg-muted transition-all">
+                  <Button
+                    variant="outline"
+                    className="w-full font-bold py-6 rounded-xl border-border hover:bg-muted transition-all"
+                    onClick={handleAddToCrm}
+                  >
                     <Building2 className="w-4 h-4 mr-2" /> Add to CRM
                   </Button>
                </div>
@@ -753,7 +995,67 @@ export default function VisitorsPage() {
         open={enrichOpen}
         onClose={() => setEnrichOpen(false)}
         selectedRows={selectedPeopleIds.length > 0 ? selectedPeopleIds.length : filteredVisits.length}
+        onRun={handleRunEnrichments}
       />
+
+      {/* Tracking Script Dialog */}
+      <Dialog open={trackingOpen} onOpenChange={setTrackingOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">Install Tracking Script</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Add this snippet before the closing <code>&lt;/head&gt;</code> tag on every page you want to track.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-muted rounded-lg p-4 font-mono text-[11px] leading-relaxed relative">
+            <pre className="whitespace-pre-wrap break-all">{`<!-- Outmate.ai Tracking -->\n<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${user?.id || "YOUR_KEY"}"\n  async\n></script>`}</pre>
+            <Button
+              size="sm"
+              variant="outline"
+              className="absolute top-2 right-2 h-7 text-[10px] font-bold gap-1"
+              onClick={() => {
+                navigator.clipboard.writeText(
+                  `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${user?.id || "YOUR_KEY"}" async></script>`
+                )
+                toast.success("Tracking script copied to clipboard")
+              }}
+            >
+              <Check className="w-3 h-3" /> Copy
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">Script v2.1 &middot; Loads async &middot; &lt;2 KB gzipped</p>
+        </DialogContent>
+      </Dialog>
+
+      {/* Alert Rules Dialog */}
+      <Dialog open={alertsOpen} onOpenChange={setAlertsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">Alert Rules</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Get notified when high-intent visitors match your ICP.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {[
+              { label: "Hot account detected", desc: "Intent score above 70%", enabled: true },
+              { label: "ICP match visit", desc: "Visitor matches your ideal customer profile", enabled: false },
+              { label: "Return visitor", desc: "Known company visits again within 24h", enabled: false },
+            ].map((rule) => (
+              <div key={rule.label} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div>
+                  <p className="text-xs font-bold">{rule.label}</p>
+                  <p className="text-[10px] text-muted-foreground">{rule.desc}</p>
+                </div>
+                <Badge variant={rule.enabled ? "default" : "outline"} className="text-[9px]">
+                  {rule.enabled ? "Active" : "Off"}
+                </Badge>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center">Alert delivery via email &middot; Slack coming soon</p>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

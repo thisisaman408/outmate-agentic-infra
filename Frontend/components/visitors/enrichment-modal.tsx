@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import {
   Mail,
   Phone,
@@ -128,6 +128,7 @@ interface EnrichmentModalProps {
   onClose: () => void
   selectedRows: number
   totalCredits?: number
+  onRun?: (actionIds: string[], estimatedCredits: number) => void
 }
 
 export default function EnrichmentModal({
@@ -135,9 +136,11 @@ export default function EnrichmentModal({
   onClose,
   selectedRows,
   totalCredits = 22400,
+  onRun,
 }: EnrichmentModalProps) {
   const [activeCat, setActiveCat] = useState("email")
   const [queue, setQueue] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
 
   const activeCategory = categories.find((c) => c.id === activeCat)!
 
@@ -166,6 +169,8 @@ export default function EnrichmentModal({
   }, [queuedActions, selectedRows])
 
   const overBudget = estimatedCredits > totalCredits
+
+  useEffect(() => { if (open) setRunning(false) }, [open])
 
   if (!open) return null
 
@@ -352,14 +357,23 @@ export default function EnrichmentModal({
               )}
 
               <button
-                disabled={queue.length === 0 || overBudget}
+                disabled={queue.length === 0 || overBudget || running}
+                onClick={() => {
+                  if (!onRun) return
+                  setRunning(true)
+                  onRun(queue, estimatedCredits)
+                }}
                 className={`w-full py-3 text-[12px] font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 ${
-                  queue.length === 0 || overBudget
+                  queue.length === 0 || overBudget || running
                     ? "bg-muted text-muted-foreground cursor-not-allowed shadow-none"
                     : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/20"
                 }`}
               >
-                <Sparkles className="w-4 h-4" /> Run {queue.length} enrichment{queue.length !== 1 && 's'}
+                {running ? (
+                  <><span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> Running...</>
+                ) : (
+                  <><Sparkles className="w-4 h-4" /> Run {queue.length} enrichment{queue.length !== 1 && 's'}</>
+                )}
               </button>
               <p className="text-[9px] text-muted-foreground/60 text-center font-medium">Credits are only consumed for successful lookup results</p>
             </div>
