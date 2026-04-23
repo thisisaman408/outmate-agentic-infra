@@ -78,8 +78,6 @@ const sections: NavSection[] = [
       { name: "People", href: "/leads/prospects", icon: Users },
       { name: "History", href: "/leads/history", icon: Clock },
       { name: "AI Powered Search", href: "/ai-powered-search", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
-      { name: "Segments & Lists", href: "/lists", icon: ListTree },
-      { name: "Knowledge Base", href: "/knowledge", icon: BookOpen },
     ],
   },
   {
@@ -91,7 +89,6 @@ const sections: NavSection[] = [
       { name: "Voice Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
       { name: "Enrichment", href: "/enrichment", icon: Zap, badge: "AI", badgeColor: "indigo" },
       { name: "Agent Studio", href: "/ai-agents", icon: Bot, badge: "Studio", badgeColor: "indigo" },
-      { name: "Marketplace", href: "/marketplace", icon: Target, badge: "52", badgeColor: "indigo" },
       // Only render the canvas link when a URL is configured (dev only by default).
       ...(AGENTIC_INFRA_URL
         ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
@@ -101,7 +98,6 @@ const sections: NavSection[] = [
   {
     label: "System",
     items: [
-      { name: "Home Dashboard", href: "/dashboard", icon: Home },
       { name: "Integrations", href: "/integrations", icon: Plug },
       { name: "Settings", href: "/settings", icon: Settings },
     ],
