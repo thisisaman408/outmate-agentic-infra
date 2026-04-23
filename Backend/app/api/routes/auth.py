@@ -26,6 +26,10 @@ from app.db.models.user import User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+# ─── Development Fallback Store ─────────────────────────────────────────────
+# Used only when Redis is unavailable in development environment
+_dev_otp_store = {} # {email: otp}
+
 
 # ─── Pydantic models ────────────────────────────────────────────────────────
 
@@ -244,7 +248,10 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
     existing = db.query(User).filter(User.email == body.email).first()
     if existing:
         logger.warning("Register rejected — email already in use — email=%s", body.email)
-        raise HTTPException(status_code=400, detail="Email already in use")
+        raise HTTPException(
+            status_code=400, 
+            detail="An account with this email already exists. Please log in instead."
+        )
 
     user = User(
         email=body.email,
@@ -284,8 +291,24 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
             return {"token": token, "user": user_response(dummy)}
         raise HTTPException(status_code=503, detail="Database temporarily unavailable")
 
-    if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user:
+        logger.warning("Login rejected — user not found — email=%s", body.email)
+        raise HTTPException(
+            status_code=401, 
+            detail="Account not found. Please sign up first."
+        )
+
+    if not user.hashed_password:
+        # User exists but probably signed up via Google
+        logger.warning("Login rejected — no password set (Google user?) — email=%s", body.email)
+        raise HTTPException(
+            status_code=401,
+            detail="This account uses Google Sign-In. Please use the 'Continue with Google' button."
+        )
+
+    if not verify_password(body.password, user.hashed_password):
+        logger.warning("Login rejected — incorrect password — email=%s", body.email)
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
 
     # Returning users who never went through onboarding: auto-complete it
     if not user.onboarding_completed and user.last_login_at:
@@ -342,7 +365,20 @@ async def google_auth(request: Request, body: GoogleAuthRequest, db: Session = D
         user = db.query(User).filter(User.email == email).first()
 
     if user:
-        # Existing user — link Google ID + sync verified status
+        # Existing user
+        # If they are on the signup page (terms_accepted=True), tell them to log in instead
+        # unless they are already linked (then just log them in for better UX, 
+        # or follow the user's request strictly).
+        # The user said "tell them to login first" for "vice versa".
+        if body.terms_accepted and not user.google_id:
+             # They are signing up with Google but already have a manual account
+             logger.warning("Google auth rejected — existing manual user trying to signup — email=%s", email)
+             raise HTTPException(
+                 status_code=400,
+                 detail="An account with this email already exists. Please log in with your password or link Google from settings."
+             )
+        
+        # Link Google ID if not set
         if not user.google_id:
             user.google_id = google_id
         if email_verified_by_google and not user.is_email_verified:
@@ -356,10 +392,12 @@ async def google_auth(request: Request, body: GoogleAuthRequest, db: Session = D
         db.commit()
     else:
         # Brand new user via Google OAuth
+        # If the user is on the login page and terms_accepted is false, we might want to tell them to sign up.
         if not body.terms_accepted:
+            logger.warning("Google auth rejected — new user but terms not accepted — email=%s", email)
             raise HTTPException(
                 status_code=400,
-                detail="You must accept the Terms of Service to create an account",
+                detail="No account found with this email. Please sign up first and accept the Terms of Service.",
             )
         user = User(
             email=email,
@@ -422,13 +460,26 @@ async def send_otp(
         raise HTTPException(status_code=429, detail="Too many OTP requests. Please wait 15 minutes.")
 
     otp = _generate_otp()
-    await redis.setex(f"otp:{email}", 600, otp)           # 10 min TTL
-    await redis.setex(f"otp_attempts:{email}", 600, "0")  # reset attempt counter
+    
+    # Development logging of OTP for easy testing
+    if settings.ENVIRONMENT.lower() == "development":
+        logger.info(f"DEBUG OTP for {email}: {otp}")
+        print(f"\n[DEV ONLY] OTP for {email}: {otp}\n")
+        _dev_otp_store[email] = otp
 
-    pipe = redis.pipeline()
-    pipe.incr(rate_key)
-    pipe.expire(rate_key, 900)  # 15 min window
-    await pipe.execute()
+    try:
+        await redis.setex(f"otp:{email}", 600, otp)           # 10 min TTL
+        await redis.setex(f"otp_attempts:{email}", 600, "0")  # reset attempt counter
+
+        pipe = redis.pipeline()
+        pipe.incr(rate_key)
+        pipe.expire(rate_key, 900)  # 15 min window
+        await pipe.execute()
+    except Exception as e:
+        logger.error(f"Redis operation failed during OTP send: {e}")
+        if settings.ENVIRONMENT.lower() != "development":
+            raise HTTPException(status_code=503, detail="OTP service temporarily unavailable")
+        # In development, we continue even if Redis fails as we have the in-memory fallback
 
     # Get user name for personalised email (best-effort)
     user = db.query(User).filter(User.email == email).first()
@@ -467,7 +518,16 @@ async def verify_otp(
     if attempts and int(attempts) >= 5:
         raise HTTPException(status_code=429, detail="Too many incorrect attempts. Request a new code.")
 
-    stored_otp = await redis.get(f"otp:{email}")
+    stored_otp = None
+    try:
+        stored_otp = await redis.get(f"otp:{email}")
+    except Exception as e:
+        logger.error(f"Redis get failed during OTP verify: {e}")
+        if settings.ENVIRONMENT.lower() == "development":
+            stored_otp = _dev_otp_store.get(email)
+        else:
+            raise HTTPException(status_code=503, detail="OTP service temporarily unavailable")
+
     if not stored_otp:
         raise HTTPException(status_code=400, detail="Verification code expired or not found. Request a new one.")
 
@@ -627,6 +687,12 @@ async def google_oauth_callback(
                 user = db.query(User).filter(User.email == email).first()
 
             if user:
+                # Existing user
+                if terms_accepted and not user.google_id:
+                     logger.warning("Google callback rejected — existing manual user trying to signup — email=%s", email)
+                     frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
+                     return RedirectResponse(url=f"{frontend_base}/auth/signup?error=account_exists")
+
                 if not user.google_id:
                     user.google_id = google_id
                 if email_verified_by_google and not user.is_email_verified:
@@ -643,8 +709,9 @@ async def google_oauth_callback(
                 db.commit()
             else:
                 if not terms_accepted:
+                    logger.warning("Google callback rejected — new user but terms not accepted — email=%s", email)
                     frontend_base = os.getenv("APP_WEBHOOK_URL", "http://localhost:3000").rstrip("/")
-                    return RedirectResponse(url=f"{frontend_base}/auth/signup?error=terms_required")
+                    return RedirectResponse(url=f"{frontend_base}/auth/login?error=signup_required")
                 user = User(
                     email=email,
                     full_name=name,

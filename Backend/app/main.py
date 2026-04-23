@@ -339,7 +339,7 @@ app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"], depen
 logger.info("Dashboard router registered")
 
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"], dependencies=auth_dependencies)
-app.include_router(copilot_sse_router, prefix="/api/copilot")  # no auth — SSE validates JWT via ?token=
+app.include_router(copilot_sse_router, prefix="/api/sse/copilot")  # no auth — SSE validates JWT via ?token=
 logger.info("Copilot router registered")
 
 app.include_router(calendar_router.router, prefix="/api/calendar", tags=["calendar"])
@@ -436,9 +436,9 @@ async def startup_event():
                         # Set a short timeout for migrations so we don't hang the app
                         conn.execute(text("SET statement_timeout = 10000;")) # 10s
                         conn.execute(text(ddl))
-                        logger.info(f"✓ Added missing users.{col_name} column")
+                        logger.info(f"[SUCCESS] Added missing users.{col_name} column")
                 except Exception as e:
-                    logger.warning(f"⚠ Could not add users.{col_name}: {e}")
+                    logger.warning(f"[WARNING] Could not add users.{col_name}: {e}")
 
         # Watchers table migrations
         if inspector.has_table("watchers"):
@@ -456,9 +456,9 @@ async def startup_event():
                     try:
                         with engine.begin() as conn:
                             conn.execute(text(ddl))
-                            logger.info(f"✓ Added missing watchers.{col_name} column")
+                            logger.info(f"[SUCCESS] Added missing watchers.{col_name} column")
                     except Exception as e:
-                        logger.warning(f"⚠ Could not add watchers.{col_name}: {e}")
+                        logger.warning(f"[WARNING] Could not add watchers.{col_name}: {e}")
 
         # ── Visitor tracker v2 schema migrations (idempotent) ─────────────────
         # site_configs new columns
@@ -514,7 +514,7 @@ async def startup_event():
                 "ON visits ((resolution->>'visitor_id')) "
                 "WHERE resolution->>'visitor_id' IS NOT NULL"
             ))
-        logger.info("✓ Visitor tracker v2 schema migrations applied")
+        logger.info("[SUCCESS] Visitor tracker v2 schema migrations applied")
 
         # ── Identity graph v2 indexes (idempotent) ─────────────────────────────
         # Expression index on raw_data->>'fingerprint' for O(log n) cross-org
@@ -525,7 +525,7 @@ async def startup_event():
                 "ON identity_nodes ((raw_data->>'fingerprint')) "
                 "WHERE raw_data->>'fingerprint' IS NOT NULL"
             ))
-        logger.info("✓ Identity graph v2 indexes applied")
+        logger.info("[SUCCESS] Identity graph v2 indexes applied")
         # ── end identity graph v2 ──────────────────────────────────────────────
 
         # ── end visitor tracker v2 ─────────────────────────────────────────────
@@ -562,7 +562,7 @@ async def startup_event():
                 "ON visitor_journey_sequences (org_id, visitor_id, fingerprint, session_id)"
             ))
         _seed_company_resolution_aliases()
-        logger.info("✓ Database tables ensured")
+        logger.info("[SUCCESS] Database tables ensured")
 
         # ── Signal pipeline v1 indexes (idempotent) ──────────────────
         # Ensure signal_events table indexes exist
@@ -595,30 +595,30 @@ async def startup_event():
                 "CREATE INDEX IF NOT EXISTS ix_signal_events_ingested_at "
                 "ON signal_events (ingested_at);"
             ))
-        logger.info("✓ Signal pipeline v1 indexes ensured")
+        logger.info("[SUCCESS] Signal pipeline v1 indexes ensured")
         # HubSpot tokens stored in user_integrations table — no ALTER TABLE needed.
     except Exception as e:
-        logger.error(f"✗ Database init failed (app will start without DB): {e}")
+        logger.error(f"[ERROR] Database init failed (app will start without DB): {e}")
 
     # Seed the default visitor pixel key (idempotent — safe to run every startup)
     try:
         from app.api.routes.visitors import _ensure_default_site_config
         _ensure_default_site_config()
-        logger.info("✓ Default visitor SiteConfig ensured")
+        logger.info("[SUCCESS] Default visitor SiteConfig ensured")
     except Exception as e:
-        logger.warning(f"⚠ Could not seed visitor SiteConfig: {e}")
+        logger.warning(f"[WARNING] Could not seed visitor SiteConfig: {e}")
 
     try:
         connected = RedisManager.connect()
         app.state.redis_ready = bool(connected)
         if connected:
-            logger.info("✓ Redis connection established")
+            logger.info("[SUCCESS] Redis connection established")
             # Ping every 45 s to prevent Upstash / managed-Redis idle disconnects
             app.state.redis_keepalive_task = start_keepalive(interval=45)
         else:
-            logger.warning("⚠ Redis unavailable (continuing without Redis)")
+            logger.warning("[WARNING] Redis unavailable (continuing without Redis)")
     except Exception as e:
-        logger.error(f"✗ Redis init failed (app will start without Redis): {e}")
+        logger.error(f"[ERROR] Redis init failed (app will start without Redis): {e}")
     app.state.db_ready = True
     app.state.redis_ready = True
 
@@ -627,23 +627,23 @@ async def startup_event():
     # known abseil/grpc mutex deadlock that hangs SentenceTransformer init on
     # some Mac configurations).  The model still lazy-loads on first request.
     if os.getenv("OUTMATE_SKIP_EMBEDDING_PRELOAD", "").lower() == "true":
-        logger.info("⏭ Skipping embedding model preload (OUTMATE_SKIP_EMBEDDING_PRELOAD=true)")
+        logger.info("[SKIP] Skipping embedding model preload (OUTMATE_SKIP_EMBEDDING_PRELOAD=true)")
     else:
         try:
             from app.core.embeddings import get_embedding_model
             get_embedding_model()
-            logger.info("✓ Embedding model preloaded")
+            logger.info("[SUCCESS] Embedding model preloaded")
         except Exception as e:
-            logger.warning(f"⚠ Embedding model preload failed (will load on first request): {e}")
+            logger.warning(f"[WARNING] Embedding model preload failed (will load on first request): {e}")
 
     # Resolve the Social Listening flow ID from the agentic infra so we
     # don't break when the engine regenerates UUIDs on cold start.
     try:
         from app.core.agentic_flow_resolver import get_social_listening_flow
         flow_id, node_id, node_type = get_social_listening_flow()
-        logger.info("✓ Social Listening flow resolved: flow=%s node=%s type=%s", flow_id, node_id, node_type)
+        logger.info("[SUCCESS] Social Listening flow resolved: flow=%s node=%s type=%s", flow_id, node_id, node_type)
     except Exception as e:
-        logger.warning("⚠ Social Listening flow resolution failed (will retry on first call): %s", e)
+        logger.warning("[WARNING] Social Listening flow resolution failed (will retry on first call): %s", e)
 
     # Seed integration catalog
     try:
@@ -652,13 +652,13 @@ async def startup_event():
         db = next(get_db())
         seeded = IntegrationRegistry.seed_catalog(db)
         if seeded:
-            logger.info("✓ Seeded %d integrations into catalog", seeded)
+            logger.info("[SUCCESS] Seeded %d integrations into catalog", seeded)
         else:
-            logger.info("✓ Integration catalog up to date")
+            logger.info("[SUCCESS] Integration catalog up to date")
     except Exception as e:
-        logger.warning("⚠ Integration catalog seed failed: %s", e)
+        logger.warning("[WARNING] Integration catalog seed failed: %s", e)
 
-    logger.info("✓ Application startup (optimized) complete")
+    logger.info("[SUCCESS] Application startup (optimized) complete")
     logger.info("================================")
 
 

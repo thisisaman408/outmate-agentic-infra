@@ -16,6 +16,7 @@ const inter = Inter({
 })
 
 import { AuthProvider } from "@/components/auth/auth-provider"
+import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
   title: "Outmate.ai - B2B GTM Intelligence Platform",
@@ -51,6 +52,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>{children}</AuthProvider>
+        <Toaster />
       </body>
     </html>
   )

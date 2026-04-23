@@ -20,7 +20,7 @@ export function useNotifications() {
     const token = getToken()
     if (!token) return
 
-    const url = `${BACKEND_BASE}/api/copilot/notifications/stream?token=${encodeURIComponent(token)}`
+    const url = `${BACKEND_BASE}/api/sse/copilot/notifications/stream?token=${encodeURIComponent(token)}`
     const es = new EventSource(url)
     esRef.current = es
 

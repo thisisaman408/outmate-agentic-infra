@@ -681,12 +681,6 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
                 logger.error(f"Slack notification failed: {e}")
 
 
-# Handle trailing slash variant for sync
-@router.post("/{id}/sync/")
-async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=Depends(get_current_user)):
-    # Delegate to the main sync_watcher function
-    return await sync_watcher(id, db, _user)
-
 
 # ─────────────────────────────────────────
 # Legacy /api/watchers routes (no /v1/)

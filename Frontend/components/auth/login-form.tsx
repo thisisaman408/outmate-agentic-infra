@@ -53,6 +53,9 @@ export function LoginForm() {
         case "database_error":
           errorMessage = "Database temporarily unavailable. Please try again later."
           break
+        case "signup_required":
+          errorMessage = "No account found with this email. Please sign up first."
+          break
         case "unexpected_error":
           errorMessage = "An unexpected error occurred. Please try again."
           break
@@ -96,7 +99,7 @@ export function LoginForm() {
 
       {/* Google Sign-In */}
       <div className="space-y-3">
-        <GoogleButton text="signin_with" disabled={isLoading} />
+        <GoogleButton text="signin_with" disabled={isLoading} termsAccepted={false} />
       </div>
 
       {/* Divider */}

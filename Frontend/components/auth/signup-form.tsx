@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Eye, EyeOff, Loader2, Lock, Mail, User, Building2, CheckCircle2 } from "lucide-react"
@@ -68,6 +68,32 @@ export function SignupForm() {
     password: "",
     workspace: "",
   })
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const error = params.get("error")
+    if (error) {
+      let errorMessage = "An error occurred during sign up."
+      switch (error) {
+        case "account_exists":
+          errorMessage = "An account with this email already exists. Please log in instead."
+          break
+        case "terms_required":
+          errorMessage = "You must accept the Terms of Service to create an account."
+          break
+        case "google_not_configured":
+          errorMessage = "Google sign-in is not configured on the server."
+          break
+        default:
+          errorMessage = "Authentication failed. Please try again."
+      }
+      toast({
+        title: "Sign up Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    }
+  }, [toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
