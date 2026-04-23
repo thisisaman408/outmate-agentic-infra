@@ -1,15 +1,30 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import {
-  Search, Plus, RefreshCw,
-  Share2, ArrowUpRight, Flame, Target, UserPlus, Send,
-  Activity, Mail, Linkedin
+  Search,
+  Plus,
+  RefreshCw,
+  Flame,
+  Users,
+  Zap,
+  Target,
+  Linkedin,
+  ExternalLink,
+  Pause,
+  Play,
+  Trash2,
+  Sparkles,
+  Mail,
+  Send,
+  ArrowUpRight,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import {
   fetchSearches,
@@ -26,6 +41,7 @@ import {
   getHubSpotAuthUrl,
   SIGNAL_TYPE_OPTIONS,
   SORT_OPTIONS,
+  SINCE_OPTIONS,
   STRENGTH_OPTIONS,
   type SocialSearch,
   type SocialSignal,
@@ -34,266 +50,422 @@ import {
   type CreateSearchPayload,
   type IntegrationStatus,
 } from "@/lib/social-listening"
+import { CreateSearchWizard } from "./_components/create-search-wizard"
 
-/* ─── types ─── */
-interface SavedSearch {
-  id: string
-  name: string
-  platform: "linkedin" | "x"
-  frequency: string
-  updatedAt: string
-  keywords: string[]
-  paused?: boolean
-  matchCount?: number
-  enrichedCount?: number
-}
+// ============================================================================
+// Page
+// ============================================================================
 
-const SIGNAL_CATEGORIES = [
-  "All Signals", "Sales-Led", "Product-Led", "Community-Led",
-  "Competitor", "Technographic", "Event", "Partner"
-] as const
-
-const INTENT_OPTIONS = ["Highest Intent", "High Intent", "All Intent"] as const
-const TIME_OPTIONS = ["Anytime", "Today", "This Week", "This Month"] as const
-
-export default function SocialAgentPage() {
-  const [searches, setSearches] = useState<SavedSearch[]>([])
+export default function SocialListeningPage() {
+  const [searches, setSearches] = useState<SocialSearch[]>([])
   const [signals, setSignals] = useState<SocialSignal[]>([])
-  const [stats, setStats] = useState<SocialStats>({
-    total_signals: 0, total_signals_delta_pct: 0,
-    enriched_contacts: 0, enriched_contacts_delta_pct: 0,
-    hot_intent_leads: 0, hot_intent_leads_delta: 0,
-    active_searches: 0, running_searches: 0,
+  const [stats, setStats] = useState<SocialStats | null>(null)
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null)
+  const [feedParams, setFeedParams] = useState<SignalFeedParams>({
+    sort: "intent",
+    since: "all",
+    signal_type: "all",
   })
-  const [selectedSearchId, setSelectedSearchId] = useState<string | null>(null)
-  const [view, setView] = useState<"feed" | "builder">("feed")
   const [loading, setLoading] = useState(true)
-  const [creating, setCreating] = useState(false)
-  const [newSearchName, setNewSearchName] = useState("")
-  const [newSearchKeywords, setNewSearchKeywords] = useState("")
-
-  // Filters
-  const [activeCategory, setActiveCategory] = useState("All Signals")
-  const [intentFilter, setIntentFilter] = useState<typeof INTENT_OPTIONS[number]>("Highest Intent")
-  const [timeFilter, setTimeFilter] = useState<typeof TIME_OPTIONS[number]>("Anytime")
-  const [strengthFilter, setStrengthFilter] = useState<"all" | "High" | "Medium" | "Low">("all")
-  const [enrichedOnly, setEnrichedOnly] = useState(false)
-  const [hotOnly, setHotOnly] = useState(false)
-  const [sortBy, setSortBy] = useState<"recent" | "intent" | "engagement">("recent")
-  const [enrichingId, setEnrichingId] = useState<string | null>(null)
+  const [running, setRunning] = useState<string | null>(null)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [expandedSignal, setExpandedSignal] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [searchData, statsData] = await Promise.all([fetchSearches(), fetchStats()])
-      setSearches(searchData.map(s => ({
-        id: s.id, name: s.name, platform: "linkedin" as const,
-        frequency: s.schedule,
-        updatedAt: s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : "Never",
-        keywords: s.keywords, paused: s.status === "paused",
-        matchCount: s.total_signals, enrichedCount: s.enriched_signals
-      })))
-      setStats(statsData)
-    } catch (error) {
-      console.error("Failed to load data:", error)
+      const [s, st] = await Promise.all([fetchSearches(), fetchStats()])
+      setSearches(s)
+      setStats(st)
+    } catch {
+      // Auth not ready or backend unavailable — page renders with empty state
     } finally {
       setLoading(false)
     }
   }, [])
 
   const loadSignals = useCallback(async () => {
-    const params: SignalFeedParams = {
-      search_id: selectedSearchId || undefined,
-      signal_type: activeCategory === "All Signals" ? undefined : activeCategory,
-      sort: sortBy,
-      limit: 50,
-      enriched_only: enrichedOnly || undefined,
-      hot_only: hotOnly || undefined,
-      strength: strengthFilter === "all" ? undefined : strengthFilter,
-      since: timeFilter === "Anytime" ? undefined
-        : timeFilter === "Today" ? "today"
-        : timeFilter === "This Week" ? "week"
-        : timeFilter === "This Month" ? "month" : undefined,
-      min_intent: intentFilter === "Highest Intent" ? 80
-        : intentFilter === "High Intent" ? 60 : undefined,
-    }
-    try {
-      const data = await fetchSignals(params)
-      setSignals(data)
-    } catch (error) {
-      console.error("Failed to load signals:", error)
-    }
-  }, [selectedSearchId, activeCategory, sortBy, enrichedOnly, hotOnly, strengthFilter, timeFilter, intentFilter])
+    const params: SignalFeedParams = { ...feedParams }
+    if (activeSearchId) params.search_id = activeSearchId
+    const sigs = await fetchSignals(params)
+    setSignals(sigs)
+  }, [feedParams, activeSearchId])
 
-  async function handleEnrich(signalId: string) {
-    setEnrichingId(signalId)
-    try {
-      await enrichSignal(signalId)
-      await loadSignals()
-      await fetchStats().then(setStats)
-    } catch (e) { console.error("Enrich failed:", e) }
-    finally { setEnrichingId(null) }
+  useEffect(() => {
+    setMounted(true)
+    loadAll()
+  }, [loadAll])
+
+  useEffect(() => {
+    if (mounted) loadSignals()
+  }, [mounted, loadSignals])
+
+  const handleCreateSearch = async (payload: CreateSearchPayload) => {
+    const s = await createSearch(payload)
+    setSearches((prev) => [s, ...prev])
+    setActiveSearchId(s.id)
+    setShowCreateDialog(false)
+    // Auto-run the search immediately after creation
+    handleRunNow(s.id)
   }
 
-  async function handleRefresh() {
-    setLoading(true)
-    await Promise.all([loadAll(), loadSignals()])
-    setLoading(false)
+  const handleRunNow = async (id: string) => {
+    setRunning(id)
+    try {
+      // Auto-resume paused searches so the run button always works.
+      const search = searches.find((s) => s.id === id)
+      if (search?.status === "paused") {
+        const resumed = await updateSearch(id, { status: "active" })
+        setSearches((prev) => prev.map((s) => (s.id === id ? resumed : s)))
+      }
+      // Background run — survives tab close.  Polls for completion every 3s.
+      const updated = await runSearchAndWait(id, {
+        onProgress: (s) => {
+          if (s.status === "running" || s.status === "queued") {
+            // Keep the running indicator visible; could expose s.leads_count later.
+          }
+        },
+      })
+      setSearches((prev) => prev.map((s) => (s.id === id ? updated : s)))
+      await Promise.all([loadSignals(), fetchStats().then(setStats)])
+    } catch {
+      // Silently handle — the UI already shows the running state reset.
+    } finally {
+      setRunning(null)
+    }
   }
+
+  const handleToggle = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === "active" ? "paused" : "active"
+    const updated = await updateSearch(id, { status: newStatus })
+    setSearches((prev) => prev.map((s) => (s.id === id ? updated : s)))
+  }
+
+  const handleDelete = async (id: string) => {
+    await deleteSearch(id)
+    setSearches((prev) => prev.filter((s) => s.id !== id))
+    if (activeSearchId === id) setActiveSearchId(null)
+  }
+
+  const handleRefresh = async () => {
+    await Promise.all([loadSignals(), fetchStats().then(setStats)])
+  }
+
+  if (!mounted) return null
 
   return (
-    <div className="flex h-full bg-background overflow-hidden font-sans">
-      {/* Sidebar */}
-      <aside className="w-[280px] border-r border-border bg-card flex flex-col shrink-0">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="text-sm font-black uppercase tracking-widest text-foreground">All Searches</h2>
-          <Button onClick={() => setView('builder')} variant="ghost" size="icon" className="h-8 w-8 rounded-lg bg-primary/10 text-primary">
-            <Plus className="w-4 h-4" />
-          </Button>
-        </div>
-      </aside>
+    <div className="flex h-[calc(100vh-4rem)] gap-0">
+      {/* Left Rail */}
+      <SearchSidebar
+        searches={searches}
+        activeSearchId={activeSearchId}
+        runningId={running}
+        onSelect={(id) => setActiveSearchId(activeSearchId === id ? null : id)}
+        onRunNow={handleRunNow}
+        onToggle={handleToggle}
+        onDelete={handleDelete}
+        onCreate={() => setShowCreateDialog(true)}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto bg-muted/5">
-        {view === 'builder' ? (
-          <div className="p-6 max-w-2xl mx-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h1 className="text-2xl font-bold tracking-tight">Create New Search</h1>
-              <Button variant="outline" size="sm" onClick={() => setView('feed')}>
-                Cancel
-              </Button>
-            </div>
-            <Card>
-              <CardContent className="p-6 space-y-4">
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">Search Name</label>
-                  <Input
-                    placeholder="e.g., SaaS Companies in Series A"
-                    value={newSearchName}
-                    onChange={(e) => setNewSearchName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">Keywords</label>
-                  <Input
-                    placeholder="e.g., SaaS, Series A, B2B"
-                    value={newSearchKeywords}
-                    onChange={(e) => setNewSearchKeywords(e.target.value)}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  onClick={async () => {
-                    if (!newSearchName || !newSearchKeywords) return
-                    setCreating(true)
-                    try {
-                      await createSearch({
-                        name: newSearchName,
-                        keywords: newSearchKeywords.split(',').map(k => k.trim()),
-                        signal_types: ['Sales-Led'],
-                      })
-                      setNewSearchName('')
-                      setNewSearchKeywords('')
-                      setView('feed')
-                      await loadAll()
-                    } catch (error) {
-                      console.error('Failed to create search:', error)
-                    } finally {
-                      setCreating(false)
-                    }
-                  }}
-                  disabled={creating || !newSearchName || !newSearchKeywords}
-                >
-                  {creating ? 'Creating...' : 'Create Search'}
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="p-6 max-w-7xl mx-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h1 className="text-2xl font-bold tracking-tight">Social Agent</h1>
-              <Button variant="outline" size="sm" className="gap-2" onClick={handleRefresh} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <Card>
-                <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground mb-1">Total Signals</p>
-                  <p className="text-3xl font-bold">{stats.total_signals}</p>
-                  <p className="text-xs text-green-600 mt-1">{stats.total_signals_delta_pct >= 0 ? '+' : ''}{stats.total_signals_delta_pct}%</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground mb-1">Enriched Contacts</p>
-                  <p className="text-3xl font-bold">{stats.enriched_contacts}</p>
-                  <p className="text-xs text-green-600 mt-1">{stats.enriched_contacts_delta_pct >= 0 ? '+' : ''}{stats.enriched_contacts_delta_pct}%</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground mb-1">Hot Intent Leads</p>
-                  <p className="text-3xl font-bold">{stats.hot_intent_leads}</p>
-                  <p className="text-xs text-green-600 mt-1">+{stats.hot_intent_leads_delta} today</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-5">
-                  <p className="text-sm text-muted-foreground mb-1">Active Searches</p>
-                  <p className="text-3xl font-bold">{stats.active_searches}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{stats.running_searches} running</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Filters */}
-            <div className="flex flex-wrap items-center gap-3 mb-6">
-              <Badge
-                variant={activeCategory === "All Signals" ? "default" : "outline"}
-                className="cursor-pointer"
-                onClick={() => setActiveCategory("All Signals")}
-              >
-                All Signals
-              </Badge>
-              {SIGNAL_CATEGORIES.slice(1).map((cat) => (
-                <Badge
-                  key={cat}
-                  variant={activeCategory === cat ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() => setActiveCategory(cat)}
-                >
-                  {cat}
-                </Badge>
-              ))}
-            </div>
-
-            {/* Signals Grid */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <KPIRow stats={stats} />
+        <FilterBar
+          params={feedParams}
+          onChange={(p) => setFeedParams({ ...feedParams, ...p })}
+          onRefresh={handleRefresh}
+          onRunNow={activeSearchId ? () => handleRunNow(activeSearchId) : undefined}
+          activeSearchName={
+            activeSearchId
+              ? searches.find((s) => s.id === activeSearchId)?.name ?? "All Searches"
+              : "All Searches"
+          }
+          totalResults={signals.length}
+          isRunning={!!running}
+        />
+        <ScrollArea className="flex-1">
+          <div className="p-4 space-y-3 max-w-5xl mx-auto w-full">
             {loading ? (
-              <div className="text-center py-12 text-muted-foreground">Loading signals...</div>
+              <div className="flex items-center justify-center py-20 text-muted-foreground">
+                <Loader2 className="animate-spin mr-2 size-5" />
+                Loading signals...
+              </div>
             ) : signals.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                No signals found. Create a search to start monitoring social media.
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <Search className="size-10 mb-3 opacity-30" />
+                <p className="text-lg font-medium">No signals yet</p>
+                <p className="text-sm mt-1">
+                  {searches.length === 0
+                    ? "Create a search to start monitoring"
+                    : "Run a search to discover signals"}
+                </p>
               </div>
             ) : (
-              <div className="grid gap-4">
-                {signals.map((signal) => (
-                  <SignalCard
-                    key={signal.id}
-                    signal={signal}
-                    expanded={false}
-                    onToggle={() => {}}
-                  />
-                ))}
-              </div>
+              signals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  expanded={expandedSignal === signal.id}
+                  onToggle={() =>
+                    setExpandedSignal(expandedSignal === signal.id ? null : signal.id)
+                  }
+                />
+              ))
             )}
           </div>
-        )}
-      </main>
+        </ScrollArea>
+      </div>
+
+      {showCreateDialog && (
+        <CreateSearchWizard
+          onClose={() => setShowCreateDialog(false)}
+          onCreate={handleCreateSearch}
+        />
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Search Sidebar
+// ============================================================================
+
+function SearchSidebar({
+  searches,
+  activeSearchId,
+  runningId,
+  onSelect,
+  onRunNow,
+  onToggle,
+  onDelete,
+  onCreate,
+}: {
+  searches: SocialSearch[]
+  activeSearchId: string | null
+  runningId: string | null
+  onSelect: (id: string) => void
+  onRunNow: (id: string) => void
+  onToggle: (id: string, status: string) => void
+  onDelete: (id: string) => void
+  onCreate: () => void
+}) {
+  const totalSignals = searches.reduce((s, w) => s + w.total_signals, 0)
+  return (
+    <div className="w-72 border-r flex flex-col bg-card/50">
+      <div className="p-3 border-b flex items-center justify-between">
+        <h2 className="font-semibold text-lg">Social Listening</h2>
+        <Button size="icon" className="size-8 rounded-full" onClick={onCreate}>
+          <Plus className="size-4" />
+        </Button>
+      </div>
+
+      <div className="p-3 border-b">
+        <div
+          className={cn(
+            "rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+            !activeSearchId ? "bg-primary/10 border border-primary/30" : "hover:bg-muted"
+          )}
+          onClick={() => onSelect("")}
+        >
+          <div className="flex items-center gap-2">
+            <Target className="size-4 text-primary" />
+            <span className="font-medium text-sm">All searches</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {searches.length} active · {totalSignals} signals
+          </p>
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1 p-2">
+        <div className="space-y-1.5">
+          {searches.map((s) => (
+            <div
+              key={s.id}
+              className={cn(
+                "group rounded-lg px-3 py-2.5 cursor-pointer transition-all border",
+                activeSearchId === s.id
+                  ? "bg-primary/5 border-primary/40"
+                  : "border-transparent hover:bg-muted hover:border-border/60"
+              )}
+              onClick={() => onSelect(s.id)}
+            >
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <Linkedin className="size-3.5 text-blue-400 shrink-0" />
+                    <p className="font-medium text-sm truncate">{s.name}</p>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-green-400 inline-block" />
+                      {s.schedule === "manual" ? "Manual" : s.schedule}
+                    </span>
+                    <span className="font-medium text-foreground/80">{s.total_signals} signals</span>
+                    <span>{s.enriched_signals} enriched</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                    {s.keywords.join(", ")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    className={cn("p-1 rounded hover:bg-primary/20", runningId === s.id ? "text-primary" : "text-muted-foreground hover:text-primary")}
+                    title={runningId === s.id ? "Running..." : "Run now"}
+                    onClick={(e) => { e.stopPropagation(); if (runningId !== s.id) onRunNow(s.id) }}
+                  >
+                    {runningId === s.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                  </button>
+                  <button
+                    className="p-1 rounded hover:bg-muted-foreground/20"
+                    title={s.status === "active" ? "Pause" : "Resume"}
+                    onClick={(e) => { e.stopPropagation(); onToggle(s.id, s.status) }}
+                  >
+                    {s.status === "active" ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                  </button>
+                  <button
+                    className="p-1 rounded hover:bg-destructive/20 hover:text-destructive"
+                    title="Delete"
+                    onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+// ============================================================================
+// KPI Row
+// ============================================================================
+
+function KPIRow({ stats }: { stats: SocialStats | null }) {
+  const cards = [
+    { label: "Total Signals", value: stats?.total_signals ?? 0, delta: stats ? `${stats.total_signals_delta_pct >= 0 ? "+" : ""}${stats.total_signals_delta_pct}%` : "", positive: (stats?.total_signals_delta_pct ?? 0) >= 0, icon: Zap, color: "text-violet-400" },
+    { label: "Enriched Contacts", value: stats?.enriched_contacts ?? 0, delta: stats ? `${stats.enriched_contacts_delta_pct >= 0 ? "+" : ""}${stats.enriched_contacts_delta_pct}%` : "", positive: (stats?.enriched_contacts_delta_pct ?? 0) >= 0, icon: Users, color: "text-emerald-400" },
+    { label: "Hot Intent Leads", value: stats?.hot_intent_leads ?? 0, delta: stats ? `+${stats.hot_intent_leads_delta} today` : "", positive: true, icon: Flame, color: "text-orange-400" },
+    { label: "Active Searches", value: stats?.active_searches ?? 0, delta: stats ? `${stats.running_searches} running` : "", positive: true, icon: Target, color: "text-sky-400" },
+  ]
+  return (
+    <div className="grid grid-cols-4 gap-3 p-4 pb-0">
+      {cards.map((c) => (
+        <Card key={c.label} className="border-border/60">
+          <CardContent className="flex items-center justify-between py-4 px-5">
+            <div>
+              <p className="text-3xl font-bold">{c.value}</p>
+              <p className="text-xs text-muted-foreground">{c.label}</p>
+              {c.delta && (
+                <p className={cn("text-xs font-medium mt-0.5", c.positive ? "text-emerald-400" : "text-red-400")}>{c.delta}</p>
+              )}
+            </div>
+            <c.icon className={cn("size-8 opacity-40", c.color)} />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+// ============================================================================
+// Filter Bar + Activity Tabs
+// ============================================================================
+
+function FilterBar({
+  params,
+  onChange,
+  onRefresh,
+  onRunNow,
+  activeSearchName,
+  totalResults,
+  isRunning,
+}: {
+  params: SignalFeedParams
+  onChange: (p: Partial<SignalFeedParams>) => void
+  onRefresh: () => void
+  onRunNow?: () => void
+  activeSearchName: string
+  totalResults: number
+  isRunning?: boolean
+}) {
+  return (
+    <div className="px-4 pt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-base">{activeSearchName}</h3>
+          <Badge variant="secondary" className="text-xs">{totalResults} results</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <select value={params.sort || "intent"} onChange={(e) => onChange({ sort: e.target.value as any })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select value={params.since || "all"} onChange={(e) => onChange({ since: e.target.value as any })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            {SINCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select
+            value={params.strength || "all"}
+            onChange={(e) => onChange({ strength: e.target.value === "all" ? undefined : e.target.value })}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {STRENGTH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <button
+            onClick={() => onChange({ enriched_only: !params.enriched_only })}
+            className={cn(
+              "h-9 px-3 rounded-md text-sm font-medium border transition-colors whitespace-nowrap",
+              params.enriched_only
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <Mail className="size-3.5 inline-block mr-1.5 -mt-0.5" />
+            Enriched only
+          </button>
+          <button
+            onClick={() => onChange({ hot_only: !params.hot_only })}
+            className={cn(
+              "h-9 px-3 rounded-md text-sm font-medium border transition-colors whitespace-nowrap",
+              params.hot_only
+                ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <Flame className="size-3.5 inline-block mr-1.5 -mt-0.5" />
+            Hot leads
+          </button>
+          {onRunNow && (
+            <Button size="sm" onClick={onRunNow} disabled={isRunning}>
+              {isRunning ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="size-3.5 mr-1.5" />}
+              {isRunning ? "Running..." : "Run Search"}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onRefresh}>
+            <RefreshCw className="size-3.5 mr-1.5" />
+            Refresh
+          </Button>
+        </div>
+      </div>
+      <div className="flex gap-1 border-b pb-1">
+        {SIGNAL_TYPE_OPTIONS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => onChange({ signal_type: t.value })}
+            className={cn(
+              "px-3 py-1.5 text-sm rounded-md transition-colors",
+              (params.signal_type ?? "all") === t.value
+                ? "bg-primary text-primary-foreground font-medium"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -362,8 +534,10 @@ function LinkedInPostPlaceholder({
       }}
       className="group relative block rounded-lg overflow-hidden border border-border/50 hover:border-[#0A66C2]/60 hover:shadow-lg hover:shadow-[#0A66C2]/15 transition-all"
     >
-      {/* ─── Compact hero band (wide, ~4:1) ─── */}
-      <div className="relative aspect-[4/1] w-full bg-gradient-to-br from-[#0A66C2] via-[#0a5fb2] to-[#003a73] overflow-hidden">
+      {/* Fixed-height hero so it never balloons on wide cards.  h-40 gives
+           enough vertical space to read as a proper LinkedIn-style cover
+           without becoming a billboard. */}
+      <div className="relative h-40 w-full bg-gradient-to-br from-[#0A66C2] via-[#0a5fb2] to-[#003a73] overflow-hidden">
         {/* Decorative light + grid so the hero reads like a graphic cover */}
         <div className="absolute inset-0 opacity-25 mix-blend-overlay bg-[radial-gradient(circle_at_top_right,_white,_transparent_55%)]" />
         <div className="absolute inset-0 opacity-[0.10] bg-[linear-gradient(transparent_95%,white_95%),linear-gradient(90deg,transparent_95%,white_95%)] bg-[length:20px_20px]" />
@@ -467,7 +641,7 @@ function PostImageGrid({
   }: {
     url: string
     className: string
-    overlay?: React.ReactNode
+    overlay?: ReactNode
   }) => (
     <a
       href={href(url)}
@@ -616,30 +790,6 @@ function resolveCompany(signal: SocialSignal): string {
   return ""   // empty string → the "·" separator + company line hides
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return "just now"
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function IntentBadge({ score, tier }: { score: number; tier?: string }) {
-  const getColor = () => {
-    if (score >= 80) return "bg-orange-500/15 text-orange-400 border-orange-500/30"
-    if (score >= 60) return "bg-amber-500/15 text-amber-400 border-amber-500/30"
-    return "bg-slate-500/15 text-slate-400 border-slate-500/30"
-  }
-  return (
-    <Badge variant="outline" className={cn("text-[9px] font-medium px-1.5 py-0", getColor())}>
-      {score}
-    </Badge>
-  )
-}
-
 function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expanded: boolean; onToggle: () => void }) {
   const signalName = signal.signal_type?.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || "Activity"
   const category = signal.signal_category || "Sales-Led"
@@ -711,110 +861,233 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
 
   return (
     <Card className={cn("border-border/60 transition-all cursor-pointer hover:border-primary/30", expanded && "border-primary/50 ring-1 ring-primary/20")} onClick={onToggle}>
-      <CardContent className="py-4 px-5 space-y-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-3">
-            {/* Avatar wrapper keeps the LinkedIn "in" corner badge aligned to
-                both real DP + gradient fallback variants. */}
-            <div className="relative shrink-0">
-              {signal.profile_picture_url ? (
-                /* Author DP — falls back to the gradient+initials tile on 404/broken URL.
-                   LinkedIn serves DPs from media.licdn.com which often hot-links fine
-                   from a browser but sometimes returns 403 without a referrer. */
-                <img
-                  src={signal.profile_picture_url}
-                  alt={displayName || "profile"}
-                  className="size-10 rounded-full object-cover ring-1 ring-border/40"
-                  onError={(e) => {
-                    const img = e.currentTarget
-                    img.style.display = "none"
-                    img.nextElementSibling?.classList.remove("hidden")
-                  }}
-                />
-              ) : null}
-              {/* Branded gradient avatar with initials.  Uses a per-name hash so
-                  two different people never share the same colour but the same
-                  person is always the same tile across refreshes.  A ring +
-                  LinkedIn glyph makes it read as a designed template, not a
-                  placeholder for missing data. */}
-              <div className={cn(
-                "size-10 rounded-full text-white flex items-center justify-center text-sm font-bold shadow-sm bg-gradient-to-br ring-1 ring-white/10",
-                gradientForName(displayName),
-                signal.profile_picture_url && "hidden",
-              )}>{initials}</div>
-              {/* Small LinkedIn "in" badge in the corner — shows on both real
-                  DPs and the gradient fallback so every signal card reads as
-                  a LinkedIn-sourced contact. */}
-              <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#0A66C2] flex items-center justify-center ring-2 ring-card shadow-sm">
-                <span className="text-white font-black text-[8px] leading-none">in</span>
-              </span>
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm">{displayName}</span>
-                {signal.person_linkedin && <Linkedin className="size-3.5 text-blue-400" />}
-                <Badge variant="outline" className={cn("text-[10px] font-medium px-1.5 py-0", activityColor)}>
-                  {signalName}
-                </Badge>
-                {signal.signal_strength && (
-                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                    signal.signal_strength === "High" ? "bg-red-500/15 text-red-400" :
-                    signal.signal_strength === "Medium" ? "bg-amber-500/15 text-amber-400" :
-                    "bg-slate-500/15 text-slate-400"
-                  )}>
-                    {signal.signal_strength}
-                  </span>
-                )}
-                {signal.intent_score != null && <IntentBadge score={signal.intent_score} tier={signal.intent_tier} />}
+      <CardContent className="py-4 px-5">
+        {/* Grid gives deterministic column widths — `minmax(0,1fr)` is
+            critical, it forces the content column to respect its bounds
+            instead of expanding to fit a wide snippet (which was pushing
+            the action rail off-screen on ultra-wide monitors). */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px] gap-5">
+          {/* ── Left: content column ─────────────────────────────── */}
+          <div className="min-w-0 space-y-3">
+            <div className="flex items-start gap-3">
+              {/* Avatar wrapper keeps the LinkedIn "in" corner badge aligned to
+                  both real DP + gradient fallback variants. */}
+              <div className="relative shrink-0">
+                {signal.profile_picture_url ? (
+                  <img
+                    src={signal.profile_picture_url}
+                    alt={displayName || "profile"}
+                    className="size-10 rounded-full object-cover ring-1 ring-border/40"
+                    onError={(e) => {
+                      const img = e.currentTarget
+                      img.style.display = "none"
+                      img.nextElementSibling?.classList.remove("hidden")
+                    }}
+                  />
+                ) : null}
+                <div className={cn(
+                  "size-10 rounded-full text-white flex items-center justify-center text-sm font-bold shadow-sm bg-gradient-to-br ring-1 ring-white/10",
+                  gradientForName(displayName),
+                  signal.profile_picture_url && "hidden",
+                )}>{initials}</div>
+                <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#0A66C2] flex items-center justify-center ring-2 ring-card shadow-sm">
+                  <span className="text-white font-black text-[8px] leading-none">in</span>
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {signal.person_title}{signal.person_title && displayCompany && " · "}
-                {displayCompany && (
-                  <span className="font-medium text-foreground/80">{displayCompany}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm">{displayName}</span>
+                  {signal.person_linkedin && <Linkedin className="size-3.5 text-blue-400" />}
+                  <Badge variant="outline" className={cn("text-[10px] font-medium px-1.5 py-0", activityColor)}>
+                    {signalName}
+                  </Badge>
+                  {signal.signal_strength && (
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                      signal.signal_strength === "High" ? "bg-red-500/15 text-red-400" :
+                      signal.signal_strength === "Medium" ? "bg-amber-500/15 text-amber-400" :
+                      "bg-slate-500/15 text-slate-400"
+                    )}>
+                      {signal.signal_strength}
+                    </span>
+                  )}
+                  {signal.intent_score != null && <IntentBadge score={signal.intent_score} tier={signal.intent_tier} />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {signal.person_title}{signal.person_title && displayCompany && " · "}
+                  {displayCompany && (
+                    <span className="font-medium text-foreground/80">{displayCompany}</span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground">{ago}</span>
+                  {signal.matched_search_names.map((name) => (
+                    <Badge key={name} variant="secondary" className="text-[10px] px-1.5 py-0">{name}</Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {displaySnippet && (
+              <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3 break-words">
+                {displaySnippet}
+                {signal.post_url && (
+                  <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary text-xs ml-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+                    Read more <ArrowUpRight className="size-3" />
+                  </a>
                 )}
               </p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-muted-foreground">{ago}</span>
-                {signal.matched_search_names.map((name) => (
-                  <Badge key={name} variant="secondary" className="text-[10px] px-1.5 py-0">{name}</Badge>
-                ))}
-              </div>
+            )}
+
+            {/* Media — capped at max-w-md so it stays a preview, never a
+                billboard.  LinkedInPostPlaceholder's inner hero is fixed
+                to h-20 so it doesn't balloon on wide cards. */}
+            <div className="max-w-md">
+              {signal.post_images && signal.post_images.length > 0 ? (
+                <PostImageGrid images={signal.post_images} postUrl={signal.post_url} />
+              ) : (
+                <LinkedInPostPlaceholder
+                  snippet={displaySnippet}
+                  postUrl={signal.post_url}
+                  personName={displayName}
+                />
+              )}
+            </div>
+
+            {signal.best_hook && (
+              <p className="text-xs text-muted-foreground italic border-l-2 border-primary/30 pl-3">
+                <strong>Hook:</strong> {signal.best_hook}
+              </p>
+            )}
+
+            {/* Email + status strip — stays with content because it's an
+                output of the reveal action, not an action itself. */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground min-h-[20px]">
+              {revealed && signal.person_email ? (
+                <span className="flex items-center gap-1 truncate">
+                  <Mail className="size-3 shrink-0" />
+                  <span className="truncate">{signal.person_email}</span>
+                  {!signal.person_email_verified && <span className="text-[10px] text-amber-400 shrink-0">(unverified)</span>}
+                </span>
+              ) : revealed ? (
+                <span className="text-muted-foreground/60">no email found</span>
+              ) : (
+                <span className="text-muted-foreground/70">Contact hidden — reveal to see email</span>
+              )}
+              {enrichResult && <span className="text-[10px] text-emerald-400">{enrichResult}</span>}
+              {crmResult && <span className="text-[10px] text-sky-400">{crmResult}</span>}
+            </div>
+          </div>
+
+          {/* ── Right: action rail ───────────────────────────────────
+              Horizontal on narrow (below lg), vertical rail on lg+.
+              The grid template pins this at 220px on lg+. */}
+          <div className="flex flex-row flex-wrap lg:flex-col gap-2 pt-3 mt-3 lg:mt-0 lg:pt-0 lg:pl-5 border-t lg:border-t-0 lg:border-l border-border/50">
+            <Button
+              variant={revealed ? "outline" : "default"}
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleEnrich}
+              disabled={enriching || revealed}
+            >
+              {enriching ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Mail className="size-3.5 mr-1.5" />}
+              {revealed ? (signal.person_email ? "Revealed" : "No email") : enriching ? "Revealing..." : "Reveal Contact · 2cr"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleOutreach}
+              disabled={outreachLoading}
+            >
+              {outreachLoading ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Send className="size-3.5 mr-1.5" />}
+              {outreachDraft ? "View Outreach" : "Generate Outreach"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleCrm}
+              disabled={crmLoading}
+            >
+              {crmLoading ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <ArrowUpRight className="size-3.5 mr-1.5" />}
+              Push to CRM
+            </Button>
+            {/* External links row — post + profile.  Sits at the bottom of
+                the rail on lg so it reads like a secondary-action footer. */}
+            <div className="flex items-center gap-1 lg:mt-auto lg:pt-2 lg:border-t lg:border-border/40 w-full">
+              {signal.post_url && (
+                <a
+                  href={signal.post_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1 h-7 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                  title="View post on LinkedIn"
+                >
+                  <ExternalLink className="size-3" />
+                  <span>Post</span>
+                </a>
+              )}
+              {revealed && signal.person_linkedin && (
+                <a
+                  href={signal.person_linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1 h-7 rounded-md text-[11px] text-blue-400 hover:text-blue-300 hover:bg-muted transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                  title="View LinkedIn profile"
+                >
+                  <Linkedin className="size-3" />
+                  <span>Profile</span>
+                </a>
+              )}
             </div>
           </div>
         </div>
-        <div>
-        {displaySnippet && (
-          <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3">
-            {displaySnippet}
-            {signal.post_url && (
-              <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary text-xs ml-2 hover:underline" onClick={(e) => e.stopPropagation()}>
-                Read more <ArrowUpRight className="size-3" />
-              </a>
-            )}
-          </p>
-        )}
 
-        {/* Post media — always render SOMETHING so every card has the
-            same visual weight.  Raw images when we've got them, a big
-            LinkedIn-branded thumbnail placeholder when we don't.  No
-            iframes (LinkedIn blocks guest embeds so those went blank). */}
-        {signal.post_images && signal.post_images.length > 0 ? (
-          <PostImageGrid images={signal.post_images} postUrl={signal.post_url} />
-        ) : (
-          <LinkedInPostPlaceholder
-            snippet={displaySnippet}
-            postUrl={signal.post_url}
-            personName={displayName}
-          />
+        {expanded && outreachDraft && (
+          <div className="mt-4 p-3 bg-muted/40 rounded-lg border border-border/60">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-muted-foreground">AI Outreach Draft</p>
+              <button className="text-xs text-primary hover:underline" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(outreachDraft || "") }}>
+                Copy
+              </button>
+            </div>
+            <p className="text-sm whitespace-pre-wrap">{outreachDraft}</p>
+          </div>
         )}
-
-        {signal.best_hook && (
-          <p className="text-xs text-muted-foreground italic border-l-2 border-primary/30 pl-3">
-            <strong>Hook:</strong> {signal.best_hook}
-          </p>
-        )}
-        </div>
       </CardContent>
     </Card>
   )
+}
+
+function IntentBadge({ score, tier }: { score: number; tier: string }) {
+  const colors: Record<string, string> = {
+    hot: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+    warm: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    cold: "bg-slate-500/15 text-slate-400 border-slate-500/30",
+  }
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border", colors[tier] || colors.cold)}>
+      {(tier === "hot" || tier === "warm") && <Flame className="size-3" />}
+      {tier.charAt(0).toUpperCase() + tier.slice(1)} · {score}
+    </span>
+  )
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function formatTimeAgo(epochMs: number): string {
+  const diff = Date.now() - epochMs
+  const sec = Math.floor(diff / 1000)
+  if (sec < 60) return "just now"
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d ago`
+  return new Date(epochMs).toLocaleDateString()
 }
