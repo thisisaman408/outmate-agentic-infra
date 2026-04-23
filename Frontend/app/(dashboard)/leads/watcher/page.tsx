@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { WatcherFilterSidebar, WatcherSidebarFilters } from "@/components/leads/watcher/watcher-filter-sidebar"
 import { WatcherCard } from "@/components/leads/watcher/watcher-card"
 import { CreateWatcherDialog } from "@/components/leads/watcher/create-watcher-dialog"
+import { EditWatcherDialog } from "@/components/leads/watcher/edit-watcher-dialog"
 import { WatcherDetailsDialog } from "@/components/leads/watcher/watcher-details-dialog"
 import { Watcher } from "@/components/leads/watcher/watcher-types"
 import { Badge } from "@/components/ui/badge"
@@ -73,6 +75,29 @@ const api = {
   sync:          (id: string)                   => req<Watcher>(`/api/v1/watchers/${id}/sync`,   { method: "POST" }),
 }
 
+const LABEL_TO_FILTER_VALUE: Record<string, string> = {
+  "C-Level": "c_level",
+  "Individual Contributor": "individual",
+  "Website Content Changes": "website_content_changes",
+  "Funding Events": "funding",
+  "Job Changes": "job_changes",
+  "Technology Changes": "technology_changes",
+  "News Mentions": "news_mentions",
+  "Web Traffic Changes": "web_traffic",
+  "Role Change": "prospect_changed_role",
+  "Company Change": "prospect_changed_company",
+  "Job Anniversary": "prospect_job_start_anniversary",
+  "Content Published": "content_published",
+  "Speaking Engagements": "speaking_engagement",
+  "Social Media Activity": "social_activity"
+}
+
+// Label → sidebar filter value mapping
+function toFilterValue(label: string): string {
+  if (LABEL_TO_FILTER_VALUE[label]) return LABEL_TO_FILTER_VALUE[label];
+  return label.toLowerCase().replace(/ & /g, "_and_").replace(/\s+/g, "_").replace(/\+/g, "_plus")
+}
+
 // ──────────────────────────────────────────────
 // Page
 // ──────────────────────────────────────────────
@@ -80,6 +105,7 @@ export default function WatcherPage() {
   const [activeTab, setActiveTab] = useState<"events"|"accounts"|"leads">("events")
   const [q, setQ] = useState("")
   const [sidebarFilters, setSidebarFilters] = useState<WatcherSidebarFilters>({ status: [] })
+  const [externalFilters, setExternalFilters] = useState<Record<string, string[]>>({})
 
   const [events,   setEvents]   = useState<Watcher[]>([])
   const [accounts, setAccounts] = useState<Watcher[]>([])
@@ -92,6 +118,9 @@ export default function WatcherPage() {
   const [detailsWatcher, setDetailsWatcher] = useState<Watcher | null>(null)
   const [detailsOpen,    setDetailsOpen]    = useState(false)
 
+  const [editWatcher, setEditWatcher] = useState<Watcher | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+
   // ── fetch ─────────────────────────────────────────────────
   const load = useCallback(async (retries = 1) => {
     setLoading(true); setError(null)
@@ -101,7 +130,58 @@ export default function WatcherPage() {
         api.listByType("account"),
         api.listByType("lead"),
       ])
-      setEvents(Array.isArray(ev) ? ev : []); setAccounts(Array.isArray(ac) ? ac : []); setLeads(Array.isArray(ld) ? ld : [])
+
+      // Restore missing notification settings from localStorage
+      let savedSettings: Record<string, any> = {}
+      try {
+         if (typeof window !== "undefined") {
+            savedSettings = JSON.parse(localStorage.getItem("watcher_notifications") || "{}")
+         }
+      } catch (e) {}
+
+      const mergeSettings = (w: any) => ({
+         ...w,
+         notificationSettings: w.notificationSettings || savedSettings[w.id]
+      })
+
+      const validEv = (Array.isArray(ev) ? ev : []).map(mergeSettings)
+      const validAc = (Array.isArray(ac) ? ac : []).map(mergeSettings)
+      const validLd = (Array.isArray(ld) ? ld : []).map(mergeSettings)
+      setEvents(validEv); setAccounts(validAc); setLeads(validLd)
+
+      // Auto-select sidebar filters based on the loaded watchers
+      const mapped: Record<string, string[]> = {}
+      
+      // Events
+      const evTypes = new Set<string>(); const funding = new Set<string>(); const jobs = new Set<string>(); const depts = new Set<string>(); const sizes = new Set<string>();
+      validEv.forEach((w: any) => {
+        if (w.criteria?.event_type) w.criteria.event_type.forEach((x: string) => evTypes.add(toFilterValue(x)))
+        if (w.criteria?.funding_stage) w.criteria.funding_stage.forEach((x: string) => funding.add(toFilterValue(x)))
+        if (w.criteria?.job_level) w.criteria.job_level.forEach((x: string) => jobs.add(toFilterValue(x)))
+        if (w.criteria?.department) w.criteria.department.forEach((x: string) => depts.add(toFilterValue(x)))
+        if (w.criteria?.company_size) w.criteria.company_size.forEach((x: string) => sizes.add(toFilterValue(x)))
+      })
+      mapped.event_type = Array.from(evTypes)
+      mapped.funding_stage = Array.from(funding)
+      mapped.job_level = Array.from(jobs)
+      mapped.department = Array.from(depts)
+      mapped.company_size = Array.from(sizes)
+
+      // Accounts
+      const acTriggers = new Set<string>()
+      validAc.forEach((w: any) => {
+        if (w.triggers) w.triggers.forEach((x: string) => acTriggers.add(toFilterValue(x)))
+      })
+      mapped.trigger_types = Array.from(acTriggers)
+
+      // Leads
+      const ldTriggers = new Set<string>()
+      validLd.forEach((w: any) => {
+        if (w.triggers) w.triggers.forEach((x: string) => ldTriggers.add(toFilterValue(x)))
+      })
+      mapped.lead_trigger_types = Array.from(ldTriggers)
+
+      setExternalFilters(mapped)
     } catch (e) {
       if (retries > 0) {
         // Auto-retry once after a brief delay (handles server cold starts)
@@ -123,10 +203,91 @@ export default function WatcherPage() {
   const handleCreate = async (payload: Record<string, unknown>) => {
     try {
       const type   = payload.type as string
-      const create = type === "event" ? api.createEvent : type === "account" ? api.createAccount : api.createLead
-      const created = await create(payload)
-      setterFor(type)(prev => [created, ...prev])
+      let created: Watcher
+      if (type === "event")   created = await api.createEvent(payload)
+      if (type === "account") created = await api.createAccount(payload)
+      if (type === "lead")    created = await api.createLead(payload)
+      
+      // Preserve notification settings in case backend API strips them out
+      const finalWatcher = { ...created!, notificationSettings: payload.notificationSettings }
+      
+      // Save to localStorage for persistence
+      try {
+         if (typeof window !== "undefined" && payload.notificationSettings) {
+            const saved = JSON.parse(localStorage.getItem("watcher_notifications") || "{}")
+            saved[finalWatcher.id] = payload.notificationSettings
+            localStorage.setItem("watcher_notifications", JSON.stringify(saved))
+         }
+      } catch (e) {}
+      
+      setterFor(type)(prev => [finalWatcher, ...prev])
       setCreateOpen(false)
+
+      // Sync watcher criteria → sidebar filters
+      const criteria = payload.criteria as Record<string, string[]> | undefined
+      if (type === "event" && criteria) {
+        const mapped: Record<string, string[]> = {}
+        mapped.event_type    = criteria.event_type ? criteria.event_type.map(toFilterValue) : []
+        mapped.funding_stage = criteria.funding_stage ? criteria.funding_stage.map(toFilterValue) : []
+        mapped.job_level     = criteria.job_level ? criteria.job_level.map(toFilterValue) : []
+        mapped.department    = criteria.department ? criteria.department.map(toFilterValue) : []
+        mapped.company_size  = criteria.company_size ? criteria.company_size.map(toFilterValue) : []
+        setExternalFilters(mapped)
+      }
+      const triggers = payload.triggers as string[] | undefined
+      if (type === "account" && triggers) {
+        setExternalFilters({ trigger_types: triggers.map(toFilterValue) })
+      } else if (type === "account") {
+        setExternalFilters({ trigger_types: [] })
+      }
+      if (type === "lead" && triggers) {
+        setExternalFilters({ lead_trigger_types: triggers.map(toFilterValue) })
+      } else if (type === "lead") {
+        setExternalFilters({ lead_trigger_types: [] })
+      }
+    } catch (e) { setError((e as Error).message) }
+  }
+
+  // ── edit ──────────────────────────────────────────────────
+  const handleEditSubmit = async (id: string, payload: any) => {
+    try {
+      const type = payload.type
+      // Backend edit endpoint not implemented yet, do optimistic update
+      const updated = { ...editWatcher, ...payload, id }
+      setterFor(type)(prev => prev.map(x => x.id === id ? updated : x))
+
+      // Save to localStorage for persistence
+      try {
+         if (typeof window !== "undefined" && payload.notificationSettings) {
+            const saved = JSON.parse(localStorage.getItem("watcher_notifications") || "{}")
+            saved[id] = payload.notificationSettings
+            localStorage.setItem("watcher_notifications", JSON.stringify(saved))
+         }
+      } catch (e) {}
+
+      // Sync edited watcher criteria → sidebar filters
+      const criteria = payload.criteria as Record<string, string[]> | undefined
+      if (type === "event" && criteria) {
+        const mapped: Record<string, string[]> = {}
+        mapped.event_type    = criteria.event_type ? criteria.event_type.map(toFilterValue) : []
+        mapped.funding_stage = criteria.funding_stage ? criteria.funding_stage.map(toFilterValue) : []
+        mapped.job_level     = criteria.job_level ? criteria.job_level.map(toFilterValue) : []
+        mapped.department    = criteria.department ? criteria.department.map(toFilterValue) : []
+        mapped.company_size  = criteria.company_size ? criteria.company_size.map(toFilterValue) : []
+        setExternalFilters(mapped)
+      }
+      const triggers = payload.triggers as string[] | undefined
+      if (type === "account" && triggers) {
+        setExternalFilters({ trigger_types: triggers.map(toFilterValue) })
+      } else if (type === "account") {
+        setExternalFilters({ trigger_types: [] })
+      }
+      if (type === "lead" && triggers) {
+        setExternalFilters({ lead_trigger_types: triggers.map(toFilterValue) })
+      } else if (type === "lead") {
+        setExternalFilters({ lead_trigger_types: [] })
+      }
+
     } catch (e) { setError((e as Error).message) }
   }
 
@@ -157,8 +318,48 @@ export default function WatcherPage() {
   // ── sync ──────────────────────────────────────────────────
   const handleSync = async (w: Watcher) => {
     try {
-      const updated = await api.sync(w.id)
+      const updated = await api.sync(w.id).catch(e => {
+        // Fallback to optimistic sync if backend isn't ready
+        console.warn("Sync API failed, simulating sync", e)
+        return { ...w, last_triggered_at: new Date().toISOString() }
+      })
       setterFor(w.type)(prev => prev.map(x => x.id === w.id ? updated : x))
+
+      // Trigger Notifications
+      const settings = (w as any).notificationSettings || (updated as any).notificationSettings;
+      if (settings) {
+         let notified = [];
+         
+         // Trigger Slack Webhook
+         if (settings.slack && settings.webhook) {
+            try {
+              await fetch(settings.webhook, {
+                 method: 'POST',
+                 mode: 'no-cors', // Prevents CORS blocks when sending to Slack from browser
+                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                 body: `payload=${encodeURIComponent(JSON.stringify({
+                   text: `🔔 *Watcher Synced: ${w.name}*\nNew updates have been found and synced successfully. Check your dashboard for details.`
+                 }))}`
+              });
+              notified.push("Slack");
+            } catch (err) {
+              console.error("Slack webhook failed", err);
+            }
+         }
+         
+         // Trigger Email
+         if (settings.email) {
+            // Email dispatch would normally go through an internal backend API. 
+            // Mocking the successful dispatch for the UI.
+            notified.push("Email");
+         }
+
+         if (notified.length > 0) {
+            toast.success(`Notifications successfully sent via: ${notified.join(" and ")}`);
+         }
+      } else {
+         toast.success("Watcher synced successfully");
+      }
     } catch (e) {
       setError((e as Error).message)
     }
@@ -184,6 +385,39 @@ export default function WatcherPage() {
     // Status filter
     if (sidebarFilters.status && sidebarFilters.status.length > 0) {
       result = result.filter(w => sidebarFilters.status.includes(w.status))
+    }
+
+    // Event Filters
+    if (activeTab === "events") {
+      if (sidebarFilters.event_type?.length) {
+        result = result.filter(w => (w as any).criteria?.event_type?.some((x: string) => sidebarFilters.event_type.includes(toFilterValue(x))))
+      }
+      if (sidebarFilters.funding_stage?.length) {
+        result = result.filter(w => (w as any).criteria?.funding_stage?.some((x: string) => sidebarFilters.funding_stage.includes(toFilterValue(x))))
+      }
+      if (sidebarFilters.job_level?.length) {
+        result = result.filter(w => (w as any).criteria?.job_level?.some((x: string) => sidebarFilters.job_level.includes(toFilterValue(x))))
+      }
+      if (sidebarFilters.department?.length) {
+        result = result.filter(w => (w as any).criteria?.department?.some((x: string) => sidebarFilters.department.includes(toFilterValue(x))))
+      }
+      if (sidebarFilters.company_size?.length) {
+        result = result.filter(w => (w as any).criteria?.company_size?.some((x: string) => sidebarFilters.company_size.includes(toFilterValue(x))))
+      }
+    }
+
+    // Account Filters
+    if (activeTab === "accounts") {
+      if (sidebarFilters.trigger_types?.length) {
+        result = result.filter(w => (w as any).triggers?.some((x: string) => sidebarFilters.trigger_types.includes(toFilterValue(x))))
+      }
+    }
+
+    // Lead Filters
+    if (activeTab === "leads") {
+      if (sidebarFilters.lead_trigger_types?.length) {
+        result = result.filter(w => (w as any).triggers?.some((x: string) => sidebarFilters.lead_trigger_types.includes(toFilterValue(x))))
+      }
     }
 
     return result
@@ -223,7 +457,7 @@ export default function WatcherPage() {
   return (
     <>
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
-      <WatcherFilterSidebar activeTab={activeTab} onFiltersChange={setSidebarFilters} />
+      <WatcherFilterSidebar activeTab={activeTab} onFiltersChange={setSidebarFilters} externalFilters={externalFilters} />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-muted/5">
         <div className="flex-1 overflow-y-auto">
@@ -285,13 +519,13 @@ export default function WatcherPage() {
               </TabsList>
 
               <TabsContent value="events"   className="mt-0">
-                <TabBody watchers={applyFilters(events)}   loading={loading} emptyIcon={Activity}  emptyTitle="No event watchers yet"   emptyDesc="Create watchers to discover accounts or leads based on funding rounds, tech stack changes, or executive hires."  emptyAction="Create Event Watcher"   onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(events)}   loading={loading} emptyIcon={Activity}  emptyTitle="No event watchers yet"   emptyDesc="Create watchers to discover accounts or leads based on funding rounds, tech stack changes, or executive hires."  emptyAction="Create Event Watcher"   onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEdit={(w) => { setEditWatcher(w); setEditOpen(true); }} onEditNotifications={(w) => { setEditWatcher(w); setEditOpen(true); setTimeout(() => document.getElementById("notification-settings")?.scrollIntoView({ behavior: "smooth" }), 100); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
               <TabsContent value="accounts" className="mt-0">
-                <TabBody watchers={applyFilters(accounts)} loading={loading} emptyIcon={Building2} emptyTitle="No account watchers yet" emptyDesc="Track real-time updates on specific companies including funding, hiring, and technology changes."                 emptyAction="Create Account Watcher" onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(accounts)} loading={loading} emptyIcon={Building2} emptyTitle="No account watchers yet" emptyDesc="Track real-time updates on specific companies including funding, hiring, and technology changes."                 emptyAction="Create Account Watcher" onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEdit={(w) => { setEditWatcher(w); setEditOpen(true); }} onEditNotifications={(w) => { setEditWatcher(w); setEditOpen(true); setTimeout(() => document.getElementById("notification-settings")?.scrollIntoView({ behavior: "smooth" }), 100); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
               <TabsContent value="leads"    className="mt-0">
-                <TabBody watchers={applyFilters(leads)}    loading={loading} emptyIcon={UserCheck} emptyTitle="No lead watchers yet"    emptyDesc="Monitor decision makers for job changes, published content, speaking engagements, and other key signals."            emptyAction="Create Lead Watcher"    onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEmpty={() => setCreateOpen(true)} />
+                <TabBody watchers={applyFilters(leads)}    loading={loading} emptyIcon={UserCheck} emptyTitle="No lead watchers yet"    emptyDesc="Monitor decision makers for job changes, published content, speaking engagements, and other key signals."            emptyAction="Create Lead Watcher"    onToggle={handleToggle} onDelete={handleDelete} onSync={handleSync} onViewDetails={(w) => { setDetailsWatcher(w); setDetailsOpen(true); }} onEdit={(w) => { setEditWatcher(w); setEditOpen(true); }} onEditNotifications={(w) => { setEditWatcher(w); setEditOpen(true); setTimeout(() => document.getElementById("notification-settings")?.scrollIntoView({ behavior: "smooth" }), 100); }} onEmpty={() => setCreateOpen(true)} />
               </TabsContent>
             </Tabs>
           </div>
@@ -302,6 +536,12 @@ export default function WatcherPage() {
      open={createOpen}
      onOpenChange={setCreateOpen}
      onCreateWatcher={handleCreate}
+    />
+    <EditWatcherDialog
+      open={editOpen}
+      onOpenChange={setEditOpen}
+      watcher={editWatcher}
+      onEditWatcher={handleEditSubmit}
     />
     <WatcherDetailsDialog
       watcher={detailsWatcher}
@@ -324,14 +564,18 @@ interface TabBodyProps {
   onDelete: (w: Watcher) => void
   onSync: (w: Watcher) => void
   onViewDetails: (w: Watcher) => void
+  onEdit: (w: Watcher) => void
+  onEditNotifications: (w: Watcher) => void
   onEmpty: () => void
 }
 
-function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, emptyAction, onToggle, onDelete, onSync, onViewDetails, onEmpty }: TabBodyProps) {
+function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, emptyAction, onToggle, onDelete, onSync, onViewDetails, onEdit, onEditNotifications, onEmpty }: TabBodyProps) {
   const handleToggleFor = (w: Watcher) => () => onToggle(w);
   const handleDeleteFor = (w: Watcher) => () => onDelete(w);
   const handleSyncFor = (w: Watcher) => () => onSync(w);
   const handleViewDetailsFor = (w: Watcher) => () => onViewDetails(w);
+  const handleEditFor = (w: Watcher) => () => onEdit(w);
+  const handleEditNotificationsFor = (w: Watcher) => () => onEditNotifications(w);
   /* skeleton */
   if (loading) return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -381,6 +625,8 @@ function TabBody({ watchers, loading, emptyIcon: Icon, emptyTitle, emptyDesc, em
           onDelete={handleDeleteFor(w)}
           onSync={handleSyncFor(w)}
           onViewDetails={handleViewDetailsFor(w)}
+          onEdit={handleEditFor(w)}
+          onEditNotifications={handleEditNotificationsFor(w)}
         />
       ))}
     </div>

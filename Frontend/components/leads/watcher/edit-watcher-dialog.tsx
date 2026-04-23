@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
     Dialog,
     DialogContent,
@@ -23,20 +23,22 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import { Activity, Building2, UserCheck, Plus, X } from "lucide-react"
+import { Activity, Building2, UserCheck, Save, X } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 
-interface CreateWatcherDialogProps {
+interface EditWatcherDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
-    onCreateWatcher: (watcher: any) => void
+    onEditWatcher: (id: string, watcher: any) => void
+    watcher: any | null
 }
 
-export function CreateWatcherDialog({
+export function EditWatcherDialog({
     open,
     onOpenChange,
-    onCreateWatcher
-}: CreateWatcherDialogProps) {
+    onEditWatcher,
+    watcher
+}: EditWatcherDialogProps) {
     const [watcherType, setWatcherType] = useState<"event" | "account" | "lead">("event")
     const [formData, setFormData] = useState({
         name: "",
@@ -63,19 +65,45 @@ export function CreateWatcherDialog({
         webhookUrl: ""
     })
 
+    useEffect(() => {
+        if (watcher && open) {
+            setWatcherType(watcher.type as "event" | "account" | "lead")
+            setFormData({
+                name: watcher.name || "",
+                description: watcher.description || "",
+                eventTypes: watcher.criteria?.event_type || [],
+                fundingStages: watcher.criteria?.funding_stage || [],
+                jobLevels: watcher.criteria?.job_level || [],
+                departments: watcher.criteria?.department || [],
+                companySize: watcher.criteria?.company_size || [],
+                accountName: watcher.accountName || "",
+                accountDomain: watcher.accountDomain || "",
+                accountTriggers: watcher.triggers || [],
+                leadName: watcher.leadName || "",
+                leadTitle: watcher.leadTitle || "",
+                leadCompany: watcher.leadCompany || "",
+                leadEmail: watcher.leadEmail || "",
+                leadTriggers: watcher.triggers || [],
+                emailNotifications: watcher.notificationSettings?.email ?? true,
+                slackNotifications: watcher.notificationSettings?.slack ?? false,
+                webhookUrl: watcher.notificationSettings?.webhook || ""
+            })
+        }
+    }, [watcher, open])
+
     const handleSubmit = () => {
-        // Validate event watchers have at least one event type
+        if (!watcher) return;
+        
         if (watcherType === "event" && (!formData.eventTypes || formData.eventTypes.length === 0)) {
             alert("Please select at least one event type for the event watcher");
             return
         }
 
-        // Build watcher object based on type
-        let watcher: any = {
+        let updatedWatcher: any = {
+            ...watcher,
             name: formData.name,
             description: formData.description,
             type: watcherType,
-            status: "active",
             notificationSettings: {
                 email: formData.emailNotifications,
                 slack: formData.slackNotifications,
@@ -84,7 +112,7 @@ export function CreateWatcherDialog({
         }
 
         if (watcherType === "event") {
-            watcher.criteria = {
+            updatedWatcher.criteria = {
                 event_type: formData.eventTypes,
                 funding_stage: formData.fundingStages,
                 job_level: formData.jobLevels,
@@ -92,43 +120,19 @@ export function CreateWatcherDialog({
                 company_size: formData.companySize
             }
         } else if (watcherType === "account") {
-            watcher.accountName = formData.accountName
-            watcher.accountDomain = formData.accountDomain
-            watcher.triggers = formData.accountTriggers
+            updatedWatcher.accountName = formData.accountName
+            updatedWatcher.accountDomain = formData.accountDomain
+            updatedWatcher.triggers = formData.accountTriggers
         } else {
-            watcher.leadName = formData.leadName
-            watcher.leadTitle = formData.leadTitle
-            watcher.leadCompany = formData.leadCompany
-            watcher.leadEmail = formData.leadEmail
-            watcher.triggers = formData.leadTriggers
+            updatedWatcher.leadName = formData.leadName
+            updatedWatcher.leadTitle = formData.leadTitle
+            updatedWatcher.leadCompany = formData.leadCompany
+            updatedWatcher.leadEmail = formData.leadEmail
+            updatedWatcher.triggers = formData.leadTriggers
         }
 
-        onCreateWatcher(watcher)
-        resetForm()
+        onEditWatcher(watcher.id, updatedWatcher)
         onOpenChange(false)
-    }
-
-    const resetForm = () => {
-        setFormData({
-            name: "",
-            description: "",
-            eventTypes: [],
-            fundingStages: [],
-            jobLevels: [],
-            departments: [],
-            companySize: [],
-            accountName: "",
-            accountDomain: "",
-            accountTriggers: [],
-            leadName: "",
-            leadTitle: "",
-            leadCompany: "",
-            leadEmail: "",
-            leadTriggers: [],
-            emailNotifications: true,
-            slackNotifications: false,
-            webhookUrl: ""
-        })
     }
 
     const addItem = (field: keyof typeof formData, value: string) => {
@@ -149,18 +153,20 @@ export function CreateWatcherDialog({
         })
     }
 
+    if (!watcher) return null;
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-2xl max-h-[90vh] p-0">
                 <DialogHeader className="p-6 pb-4">
-                    <DialogTitle className="text-2xl">Create New Watcher</DialogTitle>
+                    <DialogTitle className="text-2xl">Edit Watcher</DialogTitle>
                     <DialogDescription>
-                        Set up real-time alerts for events, accounts, or leads that matter to your business.
+                        Update settings and real-time alerts for this watcher.
                     </DialogDescription>
                 </DialogHeader>
 
                 <Tabs value={watcherType} onValueChange={(v) => setWatcherType(v as any)} className="flex-1">
-                    <div className="px-6">
+                    <div className="px-6 pointer-events-none opacity-80">
                         <TabsList className="grid w-full grid-cols-3">
                             <TabsTrigger value="event" className="gap-2">
                                 <Activity className="h-4 w-4" />
@@ -230,7 +236,7 @@ export function CreateWatcherDialog({
                         </TabsContent>
 
                         {/* Notification Settings */}
-                        <div className="space-y-4 mt-6 pt-6 border-t">
+                        <div className="space-y-4 mt-6 pt-6 border-t" id="notification-settings">
                             <h4 className="font-medium text-sm">Notification Settings</h4>
                             
                             <div className="flex items-center justify-between">
@@ -286,8 +292,8 @@ export function CreateWatcherDialog({
                             (watcherType === "event" && (!formData.eventTypes || formData.eventTypes.length === 0))
                         }
                     >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Create Watcher
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Changes
                     </Button>
                 </DialogFooter>
             </DialogContent>

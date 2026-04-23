@@ -37,9 +37,11 @@ interface WatcherCardProps {
     onDelete: () => void
     onSync: () => void
     onViewDetails: () => void
+    onEdit: () => void
+    onEditNotifications: () => void
 }
 
-export function WatcherCard({ watcher, onToggle, onDelete, onSync, onViewDetails }: WatcherCardProps) {
+export function WatcherCard({ watcher, onToggle, onDelete, onSync, onViewDetails, onEdit, onEditNotifications }: WatcherCardProps) {
     const formatDate = (date: Date) => {
         const now = new Date()
         const diff = now.getTime() - date.getTime()
@@ -113,7 +115,7 @@ export function WatcherCard({ watcher, onToggle, onDelete, onSync, onViewDetails
                                 <RefreshCw className="mr-2 h-4 w-4" />
                                 Sync Now
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={onEdit}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit Watcher
                             </DropdownMenuItem>
@@ -130,7 +132,7 @@ export function WatcherCard({ watcher, onToggle, onDelete, onSync, onViewDetails
                                     </>
                                 )}
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={onEditNotifications}>
                                 <Bell className="mr-2 h-4 w-4" />
                                 Notification Settings
                             </DropdownMenuItem>

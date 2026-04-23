@@ -17,6 +17,7 @@ export interface WatcherSidebarFilters {
 interface WatcherFilterSidebarProps {
   activeTab: string
   onFiltersChange?: (filters: WatcherSidebarFilters) => void
+  externalFilters?: Record<string, string[]>
 }
 
 // Event watcher filters
@@ -160,9 +161,16 @@ const LEAD_FILTERS = [
   }
 ]
 
-export function WatcherFilterSidebar({ activeTab, onFiltersChange }: WatcherFilterSidebarProps) {
+export function WatcherFilterSidebar({ activeTab, onFiltersChange, externalFilters }: WatcherFilterSidebarProps) {
   const [filters, setFilters] = React.useState<Record<string, any>>({})
   const [watcherStatus, setWatcherStatus] = React.useState<string[]>([])
+
+  React.useEffect(() => {
+    if (!externalFilters || Object.keys(externalFilters).length === 0) return
+    setFilters(prev => ({ ...prev, ...externalFilters }))
+    onFiltersChange?.({ status: watcherStatus, ...filters, ...externalFilters })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalFilters])
 
   // Subscribe to agent-injected filters — select the raw value (not ??\u00a0{}) to avoid
   // creating a new object reference on every render which causes Zustand's getSnapshot
