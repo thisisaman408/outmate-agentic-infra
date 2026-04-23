@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from app.services.social_listening.sources import linkedin_crustdata
 from app.services.social_listening.sources import linkedin_apify
+from app.services.social_listening.sources import linkedin_post_detail
 from app.services.social_listening.sources import twitter_apify
 from app.services.social_listening.sources import job_changes_crustdata
 from app.services.social_listening.sources import brightdata_discover
@@ -230,7 +231,23 @@ async def _search_linkedin(
     # slip past the source-level date filters.  See _filter_by_freshness.
     all_results = _filter_by_freshness(all_results, time_frame)
 
-    return all_results[:max_results]
+    # Trim to the caller's quota BEFORE the post-detail enrichment pass so we
+    # don't waste an actor run on rows we're about to drop.
+    all_results = all_results[:max_results]
+
+    # ── Post-detail enrichment ─────────────────────────────────────────
+    # BrightData Discover returns URLs + snippets but rarely images, author
+    # DP, or the full headline — and Apify's search actor only surfaces
+    # those for posts it found itself (URL-collisions during merge).  Any
+    # BrightData-only row lands in the feed with the gradient fallback
+    # avatar + the generic "LinkedIn Post" placeholder tile.
+    #
+    # Fix: take every URL still missing media/headline and run Apify's
+    # post-detail actor on exactly those URLs.  That's the only way to
+    # render the real post thumbnail + author's DP on a BrightData row.
+    await _enrich_missing_post_details(all_results)
+
+    return all_results
 
 
 async def _search_twitter(
@@ -263,6 +280,121 @@ async def _search_job_changes(
         max_results=max_results,
         time_frame=time_frame,
     )
+
+
+_GENERIC_TITLES = {
+    "",
+    "founder",
+    "ceo",
+    "co-founder",
+    "cofounder",
+    "founder & ceo",
+    "founder and ceo",
+    "founder, ceo",
+    "ceo & founder",
+    "ceo and founder",
+    "owner",
+    "director",
+    "entrepreneur",
+    "self-employed",
+}
+
+
+def _needs_post_detail(result: Dict[str, Any]) -> bool:
+    """A row needs the post-detail pass when any of the things we render
+    on the card (post imagery, author DP, a real headline) is missing or
+    generic.  Cheap boolean check — called once per result."""
+    if not (result.get("post_url") or "").strip():
+        return False
+    if not result.get("post_images"):
+        return True
+    if not (result.get("profile_picture_url") or "").strip():
+        return True
+    title = (result.get("title") or "").strip().lower().rstrip(".,;|")
+    if title in _GENERIC_TITLES:
+        return True
+    # Very short headlines ("CEO", "PM", "VP") are almost always Apify's
+    # author-headline field truncated to the role keyword — worth retrying
+    # via the post-detail actor which usually returns the full headline.
+    if len(title) < 10:
+        return True
+    return False
+
+
+async def _enrich_missing_post_details(results: List[Dict[str, Any]]) -> None:
+    """In-place enrichment: fill missing images/DP/headline on any row that
+    has a post URL but came back from search without the full media payload.
+
+    Silent on failure — a timeout or actor error should never drop search
+    results.  Worst case we render the gradient+placeholder UI that was
+    already shipping before this pass existed.
+    """
+    if not results or not linkedin_post_detail.is_available():
+        return
+
+    urls_to_enrich = [
+        (r.get("post_url") or "").strip()
+        for r in results
+        if _needs_post_detail(r)
+    ]
+    urls_to_enrich = [u for u in urls_to_enrich if u]
+    if not urls_to_enrich:
+        return
+
+    try:
+        enrichment_map = await linkedin_post_detail.enrich_post_urls(urls_to_enrich)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-detail enrichment failed (non-fatal): %s", exc)
+        return
+    if not enrichment_map:
+        return
+
+    updated = 0
+    for row in results:
+        url = linkedin_post_detail._normalize_url(row.get("post_url") or "")
+        data = enrichment_map.get(url)
+        if not data:
+            continue
+
+        # Images: only write when the search pass didn't capture any — never
+        # clobber an existing list with a potentially-smaller one.
+        if data.get("post_images") and not row.get("post_images"):
+            row["post_images"] = data["post_images"]
+
+        # Author DP: same rule — only fill, never replace.
+        if data.get("profile_picture_url") and not row.get(
+            "profile_picture_url"
+        ):
+            row["profile_picture_url"] = data["profile_picture_url"]
+
+        # Headline: replace the existing value when the enriched one is
+        # meaningfully richer.  LinkedIn headlines like "Founder & CEO"
+        # (standalone) get upgraded to the full "Founder & CEO at Acme |
+        # Building X..." string.
+        existing_title = (row.get("title") or "").strip()
+        new_title = (data.get("title") or "").strip()
+        if new_title and (
+            not existing_title
+            or existing_title.lower().rstrip(".,;|") in _GENERIC_TITLES
+            or len(new_title) > len(existing_title) + 10
+        ):
+            row["title"] = new_title
+
+        # Author identity: fill only when missing.  We don't want a richer
+        # profile link overwriting a link the search pass already validated.
+        if not (row.get("name") or "").strip() and data.get("name"):
+            row["name"] = data["name"]
+        if not (row.get("linkedin") or "").strip() and data.get("linkedin"):
+            row["linkedin"] = data["linkedin"]
+
+        updated += 1
+
+    if updated:
+        logger.info(
+            "Post-detail enrichment filled %d/%d rows",
+            updated,
+            len(urls_to_enrich),
+        )
 
 
 def _merge_and_dedupe(

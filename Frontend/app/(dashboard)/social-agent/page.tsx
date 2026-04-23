@@ -169,7 +169,7 @@ export default function SocialListeningPage() {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <KPIRow stats={stats} />
         <FilterBar
           params={feedParams}
@@ -185,7 +185,7 @@ export default function SocialListeningPage() {
           isRunning={!!running}
         />
         <ScrollArea className="flex-1">
-          <div className="p-4 space-y-3">
+          <div className="p-4 space-y-3 max-w-5xl mx-auto w-full">
             {loading ? (
               <div className="flex items-center justify-center py-20 text-muted-foreground">
                 <Loader2 className="animate-spin mr-2 size-5" />
@@ -534,8 +534,10 @@ function LinkedInPostPlaceholder({
       }}
       className="group relative block rounded-lg overflow-hidden border border-border/50 hover:border-[#0A66C2]/60 hover:shadow-lg hover:shadow-[#0A66C2]/15 transition-all"
     >
-      {/* ─── Compact hero band (wide, ~4:1) ─── */}
-      <div className="relative aspect-[4/1] w-full bg-gradient-to-br from-[#0A66C2] via-[#0a5fb2] to-[#003a73] overflow-hidden">
+      {/* Fixed-height hero so it never balloons on wide cards.  h-40 gives
+           enough vertical space to read as a proper LinkedIn-style cover
+           without becoming a billboard. */}
+      <div className="relative h-40 w-full bg-gradient-to-br from-[#0A66C2] via-[#0a5fb2] to-[#003a73] overflow-hidden">
         {/* Decorative light + grid so the hero reads like a graphic cover */}
         <div className="absolute inset-0 opacity-25 mix-blend-overlay bg-[radial-gradient(circle_at_top_right,_white,_transparent_55%)]" />
         <div className="absolute inset-0 opacity-[0.10] bg-[linear-gradient(transparent_95%,white_95%),linear-gradient(90deg,transparent_95%,white_95%)] bg-[length:20px_20px]" />
@@ -859,153 +861,192 @@ function SignalCard({ signal, expanded, onToggle }: { signal: SocialSignal; expa
 
   return (
     <Card className={cn("border-border/60 transition-all cursor-pointer hover:border-primary/30", expanded && "border-primary/50 ring-1 ring-primary/20")} onClick={onToggle}>
-      <CardContent className="py-4 px-5 space-y-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-3">
-            {/* Avatar wrapper keeps the LinkedIn "in" corner badge aligned to
-                both real DP + gradient fallback variants. */}
-            <div className="relative shrink-0">
-              {signal.profile_picture_url ? (
-                /* Author DP — falls back to the gradient+initials tile on 404/broken URL.
-                   LinkedIn serves DPs from media.licdn.com which often hot-links fine
-                   from a browser but sometimes returns 403 without a referrer. */
-                <img
-                  src={signal.profile_picture_url}
-                  alt={displayName || "profile"}
-                  className="size-10 rounded-full object-cover ring-1 ring-border/40"
-                  onError={(e) => {
-                    const img = e.currentTarget
-                    img.style.display = "none"
-                    img.nextElementSibling?.classList.remove("hidden")
-                  }}
-                />
-              ) : null}
-              {/* Branded gradient avatar with initials.  Uses a per-name hash so
-                  two different people never share the same colour but the same
-                  person is always the same tile across refreshes.  A ring +
-                  LinkedIn glyph makes it read as a designed template, not a
-                  placeholder for missing data. */}
-              <div className={cn(
-                "size-10 rounded-full text-white flex items-center justify-center text-sm font-bold shadow-sm bg-gradient-to-br ring-1 ring-white/10",
-                gradientForName(displayName),
-                signal.profile_picture_url && "hidden",
-              )}>{initials}</div>
-              {/* Small LinkedIn "in" badge in the corner — shows on both real
-                  DPs and the gradient fallback so every signal card reads as
-                  a LinkedIn-sourced contact. */}
-              <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#0A66C2] flex items-center justify-center ring-2 ring-card shadow-sm">
-                <span className="text-white font-black text-[8px] leading-none">in</span>
-              </span>
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm">{displayName}</span>
-                {signal.person_linkedin && <Linkedin className="size-3.5 text-blue-400" />}
-                <Badge variant="outline" className={cn("text-[10px] font-medium px-1.5 py-0", activityColor)}>
-                  {signalName}
-                </Badge>
-                {signal.signal_strength && (
-                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
-                    signal.signal_strength === "High" ? "bg-red-500/15 text-red-400" :
-                    signal.signal_strength === "Medium" ? "bg-amber-500/15 text-amber-400" :
-                    "bg-slate-500/15 text-slate-400"
-                  )}>
-                    {signal.signal_strength}
-                  </span>
-                )}
-                {signal.intent_score != null && <IntentBadge score={signal.intent_score} tier={signal.intent_tier} />}
+      <CardContent className="py-4 px-5">
+        {/* Grid gives deterministic column widths — `minmax(0,1fr)` is
+            critical, it forces the content column to respect its bounds
+            instead of expanding to fit a wide snippet (which was pushing
+            the action rail off-screen on ultra-wide monitors). */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px] gap-5">
+          {/* ── Left: content column ─────────────────────────────── */}
+          <div className="min-w-0 space-y-3">
+            <div className="flex items-start gap-3">
+              {/* Avatar wrapper keeps the LinkedIn "in" corner badge aligned to
+                  both real DP + gradient fallback variants. */}
+              <div className="relative shrink-0">
+                {signal.profile_picture_url ? (
+                  <img
+                    src={signal.profile_picture_url}
+                    alt={displayName || "profile"}
+                    className="size-10 rounded-full object-cover ring-1 ring-border/40"
+                    onError={(e) => {
+                      const img = e.currentTarget
+                      img.style.display = "none"
+                      img.nextElementSibling?.classList.remove("hidden")
+                    }}
+                  />
+                ) : null}
+                <div className={cn(
+                  "size-10 rounded-full text-white flex items-center justify-center text-sm font-bold shadow-sm bg-gradient-to-br ring-1 ring-white/10",
+                  gradientForName(displayName),
+                  signal.profile_picture_url && "hidden",
+                )}>{initials}</div>
+                <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-[#0A66C2] flex items-center justify-center ring-2 ring-card shadow-sm">
+                  <span className="text-white font-black text-[8px] leading-none">in</span>
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {signal.person_title}{signal.person_title && displayCompany && " · "}
-                {displayCompany && (
-                  <span className="font-medium text-foreground/80">{displayCompany}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm">{displayName}</span>
+                  {signal.person_linkedin && <Linkedin className="size-3.5 text-blue-400" />}
+                  <Badge variant="outline" className={cn("text-[10px] font-medium px-1.5 py-0", activityColor)}>
+                    {signalName}
+                  </Badge>
+                  {signal.signal_strength && (
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                      signal.signal_strength === "High" ? "bg-red-500/15 text-red-400" :
+                      signal.signal_strength === "Medium" ? "bg-amber-500/15 text-amber-400" :
+                      "bg-slate-500/15 text-slate-400"
+                    )}>
+                      {signal.signal_strength}
+                    </span>
+                  )}
+                  {signal.intent_score != null && <IntentBadge score={signal.intent_score} tier={signal.intent_tier} />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {signal.person_title}{signal.person_title && displayCompany && " · "}
+                  {displayCompany && (
+                    <span className="font-medium text-foreground/80">{displayCompany}</span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground">{ago}</span>
+                  {signal.matched_search_names.map((name) => (
+                    <Badge key={name} variant="secondary" className="text-[10px] px-1.5 py-0">{name}</Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {displaySnippet && (
+              <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3 break-words">
+                {displaySnippet}
+                {signal.post_url && (
+                  <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary text-xs ml-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+                    Read more <ArrowUpRight className="size-3" />
+                  </a>
                 )}
               </p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-muted-foreground">{ago}</span>
-                {signal.matched_search_names.map((name) => (
-                  <Badge key={name} variant="secondary" className="text-[10px] px-1.5 py-0">{name}</Badge>
-                ))}
-              </div>
+            )}
+
+            {/* Media — capped at max-w-md so it stays a preview, never a
+                billboard.  LinkedInPostPlaceholder's inner hero is fixed
+                to h-20 so it doesn't balloon on wide cards. */}
+            <div className="max-w-md">
+              {signal.post_images && signal.post_images.length > 0 ? (
+                <PostImageGrid images={signal.post_images} postUrl={signal.post_url} />
+              ) : (
+                <LinkedInPostPlaceholder
+                  snippet={displaySnippet}
+                  postUrl={signal.post_url}
+                  personName={displayName}
+                />
+              )}
+            </div>
+
+            {signal.best_hook && (
+              <p className="text-xs text-muted-foreground italic border-l-2 border-primary/30 pl-3">
+                <strong>Hook:</strong> {signal.best_hook}
+              </p>
+            )}
+
+            {/* Email + status strip — stays with content because it's an
+                output of the reveal action, not an action itself. */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground min-h-[20px]">
+              {revealed && signal.person_email ? (
+                <span className="flex items-center gap-1 truncate">
+                  <Mail className="size-3 shrink-0" />
+                  <span className="truncate">{signal.person_email}</span>
+                  {!signal.person_email_verified && <span className="text-[10px] text-amber-400 shrink-0">(unverified)</span>}
+                </span>
+              ) : revealed ? (
+                <span className="text-muted-foreground/60">no email found</span>
+              ) : (
+                <span className="text-muted-foreground/70">Contact hidden — reveal to see email</span>
+              )}
+              {enrichResult && <span className="text-[10px] text-emerald-400">{enrichResult}</span>}
+              {crmResult && <span className="text-[10px] text-sky-400">{crmResult}</span>}
             </div>
           </div>
-        </div>
 
-        {displaySnippet && (
-          <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3">
-            {displaySnippet}
-            {signal.post_url && (
-              <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary text-xs ml-2 hover:underline" onClick={(e) => e.stopPropagation()}>
-                Read more <ArrowUpRight className="size-3" />
-              </a>
-            )}
-          </p>
-        )}
-
-        {/* Post media — always render SOMETHING so every card has the
-            same visual weight.  Raw images when we've got them, a big
-            LinkedIn-branded thumbnail placeholder when we don't.  No
-            iframes (LinkedIn blocks guest embeds so those went blank). */}
-        {signal.post_images && signal.post_images.length > 0 ? (
-          <PostImageGrid images={signal.post_images} postUrl={signal.post_url} />
-        ) : (
-          <LinkedInPostPlaceholder
-            snippet={displaySnippet}
-            postUrl={signal.post_url}
-            personName={displayName}
-          />
-        )}
-
-        {signal.best_hook && (
-          <p className="text-xs text-muted-foreground italic border-l-2 border-primary/30 pl-3">
-            <strong>Hook:</strong> {signal.best_hook}
-          </p>
-        )}
-
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {revealed && signal.person_email ? (
-              <span className="flex items-center gap-1">
-                <Mail className="size-3" />{signal.person_email}
-                {!signal.person_email_verified && <span className="text-[10px] text-amber-400">(unverified)</span>}
-              </span>
-            ) : revealed ? (
-              <span className="text-muted-foreground/60">no email found</span>
-            ) : (
-              <button
-                onClick={handleEnrich}
-                disabled={enriching}
-                className="flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
-              >
-                {enriching ? <Loader2 className="size-3 animate-spin" /> : <Mail className="size-3" />}
-                <span className="text-xs font-medium">{enriching ? "Revealing..." : "Reveal contact · 2cr"}</span>
-              </button>
-            )}
-            {enrichResult && <span className="text-[10px] text-emerald-400 ml-2">{enrichResult}</span>}
-            {crmResult && <span className="text-[10px] text-sky-400 ml-2">{crmResult}</span>}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" className="h-7 text-xs text-foreground hover:text-foreground" onClick={handleOutreach} disabled={outreachLoading}>
-              {outreachLoading ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Send className="size-3 mr-1" />}Outreach
+          {/* ── Right: action rail ───────────────────────────────────
+              Horizontal on narrow (below lg), vertical rail on lg+.
+              The grid template pins this at 220px on lg+. */}
+          <div className="flex flex-row flex-wrap lg:flex-col gap-2 pt-3 mt-3 lg:mt-0 lg:pt-0 lg:pl-5 border-t lg:border-t-0 lg:border-l border-border/50">
+            <Button
+              variant={revealed ? "outline" : "default"}
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleEnrich}
+              disabled={enriching || revealed}
+            >
+              {enriching ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Mail className="size-3.5 mr-1.5" />}
+              {revealed ? (signal.person_email ? "Revealed" : "No email") : enriching ? "Revealing..." : "Reveal Contact · 2cr"}
             </Button>
-            <Button variant="outline" size="sm" className="h-7 text-xs text-foreground hover:text-foreground" onClick={handleCrm} disabled={crmLoading}>
-              {crmLoading ? <Loader2 className="size-3 mr-1 animate-spin" /> : <ArrowUpRight className="size-3 mr-1" />}CRM
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleOutreach}
+              disabled={outreachLoading}
+            >
+              {outreachLoading ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Send className="size-3.5 mr-1.5" />}
+              {outreachDraft ? "View Outreach" : "Generate Outreach"}
             </Button>
-            {signal.post_url && (
-              <a href={signal.post_url} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-muted" onClick={(e) => e.stopPropagation()} title="View post">
-                <ExternalLink className="size-3.5 text-muted-foreground hover:text-foreground" />
-              </a>
-            )}
-            {revealed && signal.person_linkedin && (
-              <a href={signal.person_linkedin} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-muted" onClick={(e) => e.stopPropagation()} title="View LinkedIn profile">
-                <Linkedin className="size-3.5 text-blue-400 hover:text-blue-300" />
-              </a>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs flex-1 lg:flex-none justify-start"
+              onClick={handleCrm}
+              disabled={crmLoading}
+            >
+              {crmLoading ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <ArrowUpRight className="size-3.5 mr-1.5" />}
+              Push to CRM
+            </Button>
+            {/* External links row — post + profile.  Sits at the bottom of
+                the rail on lg so it reads like a secondary-action footer. */}
+            <div className="flex items-center gap-1 lg:mt-auto lg:pt-2 lg:border-t lg:border-border/40 w-full">
+              {signal.post_url && (
+                <a
+                  href={signal.post_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1 h-7 rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                  title="View post on LinkedIn"
+                >
+                  <ExternalLink className="size-3" />
+                  <span>Post</span>
+                </a>
+              )}
+              {revealed && signal.person_linkedin && (
+                <a
+                  href={signal.person_linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1 h-7 rounded-md text-[11px] text-blue-400 hover:text-blue-300 hover:bg-muted transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                  title="View LinkedIn profile"
+                >
+                  <Linkedin className="size-3" />
+                  <span>Profile</span>
+                </a>
+              )}
+            </div>
           </div>
         </div>
 
         {expanded && outreachDraft && (
-          <div className="mt-2 p-3 bg-muted/40 rounded-lg border border-border/60">
+          <div className="mt-4 p-3 bg-muted/40 rounded-lg border border-border/60">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-medium text-muted-foreground">AI Outreach Draft</p>
               <button className="text-xs text-primary hover:underline" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(outreachDraft || "") }}>

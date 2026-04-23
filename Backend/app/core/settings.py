@@ -255,6 +255,10 @@ class Settings(BaseSettings):
         "",
         description="Apify API token for LinkedIn/Twitter scrapers. Optional — enhances social listening when set.",
     )
+    APIFY_POST_DETAIL_ACTOR: str = Field(
+        "apimaestro~linkedin-post-detail",
+        description="Apify actor ID that enriches a LinkedIn post URL with author DP, full headline, and post images. Swap to any actor that accepts {urls: [...]} and returns post+author fields.",
+    )
     CONTEXTUAL_AI_API_KEY: Optional[str] = Field(
         None,
         description="Contextual AI API key (optional)"

@@ -48,6 +48,39 @@ ALL_SOCIAL_SIGNAL_TYPES = [
     SIGNAL_TYPE_JOB_CHANGE,
 ]
 
+# Role-only headlines the search scrapers frequently return.  Any match
+# here is treated as "generic" — the post-detail enrichment pass usually
+# has the full LinkedIn headline and wins the upgrade.
+_GENERIC_TITLE_SET = {
+    "founder",
+    "ceo",
+    "co-founder",
+    "cofounder",
+    "founder & ceo",
+    "founder and ceo",
+    "founder, ceo",
+    "ceo & founder",
+    "ceo and founder",
+    "owner",
+    "director",
+    "entrepreneur",
+    "self-employed",
+}
+
+
+def _is_richer_title(new: str, current: str) -> bool:
+    """True when `new` should replace `current` on an existing signal row."""
+    new = (new or "").strip()
+    if not new:
+        return False
+    current = (current or "").strip()
+    if not current:
+        return True
+    current_key = current.lower().rstrip(".,;|")
+    if current_key in _GENERIC_TITLE_SET and new.lower() != current_key:
+        return True
+    return len(new) > len(current) + 10
+
 
 class SocialListeningService:
     """Run a social-listening watcher and ingest the results as signals.
@@ -270,8 +303,15 @@ class SocialListeningService:
             lead_company = (lead.get("company") or "").strip()
             if lead_company and not (signal.company_name or "").strip():
                 signal.company_name = lead_company
+            # Titles deserve special care.  An earlier scrape often only
+            # captured the short role keyword ("Founder & CEO", "CEO") —
+            # the post-detail enrichment pass in the dispatcher pulls the
+            # full LinkedIn headline, which is always the richer string.
+            # Upgrade when the new value is clearly better rather than
+            # only filling blank cells.
             lead_title = (lead.get("title") or "").strip()
-            if lead_title and not (signal.prospect_title or "").strip():
+            current_title = (signal.prospect_title or "").strip()
+            if lead_title and _is_richer_title(lead_title, current_title):
                 signal.prospect_title = lead_title
 
             # Refresh scrape-captured media/snippet when the new pass has
