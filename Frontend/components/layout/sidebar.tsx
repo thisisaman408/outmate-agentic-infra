@@ -63,11 +63,15 @@ const AGENTIC_INFRA_URL =
 
 const sections: NavSection[] = [
   {
-    label: "Intelligence",
+    label: "Website Visitors",
     items: [
       { name: "Website Visitors", href: "/visitors", icon: Eye, badge: "Live", badgeColor: "green" },
-      { name: "Intent Signals", href: "/signals", icon: Radar, badge: "AI", badgeColor: "indigo" },
-      { name: "Watchers", href: "/leads/watcher", icon: Bell, badge: "AI", badgeColor: "indigo" },
+    ],
+  },
+  {
+    label: "Copilot",
+    items: [
+      { name: "Copilot", href: "/copilot", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
     ],
   },
   {
@@ -83,16 +87,14 @@ const sections: NavSection[] = [
   {
     label: "Execution",
     items: [
-      { name: "Unified Copilot", href: "/copilot", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
-      { name: "Campaigns", href: "/campaigns", icon: GitBranch },
-      { name: "Social Agent", href: "/social-agent", icon: Share2, badge: "Hot", badgeColor: "indigo" },
-      { name: "Voice Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
-      { name: "Enrichment", href: "/enrichment", icon: Zap, badge: "AI", badgeColor: "indigo" },
-      { name: "Agent Studio", href: "/ai-agents", icon: Bot, badge: "Studio", badgeColor: "indigo" },
-      // Only render the canvas link when a URL is configured (dev only by default).
       ...(AGENTIC_INFRA_URL
         ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
         : []),
+      { name: "Social Agent", href: "/social-agent", icon: Share2, badge: "New", badgeColor: "green" },
+      { name: "Voice AI Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
+      { name: "Intent Signals", href: "/signals", icon: Radar },
+      { name: "Watchers", href: "/leads/watcher", icon: Bell, badge: "AI", badgeColor: "indigo" },
+      { name: "Campaigns", href: "/campaigns", icon: GitBranch },
     ],
   },
   {
