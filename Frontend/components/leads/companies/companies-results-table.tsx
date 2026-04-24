@@ -13,7 +13,7 @@ import {
     Sparkles,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
     Tooltip,
@@ -142,6 +142,8 @@ interface CompaniesResultsTableProps {
     enrichingRows?: Record<string, boolean>
     onWaterfallResult?: (companyId: string, field: 'email' | 'phone', result: Record<string, any>) => void
     waterfallAttempts?: Record<string, { email?: boolean; phone?: boolean }>
+    /** Called whenever the table selection changes — gives parent the selected CompanyData rows */
+    onSelectionChange?: (selected: CompanyData[]) => void
 }
 
 // Format utilities
@@ -316,6 +318,7 @@ export function CompaniesResultsTable({
     enrichingRows = {},
     onWaterfallResult,
     waterfallAttempts = {},
+    onSelectionChange,
 }: CompaniesResultsTableProps) {
     const router = useRouter()
     const { openPanel } = useCopilotPanelStore()
@@ -702,6 +705,11 @@ export function CompaniesResultsTable({
         defaultPageSize: 25,
         getRowId,
     })
+
+    // Notify parent whenever selection changes
+    useEffect(() => {
+        onSelectionChange?.(table.selectedData)
+    }, [table.selectedRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Export handler
     const handleExport = useCallback((rows: CompanyData[]) => {

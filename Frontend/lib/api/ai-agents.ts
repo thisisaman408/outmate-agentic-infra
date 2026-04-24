@@ -101,14 +101,21 @@ export const aiAgentsApi = {
     return response.json();
   },
 
-  // Research Agent
+  // Research Agent (can take 30-90s depending on depth)
   researchCompany: async (companyName: string, depth: "quick" | "standard" | "deep"): Promise<ResearchResult> => {
     const response = await fetch(`${API_BASE_URL}/api/v1/ai-agents/research`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ companyName, depth }),
     });
-    if (!response.ok) throw new Error('Failed to research company');
+    if (!response.ok) {
+      let detail = `Research failed (${response.status})`
+      try {
+        const payload = await response.json()
+        detail = payload.detail || payload.error || detail
+      } catch { /* ignore */ }
+      throw new Error(detail)
+    }
     return response.json();
   },
 

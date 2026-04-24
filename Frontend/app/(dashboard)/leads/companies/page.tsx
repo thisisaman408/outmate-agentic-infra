@@ -1,12 +1,14 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useRouter } from "next/navigation"
 import {
   Search,
   Command,
   Bot,
   Zap,
   Bookmark,
+  Target,
   Star,
   Play,
   ChevronDown,
@@ -38,6 +40,17 @@ import { toast } from "sonner"
 import { CompaniesResultsTable } from "@/components/leads/companies/companies-results-table"
 import type { CompanyData } from "@/components/leads/companies/companies-results-table"
 import { enrichCompany } from "@/lib/services/betterContactService"
+import { savedSearchesApi } from "@/lib/api/saved-searches"
+import { aiAgentsApi, type ResearchResult, type PredictiveScore } from "@/lib/api/ai-agents"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -177,16 +190,33 @@ export default function CompaniesPage() {
   const [chipInputs, setChipInputs] = useState<Record<string, string>>({})
   const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({})
   const [searchQuery, setSearchQuery] = useState("")
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("")
+  const [isSaveSearchOpen, setIsSaveSearchOpen] = useState(false)
+  const [savedSearchName, setSavedSearchName] = useState("")
+  const [isSavingSearch, setIsSavingSearch] = useState(false)
+  
+  // AI Actions State
+  const [isResearchOpen, setIsResearchOpen] = useState(false)
+  const [researching, setResearching] = useState(false)
+  const [researchResult, setResearchResult] = useState<ResearchResult | null>(null)
+  
+  const [isScoringOpen, setIsScoringOpen] = useState(false)
+  const [scoring, setScoring] = useState(false)
+  const [scores, setScores] = useState<PredictiveScore[]>([])
+  const router = useRouter()
 
   // Real Data State
   const [companies, setCompanies] = useState<CompanyData[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
 
-  // Enrichment State (zap icon = BetterContact)
   const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
   const [enrichingRows, setEnrichingRows] = useState<Record<string, boolean>>({})
   const [waterfallAttempts, setWaterfallAttempts] = useState<Record<string, { email?: boolean; phone?: boolean }>>({})
+
+  // Selection state — driven by the table's onSelectionChange callback
+  const [selectedCompanies, setSelectedCompanies] = useState<CompanyData[]>([])
+  const selectedCount = selectedCompanies.length
 
   useEffect(() => {
     setMounted(true)
@@ -384,8 +414,107 @@ export default function CompaniesPage() {
     toast.success(`Exported ${filteredCompanies.length} companies to CSV`)
   }
 
-  const selectedCount = Object.values(selectedRows).filter(Boolean).length
   const activeFilterCount = Object.values(filterChips).filter((v) => v.length > 0).length
+
+  const handleSaveSearch = async () => {
+    if (!savedSearchName.trim()) {
+      toast.error("Please enter a name for your search")
+      return
+    }
+
+    setIsSavingSearch(true)
+    try {
+      const filters = buildFiltersFromChips(filterChips)
+      await savedSearchesApi.create({
+        name: savedSearchName,
+        search_type: "company",
+        filters,
+        nlp_query: globalSearchQuery || undefined
+      })
+      toast.success("Search saved successfully")
+      setIsSaveSearchOpen(false)
+      setSavedSearchName("")
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save search")
+    } finally {
+      setIsSavingSearch(false)
+    }
+  }
+
+  const handleResearch = async () => {
+    if (selectedCompanies.length === 0) {
+      toast.error("Please select at least one company to research")
+      return
+    }
+    const company = selectedCompanies[0]
+    setIsResearchOpen(true)
+    setResearching(true)
+    setResearchResult(null)
+    try {
+      const result = await aiAgentsApi.researchCompany(company.name, "standard")
+      setResearchResult(result)
+    } catch (error: any) {
+      toast.error(error.message || "Research failed")
+      setIsResearchOpen(false)
+    } finally {
+      setResearching(false)
+    }
+  }
+
+  const handleAutoScore = async () => {
+    if (selectedCompanies.length === 0) {
+      toast.error("Please select at least one company to score")
+      return
+    }
+    setIsScoringOpen(true)
+    setScoring(true)
+    setScores([])
+    try {
+      const results: PredictiveScore[] = []
+      for (const company of selectedCompanies.slice(0, 5)) {
+        const scoreResults = await aiAgentsApi.scoreLeads({ 
+          name: company.name, 
+          domain: company.domain,
+          industry: company.industry,
+          country: company.headquarters_country
+        })
+        results.push(...scoreResults)
+      }
+      setScores(results)
+      toast.success("Auto-scoring complete")
+    } catch (error: any) {
+      toast.error(error.message || "Scoring failed")
+    } finally {
+      setScoring(false)
+    }
+  }
+
+  const handleRunAgent = async () => {
+    if (selectedCompanies.length === 0) {
+      toast.error("Please select at least one company first")
+      return
+    }
+    const company = selectedCompanies[0]
+    setIsResearchOpen(true)
+    setResearching(true)
+    setResearchResult(null)
+    toast.info(`Running AI agent on ${selectedCompanies.length} compan${selectedCompanies.length > 1 ? 'ies' : 'y'}...`)
+    try {
+      const result = await aiAgentsApi.researchCompany(company.name, "deep")
+      setResearchResult(result)
+      toast.success("AI agent completed research")
+    } catch (error: any) {
+      toast.error(error.message || "Agent run failed")
+      setIsResearchOpen(false)
+    } finally {
+      setResearching(false)
+    }
+  }
+
+  const handleCreateWorkflow = () => {
+    const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id])
+    router.push(`/workflow-canvas?source=leads${selectedIds.length > 0 ? `&ids=${selectedIds.join(",")}` : ""}`)
+  }
 
   if (!mounted) return null
 
@@ -398,7 +527,7 @@ export default function CompaniesPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
             <Input
-              placeholder="Filter companies..."
+              placeholder="Search companies..."
               className="pl-9 h-9 bg-muted/40 border-transparent focus:bg-background transition-all text-xs font-medium rounded-lg"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -572,24 +701,91 @@ export default function CompaniesPage() {
           <div className="flex-1 flex items-center gap-3 px-4 py-2 rounded-xl bg-muted/50 border border-border/50 group focus-within:border-primary/50 transition-all">
             <Search className="w-4 h-4 text-muted-foreground/50 group-focus-within:text-primary transition-colors" />
             <input
-              placeholder="Search across companies..."
+              placeholder="Search across Outmate..."
               className="flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground/40"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={globalSearchQuery}
+              onChange={(e) => setGlobalSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && globalSearchQuery.trim()) {
+                  handleNlpSearch({ query: globalSearchQuery.trim() })
+                }
+              }}
             />
             <kbd className="hidden sm:inline-flex items-center gap-1 h-5 px-1.5 font-sans text-[10px] font-bold text-muted-foreground bg-card border border-border rounded opacity-100">
-               \u2318K
+               ⌘K
             </kbd>
           </div>
           <div className="flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all">
-              <Bot className="w-4 h-4" /> AI Research
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className={cn("h-9 px-3 gap-2 text-[11px] font-bold transition-all", selectedCount > 0 ? "hover:bg-primary/5 hover:text-primary" : "opacity-50 cursor-not-allowed")}
+              onClick={handleResearch}
+              disabled={selectedCount === 0}
+              title={selectedCount === 0 ? "Select companies first" : undefined}
+            >
+              <Bot className="w-4 h-4" />
+              Research with AI{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </Button>
-            <Button variant="ghost" size="sm" className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all">
-              <Zap className="w-4 h-4" /> Workflows
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all"
+              onClick={handleCreateWorkflow}
+            >
+              <Zap className="w-4 h-4" /> Create workflow
             </Button>
-            <Button className="h-10 px-5 gap-2 text-[11px] font-black bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-95">
-              <Play className="w-4 h-4 fill-current" /> Run Agent
+            <Dialog open={isSaveSearchOpen} onOpenChange={setIsSaveSearchOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all">
+                  <Bookmark className="w-4 h-4" /> Save search
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Save Search</DialogTitle>
+                  <DialogDescription>
+                    Give your search a name to easily access it later from the "Saved" tab.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <label htmlFor="name" className="text-sm font-medium">Name</label>
+                    <Input
+                      id="name"
+                      value={savedSearchName}
+                      onChange={(e) => setSavedSearchName(e.target.value)}
+                      placeholder="e.g. Series A Fintechs in NY"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsSaveSearchOpen(false)}>Cancel</Button>
+                  <Button onClick={handleSaveSearch} disabled={isSavingSearch}>
+                    {isSavingSearch ? "Saving..." : "Save Search"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className={cn("h-9 px-3 gap-2 text-[11px] font-bold transition-all", selectedCount > 0 ? "hover:bg-primary/5 hover:text-primary" : "opacity-50 cursor-not-allowed")}
+              onClick={handleAutoScore}
+              disabled={selectedCount === 0}
+              title={selectedCount === 0 ? "Select companies first" : undefined}
+            >
+              <Target className="w-4 h-4" />
+              Auto-Score{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </Button>
+            <Button 
+              className={cn("h-10 px-5 gap-2 text-[11px] font-black transition-all active:scale-95", selectedCount > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" : "bg-muted text-muted-foreground cursor-not-allowed")}
+              onClick={handleRunAgent}
+              disabled={selectedCount === 0}
+              title={selectedCount === 0 ? "Select companies to run agent" : undefined}
+            >
+              {researching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              {selectedCount > 0 ? `Run Agent (${selectedCount})` : "Run Agent"}
             </Button>
           </div>
         </div>
@@ -691,9 +887,100 @@ export default function CompaniesPage() {
               )}
               enrichingRows={enrichingRows}
               waterfallAttempts={waterfallAttempts}
+              onSelectionChange={setSelectedCompanies}
             />
           )}
         </div>
+
+        {/* Research Dialog */}
+        <Dialog open={isResearchOpen} onOpenChange={setIsResearchOpen}>
+          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bot className="w-5 h-5 text-primary" />
+                AI Research Report
+              </DialogTitle>
+            </DialogHeader>
+            {researching ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-4">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <p className="text-sm font-medium text-muted-foreground">Analyzing company data across the web...</p>
+              </div>
+            ) : researchResult ? (
+              <div className="space-y-6 py-4">
+                <div>
+                  <h3 className="text-lg font-bold mb-1">{researchResult.companyName}</h3>
+                  <p className="text-sm text-muted-foreground">{researchResult.summary}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-black uppercase tracking-widest text-primary">Insights</h4>
+                    <ul className="space-y-1">
+                      {researchResult.keyInsights.slice(0, 4).map((insight, i) => (
+                        <li key={i} className="text-xs font-medium list-disc ml-4">{insight}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-black uppercase tracking-widest text-primary">Opportunities</h4>
+                    <ul className="space-y-1">
+                      {researchResult.opportunities.slice(0, 4).map((opp, i) => (
+                        <li key={i} className="text-xs font-medium list-disc ml-4">{opp}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button onClick={() => setIsResearchOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Auto-Score Dialog */}
+        <Dialog open={isScoringOpen} onOpenChange={setIsScoringOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-primary" />
+                AI Propensity Scoring
+              </DialogTitle>
+            </DialogHeader>
+            {scoring ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-4">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <p className="text-sm font-medium text-muted-foreground">Calculating match scores for selected leads...</p>
+              </div>
+            ) : (
+              <div className="space-y-4 py-4">
+                {scores.map((score, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                    <div>
+                      <div className="text-sm font-bold">{score.companyName}</div>
+                      <div className="text-[10px] text-muted-foreground">{score.recommendation}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className={cn(
+                        "text-lg font-black",
+                        score.score > 70 ? "text-green-500" : score.score > 40 ? "text-amber-500" : "text-red-500"
+                      )}>
+                        {score.score}%
+                      </div>
+                      <div className="text-[9px] font-bold uppercase tracking-wider opacity-50">{score.prediction} fit</div>
+                    </div>
+                  </div>
+                ))}
+                {scores.length === 0 && !scoring && (
+                  <p className="text-center py-4 text-sm text-muted-foreground">No scores available.</p>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button onClick={() => setIsScoringOpen(false)}>Done</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

@@ -70,6 +70,7 @@ from app.api.routes import voice_agent
 from app.api.routes import voice_campaigns
 from app.api.routes import company_profile
 from app.api.routes import retell_public
+from app.api.routes import saved_searches
 
 # Import Celery tasks to register them (must be before app startup)
 from app.tasks import signal_tasks  # noqa: F401
@@ -395,6 +396,9 @@ logger.info("Company Profile router registered")
 app.include_router(retell_public.router)
 logger.info("Retell public router registered (/retell-webhook, /knowledge-search)")
 
+app.include_router(saved_searches.router, prefix="/api/v1/saved-searches", tags=["saved-searches"], dependencies=auth_dependencies)
+logger.info("Saved Searches router registered")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(SEPARATOR)
@@ -441,6 +445,27 @@ async def startup_event():
                     logger.warning(f"[WARNING] Could not add users.{col_name}: {e}")
 
         # Watchers table migrations
+        if not inspector.has_table("saved_searches"):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        CREATE TABLE IF NOT EXISTS saved_searches (
+                            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            name VARCHAR(255) NOT NULL,
+                            description TEXT,
+                            search_type VARCHAR(50) NOT NULL,
+                            filters JSONB NOT NULL,
+                            nlp_query TEXT,
+                            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_saved_searches_user_id ON saved_searches(user_id);
+                    """))
+                    logger.info("[SUCCESS] Created saved_searches table")
+            except Exception as e:
+                logger.warning(f"[WARNING] Could not create saved_searches table: {e}")
+
         if inspector.has_table("watchers"):
             watcher_columns = {col["name"] for col in inspector.get_columns("watchers")}
             watcher_migrations = [

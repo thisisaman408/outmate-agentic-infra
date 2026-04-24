@@ -24,7 +24,6 @@ import { cn } from "@/lib/utils"
 
 const navPills = [
   { label: "Home", href: "/dashboard" },
-  { label: "Agents", href: "/ai-agents" },
   { label: "Database", href: "/leads/companies" },
 ]
 
@@ -82,7 +81,13 @@ export function Header() {
           <Menu className="h-5 w-5" />
         </Button>
 
-        {/* Left: Nav Pills */}
+        {/* Left: Logo */}
+        <Link href="/visitors" className="flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-black">O</div>
+          <span className="text-sm font-bold text-foreground hidden sm:inline">Outmate</span>
+        </Link>
+
+        {/* Nav Pills */}
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
           {navPills.map((pill) => (
             <Link
@@ -100,23 +105,14 @@ export function Header() {
           ))}
         </div>
 
-        {/* Middle: Search (Optional, keeping it but making it more subtle) */}
-        <div className="hidden md:flex flex-1 max-w-sm ml-4">
-           <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
-            <Input
-              placeholder="Quick search..."
-              className="pl-9 h-8 bg-muted/30 border-transparent focus:bg-background transition-colors w-full text-xs"
-            />
-          </div>
-        </div>
+        <div className="flex-1" />
 
         {/* Right: Actions */}
-        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* Credits Pill */}
           {user && (
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary text-[10px] font-bold text-muted-foreground">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border text-[10px] font-bold text-muted-foreground">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
               {user.credits?.toLocaleString() || "22,400"} credits
             </div>
           )}
@@ -125,6 +121,11 @@ export function Header() {
 
           {/* Notifications */}
           <NotificationDropdown />
+
+          {/* Settings */}
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.push("/settings")}>
+            <Settings className="h-4 w-4 text-muted-foreground" />
+          </Button>
 
           {user ? (
             <DropdownMenu>

@@ -270,7 +270,7 @@ export function FilterSidebar({ onSearch, initialFilters, autoSearchOnMount = fa
                 <div className="p-4 border-b border-border/40">
                     <h2 className="font-semibold text-sm flex items-center gap-2 text-foreground/80">
                         <SlidersHorizontal className="h-4 w-4" />
-                        Filters
+                        Search
                     </h2>
                 </div>
 

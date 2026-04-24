@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useRef, useCallback, useEffect } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { 
   Sparkles, Send, Building2, Users, GitBranch, Mail, 
   Search, Bot, FileText, X, ArrowUpCircle, Database,
@@ -93,21 +93,25 @@ const copilotFeatures: CopilotFeature[] = [
 ]
 
 const suggestions = [
-  { icon: Eye, label: "Hot Visitors", desc: "Find high-intent accounts from 24h", color: "bg-emerald-500/10 text-emerald-500" },
-  { icon: Users, label: "Enrich Leads", desc: "Run waterfall lookup on target list", color: "bg-indigo-500/10 text-indigo-500" },
-  { icon: GitBranch, label: "Build Flow", desc: "Automate outbound for new signals", color: "bg-orange-500/10 text-orange-500" },
-  { icon: Mail, label: "Draft Outreach", desc: "Personalize sequence with AI", color: "bg-purple-500/10 text-purple-500" },
+  { icon: Eye, label: "Find hot website visitors", desc: "Analyze recent high-intent companies", color: "bg-emerald-500/10 text-emerald-500" },
+  { icon: Users, label: "Enrich leads", desc: "Run waterfall enrichment on contacts", color: "bg-indigo-500/10 text-indigo-500" },
+  { icon: GitBranch, label: "Build workflow", desc: "Create automated GTM sequences", color: "bg-orange-500/10 text-orange-500" },
+  { icon: Mail, label: "Run outreach", desc: "Launch personalized email campaigns", color: "bg-purple-500/10 text-purple-500" },
+  { icon: Database, label: "Query database", desc: "Search companies and contacts", color: "bg-sky-500/10 text-sky-500" },
+  { icon: BarChart3, label: "Analyze pipeline", desc: "Review conversion and performance", color: "bg-amber-500/10 text-amber-500" },
 ]
 
 /* ─── component ─── */
 export default function UnifiedCopilotPage() {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const initialQuerySent = useRef(false)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -178,6 +182,14 @@ export default function UnifiedCopilotPage() {
     }
   }, [input])
 
+  useEffect(() => {
+    const q = searchParams.get("q")
+    if (q && !initialQuerySent.current) {
+      initialQuerySent.current = true
+      sendMessage(q)
+    }
+  }, [searchParams, sendMessage])
+
   const hasMessages = messages.length > 0
 
   return (
@@ -192,7 +204,7 @@ export default function UnifiedCopilotPage() {
             <Sparkles className="w-4 h-4 text-primary" />
             <span className="text-xs font-black uppercase tracking-widest text-primary">Copilot</span>
           </div>
-          <h2 className="text-lg font-black tracking-tight text-foreground">AI Features</h2>
+          <h2 className="text-lg font-black tracking-tight text-foreground">AI-powered GTM assistant</h2>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-1">
           {copilotFeatures.map((feature) => {
@@ -253,7 +265,7 @@ export default function UnifiedCopilotPage() {
          <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-muted rounded-xl border border-border">
                <Command className="w-3 h-3 text-muted-foreground/40" />
-               <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Shift + Enter to send</span>
+               <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">AI Ready</span>
             </div>
             <button 
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -266,34 +278,58 @@ export default function UnifiedCopilotPage() {
 
       {/* Chat Container */}
       <div className="flex-1 flex flex-col relative overflow-hidden bg-muted/5">
-         
+
          {/* Message Feed */}
          <div className="flex-1 overflow-y-auto px-4 md:px-0 no-scrollbar">
             <div className="max-w-3xl mx-auto py-12 space-y-8">
-               
+
                {!hasMessages && (
-                  <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
                      <div className="text-center space-y-4">
                         <div className="w-20 h-20 rounded-[32px] bg-primary/10 flex items-center justify-center mx-auto shadow-2xl shadow-primary/20">
                            <Sparkles className="w-10 h-10 text-primary" />
                         </div>
-                        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase pt-4">How can I help you <span className="text-primary italic">scale</span>?</h2>
+                        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase pt-4">What would you like to <span className="text-primary italic">do</span> ?</h2>
                         <p className="text-[13px] font-medium text-muted-foreground/60 max-w-md mx-auto leading-relaxed">
-                           Autonomous research, waterfall enrichment, or workflow automation. Just ask and I'll execute.
+                           Query your database, analyze visitors, build workflows, or run outreach — all from one place.
                         </p>
                      </div>
 
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     {/* Input Bar (above suggestions) */}
+                     <div className="max-w-3xl mx-auto">
+                        <div className="flex flex-col bg-card border border-border rounded-xl p-4 shadow-sm transition-all focus-within:border-primary/30 focus-within:shadow-md">
+                           <textarea
+                              value={input}
+                              onChange={(e) => setInput(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
+                              placeholder="Ask anything... Find hot visitors, enrich leads, build workflows, run outreach"
+                              className="w-full h-20 bg-transparent border-none outline-none resize-none px-2 py-1 text-[14px] font-medium placeholder:text-muted-foreground/40 text-foreground"
+                           />
+                           <div className="flex items-center justify-between px-2 pt-2">
+                              <span className="text-[11px] font-medium text-muted-foreground/40">Powered by Outmate AI</span>
+                              <button
+                                 onClick={() => sendMessage()}
+                                 disabled={!input.trim()}
+                                 className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 transition-all hover:bg-primary/90"
+                              >
+                                 <ArrowUpCircle className="w-5 h-5" />
+                              </button>
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Suggestion Cards (below input) */}
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {suggestions.map((s, i) => (
-                           <button 
+                           <button
                               key={i}
                               onClick={() => sendMessage(s.label)}
-                              className="group p-6 bg-card border border-border rounded-[24px] text-left hover:border-primary/20 hover:shadow-xl hover:shadow-black/[0.02] transition-all"
+                              className="group p-5 bg-card border border-border rounded-xl text-left hover:border-primary/20 hover:shadow-lg transition-all"
                            >
-                              <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110", s.color)}>
-                                 <s.icon className="w-5 h-5" />
+                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-3 transition-transform group-hover:scale-110", s.color)}>
+                                 <s.icon className="w-4.5 h-4.5" />
                               </div>
-                              <p className="text-[13px] font-black uppercase tracking-tight text-foreground mb-1">{s.label}</p>
+                              <p className="text-[13px] font-bold text-foreground mb-1">{s.label}</p>
                               <p className="text-[11px] font-medium text-muted-foreground/60">{s.desc}</p>
                            </button>
                         ))}
@@ -303,12 +339,12 @@ export default function UnifiedCopilotPage() {
 
                {messages.map((msg, i) => (
                   <div key={i} className={cn("flex gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300", msg.role === "user" ? "flex-row-reverse" : "flex-row")}>
-                     <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-lg", 
+                     <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-lg",
                         msg.role === "assistant" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground border border-border")}>
                         {msg.role === "assistant" ? <Sparkles className="w-5 h-5" /> : <Users className="w-5 h-5" />}
                      </div>
                      <div className={cn("max-w-[85%] space-y-2", msg.role === "user" ? "text-right" : "text-left")}>
-                        <div className={cn("p-6 rounded-[24px] text-[14px] leading-relaxed font-medium shadow-sm", 
+                        <div className={cn("p-6 rounded-[24px] text-[14px] leading-relaxed font-medium shadow-sm",
                            msg.role === "assistant" ? "bg-card border border-border text-foreground" : "bg-primary text-primary-foreground")}>
                            {msg.content.split('\n').map((line, j) => (
                               <p key={j} className={cn(j > 0 && "mt-2")}>{line}</p>
@@ -339,36 +375,32 @@ export default function UnifiedCopilotPage() {
             </div>
          </div>
 
-         {/* Fixed Input Bar */}
-         <div className="p-8 bg-gradient-to-t from-background via-background to-transparent">
-            <div className="max-w-3xl mx-auto relative group">
-               <div className="absolute -inset-1 bg-gradient-to-r from-primary/20 to-indigo-500/20 rounded-[32px] blur opacity-0 group-focus-within:opacity-100 transition-opacity" />
-               <div className="relative flex flex-col bg-card border-2 border-border group-focus-within:border-primary/30 rounded-[32px] p-4 shadow-2xl transition-all">
-                  <textarea 
-                     value={input}
-                     onChange={(e) => setInput(e.target.value)}
-                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
-                     placeholder="Ask me to find visitors, enrich leads, or build a workflow..."
-                     className="w-full h-24 bg-transparent border-none outline-none resize-none px-4 py-2 text-[14px] font-medium placeholder:text-muted-foreground/30 text-foreground"
-                  />
-                  <div className="flex items-center justify-between px-4 pt-2 pb-1 border-t border-border/10">
-                     <div className="flex items-center gap-2">
-                        <button className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground"><Database className="w-4 h-4" /></button>
-                        <button className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground"><Zap className="w-4 h-4" /></button>
-                        <div className="h-4 w-px bg-border mx-1" />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40 italic">Agent Context: Dashboard V3</span>
+         {/* Bottom Input Bar (only when messages exist) */}
+         {hasMessages && (
+            <div className="p-8 bg-gradient-to-t from-background via-background to-transparent">
+               <div className="max-w-3xl mx-auto">
+                  <div className="flex flex-col bg-card border border-border rounded-xl p-4 shadow-sm transition-all focus-within:border-primary/30 focus-within:shadow-md">
+                     <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), sendMessage())}
+                        placeholder="Ask anything... Find hot visitors, enrich leads, build workflows, run outreach"
+                        className="w-full h-20 bg-transparent border-none outline-none resize-none px-2 py-1 text-[14px] font-medium placeholder:text-muted-foreground/40 text-foreground"
+                     />
+                     <div className="flex items-center justify-between px-2 pt-2">
+                        <span className="text-[11px] font-medium text-muted-foreground/40">Powered by Outmate AI</span>
+                        <button
+                           onClick={() => sendMessage()}
+                           disabled={!input.trim()}
+                           className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 transition-all hover:bg-primary/90"
+                        >
+                           <ArrowUpCircle className="w-5 h-5" />
+                        </button>
                      </div>
-                     <button 
-                        onClick={() => sendMessage()}
-                        disabled={!input.trim()}
-                        className="h-10 px-6 bg-primary text-primary-foreground rounded-2xl flex items-center gap-2 text-[11px] font-black uppercase tracking-widest shadow-lg shadow-primary/20 disabled:opacity-30 transition-all hover:scale-105 active:scale-95"
-                     >
-                        Execute <ArrowUpCircle className="w-4 h-4" />
-                     </button>
                   </div>
                </div>
             </div>
-         </div>
+         )}
 
       </div>
       </div>
