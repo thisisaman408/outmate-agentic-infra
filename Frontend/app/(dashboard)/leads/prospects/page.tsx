@@ -87,16 +87,16 @@ const unlockedFilters: FilterDef[] = [
       "RevOps Lead",
       "BDR Manager",
     ],
-    advancedOptions: [
-      { label: "Include similar titles", description: "Match related job titles automatically" },
-      { label: "Exclude past titles", description: "Don't match on previous positions" },
-    ],
+  },
+  {
+    label: "Company",
+    category: "Identity",
+    options: [],
   },
   {
     label: "Seniority level",
     category: "Identity",
     options: ["C-suite", "VP", "Director", "Senior IC", "Manager", "IC", "Founder"],
-    advancedOptions: [{ label: "Include one level up/down", description: "Broaden to adjacent seniority" }],
   },
   {
     label: "Function / department",
@@ -109,16 +109,9 @@ const unlockedFilters: FilterDef[] = [
     label: "Location",
     category: "Location",
     options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "India", "New York", "San Francisco", "London"],
-    advancedOptions: [{ label: "Include remote", description: "Include remote workers based in region" }],
   },
 
   /* ── Company ── */
-  {
-    label: "Company",
-    category: "Company",
-    options: [],
-    advancedOptions: [{ label: "Include subsidiaries", description: "Match parent and subsidiary companies" }],
-  },
   {
     label: "# Employees",
     category: "Company",
@@ -236,7 +229,7 @@ function UnlockedFilterPanel({
 
           {hasChips && (
             <div className="mb-3">
-              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Active</div>
+              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Include</div>
               <div className="flex flex-wrap gap-1.5">
                 {chips.map((c) => (
                   <span
@@ -314,6 +307,7 @@ export default function PeoplePage() {
   const [view, setView] = useState<"nlp" | "results">("nlp")
   const [nlpQuery, setNlpQuery] = useState("")
   const [activeTab, setActiveTab] = useState<"total" | "new" | "saved">("new")
+  const [filterSearch, setFilterSearch] = useState("")
   const [expandedFilters, setExpandedFilters] = useState<Record<string, boolean>>({
     "Current title": true,
     "Seniority level": true,
@@ -333,6 +327,8 @@ export default function PeoplePage() {
   // Real Data State
   const [prospects, setProspects] = useState<ProspectProfile[]>([])
   const [totalCount, setTotalCount] = useState(0)
+  const [newCount, setNewCount] = useState(0)
+  const [savedCount, setSavedCount] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [enrichedData, setEnrichedData] = useState<Record<string, any>>({})
   
@@ -354,12 +350,12 @@ export default function PeoplePage() {
   // Stubs for table compatibility
   const handleLoadMore = async () => {}
   const onEnrichReveal = async () => {}
-  const handleWaterfallResult = (linkedinUrl: string, field: 'email' | 'phone', result: any) => {
+  const handleWaterfallResult = (linkedinUrl: string, field: 'email' | 'phone', resultData: any) => {
     setEnrichedData(prev => ({
       ...prev,
       [linkedinUrl]: {
         ...prev[linkedinUrl],
-        [field]: result
+        [field]: resultData
       }
     }))
   }
@@ -382,28 +378,29 @@ export default function PeoplePage() {
       }
       
       // Convert prospects to contact format
-      const contacts = rows.map(prospect => ({
-        email: prospect.emails?.[0] || '',
-        firstname: prospect.first_name || '',
-        lastname: prospect.last_name || '',
-        phone: prospect.phones?.[0] || '',
-        company: prospect.current_employers?.[0]?.name || '',
-        jobtitle: prospect.current_employers?.[0]?.title || '',
-        linkedin: prospect.linkedin_profile_url || '',
+      const contacts = rows.map(currentProspect => ({
+        email: currentProspect.emails?.[0] || '',
+        firstname: currentProspect.first_name || '',
+        lastname: currentProspect.last_name || '',
+        phone: '', // No phone property available in ProspectProfile
+        company: currentProspect.current_employers?.[0]?.name || '',
+        jobtitle: currentProspect.current_employers?.[0]?.title || '',
+        linkedin: currentProspect.linkedin_profile_url || '',
       }))
       
       // Call the appropriate CRM API
-      let result
+      let hubspotResult, salesforceResult, zohoResult
       if (crmType === 'hubspot') {
-        result = await integrationsApi.hubspotAddContacts(contacts)
+        hubspotResult = await integrationsApi.hubspotAddContacts(contacts)
       } else if (crmType === 'salesforce') {
-        result = await integrationsApi.salesforceAddContacts(contacts)
+        salesforceResult = await integrationsApi.salesforceAddContacts(contacts)
       } else if (crmType === 'zoho_crm') {
-        result = await integrationsApi.zohoCrmAddContacts(contacts)
+        zohoResult = await integrationsApi.zohoCrmAddContacts(contacts)
       }
       
-      if (result.success) {
-        toast.success(`Added ${result.successful} of ${result.total} contacts to ${crmType.replace('_', ' ').toUpperCase()}`)
+      const apiResult = hubspotResult || salesforceResult || zohoResult
+      if (apiResult?.success) {
+        toast.success(`Added ${apiResult.successful} of ${apiResult.total} contacts to ${crmType.replace('_', ' ').toUpperCase()}`)
       } else {
         toast.error(`Failed to add contacts to CRM`)
       }
@@ -465,7 +462,7 @@ export default function PeoplePage() {
       return
     }
     
-    const prospect = prospects.find(p => p.id === selectedIds[0])
+    const prospect = prospects.find(p => p.person_id === parseInt(selectedIds[0]))
     if (!prospect || !prospect.current_employers?.[0]) {
         toast.error("Could not find company info for this prospect")
         return
@@ -476,8 +473,8 @@ export default function PeoplePage() {
     setResearchResult(null)
     
     try {
-      const result = await aiAgentsApi.researchCompany(prospect.current_employers[0].name, "standard")
-      setResearchResult(result)
+      const researchData = await aiAgentsApi.researchCompany(prospect.current_employers[0].name, "standard")
+      setResearchResult(researchData)
     } catch (error: any) {
       toast.error(error.message || "Research failed")
       setIsResearchOpen(false)
@@ -499,16 +496,16 @@ export default function PeoplePage() {
 
     try {
       const results: PredictiveScore[] = []
-      for (const id of selectedIds.slice(0, 5)) {
-        const prospect = prospects.find(p => p.id === id)
-        if (prospect) {
-          const scoreResults = await aiAgentsApi.scoreLeads({ 
-            name: prospect.current_employers?.[0]?.name || prospect.name, 
-            domain: prospect.current_employers?.[0]?.company_website_domain,
-            industry: prospect.current_employers?.[0]?.company_linkedin_industry,
-            country: prospect.location_details?.country
+      for (const prospectIdentifier of selectedIds.slice(0, 5)) {
+        const foundProspect = prospects.find(p => p.person_id === parseInt(prospectIdentifier))
+        if (foundProspect) {
+          const scoreData = await aiAgentsApi.scoreLeads({ 
+            name: foundProspect.current_employers?.[0]?.name || foundProspect.name, 
+            domain: foundProspect.current_employers?.[0]?.company_website_domain,
+            industry: foundProspect.current_employers?.[0]?.company_linkedin_industry,
+            country: foundProspect.location_details?.country
           })
-          results.push(...scoreResults)
+          results.push(...scoreData)
         }
       }
       setScores(results)
@@ -527,8 +524,8 @@ export default function PeoplePage() {
       return
     }
     // Run agent = deep research on the first selected prospect's company
-    const prospect = prospects.find(p => p.id === selectedIds[0])
-    const companyName = prospect?.current_employers?.[0]?.name || prospect?.name
+    const selectedProspect = prospects.find(p => p.person_id === parseInt(selectedIds[0]))
+    const companyName = selectedProspect?.current_employers?.[0]?.name || selectedProspect?.name
     if (!companyName) {
       toast.error("Could not determine company for selected prospect")
       return
@@ -540,8 +537,8 @@ export default function PeoplePage() {
     toast.info(`Running AI agent on ${selectedIds.length} prospect${selectedIds.length > 1 ? 's' : ''}...`)
 
     try {
-      const result = await aiAgentsApi.researchCompany(companyName, "deep")
-      setResearchResult(result)
+      const agentResult = await aiAgentsApi.researchCompany(companyName, "deep")
+      setResearchResult(agentResult)
       toast.success("AI agent completed research")
     } catch (error: any) {
       toast.error(error.message || "Agent run failed")
@@ -637,6 +634,11 @@ export default function PeoplePage() {
       })))
       setProspects(mappedProfiles)
       setTotalCount(res.total_count)
+      // Calculate new count (prospects with recent job changes)
+      const newProspects = mappedProfiles.filter(p => p.recently_changed_jobs).length
+      setNewCount(newProspects)
+      // TODO: Fetch actual saved searches count from API
+      setSavedCount(0) // Placeholder until saved searches API is implemented
       // Persist for profile page
       try { localStorage.setItem("prospect_search_results", JSON.stringify(res.profiles)) } catch {}
     } catch (err) {
@@ -651,92 +653,140 @@ export default function PeoplePage() {
   return (
     <div className="flex h-full overflow-hidden bg-background">
       {/* Filter Sidebar */}
-      <aside className="w-[260px] min-w-[260px] h-full flex flex-col bg-card border-r border-border shadow-sm">
-        <div className="p-4">
+      <aside className="w-[280px] min-w-[280px] h-full flex flex-col bg-card border-r border-border">
+        {/* Sidebar Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-primary" strokeWidth={2.5} />
+            <span className="text-[13px] font-black uppercase tracking-wider text-foreground">Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{activeFilterCount}</span>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              setFilterChips({})
+              setActiveSignals({ "Job change signal": false, "Promotion signal": false, "New hire signal": false })
+              setPendingChange(true)
+            }}
+            className="text-[10px] font-bold text-muted-foreground hover:text-destructive flex items-center gap-1 transition-colors"
+          >
+            <X className="w-3 h-3" />
+            Reset
+          </button>
+        </div>
+
+        {/* Quick Search */}
+        <div className="px-4 py-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2.5} />
             <Input
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
               placeholder="Search filters..."
-              className="pl-9 h-9 bg-muted/40 border-transparent focus:bg-background transition-all text-xs font-medium rounded-lg"
+              className="pl-9 h-8 bg-muted/30 border-border/50 focus:bg-background focus:border-primary/40 transition-all text-[11px] font-bold rounded-lg placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
 
-        <div className="flex border-b border-border px-2">
-          {([
-            ["total", "128K", "Total"],
-            ["new", "2,847", "New"],
-            ["saved", "12", "Saved"],
-          ] as const).map(([key, num, label]) => (
+        {/* Tabs */}
+        <div className="flex border-b border-border mx-4">
+          {[
+            ["total", totalCount.toLocaleString(), "Total"],
+            ["new", newCount.toLocaleString(), "New"],
+            ["saved", savedCount.toLocaleString(), "Saved"],
+          ].map(([key, num, label]) => (
             <button
               key={key}
               onClick={() => setActiveTab(key as any)}
               className={cn(
-                "flex-1 flex flex-col items-center py-3 relative transition-all",
-                activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex-1 flex flex-col items-center py-2.5 relative transition-all",
+                activeTab === key ? "text-foreground" : "text-muted-foreground/50 hover:text-foreground"
               )}
             >
-              <span className="text-[14px] font-bold tracking-tight">{num}</span>
-              <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5">{label}</span>
-              {activeTab === key && <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary rounded-full" />}
+              <span className="text-[15px] font-black tracking-tight">{num}</span>
+              <span className="text-[8px] font-bold uppercase tracking-[0.15em] mt-0.5 opacity-60">{label}</span>
+              {activeTab === key && <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-primary rounded-full" />}
             </button>
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar py-2">
+        {/* Scrollable Filter List */}
+        <div className="flex-1 overflow-y-auto no-scrollbar">
           {(() => {
-            const categories = [...new Set(unlockedFilters.map((f) => f.category))]
-            return categories.map((cat) => (
-              <div key={cat}>
-                <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-2">{cat}</div>
-                {unlockedFilters
-                  .filter((f) => f.category === cat)
-                  .map((f) => (
-                    <UnlockedFilterPanel
-                      key={f.label}
-                      filter={f}
-                      isExpanded={!!expandedFilters[f.label]}
-                      chips={filterChips[f.label] || []}
-                      onToggle={() => toggleFilter(f.label)}
-                      onAddChip={(val) => {
-                setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
-                setPendingChange(true)
-              }}
-                      onRemoveChip={(chip) => removeChip(f.label, chip)}
-                    />
-                  ))}
-              </div>
-            ))
+            const filteredUnlockedFilters = filterSearch.trim()
+              ? unlockedFilters.filter(f =>
+                  f.label.toLowerCase().includes(filterSearch.toLowerCase()) ||
+                  (f.options && f.options.some(opt => opt.toLowerCase().includes(filterSearch.toLowerCase())))
+                )
+              : unlockedFilters
+
+            const categoryConfig: Record<string, { icon: typeof UserCircle; label: string }> = {
+              "Identity": { icon: UserCircle, label: "IDENTITY" },
+              "Company": { icon: Building2, label: "COMPANY" },
+              "Location": { icon: MapPin, label: "LOCATION" },
+            }
+            const categories = [...new Set(filteredUnlockedFilters.map((f) => f.category))]
+            return categories.map((cat) => {
+              const config = categoryConfig[cat || ""] || { icon: Briefcase, label: (cat || "").toUpperCase() }
+              const CatIcon = config.icon
+              return (
+                <div key={cat}>
+                  <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+                    <CatIcon className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
+                    <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">{config.label}</span>
+                  </div>
+                  {filteredUnlockedFilters
+                    .filter((f) => f.category === cat)
+                    .map((f) => (
+                      <UnlockedFilterPanel
+                        key={f.label}
+                        filter={f}
+                        isExpanded={!!expandedFilters[f.label]}
+                        chips={filterChips[f.label] || []}
+                        onToggle={() => toggleFilter(f.label)}
+                        onAddChip={(val) => {
+                          setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
+                          setPendingChange(true)
+                        }}
+                        onRemoveChip={(chip) => removeChip(f.label, chip)}
+                      />
+                    ))}
+                </div>
+              )
+            })
           })()}
 
-          <div className="mx-4 my-4 border-t border-border/50" />
-
+          {/* Signals Section */}
+          <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+            <Zap className="w-3.5 h-3.5 text-orange-500/40" strokeWidth={2} />
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-500/50">Signals</span>
+          </div>
           {signalFilters.filter(f => f.label !== "Signals").map((f) => {
             const isActive = activeSignals[f.label]
             return (
-              <div key={f.label} className="transition-all">
+              <div key={f.label}>
                 <button
                   onClick={() => {
                     setActiveSignals(p => ({ ...p, [f.label]: !p[f.label] }))
                     setPendingChange(true)
-                    // removed auto re-search; user should click Apply
                   }}
                   className={cn(
-                    "w-full flex items-center gap-3 px-4 h-11 text-left transition-all",
-                    isActive ? "bg-orange-500/10" : "opacity-70 hover:opacity-100"
+                    "w-full flex items-center gap-3 px-4 h-10 text-left transition-all",
+                    isActive ? "bg-orange-500/8" : "hover:bg-muted/30"
                   )}
                 >
-                  <Sparkles className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-orange-500" : "text-orange-500/30")} />
-                  <span className={cn("flex-1 text-[12px] font-bold tracking-tight", isActive ? "text-orange-500" : "text-orange-500/70")}>
-                    {f.label}
+                  <Sparkles className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-orange-500" : "text-muted-foreground/30")} strokeWidth={2} />
+                  <span className={cn("flex-1 text-[11px] font-bold tracking-tight", isActive ? "text-orange-600" : "text-muted-foreground")}>
+                    {f.label.replace(" signal", "")}
                   </span>
                   <div className={cn(
-                    "w-8 h-4 rounded-full relative transition-all shrink-0",
+                    "w-7 h-3.5 rounded-full relative transition-all shrink-0",
                     isActive ? "bg-orange-500" : "bg-muted"
                   )}>
                     <div className={cn(
-                      "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all",
-                      isActive ? "left-4" : "left-0.5"
+                      "absolute top-[2px] w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-all",
+                      isActive ? "left-[14px]" : "left-[2px]"
                     )} />
                   </div>
                 </button>
@@ -744,13 +794,17 @@ export default function PeoplePage() {
             )
           })}
 
-          <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-4">Locked Filters</div>
+          {/* Locked Filters Section */}
+          <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+            <Lock className="w-3.5 h-3.5 text-muted-foreground/30" strokeWidth={2} />
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/30">Pro Filters</span>
+          </div>
           {lockedFilters.map((f) => (
             <Popover key={f.label}>
               <PopoverTrigger asChild>
-                <button suppressHydrationWarning className="w-full flex items-center gap-3 px-4 h-11 text-left opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
-                  <span className="flex-1 text-[12px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
-                  <Lock className="w-3.5 h-3.5 opacity-30" />
+                <button suppressHydrationWarning className="w-full flex items-center gap-3 px-4 h-10 text-left opacity-50 hover:opacity-80 transition-opacity group">
+                  <Lock className="w-3 h-3 text-muted-foreground/30 group-hover:text-primary/50" strokeWidth={2} />
+                  <span className="flex-1 text-[11px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
                   {f.tier && tierPill(f.tier)}
                 </button>
               </PopoverTrigger>
@@ -768,43 +822,25 @@ export default function PeoplePage() {
           ))}
         </div>
 
-        <div className="flex flex-col gap-2 px-4 py-3 border-t border-border bg-card">
-          {/* Apply filters CTA */}
+        {/* Bottom Action Bar */}
+        <div className="px-4 py-3 border-t border-border bg-card/80 backdrop-blur-sm">
           <button
             onClick={() => handleSearch()}
             className={cn(
-              "w-full h-10 rounded-xl font-black text-[12px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg",
+              "w-full h-10 rounded-xl font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all",
               pendingChange
-                ? "bg-primary text-primary-foreground shadow-primary/30 animate-pulse"
-                : "bg-primary text-primary-foreground shadow-primary/20 hover:bg-primary/90"
+                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 animate-pulse"
+                : "bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90"
             )}
           >
-            <Search className="w-3.5 h-3.5" />
+            <Search className="w-3.5 h-3.5" strokeWidth={2.5} />
             Apply Filters
             {activeFilterCount > 0 && (
-              <span className="bg-primary-foreground/20 text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded-full">
+              <span className="bg-primary-foreground/20 text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded-full ml-1">
                 {activeFilterCount}
               </span>
             )}
           </button>
-          {/* Clear / Advanced row */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => {
-                setFilterChips({})
-                setActiveSignals({ "Job change signal": false, "Promotion signal": false, "New hire signal": false })
-                setPendingChange(true)
-              }}
-              className="text-[10px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
-            >
-              <X className="w-3 h-3" />
-              Clear all
-              {activeFilterCount > 0 && (
-                <Badge variant="secondary" className="h-4 px-1 text-[9px] font-black">{activeFilterCount}</Badge>
-              )}
-            </button>
-            <button className="text-[10px] font-black text-primary hover:underline">Advanced</button>
-          </div>
         </div>
       </aside>
 
@@ -813,18 +849,35 @@ export default function PeoplePage() {
         {/* Top Navbar */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
           <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-xl">
-            <Button variant="ghost" size="sm" className={cn("h-8 px-4 text-[11px] font-black uppercase tracking-wider rounded-lg", view === "results" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground")}>
+            <Button variant="ghost" size="sm" className={cn("h-8 px-4 text-[11px] font-bold rounded-lg", "bg-background shadow-sm text-foreground")}>
               Find People
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => window.location.href = "/leads/companies"} className="h-8 px-4 text-[11px] font-black uppercase tracking-wider text-muted-foreground rounded-lg">
+            <Button variant="ghost" size="sm" onClick={() => router.push("/leads/companies")} className="h-8 px-4 text-[11px] font-bold text-muted-foreground rounded-lg">
               Find Companies
             </Button>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn("h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all", selectedCount > 0 ? "" : "opacity-50 cursor-not-allowed")}
+              onClick={handleResearch}
+              disabled={selectedCount === 0}
+            >
+              <Bot className="w-4 h-4" /> Research with AI{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all"
+              onClick={handleCreateWorkflow}
+            >
+              <Zap className="w-4 h-4" /> Create Sequence
+            </Button>
             <Dialog open={isSaveSearchOpen} onOpenChange={setIsSaveSearchOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9 px-4 gap-2 text-[11px] font-bold border-border/50 hover:bg-muted transition-all">
-                  <BookmarkPlus className="w-3.5 h-3.5" /> Save Search
+                <Button variant="ghost" size="sm" className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all">
+                  <Bookmark className="w-4 h-4" /> Save Search
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-[425px]">
@@ -853,46 +906,22 @@ export default function PeoplePage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="h-9 px-3 gap-2 text-[11px] font-bold border-border/50 hover:bg-muted transition-all"
-              onClick={handleCreateWorkflow}
-            >
-              <Zap className="w-4 h-4" /> Create Workflow
-            </Button>
-
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className={cn("h-9 px-3 gap-2 text-[11px] font-bold border-border/50 transition-all", selectedCount > 0 ? "hover:bg-muted" : "opacity-50 cursor-not-allowed")}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn("h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all", selectedCount > 0 ? "" : "opacity-50 cursor-not-allowed")}
               onClick={handleAutoScore}
               disabled={selectedCount === 0}
-              title={selectedCount === 0 ? "Select prospects first" : undefined}
             >
-              <Target className="w-4 h-4" />
-              Auto-Score{selectedCount > 0 ? ` (${selectedCount})` : ""}
+              <Target className="w-4 h-4" /> Auto-Score{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </Button>
-
-            <Button 
-              className={cn("h-9 px-4 gap-2 text-[11px] font-black shadow-lg transition-all", selectedCount > 0 ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/20" : "bg-muted text-muted-foreground cursor-not-allowed")}
-              onClick={handleResearch}
-              disabled={selectedCount === 0}
-              title={selectedCount === 0 ? "Select prospects first" : undefined}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 px-3 gap-2 text-[11px] font-bold hover:bg-primary/5 hover:text-primary transition-all"
+              onClick={() => router.push("/settings")}
             >
-              <Sparkles className="w-4 h-4" />
-              Research with AI{selectedCount > 0 ? ` (${selectedCount})` : ""}
-            </Button>
-
-            <Button 
-              className={cn("h-9 px-5 gap-2 text-[11px] font-black shadow-lg transition-all", selectedCount > 0 ? "bg-indigo-500 text-white hover:bg-indigo-600 shadow-indigo-500/20" : "bg-muted text-muted-foreground cursor-not-allowed")}
-              onClick={handleRunAgent}
-              disabled={selectedCount === 0}
-              title={selectedCount === 0 ? "Select prospects to run agent" : undefined}
-            >
-              {researching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-              {selectedCount > 0 ? `Run Agent (${selectedCount})` : "Run Agent"}
+              <Settings className="w-4 h-4" /> Search settings
             </Button>
           </div>
         </div>
@@ -905,7 +934,7 @@ export default function PeoplePage() {
                 <Bot className="w-8 h-8 text-primary" strokeWidth={1.5} />
               </div>
               <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">
-                Who are you looking for today?
+                Use Outmate AI to find the right people.
               </h1>
               <p className="text-muted-foreground font-medium text-sm mb-10 max-w-md mx-auto leading-relaxed opacity-60">
                  Search 128M+ decision makers worldwide across 20M+ companies with natural language.

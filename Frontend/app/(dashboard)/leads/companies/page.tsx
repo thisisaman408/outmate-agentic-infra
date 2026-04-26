@@ -144,10 +144,12 @@ const MEGA_CORPS = new Set([
   "johnson & johnson", "pfizer", "moderna", "visa", "mastercard", "paypal",
 ])
 
-/** Remove mega-corps unless the user explicitly searched by company name */
+/** Remove mega-corps unless user explicitly searches for them */
 function filterMegaCorps(companies: CompanyData[], filters: Record<string, any>): CompanyData[] {
-  // If user typed a company name, don't exclude anything
+  // If user typed a company name, don't exclude mega-corps
   if (filters.name) return companies
+  
+  // Filter out mega-corps by default
   return companies.filter(c => {
     const name = (c.name || "").toLowerCase().trim()
     return !MEGA_CORPS.has(name)
@@ -194,6 +196,9 @@ export default function CompaniesPage() {
   const [isSaveSearchOpen, setIsSaveSearchOpen] = useState(false)
   const [savedSearchName, setSavedSearchName] = useState("")
   const [isSavingSearch, setIsSavingSearch] = useState(false)
+  const [savedSearchesCount, setSavedSearchesCount] = useState(0)
+  const [revealedEmail, setRevealedEmail] = useState<Record<string, boolean>>({})
+  const [revealedPhone, setRevealedPhone] = useState<Record<string, boolean>>({})
   
   // AI Actions State
   const [isResearchOpen, setIsResearchOpen] = useState(false)
@@ -218,8 +223,22 @@ export default function CompaniesPage() {
   const [selectedCompanies, setSelectedCompanies] = useState<CompanyData[]>([])
   const selectedCount = selectedCompanies.length
 
+  // +AI Column toggle — shows extra computed columns (Signal, ICP Score, Intent, AI Brief)
+  const [showAiColumns, setShowAiColumns] = useState(false)
+
   useEffect(() => {
     setMounted(true)
+    // Fetch saved searches count
+    const fetchSavedSearchesCount = async () => {
+      try {
+        const savedSearches = await savedSearchesApi.list("company")
+        setSavedSearchesCount(savedSearches.length)
+      } catch (error) {
+        console.error("Failed to fetch saved searches count:", error)
+        setSavedSearchesCount(0)
+      }
+    }
+    fetchSavedSearchesCount()
   }, [])
 
   // Map raw backend company data to CompanyData (same logic as AI Powered Search)
@@ -259,7 +278,7 @@ export default function CompaniesPage() {
         funding_stage: item.funding_stage ?? item.last_funding_round_type,
         funding_total: item.funding_total ?? item.known_funding_total_value ?? item.total_funding_usd,
         last_funding_date: item.last_funding_date ?? item.last_funding_round_date,
-        has_recent_funding: item.has_recent_funding,
+        has_recent_funding: item.has_recent_funding ?? (item.last_funding_date ? new Date(item.last_funding_date) > new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) : false),
         investors: Array.isArray(item.investors) ? item.investors : [],
         investors_count: item.investors_count ?? (Array.isArray(item.investors) ? item.investors.length : undefined),
         headquarters_country: item.headquarters_country ?? item.country_name ?? item.country ?? raw.headquarters_country ?? loc.country,
@@ -281,15 +300,29 @@ export default function CompaniesPage() {
         facebook_url: item.facebook_url,
         instagram_url: item.instagram_url,
         follower_count: item.follower_count ?? item.linkedin_followers,
-        technologies: Array.isArray(item.technologies) ? item.technologies : (item.full_tech_stack ?? []),
-        is_tech_heavy: item.is_tech_heavy,
+        technologies: Array.isArray(item.technologies) && item.technologies.length > 0
+          ? item.technologies
+          : Array.isArray(item.specialties) && item.specialties.length > 0
+            ? item.specialties
+            : Array.isArray(item.full_tech_stack) && item.full_tech_stack.length > 0
+              ? item.full_tech_stack
+              : Array.isArray(raw.technologies) ? raw.technologies
+              : Array.isArray(raw.specialties) ? raw.specialties
+              : (raw.seo?.technologies ? raw.seo.technologies : (raw.taxonomy?.technologies ?? [])),
+        is_tech_heavy: item.is_tech_heavy ?? (
+          (Array.isArray(item.technologies) && item.technologies.length > 3)
+          || (Array.isArray(item.specialties) && item.specialties.length > 3)
+        ),
         employee_growth_6m: item.employee_growth_6m,
         employee_growth_12m: item.employee_growth_12m,
-        employee_growth_6m_percent: item.employee_growth_6m_percent,
-        employee_growth_12m_percent: item.employee_growth_12m_percent,
+        employee_growth_6m_percent: item.employee_growth_6m_percent ?? raw.employee_growth_6m_percent,
+        employee_growth_12m_percent: item.employee_growth_12m_percent ?? raw.employee_growth_12m_percent,
         growth_category: item.growth_category,
-        job_openings_count: item.job_openings_count,
-        web_traffic: item.web_traffic,
+        job_openings_count: item.job_openings_count
+          ?? (Array.isArray(item.job_openings) ? item.job_openings.length : undefined)
+          ?? (typeof item.job_openings === "object" && item.job_openings?.total ? item.job_openings.total : undefined)
+          ?? (Array.isArray(raw.job_openings) ? raw.job_openings.length : undefined),
+        web_traffic: item.web_traffic ?? raw.web_traffic ?? raw.web_traffic_data?.monthly_visits,
         seo_score: item.seo_score,
         decision_makers_count: item.decision_makers_count,
         acquisition_status: item.acquisition_status,
@@ -434,10 +467,84 @@ export default function CompaniesPage() {
       toast.success("Search saved successfully")
       setIsSaveSearchOpen(false)
       setSavedSearchName("")
+      // Update saved searches count
+      setSavedSearchesCount(prev => prev + 1)
     } catch (error: any) {
       toast.error(error.message || "Failed to save search")
     } finally {
       setIsSavingSearch(false)
+    }
+  }
+
+  const handleAddToCRM = async () => {
+    if (selectedCompanies.length === 0) {
+      toast.info("Select companies to push to CRM")
+      return
+    }
+    
+    try {
+      // Convert companies to CRM format
+      const crmData = selectedCompanies.map(company => ({
+        name: company.name,
+        domain: company.domain,
+        website: company.website,
+        industry: company.industry,
+        size: company.employee_count_range || company.employee_count_exact,
+        location: `${company.headquarters_city || ''}, ${company.headquarters_state || ''}`.trim(),
+        revenue: company.revenue_range,
+        funding: company.funding_stage,
+        description: company.description
+      }))
+      
+      // Call CRM API (you'll need to implement this endpoint)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/crm/companies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companies: crmData })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Failed to push to CRM: ${response.status}`)
+      }
+      
+      toast.success(`Pushed ${selectedCompanies.length} companies to CRM`)
+      setSelectedCompanies([]) // Clear selection after successful push
+    } catch (error: any) {
+      toast.error(error.message || "Failed to push companies to CRM")
+    }
+  }
+
+  const handleRevealField = async (companyId: string, field: 'email' | 'phone') => {
+    const company = companies.find(c => (c.domain || c.id) === companyId)
+    if (!company) return
+    
+    setEnrichingRows((prev: Record<string, boolean>) => ({ ...prev, [companyId]: true }))
+    try {
+      // Use the actual enrichment service
+      const result = await enrichCompany(company.name, company.domain, field)
+      
+      // Update enriched data cache
+      setEnrichedData(prev => ({
+        ...prev,
+        [companyId]: {
+          ...prev[companyId],
+          [field]: result
+        }
+      }))
+      
+      // Update revealed state
+      if (field === 'email') {
+        setRevealedEmail((prev: Record<string, boolean>) => ({ ...prev, [companyId]: true }))
+      } else {
+        setRevealedPhone((prev: Record<string, boolean>) => ({ ...prev, [companyId]: true }))
+      }
+    } catch (error: any) {
+      console.error(`Failed to reveal ${field} for ${companyId}:`, error)
+      toast.error(`Failed to get ${field}: ${error?.message || 'Unknown error'}`)
+    } finally {
+      setEnrichingRows((prev: Record<string, boolean>) => ({ ...prev, [companyId]: false }))
     }
   }
 
@@ -458,6 +565,33 @@ export default function CompaniesPage() {
       setIsResearchOpen(false)
     } finally {
       setResearching(false)
+    }
+  }
+
+  const handleEnrichAll = async () => {
+    if (companies.length === 0) {
+      toast.info("No companies to enrich")
+      return
+    }
+    
+    try {
+      // Start enrichment for all companies
+      const enrichPromises = companies.map(async (company) => {
+        const companyId = company.domain || company.id
+        try {
+          // Enrich email
+          await handleRevealField(companyId, 'email')
+          // Enrich phone
+          await handleRevealField(companyId, 'phone')
+        } catch (error) {
+          console.error(`Failed to enrich company ${companyId}:`, error)
+        }
+      })
+      
+      await Promise.allSettled(enrichPromises)
+      toast.success(`Queued ${companies.length} companies for enrichment`)
+    } catch (error: any) {
+      toast.error(error.message || "Failed to start enrichment")
     }
   }
 
@@ -540,7 +674,7 @@ export default function CompaniesPage() {
           {([
             ["total", "Total", companies.length > 0 ? companies.length.toLocaleString() : "0"],
             ["new", "Net New", hasSearched ? filteredCompanies.length.toLocaleString() : "0"],
-            ["saved", "Saved", "0"],
+            ["saved", "Saved", savedSearchesCount.toLocaleString()],
           ] as const).map(([key, label, num]) => (
             <button
               key={key}
@@ -570,13 +704,13 @@ export default function CompaniesPage() {
                 <button
                   onClick={() => f.addable ? toggleFilter(f.label) : undefined}
                   className={cn(
-                    "w-full flex items-center gap-3 px-4 h-11 text-left transition-all hover:bg-muted/30",
-                    f.signalRow ? "text-orange-500" : hasChips ? "text-foreground" : "text-muted-foreground"
+                    "w-full flex items-center gap-2 px-4 py-3 text-left transition-all hover:bg-muted/20",
+                    f.signalRow ? "text-primary" : "text-foreground"
                   )}
                 >
-                  <span className="flex-1 text-[12px] font-bold tracking-tight">{f.label}</span>
+                  <span className="flex-1 text-[13px] font-semibold">{f.label}</span>
                   {hasChips && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">
+                    <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shrink-0">
                       {chips.length}
                     </span>
                   )}
@@ -585,47 +719,43 @@ export default function CompaniesPage() {
                   )}
                 </button>
                 {isExpanded && f.addable && (
-                  <div className="px-4 pb-3 pt-1 bg-muted/20">
-                    {/* Predefined Options / Ranges */}
-                    {f.options && (
-                      <div className="flex flex-wrap gap-1.5 mb-3">
-                        {f.options.map(opt => {
-                          const isSelected = chips.includes(opt)
-                          return (
-                            <button
-                              key={opt}
-                              onClick={() => isSelected ? removeChip(f.label, opt) : addChip(f.label, opt)}
-                              className={cn(
-                                "text-[10px] font-bold px-2 py-1 rounded-md border transition-all",
-                                isSelected 
-                                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                                  : "bg-background text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground"
-                              )}
-                            >
-                              {opt}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
+                  <div className="px-4 pb-3">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/50 mb-2 block">Include</span>
 
-                    {hasChips && !f.options && (
+                    {/* Selected chips */}
+                    {hasChips && (
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {chips.map((c) => (
                           <span
                             key={c}
-                            className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20"
+                            className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md bg-primary/10 text-primary"
                           >
                             {c}
-                            <button onClick={() => removeChip(f.label, c)} className="hover:text-foreground">
-                              <X className="w-2.5 h-2.5" />
+                            <button onClick={() => removeChip(f.label, c)} className="hover:text-foreground ml-0.5">
+                              <X className="w-3 h-3" />
                             </button>
                           </span>
                         ))}
                       </div>
                     )}
-                    
-                    <div className="flex gap-1">
+
+                    {/* Predefined options (hide already selected) */}
+                    {f.options && f.options.filter(opt => !chips.includes(opt)).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {f.options.filter(opt => !chips.includes(opt)).map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => addChip(f.label, opt)}
+                            className="text-[10px] font-medium px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground bg-background transition-all"
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Text Input */}
+                    <div className="flex gap-1 mt-1">
                       <Input
                         placeholder={`Add ${f.label.toLowerCase()}...`}
                         className="h-7 text-[10px] bg-background"
@@ -652,13 +782,13 @@ export default function CompaniesPage() {
             )
           })}
 
-          <div className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/30 mt-4">Locked Filters</div>
+          <Separator className="my-1" />
           {lockedFilters.map((f) => (
             <Popover key={f.label}>
               <PopoverTrigger asChild>
-                <button className="w-full flex items-center gap-3 px-4 h-11 text-left opacity-60 hover:opacity-100 transition-opacity grayscale hover:grayscale-0">
-                  <span className="flex-1 text-[12px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
-                  <Lock className="w-3.5 h-3.5 opacity-30" />
+                <button className="w-full flex items-center gap-2 px-4 py-3 text-left border-b border-border/30 hover:bg-muted/20 transition-all">
+                  <span className="flex-1 text-[13px] font-semibold text-muted-foreground">{f.label}</span>
+                  <Lock className="w-3.5 h-3.5 text-muted-foreground/30" />
                   {f.tier && tierPill(f.tier)}
                 </button>
               </PopoverTrigger>
@@ -688,9 +818,9 @@ export default function CompaniesPage() {
               setHasSearched(false)
             }}
           >
-            Clear all {activeFilterCount > 0 ? `\u00B7 ${activeFilterCount}` : ""}
+            Clear all {activeFilterCount > 0 ? `· ${activeFilterCount}` : ""}
           </button>
-          <button className="text-[11px] font-black text-primary hover:underline">Advanced</button>
+          <button className="text-[11px] font-semibold text-primary hover:underline">More Filters</button>
         </div>
       </aside>
 
@@ -800,45 +930,60 @@ export default function CompaniesPage() {
           <NlpSearchBar intent="company" onFiltersExtracted={handleNlpSearch} />
         </div>
 
-        {/* Stats & Results Summary */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/10">
-          <div className="flex items-center gap-3">
-             <span className="text-[11px] font-bold text-foreground tracking-tight">
-               {isLoading ? (
-                 <span className="flex items-center gap-1.5">
-                   <Loader2 className="w-3 h-3 animate-spin" /> Searching...
-                 </span>
-               ) : (
-                 <>Found <span className="text-primary">{filteredCompanies.length.toLocaleString()}</span> results</>
-               )}
-             </span>
-             {!isLoading && hasSearched && (
-               <>
-                 <Separator orientation="vertical" className="h-3" />
-                 <span className="text-[10px] font-bold text-muted-foreground">
-                   {activeFilterCount} filter{activeFilterCount !== 1 ? "s" : ""} applied
-                 </span>
-               </>
-             )}
+        {/* Summary Stats + Actions Bar */}
+        {hasSearched && (
+          <div className="px-6 py-2 border-b border-border bg-muted/5">
+            <div className="flex items-center text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <span className="font-semibold text-foreground">{companies.length.toLocaleString()}</span>
+                <span>companies</span>
+                <span className="mx-1.5 text-border">·</span>
+                <span className="font-semibold text-foreground">{filteredCompanies.length.toLocaleString()}</span>
+                <span>net new</span>
+                <span className="mx-1.5 text-border">·</span>
+                <span className="font-semibold text-foreground">{activeFilterCount}</span>
+                <span>filters active</span>
+              </div>
+              <div className="ml-auto flex items-center gap-3">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{selectedCount}</span> selected
+                </span>
+                <span className="text-border">·</span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{selectedCount}</span> W selected
+                </span>
+                <span className="text-border">·</span>
+                <button
+                  className="text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={handleExport}
+                >
+                  Export CSV
+                </button>
+                <button
+                  className="text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={handleAddToCRM}
+                >
+                  Push to CRM
+                </button>
+                <button
+                  className="text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={handleEnrichAll}
+                >
+                  Enrich all
+                </button>
+                <button
+                  className={cn("text-[12px] font-medium transition-colors", showAiColumns ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground")}
+                  onClick={() => {
+                    setShowAiColumns(prev => !prev)
+                    toast.success(showAiColumns ? "AI columns hidden" : "AI columns visible: Signal, ICP Score, Intent, AI Brief")
+                  }}
+                >
+                  {showAiColumns ? "− AI column" : "+ AI column"}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {selectedCount > 0 && (
-              <Badge className="bg-primary text-primary-foreground font-bold px-2.5 py-1 text-[10px] shadow-sm">
-                {selectedCount} Selected
-              </Badge>
-            )}
-            <button
-              className="text-[11px] font-bold text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-              onClick={handleExport}
-            >
-              <Download className="w-3.5 h-3.5" /> CSV
-            </button>
-            <button className="text-[11px] font-bold text-muted-foreground hover:text-foreground transition-colors">CRM Sync</button>
-             <button className="text-[11px] font-bold text-primary px-3 py-1 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-all">
-               + Add AI Column
-             </button>
-          </div>
-        </div>
+        )}
 
         {/* Table Area */}
         <div className="flex-1 overflow-auto no-scrollbar">
@@ -855,6 +1000,7 @@ export default function CompaniesPage() {
               companies={filteredCompanies}
               isLoading={isLoading}
               hasSearched={hasSearched}
+              showAiColumns={showAiColumns}
               tableId="companies-page-v4"
               onEnrichReveal={async (companyId, field) => {
                 if (enrichedData[companyId]?.[field] || enrichingRows[companyId]) return

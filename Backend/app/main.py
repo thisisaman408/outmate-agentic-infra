@@ -248,7 +248,7 @@ async def validation_exception_handler(request, exc: RequestValidationError):
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc: Exception):
     """
-    Global exception handler to ensure all errors return JSON responses.
+    Global exception handler to ensure all errors return JSON responses with CORS headers.
     Logs the full error server-side; returns a generic error message to the client.
     """
     logger.error(
@@ -260,10 +260,17 @@ async def global_exception_handler(request, exc: Exception):
             "error_message": str(exc),
         }
     )
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
     )
+    # Add CORS headers to error response
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Vary"] = "Origin"
+    return response
 
 # Register API routers
 app.include_router(prospects.router, dependencies=auth_dependencies)

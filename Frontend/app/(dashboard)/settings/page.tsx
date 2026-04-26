@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { 
   User, Users, Bell, Shield, Wallet, BarChart3, FileText, 
   Building2, Settings2, Code2, History, AlertTriangle, Key,
-  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2, Loader2
+  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2, Loader2, Search
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -52,6 +52,7 @@ const NAV_SECTIONS: SettingsSection[] = [
     items: [
       { id: "organization", icon: Building2, name: "Organization" },
       { id: "preferences", icon: Settings2, name: "Preferences" },
+      { id: "search-settings", icon: Search, name: "Search settings" },
       { id: "api", icon: Code2, name: "API & webhooks" },
       { id: "audit", icon: History, name: "Audit logs" },
     ],
@@ -201,8 +202,9 @@ export default function SettingsPage() {
                {activeTab === 'profile' && <ProfileSettings userProfile={userProfile} workspace={workspace} />}
                {activeTab === 'team' && <TeamSettings />}
                {activeTab === 'notifications' && <NotificationsSettings notifications={notifications} onUpdate={handleUpdateNotifications} />}
+               {activeTab === 'search-settings' && <SearchSettings />}
                {activeTab === 'byok' && <BYOKSettings />}
-               {(activeTab !== 'profile' && activeTab !== 'team' && activeTab !== 'notifications' && activeTab !== 'byok') && (
+               {(activeTab !== 'profile' && activeTab !== 'team' && activeTab !== 'notifications' && activeTab !== 'search-settings' && activeTab !== 'byok') && (
                  <div className="flex flex-col items-center justify-center h-[60vh] text-center">
                     <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6">
                        <Settings2 className="w-6 h-6 text-muted-foreground/30" />
@@ -470,6 +472,121 @@ function TeamSettings() {
              </div>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function SearchSettings() {
+  return (
+    <div className="space-y-12">
+      <header>
+        <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">Search Settings</h2>
+        <p className="text-sm font-medium text-muted-foreground/60">Configure your search preferences and default filters.</p>
+      </header>
+
+      <div className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="w-5 h-5 text-primary" />
+              People Search
+            </CardTitle>
+            <CardDescription>
+              Default settings for prospect and people searches
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-4">
+              <h4 className="font-medium">Default Filters</h4>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Include similar titles</p>
+                    <p className="text-sm text-muted-foreground">Automatically match related job titles</p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Include remote workers</p>
+                    <p className="text-sm text-muted-foreground">Show remote candidates in location results</p>
+                  </div>
+                  <Switch />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Include subsidiaries</p>
+                    <p className="text-sm text-muted-foreground">Match parent and subsidiary companies</p>
+                  </div>
+                  <Switch />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-6 space-y-4">
+              <h4 className="font-medium">Search Results</h4>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Results per page</label>
+                  <select className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm">
+                    <option>25</option>
+                    <option>50</option>
+                    <option>100</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Default sort order</label>
+                  <select className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm">
+                    <option>Relevance</option>
+                    <option>Recently Updated</option>
+                    <option>Company Size</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-primary" />
+              Company Search
+            </CardTitle>
+            <CardDescription>
+              Default settings for company searches
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-4">
+              <h4 className="font-medium">Company Filters</h4>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Include inactive companies</p>
+                    <p className="text-sm text-muted-foreground">Show companies with no recent activity</p>
+                  </div>
+                  <Switch />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Exclude personal profiles</p>
+                    <p className="text-sm text-muted-foreground">Filter out individual profiles</p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end">
+          <Button className="h-11 px-8 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-primary/20">
+            <Save className="w-4 h-4 mr-2" />
+            Save Settings
+          </Button>
+        </div>
       </div>
     </div>
   )
