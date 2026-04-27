@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
-  { name: "Overview", href: "/signals" },
   { name: "Events", href: "/signals/events" },
   { name: "Trackers", href: "/signals/tracker" },
 ]
