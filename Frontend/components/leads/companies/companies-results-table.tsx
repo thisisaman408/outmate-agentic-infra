@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -180,15 +181,19 @@ function deriveIcpScore(company: CompanyData): number {
   if (company.data_quality_score && company.data_quality_score > 0) {
     return Math.min(99, Math.round(company.data_quality_score * 10))
   }
-  let score = 50
-  if (company.industry) score += 5
-  if (company.employee_count_range || company.employee_count_exact) score += 5
-  if (company.funding_stage) score += 8
-  if (company.headquarters_city) score += 4
-  if (company.technologies && company.technologies.length > 0) score += 6
-  if (company.has_recent_funding) score += 8
-  if (company.job_openings_count && company.job_openings_count > 0) score += 5
+  let score = 20
+  if (company.industry) score += 8
+  if (company.employee_count_range || company.employee_count_exact) score += 7
+  if (company.funding_stage) score += 12
+  if (company.headquarters_city) score += 5
+  if (company.technologies && company.technologies.length > 0) score += 8
+  if (company.technologies && company.technologies.length > 3) score += 5
+  if (company.has_recent_funding) score += 12
+  if (company.job_openings_count && company.job_openings_count > 0) score += 8
+  if (company.job_openings_count && company.job_openings_count > 10) score += 5
   if (company.description) score += 3
+  if (company.web_traffic && company.web_traffic > 0) score += 4
+  if (company.employee_growth_6m_percent && company.employee_growth_6m_percent > 10) score += 6
   return Math.min(99, score)
 }
 
@@ -199,13 +204,13 @@ function deriveIntentLevel(company: CompanyData): number {
   if (company.web_traffic && company.web_traffic > 0) level++
   if (company.employee_growth_6m_percent && company.employee_growth_6m_percent > 5) level++
   if (company.is_tech_heavy) level++
-  return Math.max(1, Math.min(5, level))
+  return Math.min(5, level)
 }
 
 function deriveAiBrief(company: CompanyData): { label: string; className: string } {
   const score = deriveIcpScore(company)
-  if (score >= 80) return { label: "Ready ↗", className: "text-green-600 font-semibold cursor-pointer" }
-  if (score >= 60) return { label: "Generate", className: "text-blue-600 font-medium cursor-pointer" }
+  if (score >= 70) return { label: "Ready ↗", className: "text-green-600 font-semibold cursor-pointer" }
+  if (score >= 45) return { label: "Generate", className: "text-blue-600 font-medium cursor-pointer" }
   return { label: "Low priority", className: "text-muted-foreground" }
 }
 
@@ -225,6 +230,7 @@ export function CompaniesResultsTable({
   waterfallAttempts = {},
   onSelectionChange,
 }: Props) {
+  const router = useRouter()
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set())
 
   const handleSelectCompany = (companyId: string) => {
@@ -415,7 +421,16 @@ export function CompaniesResultsTable({
                 {/* AI Brief (AI column) */}
                 {showAiColumns && (
                   <TableCell>
-                    <span className={cn("text-[11px] whitespace-nowrap", brief.className)}>{brief.label}</span>
+                    <span
+                      className={cn("text-[11px] whitespace-nowrap", brief.className)}
+                      onClick={() => {
+                        if (brief.label !== "Low priority") {
+                          router.push(`${viewProfileBasePath}/${encodeURIComponent(company.domain || company.id)}`)
+                        }
+                      }}
+                    >
+                      {brief.label}
+                    </span>
                   </TableCell>
                 )}
 

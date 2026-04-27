@@ -28,6 +28,7 @@ import {
   Download,
   Zap,
   Loader2,
+  Globe,
   Target,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -98,10 +99,64 @@ const unlockedFilters: FilterDef[] = [
     category: "Identity",
     options: ["C-suite", "VP", "Director", "Senior IC", "Manager", "IC", "Founder"],
   },
+
+  /* ── Identity Header Section ── */
+  {
+    label: "Name",
+    category: "Identity Header",
+    options: [],
+    advancedOptions: [
+      { label: "Exact match", description: "Only show exact name matches" },
+      { label: "Exclude contacts", description: "Exclude already contacted people" },
+    ],
+  },
+  {
+    label: "Current title",
+    category: "Identity Header",
+    options: [
+      "VP Sales",
+      "Head of Growth",
+      "CRO",
+      "Director of Sales",
+      "Account Executive",
+      "SDR Manager",
+      "CMO",
+      "Head of Marketing",
+      "RevOps Lead",
+      "BDR Manager",
+    ],
+    advancedOptions: [
+      { label: "Include similar titles", description: "Match related job titles automatically" },
+      { label: "Current title only", description: "Exclude past titles from matching" },
+    ],
+  },
+  {
+    label: "Past Title",
+    category: "Identity Header",
+    options: [],
+    advancedOptions: [
+      { label: "Exact match only", description: "Past title must match exactly, no partial matching" },
+      { label: "Include similar titles", description: "Also match related past titles" },
+      { label: "Within last 2 years", description: "Only match titles held within the last 2 years" },
+    ],
+  },
+  {
+    label: "Seniority level",
+    category: "Identity Header",
+    options: ["C-suite", "VP", "Director", "Senior IC", "Manager", "IC", "Founder"],
+    advancedOptions: [
+      { label: "Current role only", description: "Match seniority of current role, not past roles" },
+      { label: "Include one level above/below", description: "Broaden match to adjacent seniority levels" },
+    ],
+  },
   {
     label: "Function / department",
-    category: "Identity",
+    category: "Identity Header",
     options: ["Sales", "Marketing", "Engineering", "Product", "Operations", "Finance", "Customer Success", "Design"],
+    advancedOptions: [
+      { label: "Primary function only", description: "Only match the primary department, not secondary roles" },
+      { label: "Include cross-functional", description: "Include people who span multiple departments" },
+    ],
   },
 
   /* ── Location ── */
@@ -109,6 +164,25 @@ const unlockedFilters: FilterDef[] = [
     label: "Location",
     category: "Location",
     options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "India", "New York", "San Francisco", "London"],
+  },
+
+  /* ── Profile Language ── */
+  {
+    label: "Profile language",
+    category: "Profile Language",
+    options: ["English", "Spanish", "French", "German", "Italian", "Portuguese", "Chinese", "Japanese", "Korean", "Russian"],
+  },
+
+  /* ── Experience Header Section ── */
+  {
+    label: "Years of experience",
+    category: "Experience Header",
+    options: ["0-1", "1-3", "3-5", "5-10", "10+"],
+  },
+  {
+    label: "Industry experience",
+    category: "Experience Header",
+    options: ["Technology", "Healthcare", "Finance", "Manufacturing", "Retail", "Education", "Government", "Non-profit"],
   },
 
   /* ── Company ── */
@@ -217,7 +291,7 @@ function UnlockedFilterPanel({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={`Quick search...`}
+              placeholder={filter.label === "Name" ? "Search name..." : filter.label === "Current title" ? "Search current title..." : "Quick search..."}
               className="flex-1 bg-transparent text-[11px] font-bold text-foreground placeholder:text-muted-foreground/40 outline-none"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && search.trim()) {
@@ -229,7 +303,7 @@ function UnlockedFilterPanel({
 
           {hasChips && (
             <div className="mb-3">
-              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Include</div>
+              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Selected</div>
               <div className="flex flex-wrap gap-1.5">
                 {chips.map((c) => (
                   <span
@@ -243,6 +317,12 @@ function UnlockedFilterPanel({
                   </span>
                 ))}
               </div>
+              <button
+                onClick={onToggle}
+                className="mt-2 text-[10px] font-bold text-primary/70 hover:text-primary transition-colors"
+              >
+                + Add more
+              </button>
             </div>
           )}
 
@@ -267,10 +347,10 @@ function UnlockedFilterPanel({
             <div className="mt-3 pt-3 border-t border-border/50">
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 hover:text-primary transition-colors w-full"
+                className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground/50 hover:text-primary transition-colors w-full"
               >
                 <SlidersHorizontal className="w-3 h-3" strokeWidth={2.5} />
-                <span>Advanced</span>
+                <span>Advanced Settings</span>
                 {showAdvanced ? (
                   <ChevronUp className="w-3 h-3 ml-auto opacity-40" />
                 ) : (
@@ -654,28 +734,6 @@ export default function PeoplePage() {
     <div className="flex h-full overflow-hidden bg-background">
       {/* Filter Sidebar */}
       <aside className="w-[280px] min-w-[280px] h-full flex flex-col bg-card border-r border-border">
-        {/* Sidebar Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-primary" strokeWidth={2.5} />
-            <span className="text-[13px] font-black uppercase tracking-wider text-foreground">Filters</span>
-            {activeFilterCount > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{activeFilterCount}</span>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              setFilterChips({})
-              setActiveSignals({ "Job change signal": false, "Promotion signal": false, "New hire signal": false })
-              setPendingChange(true)
-            }}
-            className="text-[10px] font-bold text-muted-foreground hover:text-destructive flex items-center gap-1 transition-colors"
-          >
-            <X className="w-3 h-3" />
-            Reset
-          </button>
-        </div>
-
         {/* Quick Search */}
         <div className="px-4 py-3">
           <div className="relative">
@@ -722,23 +780,54 @@ export default function PeoplePage() {
               : unlockedFilters
 
             const categoryConfig: Record<string, { icon: typeof UserCircle; label: string }> = {
-              "Identity": { icon: UserCircle, label: "IDENTITY" },
               "Company": { icon: Building2, label: "COMPANY" },
               "Location": { icon: MapPin, label: "LOCATION" },
+              "Profile Language": { icon: Globe, label: "PROFILE LANGUAGE" },
+              "Experience Header": { icon: Briefcase, label: "EXPERIENCE" },
             }
-            const categories = [...new Set(filteredUnlockedFilters.map((f) => f.category))]
-            return categories.map((cat) => {
-              const config = categoryConfig[cat || ""] || { icon: Briefcase, label: (cat || "").toUpperCase() }
-              const CatIcon = config.icon
-              return (
-                <div key={cat}>
-                  <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-                    <CatIcon className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
-                    <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">{config.label}</span>
-                  </div>
-                  {filteredUnlockedFilters
-                    .filter((f) => f.category === cat)
-                    .map((f) => (
+            // Show identity filters first without category header
+            const identityFilters = filteredUnlockedFilters.filter(f => f.category === "Identity")
+            const identityHeaderFilters = filteredUnlockedFilters.filter(f => f.category === "Identity Header")
+            const experienceHeaderFilters = filteredUnlockedFilters.filter(f => f.category === "Experience Header")
+            const otherCategories = [...new Set(filteredUnlockedFilters.map((f) => f.category).filter(cat => cat !== "Identity" && cat !== "Identity Header" && cat !== "Experience Header"))]
+            
+            return (
+              <>
+                {/* Identity filters — summary only (filter name + selected chips) */}
+                {identityFilters.filter(f => (filterChips[f.label] || []).length > 0).map((f) => {
+                  const chips = filterChips[f.label] || []
+                  return (
+                    <div key={f.label} className="px-4 py-2.5 border-b border-border/40">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-[12px] font-bold text-foreground">{f.label}</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{chips.length}</span>
+                      </div>
+                      <div className="text-[9px] uppercase font-black tracking-widest mb-1.5 text-muted-foreground/50">Include</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {chips.map((c) => (
+                          <span
+                            key={c}
+                            className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20"
+                          >
+                            {c}
+                            <button onClick={() => removeChip(f.label, c)} className="opacity-60 hover:opacity-100">
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                
+                {/* Identity Header section with IDENTITY header */}
+                {identityHeaderFilters.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+                      <UserCircle className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
+                      <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">IDENTITY</span>
+                    </div>
+                    {identityHeaderFilters.map((f) => (
                       <UnlockedFilterPanel
                         key={f.label}
                         filter={f}
@@ -752,9 +841,64 @@ export default function PeoplePage() {
                         onRemoveChip={(chip) => removeChip(f.label, chip)}
                       />
                     ))}
-                </div>
-              )
-            })
+                  </div>
+                )}
+
+                {/* Experience Header section with EXPERIENCE header */}
+                {experienceHeaderFilters.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+                      <Briefcase className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
+                      <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">EXPERIENCE</span>
+                    </div>
+                    {experienceHeaderFilters.map((f) => (
+                      <UnlockedFilterPanel
+                        key={f.label}
+                        filter={f}
+                        isExpanded={!!expandedFilters[f.label]}
+                        chips={filterChips[f.label] || []}
+                        onToggle={() => toggleFilter(f.label)}
+                        onAddChip={(val) => {
+                          setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
+                          setPendingChange(true)
+                        }}
+                        onRemoveChip={(chip) => removeChip(f.label, chip)}
+                      />
+                    ))}
+                  </div>
+                )}
+                
+                {/* Other categories with headers */}
+                {otherCategories.map((cat) => {
+                  const config = categoryConfig[cat || ""] || { icon: Briefcase, label: (cat || "").toUpperCase() }
+                  const CatIcon = config.icon
+                  return (
+                    <div key={cat}>
+                      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+                        <CatIcon className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
+                        <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">{config.label}</span>
+                      </div>
+                      {filteredUnlockedFilters
+                        .filter((f) => f.category === cat)
+                        .map((f) => (
+                          <UnlockedFilterPanel
+                            key={f.label}
+                            filter={f}
+                            isExpanded={!!expandedFilters[f.label]}
+                            chips={filterChips[f.label] || []}
+                            onToggle={() => toggleFilter(f.label)}
+                            onAddChip={(val) => {
+                              setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
+                              setPendingChange(true)
+                            }}
+                            onRemoveChip={(chip) => removeChip(f.label, chip)}
+                          />
+                        ))}
+                    </div>
+                  )
+                })}
+              </>
+            )
           })()}
 
           {/* Signals Section */}
