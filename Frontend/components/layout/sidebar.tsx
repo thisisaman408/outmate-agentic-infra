@@ -81,7 +81,7 @@ const sections: NavSection[] = [
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "People", href: "/leads/prospects", icon: Users },
       { name: "History", href: "/leads/history", icon: Clock },
-      { name: "AI Powered Search", href: "/ai-powered-search", icon: Sparkles, badge: "AI", badgeColor: "indigo" },
+      
     ],
   },
   {
