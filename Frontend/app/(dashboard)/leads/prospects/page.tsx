@@ -28,6 +28,7 @@ import {
   Download,
   Zap,
   Loader2,
+  Database,
   Globe,
   Target,
 } from "lucide-react"
@@ -127,17 +128,15 @@ const unlockedFilters: FilterDef[] = [
     ],
     advancedOptions: [
       { label: "Include similar titles", description: "Match related job titles automatically" },
-      { label: "Current title only", description: "Exclude past titles from matching" },
+      { label: "Exclude past titles", description: "Don't match on previous positions" },
     ],
   },
   {
     label: "Past Title",
     category: "Identity Header",
-    options: [],
+    options: ["VP Sales", "Head of Growth", "CRO", "Director of Sales", "Account Executive", "CMO", "Head of Marketing", "RevOps Lead"],
     advancedOptions: [
-      { label: "Exact match only", description: "Past title must match exactly, no partial matching" },
-      { label: "Include similar titles", description: "Also match related past titles" },
-      { label: "Within last 2 years", description: "Only match titles held within the last 2 years" },
+      { label: "Within last 2 years", description: "Only titles held in the last 2 years" },
     ],
   },
   {
@@ -145,8 +144,7 @@ const unlockedFilters: FilterDef[] = [
     category: "Identity Header",
     options: ["C-suite", "VP", "Director", "Senior IC", "Manager", "IC", "Founder"],
     advancedOptions: [
-      { label: "Current role only", description: "Match seniority of current role, not past roles" },
-      { label: "Include one level above/below", description: "Broaden match to adjacent seniority levels" },
+      { label: "Include one level up/down", description: "Broaden to adjacent seniority" },
     ],
   },
   {
@@ -154,8 +152,7 @@ const unlockedFilters: FilterDef[] = [
     category: "Identity Header",
     options: ["Sales", "Marketing", "Engineering", "Product", "Operations", "Finance", "Customer Success", "Design"],
     advancedOptions: [
-      { label: "Primary function only", description: "Only match the primary department, not secondary roles" },
-      { label: "Include cross-functional", description: "Include people who span multiple departments" },
+      { label: "Cross-functional", description: "Include people spanning multiple departments" },
     ],
   },
 
@@ -163,49 +160,117 @@ const unlockedFilters: FilterDef[] = [
   {
     label: "Location",
     category: "Location",
-    options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "India", "New York", "San Francisco", "London"],
+    options: ["United States", "United Kingdom", "Germany", "France", "Canada", "Australia", "New York", "San Francisco", "London", "Berlin", "Austin", "Boston", "Chicago", "Toronto", "Paris", "Singapore"],
+    advancedOptions: [
+      { label: "Include remote", description: "Include remote workers based in region" },
+      { label: "HQ location only", description: "Match company HQ, not person location" },
+    ],
+  },
+
+  /* ── Experience Header Section ── */
+  {
+    label: "Total years of experience",
+    category: "Experience Header",
+    options: ["0-2 years", "3-5 years", "6-10 years", "11-15 years", "16-20 years", "20+ years"],
+    advancedOptions: [
+      { label: "Industry-specific", description: "Count only years in selected industry" },
+    ],
+  },
+  {
+    label: "Years at company",
+    category: "Experience Header",
+    options: ["< 1 year", "1-2 years", "3-5 years", "5-10 years", "10+ years"],
+  },
+  {
+    label: "Years in current role",
+    category: "Experience Header",
+    options: ["< 6 months", "6-12 months", "1-2 years", "2-5 years", "5+ years"],
+  },
+
+  /* ── Contact Section ── */
+  {
+    label: "Email status",
+    category: "Contact",
+    options: ["Verified", "Unverified", "Invalid", "Catch-all", "No email"],
+    advancedOptions: [
+      { label: "Verified only", description: "Strictly show verified emails" },
+    ],
+  },
+  {
+    label: "Phone status",
+    category: "Contact",
+    options: ["Direct dial", "Mobile", "HQ number", "No phone"],
+  },
+  {
+    label: "Source",
+    category: "Contact",
+    options: ["LinkedIn", "Website", "Referral", "Cold outbound", "Inbound", "Event", "Partner", "Import", "API", "Chrome Extension"],
+  },
+
+  /* ── CRM Section ── */
+  {
+    label: "Owner",
+    category: "CRM",
+    options: ["Me", "Unassigned", "Team A", "Team B", "All owners"],
+  },
+  {
+    label: "Stage",
+    category: "CRM",
+    options: ["New", "Contacted", "Qualified", "Meeting booked", "Opportunity", "Customer", "Disqualified", "Nurture"],
+    advancedOptions: [
+      { label: "Exclude converted", description: "Hide already converted leads" },
+    ],
+  },
+  {
+    label: "Last activity",
+    category: "CRM",
+    options: ["Today", "Last 7 days", "Last 30 days", "Last 90 days", "No activity", "More than 90 days ago"],
+  },
+  {
+    label: "Keyword",
+    category: "CRM",
+    options: ["SaaS", "B2B", "AI/ML", "Fintech", "DevTools", "Cybersecurity", "E-commerce", "Cloud Infrastructure", "PLG", "Enterprise Sales"],
   },
 
   /* ── Profile Language ── */
   {
     label: "Profile language",
-    category: "Profile Language",
-    options: ["English", "Spanish", "French", "German", "Italian", "Portuguese", "Chinese", "Japanese", "Korean", "Russian"],
+    category: "Location",
+    options: ["English", "Spanish", "French", "German", "Portuguese", "Chinese", "Japanese"],
+    advancedOptions: [
+      { label: "Primary language only", description: "Exclude secondary languages" },
+    ],
   },
 
-  /* ── Experience Header Section ── */
-  {
-    label: "Years of experience",
-    category: "Experience Header",
-    options: ["0-1", "1-3", "3-5", "5-10", "10+"],
-  },
-  {
-    label: "Industry experience",
-    category: "Experience Header",
-    options: ["Technology", "Healthcare", "Finance", "Manufacturing", "Retail", "Education", "Government", "Non-profit"],
-  },
-
-  /* ── Company ── */
-  {
-    label: "# Employees",
-    category: "Company",
-    options: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "10001+"],
-  },
-]
+  ]
 
 const signalFilters: FilterDef[] = [
-  { label: "Signals", signalRow: true, expanded: true, chips: ["Job change", "Promotion", "New hire"] },
+  { label: "Signals", signalRow: true, expanded: true, chips: ["Job change signal", "Promotion signal", "New hire"] },
   { label: "Job change signal", signalRow: true },
   { label: "Promotion signal", signalRow: true },
-  { label: "New hire signal", signalRow: true },
+  { label: "Champion tracker", signalRow: true },
 ]
 
 const lockedFilters: FilterDef[] = [
+  { label: "# Employees (company)", locked: true, tier: "Starter" },
+  { label: "Revenue", locked: true, tier: "Starter" },
+  { label: "Funding", locked: true, tier: "Starter" },
+  { label: "Technologies", locked: true, tier: "Starter" },
+  { label: "Job Postings", locked: true, tier: "Starter" },
+  { label: "Market Segments", locked: true, tier: "Starter" },
+  { label: "Industry & keywords", locked: true, tier: "Starter" },
   { label: "Buying intent", locked: true, tier: "Growth" },
+  { label: "Intent topics", locked: true, tier: "Growth" },
   { label: "Website visitors", locked: true, tier: "Growth" },
+  { label: "Headcount growth", locked: true, tier: "Growth" },
   { label: "ICP fit score", locked: true, tier: "Growth" },
+  { label: "People lookalikes", locked: true, tier: "Growth" },
+  { label: "AI filters", locked: true, tier: "Growth" },
   { label: "Composite GTM score", locked: true, tier: "Scale" },
+  { label: "Buying group signals", locked: true, tier: "Scale" },
   { label: "Territories", locked: true, tier: "Scale" },
+  { label: "AI custom filter", locked: true, tier: "Scale" },
+  { label: "Awards and certifications", locked: true, tier: "Scale" },
 ]
 
 /* ─── helpers ─── */
@@ -213,7 +278,7 @@ const lockedFilters: FilterDef[] = [
 const tierPill = (tier: "Starter" | "Growth" | "Scale") => {
   const cls =
     tier === "Starter" ? "bg-amber-500/20 text-amber-600" : tier === "Growth" ? "bg-primary/20 text-primary" : "bg-red-500/20 text-red-600"
-  return <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider", cls)}>{tier}</span>
+  return <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider inline-flex items-center gap-1", cls)}><Lock className="w-2.5 h-2.5" />{tier}</span>
 }
 
 const scoreBar = (score: number) => (
@@ -291,7 +356,7 @@ function UnlockedFilterPanel({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={filter.label === "Name" ? "Search name..." : filter.label === "Current title" ? "Search current title..." : "Quick search..."}
+              placeholder={filter.label === "Name" ? "Search name..." : filter.label === "Current title" ? "Search current title..." : filter.label === "Past Title" ? "Search past title..." : filter.label === "Seniority level" ? "Search seniority level..." : filter.label === "Function / department" ? "Search function / department..." : filter.label === "Location" ? "Search location..." : filter.label === "Profile language" ? "Search profile language..." : filter.label === "Total years of experience" ? "Search total years of experience..." : filter.label === "Years at company" ? "Search years at company..." : filter.label === "Years in current role" ? "Search years in current role..." : filter.label === "Email status" ? "Search email status..." : filter.label === "Phone status" ? "Search phone status..." : filter.label === "Source" ? "Search source..." : filter.label === "Owner" ? "Search owner..." : filter.label === "Stage" ? "Search stage..." : filter.label === "Last activity" ? "Search last activity..." : filter.label === "Keyword" ? "Search keyword..." : "Quick search..."}
               className="flex-1 bg-transparent text-[11px] font-bold text-foreground placeholder:text-muted-foreground/40 outline-none"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && search.trim()) {
@@ -321,22 +386,25 @@ function UnlockedFilterPanel({
                 onClick={onToggle}
                 className="mt-2 text-[10px] font-bold text-primary/70 hover:text-primary transition-colors"
               >
-                + Add more
+                ADD MORE
               </button>
             </div>
           )}
 
+          {filtered.length > 0 && filter.label !== "Current title" && filter.label !== "Seniority level" && (
+            <div>
+              <div className="text-[9px] uppercase font-black tracking-widest mb-2 text-muted-foreground/50">Options</div>
+            </div>
+          )}
           {filtered.length > 0 && (
             <div className="max-h-[160px] overflow-y-auto no-scrollbar space-y-0.5">
               {filtered.map((opt) => (
                 <button
                   key={opt}
                   onClick={() => addOption(opt)}
-                  className="w-full flex items-center gap-2.5 px-2 py-2 text-left text-[11px] font-bold text-foreground/70 rounded-lg hover:bg-card hover:text-primary transition-all group"
+                  className="w-full flex items-center gap-3 px-2 py-2 text-left text-[11px] font-bold text-foreground/70 rounded-lg hover:bg-card hover:text-primary transition-all"
                 >
-                  <div className="w-4 h-4 rounded border border-border group-hover:border-primary/30 flex items-center justify-center shrink-0">
-                    <Plus className="w-2.5 h-2.5 opacity-30 group-hover:opacity-100" />
-                  </div>
+                  <input type="checkbox" checked={false} readOnly className="w-3.5 h-3.5 rounded border-muted accent-primary shrink-0" />
                   {opt}
                 </button>
               ))}
@@ -350,7 +418,7 @@ function UnlockedFilterPanel({
                 className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground/50 hover:text-primary transition-colors w-full"
               >
                 <SlidersHorizontal className="w-3 h-3" strokeWidth={2.5} />
-                <span>Advanced Settings</span>
+                <span>Advanced settings</span>
                 {showAdvanced ? (
                   <ChevronUp className="w-3 h-3 ml-auto opacity-40" />
                 ) : (
@@ -400,7 +468,7 @@ export default function PeoplePage() {
   const [activeSignals, setActiveSignals] = useState<Record<string, boolean>>({
     "Job change signal": false,
     "Promotion signal": false,
-    "New hire signal": false,
+    "Champion tracker": false,
   })
   const [pendingChange, setPendingChange] = useState(false)
 
@@ -728,7 +796,7 @@ export default function PeoplePage() {
     }
   }
 
-  const exampleChips = ["VP Sales at Series A SaaS", "CRO in recently funded fintech", "Founders at AI startups (NY)", "RevOps leads using HubSpot"]
+  const exampleChips = ["VP Sales · Series A SaaS · EU", "CRO at recently funded fintech", "Head of Growth · dev tools · US", "GTM leaders who changed jobs last 30 days", "RevOps leads using HubSpot · 100–500 emp.", "Founders at AI SaaS · raised last 6 months"]
 
   return (
     <div className="flex h-full overflow-hidden bg-background">
@@ -784,12 +852,16 @@ export default function PeoplePage() {
               "Location": { icon: MapPin, label: "LOCATION" },
               "Profile Language": { icon: Globe, label: "PROFILE LANGUAGE" },
               "Experience Header": { icon: Briefcase, label: "EXPERIENCE" },
+              "Contact": { icon: Mail, label: "CONTACT" },
+              "CRM": { icon: Database, label: "CRM" },
             }
             // Show identity filters first without category header
             const identityFilters = filteredUnlockedFilters.filter(f => f.category === "Identity")
             const identityHeaderFilters = filteredUnlockedFilters.filter(f => f.category === "Identity Header")
             const experienceHeaderFilters = filteredUnlockedFilters.filter(f => f.category === "Experience Header")
-            const otherCategories = [...new Set(filteredUnlockedFilters.map((f) => f.category).filter(cat => cat !== "Identity" && cat !== "Identity Header" && cat !== "Experience Header"))]
+            const otherCategories = ["Location", "Experience Header", "Contact", "Company", "CRM"].filter(cat => 
+              filteredUnlockedFilters.some(f => f.category === cat)
+            )
             
             return (
               <>
@@ -800,7 +872,7 @@ export default function PeoplePage() {
                     <div key={f.label} className="px-4 py-2.5 border-b border-border/40">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-[12px] font-bold text-foreground">{f.label}</span>
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{chips.length}</span>
+                        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary text-primary-foreground">{chips.length}</span>
                       </div>
                       <div className="text-[9px] uppercase font-black tracking-widest mb-1.5 text-muted-foreground/50">Include</div>
                       <div className="flex flex-wrap gap-1.5">
@@ -844,30 +916,7 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* Experience Header section with EXPERIENCE header */}
-                {experienceHeaderFilters.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-                      <Briefcase className="w-3.5 h-3.5 text-muted-foreground/40" strokeWidth={2} />
-                      <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">EXPERIENCE</span>
-                    </div>
-                    {experienceHeaderFilters.map((f) => (
-                      <UnlockedFilterPanel
-                        key={f.label}
-                        filter={f}
-                        isExpanded={!!expandedFilters[f.label]}
-                        chips={filterChips[f.label] || []}
-                        onToggle={() => toggleFilter(f.label)}
-                        onAddChip={(val) => {
-                          setFilterChips((p) => ({ ...p, [f.label]: [...(p[f.label] || []), val] }))
-                          setPendingChange(true)
-                        }}
-                        onRemoveChip={(chip) => removeChip(f.label, chip)}
-                      />
-                    ))}
-                  </div>
-                )}
-                
+                                
                 {/* Other categories with headers */}
                 {otherCategories.map((cat) => {
                   const config = categoryConfig[cat || ""] || { icon: Briefcase, label: (cat || "").toUpperCase() }
@@ -902,10 +951,32 @@ export default function PeoplePage() {
           })()}
 
           {/* Signals Section */}
-          <div className="flex items-center gap-2 px-4 pt-5 pb-2">
-            <Zap className="w-3.5 h-3.5 text-orange-500/40" strokeWidth={2} />
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-500/50">Signals</span>
+          <div className="flex items-center justify-between px-4 pt-5 pb-2">
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-orange-500/40" strokeWidth={2} />
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-500/50">Signals</span>
+            </div>
+            {Object.values(activeSignals).filter(Boolean).length > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">{Object.values(activeSignals).filter(Boolean).length}</span>
+            )}
           </div>
+          <div className="px-4 pb-2">
+            <div className="text-[9px] uppercase font-black tracking-widest text-muted-foreground/50">Include</div>
+          </div>
+          {Object.values(activeSignals).filter(Boolean).length > 0 && (
+            <div className="px-4 pb-2">
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(activeSignals).filter(([, v]) => v).map(([label]) => (
+                  <span key={label} className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg bg-orange-500/10 text-orange-600 border border-orange-500/20">
+                    {label === "Champion tracker" ? "New hire" : label === "Job change signal" ? "Job change" : label === "Promotion signal" ? "Promotion" : label}
+                    <button onClick={() => { setActiveSignals(p => ({ ...p, [label]: false })); setPendingChange(true) }} className="opacity-60 hover:opacity-100">
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {signalFilters.filter(f => f.label !== "Signals").map((f) => {
             const isActive = activeSignals[f.label]
             return (
@@ -922,7 +993,7 @@ export default function PeoplePage() {
                 >
                   <Sparkles className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-orange-500" : "text-muted-foreground/30")} strokeWidth={2} />
                   <span className={cn("flex-1 text-[11px] font-bold tracking-tight", isActive ? "text-orange-600" : "text-muted-foreground")}>
-                    {f.label.replace(" signal", "")}
+                    {f.label}
                   </span>
                   <div className={cn(
                     "w-7 h-3.5 rounded-full relative transition-all shrink-0",
@@ -939,15 +1010,11 @@ export default function PeoplePage() {
           })}
 
           {/* Locked Filters Section */}
-          <div className="flex items-center gap-2 px-4 pt-5 pb-2">
-            <Lock className="w-3.5 h-3.5 text-muted-foreground/30" strokeWidth={2} />
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/30">Pro Filters</span>
-          </div>
+          <div className="pt-3" />
           {lockedFilters.map((f) => (
             <Popover key={f.label}>
               <PopoverTrigger asChild>
                 <button suppressHydrationWarning className="w-full flex items-center gap-3 px-4 h-10 text-left opacity-50 hover:opacity-80 transition-opacity group">
-                  <Lock className="w-3 h-3 text-muted-foreground/30 group-hover:text-primary/50" strokeWidth={2} />
                   <span className="flex-1 text-[11px] font-bold tracking-tight text-muted-foreground">{f.label}</span>
                   {f.tier && tierPill(f.tier)}
                 </button>
@@ -966,25 +1033,23 @@ export default function PeoplePage() {
           ))}
         </div>
 
-        {/* Bottom Action Bar */}
+        {/* Bottom Bar */}
         <div className="px-4 py-3 border-t border-border bg-card/80 backdrop-blur-sm">
-          <button
-            onClick={() => handleSearch()}
-            className={cn(
-              "w-full h-10 rounded-xl font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all",
-              pendingChange
-                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 animate-pulse"
-                : "bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90"
-            )}
-          >
-            <Search className="w-3.5 h-3.5" strokeWidth={2.5} />
-            Apply Filters
-            {activeFilterCount > 0 && (
-              <span className="bg-primary-foreground/20 text-primary-foreground text-[9px] font-black px-1.5 py-0.5 rounded-full ml-1">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => {
+                setFilterChips({})
+                setActiveSignals(Object.fromEntries(signalFilters.filter(f => f.label !== "Signals").map(f => [f.label, false])) as any)
+                setPendingChange(true)
+              }}
+              className="text-[11px] font-bold text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear all
+            </button>
+            <span className="text-[11px] text-muted-foreground">·</span>
+            <span className="text-[11px] font-bold text-foreground">{activeFilterCount}</span>
+            <span className="text-[11px] font-bold text-primary ml-auto cursor-pointer hover:underline">More filters</span>
+          </div>
         </div>
       </aside>
 
@@ -1074,26 +1139,20 @@ export default function PeoplePage() {
         {view === "nlp" && (
           <div className="flex-1 flex flex-col items-center justify-center px-8 bg-gradient-to-b from-background to-muted/10">
             <div className="w-full max-w-[720px] -mt-20 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-8 shadow-inner">
-                <Bot className="w-8 h-8 text-primary" strokeWidth={1.5} />
-              </div>
-              <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">
+                            <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">
                 Use Outmate AI to find the right people.
               </h1>
-              <p className="text-muted-foreground font-medium text-sm mb-10 max-w-md mx-auto leading-relaxed opacity-60">
-                 Search 128M+ decision makers worldwide across 20M+ companies with natural language.
-              </p>
-
+              
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-primary/20 to-indigo-500/20 rounded-2xl blur opacity-0 group-focus-within:opacity-100 transition duration-500" />
-                <div className="relative flex items-center gap-2 p-3 rounded-2xl bg-card border border-border shadow-2xl focus-within:border-primary transition-all">
+                <div className="relative flex items-center gap-2 p-3 rounded-2xl bg-card border border-border shadow-2xl focus-within:border-primary transition-all w-full max-w-4xl">
                   <Search className="w-5 h-5 ml-2 text-muted-foreground/30" />
                   <input
                     value={nlpQuery}
                     onChange={(e) => setNlpQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                    placeholder="e.g. VP Sales at Series A SaaS in US who changed jobs recently..."
-                    className="flex-1 bg-transparent text-base font-bold text-foreground placeholder:text-muted-foreground/30 outline-none px-2"
+                    placeholder="e.g. VP Sales at Series A SaaS in Europe who changed jobs last 30 days..."
+                    className="flex-1 bg-transparent text-base font-bold text-foreground placeholder:text-muted-foreground/30 placeholder:text-xs outline-none px-2 min-w-0"
                   />
                   <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground/50 hover:bg-muted rounded-xl">
                     <Mic className="w-5 h-5" />
@@ -1115,51 +1174,162 @@ export default function PeoplePage() {
                   </button>
                 ))}
               </div>
+
+              <div className="mt-8 flex items-center justify-center gap-4">
+                <div className="text-[12px] font-medium text-muted-foreground/60 cursor-pointer hover:text-muted-foreground transition-colors">
+                  Recently searched
+                </div>
+                <div className="text-[12px] font-medium text-muted-foreground/60 cursor-pointer hover:text-muted-foreground transition-colors">
+                  Recently saved
+                </div>
+              </div>
+
+              <div className="mt-8 text-center">
+                <div className="flex items-center justify-center gap-4 text-[12px] font-medium text-muted-foreground/70">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-3 h-3" />
+                    <span>Unlock advanced filters: Buying intent · People lookalikes · ICP fit score · Headcount growth</span>
+                  </div>
+                  <button className="text-[12px] font-medium text-white bg-yellow-500 hover:bg-yellow-600 px-4 py-2 rounded-lg transition-colors cursor-pointer">
+                    View plans
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {/* Results Page */}
         {view === "results" && (
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Stats Bar */}
-            <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/10">
-               <div className="flex items-center gap-3">
-                 <span className="text-[11px] font-bold text-foreground tracking-tight">
-                   Found <span className="text-primary">{totalCount.toLocaleString()}</span> results
-                 </span>
-                 <Separator orientation="vertical" className="h-3" />
-                 <span className="text-[10px] font-bold text-muted-foreground">
-                   {activeFilterCount} active filters
-                 </span>
-               </div>
-               <div className="flex items-center gap-3">
-                 {selectedCount > 0 && <Badge className="font-bold">{selectedCount} Selected</Badge>}
-                 <button className="text-[11px] font-bold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
-                   <Download className="w-3.5 h-3.5" /> Export CSV
-                 </button>
-                 <Button size="sm" className="h-8 px-4 font-black bg-indigo-500 text-white shadow-xl shadow-indigo-500/20">
-                   <Zap className="w-3.5 h-3.5 fill-current mr-1.5" /> Run Outreach
-                 </Button>
-               </div>
+          <div className="flex-1 flex flex-col min-w-0 bg-background">
+            {/* Search Header */}
+            <div className="px-6 py-4 border-b border-border">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/40" strokeWidth={2} />
+                  <input
+                    type="text"
+                    placeholder="Search"
+                    className="w-full pl-10 pr-4 py-2.5 bg-muted/30 border border-border/50 rounded-xl text-sm font-medium focus:bg-background focus:border-primary/40 transition-all outline-none"
+                  />
+                </div>
+                <Button variant="outline" size="sm" className="h-10 px-4 gap-2 rounded-lg border-border/50">
+                  <SlidersHorizontal className="w-4 h-4" />
+                  <span className="text-sm font-medium">Filters</span>
+                  {activeFilterCount > 0 && (
+                    <Badge className="ml-1 bg-primary text-primary-foreground text-xs font-bold h-5 min-w-5">
+                      {activeFilterCount}
+                    </Badge>
+                  )}
+                </Button>
+              </div>
+              
+              {/* Active Filter Chips */}
+              {activeFilterCount > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(filterChips).map(([filterName, chips]) =>
+                    chips.map((chip) => (
+                      <div key={`${filterName}-${chip}`} className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/20 rounded-full">
+                        <span className="text-xs font-medium text-primary">{chip}</span>
+                        <button 
+                          onClick={() => removeChip(filterName, chip)}
+                          className="w-3.5 h-3.5 rounded-full bg-primary/20 flex items-center justify-center hover:bg-primary/30 transition-colors"
+                        >
+                          <X className="w-2 h-2 text-primary" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Table */}
-            <div className="flex-1 overflow-hidden min-h-0">
-               <ProspectsResultsTable
-                  profiles={prospects}
-                  totalCount={totalCount}
-                  hasMore={false}
-                  onLoadMore={handleLoadMore}
-                  isLoadingMore={false}
-                  enableContactReveal={true}
-                  onEnrichReveal={onEnrichReveal}
-                  onWaterfallResult={handleWaterfallResult}
-                  enrichCache={{}}
-                  enrichingRows={{}}
-                  tableId="prospects-search-v3"
-                  onAddToCRM={handleAddToCRM}
-               />
+            {/* Results Stats */}
+            <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/10">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-foreground">
+                  <span className="text-primary font-bold">{totalCount.toLocaleString()}</span> results
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {activeFilterCount} active filters
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {selectedCount > 0 && (
+                  <Badge className="bg-primary text-primary-foreground font-bold">
+                    {selectedCount} Selected
+                  </Badge>
+                )}
+                <button className="text-sm font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+                <Button size="sm" className="h-9 px-4 font-bold bg-indigo-500 text-white shadow-lg shadow-indigo-500/20">
+                  <Zap className="w-4 h-4 fill-current mr-1.5" />
+                  Run Outreach
+                </Button>
+              </div>
+            </div>
+
+            {/* Cards Grid */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {prospects.slice(0, 9).map((prospect, index) => (
+                  <div key={prospect.id || index} className="bg-card border border-border rounded-xl p-4 hover:shadow-lg transition-shadow">
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+                          <UserCircle className="w-6 h-6 text-primary" strokeWidth={1.5} />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm text-foreground">{prospect.name || 'John Doe'}</h3>
+                          <p className="text-xs text-muted-foreground">{prospect.title || 'VP of Sales'}</p>
+                        </div>
+                      </div>
+                      <button className="w-6 h-6 rounded-full hover:bg-muted/50 flex items-center justify-center transition-colors">
+                        <BookmarkPlus className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+
+                    {/* Company Info */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">{prospect.company || 'Tech Corp'}</span>
+                    </div>
+
+                    {/* Location */}
+                    <div className="flex items-center gap-2 mb-4">
+                      <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">{prospect.location || 'San Francisco, CA'}</span>
+                    </div>
+
+                    {/* Contact Actions */}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1 h-8 text-xs font-medium border-border/50">
+                        <Mail className="w-3 h-3 mr-1" />
+                        Email
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 h-8 text-xs font-medium border-border/50">
+                        <Linkedin className="w-3 h-3 mr-1" />
+                        LinkedIn
+                      </Button>
+                      <Button size="sm" className="flex-1 h-8 text-xs font-medium bg-primary text-primary-foreground">
+                        Add to CRM
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Load More */}
+              {prospects.length > 9 && (
+                <div className="flex justify-center mt-6">
+                  <Button variant="outline" className="px-6">
+                    Load More
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}
