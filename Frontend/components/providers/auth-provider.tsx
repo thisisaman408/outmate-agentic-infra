@@ -19,13 +19,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(user)
 
     const normalizedPath = pathname || "/"
+
+    // Allow public pages (homepage, privacy policy, etc.) without auth
+    const isPublicPage = normalizedPath === "/" || normalizedPath.startsWith("/privacy")
+
     if (user) {
-      // If already logged in and on an auth page, go to dashboard
       if (normalizedPath.startsWith("/auth")) {
+        // After login/signup — route based on onboarding status
+        if (user.onboarding_completed) {
+          router.replace("/dashboard")
+        } else {
+          router.replace("/onboarding")
+        }
+      } else if (!user.onboarding_completed && !normalizedPath.startsWith("/onboarding")) {
+        // Logged in but onboarding not done — block access to rest of app
+        router.replace("/onboarding")
+      } else if (user.onboarding_completed && normalizedPath.startsWith("/onboarding")) {
+        // Already completed onboarding — don't let them go back
         router.replace("/dashboard")
       }
-    } else if (!normalizedPath.startsWith("/auth")) {
-      // Not logged in — redirect to local login page
+    } else if (!normalizedPath.startsWith("/auth") && !isPublicPage) {
+      // Not logged in and not on an auth or public page — send to login
       router.replace("/auth/login")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

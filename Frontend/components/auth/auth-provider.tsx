@@ -4,52 +4,65 @@ import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { authService } from "@/lib/auth"
 import { useStore } from "@/lib/store"
-import { Loader2 } from "lucide-react"
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const router = useRouter()
-    const pathname = usePathname()
-    const [isLoading, setIsLoading] = useState(true)
-    const setUser = useStore((state) => state.setUser)
+  const router = useRouter()
+  const pathname = usePathname()
+  const [isLoading, setIsLoading] = useState(true)
+  const setUser = useStore((state) => state.setUser)
 
-    useEffect(() => {
-        const checkAuth = async () => {
-            try {
-                // First check if we have a token at all
-                const token = authService.getToken()
-                if (!token) {
-                    if (!pathname.startsWith('/auth')) {
-                        router.push('/auth/login')
-                    }
-                    setIsLoading(false)
-                    return
-                }
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = authService.getToken()
+      const cachedUser = authService.getCurrentUser()
 
-                // Verify the token with the backend
-                const user = await authService.getMe()
-                setUser(user)
-                
-                // Link authenticated user to the tracking pixel
-                if (typeof window !== 'undefined' && (window as any).outmate) {
-                    (window as any).outmate.identify(user.email);
-                }
-                
-                // Onboarding redirect logic
-                if (!user.onboarding_completed && !pathname.startsWith('/onboarding') && !pathname.startsWith('/auth')) {
-                    router.push('/onboarding')
-                }
-            } catch (err) {
-                console.error("Auth verification failed:", err)
-                if (!pathname.startsWith('/auth')) {
-                    router.push('/auth/login')
-                }
-            }
-            setIsLoading(false)
+      // ── Step 1: No token → redirect to login ────────────────────────
+      if (!token || !cachedUser) {
+        const isPublicPage = pathname === "/" || pathname.startsWith("/privacy")
+        if (!pathname.startsWith("/auth") && !isPublicPage) {
+          router.push("/auth/login")
         }
+        setIsLoading(false)
+        return
+      }
 
-        checkAuth()
-    }, [pathname, router, setUser])
+      // ── Step 2: Use cached user immediately (no backend wait) ────────
+      setUser(cachedUser)
 
-    // Loading transition removed for immediate access
-    return <>{children}</>
+      const onAuth = pathname.startsWith("/auth")
+      const onOnboarding = pathname.startsWith("/onboarding")
+
+      if (onAuth) {
+        router.push(cachedUser.onboarding_completed ? "/dashboard" : "/onboarding")
+      } else if (!cachedUser.onboarding_completed && !onOnboarding) {
+        router.push("/onboarding")
+      } else if (cachedUser.onboarding_completed && onOnboarding) {
+        router.push("/dashboard")
+      }
+
+      setIsLoading(false)
+
+      // ── Step 3: Verify with backend in background ────────────────────
+      // Only a real 401 clears the session. Network errors are ignored.
+      try {
+        const freshUser = await authService.getMe()
+        setUser(freshUser)
+        if (typeof window !== "undefined" && (window as any).outmate) {
+          (window as any).outmate.identify(freshUser.email)
+        }
+      } catch (err: any) {
+        const isAuthError =
+          err?.message === "Session expired" || err?.message?.includes("401")
+        if (isAuthError) {
+          setUser(null)
+          router.push("/auth/login?expired=true")
+        }
+        // Network errors → silently ignored, cached user stays
+      }
+    }
+
+    checkAuth()
+  }, [pathname, router, setUser])
+
+  return <>{children}</>
 }

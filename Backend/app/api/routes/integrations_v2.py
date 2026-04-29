@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -451,6 +452,34 @@ async def test_integration(
 
     if not user_conn:
         return {"success": False, "message": "Integration is not connected"}
+
+    # ── Slack Webhook Test ──────────────────────────────────────────
+    if slug == "slack" and integration.auth_type == "webhook":
+        from app.services.integration_engine.credential_vault import decrypt_credentials
+        import httpx
+        
+        try:
+            creds = decrypt_credentials(user_conn.credentials_encrypted)
+            webhook_url = creds.get("webhook_url")
+            if not webhook_url:
+                return {"success": False, "message": "Slack webhook URL not found in credentials"}
+            
+            payload = {
+                "text": "🚀 *Outmate.ai Connection Test*\n\nYour Slack integration is successfully connected and ready to receive real-time lead alerts! \n\n_Sent at: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "_"
+            }
+            
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(webhook_url, json=payload)
+                resp.raise_for_status()
+                
+            return {
+                "success": True, 
+                "message": "Test message sent to Slack successfully!",
+                "last_synced_at": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Slack test failed: {str(e)}")
+            return {"success": False, "message": f"Slack test failed: {str(e)}"}
 
     # In future, this would call connector.validate_credentials()
     return {

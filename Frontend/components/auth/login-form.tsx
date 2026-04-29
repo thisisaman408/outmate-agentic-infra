@@ -77,7 +77,12 @@ export function LoginForm() {
       const user = await authService.login(formData.email, formData.password)
       setUser(user)
       toast({ title: "Welcome back!", description: "You've signed in successfully." })
-      router.push("/dashboard")
+      // Route based on onboarding status
+      if (user.onboarding_completed) {
+        router.push("/dashboard")
+      } else {
+        router.push("/onboarding")
+      }
     } catch (error: any) {
       toast({
         title: "Sign in failed",
