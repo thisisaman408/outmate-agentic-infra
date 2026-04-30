@@ -295,13 +295,17 @@ class Settings(BaseSettings):
     # Outlook OAuth
     OUTLOOK_CLIENT_ID: str = Field("", description="Outlook/Microsoft OAuth app client ID")
     OUTLOOK_CLIENT_SECRET: str = Field("", description="Outlook/Microsoft OAuth app client secret")
+    OUTLOOK_REDIRECT_URI: str = Field(
+        "http://localhost:8000/api/v1/integrations/outlook/callback",
+        description="Microsoft OAuth redirect URI for Outlook / Office 365",
+    )
 
     # HubSpot OAuth
     HUBSPOT_CLIENT_ID: str = Field("", description="HubSpot OAuth app client ID")
     HUBSPOT_CLIENT_SECRET: str = Field("", description="HubSpot OAuth app client secret")
     HUBSPOT_REDIRECT_URI: str = Field(
-        "http://localhost:3000/api/v1/social/hubspot/callback",
-        description="HubSpot OAuth redirect URI (goes through Next.js proxy)",
+        "http://localhost:8000/api/v1/integrations/hubspot/callback",
+        description="HubSpot OAuth redirect URI for users connecting their own HubSpot portal",
     )
     HUBSPOT_PKCE_VERIFIER: str = Field("", description="HubSpot MCP Auth App PKCE code verifier (from dashboard)")
     HUBSPOT_PKCE_CHALLENGE: str = Field("", description="HubSpot MCP Auth App PKCE code challenge (from dashboard)")
@@ -394,6 +398,10 @@ class Settings(BaseSettings):
     VISITOR_DEDUPE_SECONDS: int = Field(
         3600,
         description="Visitor deduplication window in seconds"
+    )
+    VISITOR_TRACKING_INLINE: bool = Field(
+        True,
+        description="Process visitor tracking inline (skip Celery). Set False in production where a Celery worker is running."
     )
     # Enhanced enrichment APIs (optional — system degrades gracefully if absent)
     HUNTER_API_KEY: str = Field("", description="Hunter.io API key for domain → email lookup")

@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { 
   User, Users, Bell, Shield, Wallet, BarChart3, FileText, 
   Building2, Settings2, Code2, History, AlertTriangle, Key,
-  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2, Loader2, Search
+  ChevronRight, Save, Upload, Copy, ExternalLink, Mail, Trash2, Loader2, Search,
+  Eye, EyeOff
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -203,8 +204,9 @@ export default function SettingsPage() {
                {activeTab === 'team' && <TeamSettings />}
                {activeTab === 'notifications' && <NotificationsSettings notifications={notifications} onUpdate={handleUpdateNotifications} />}
                {activeTab === 'search-settings' && <SearchSettings />}
-               {activeTab === 'byok' && <BYOKSettings />}
-               {(activeTab !== 'profile' && activeTab !== 'team' && activeTab !== 'notifications' && activeTab !== 'search-settings' && activeTab !== 'byok') && (
+               {activeTab === 'api' && <APISettings />}
+              {activeTab === 'byok' && <BYOKSettings />}
+              {(activeTab !== 'profile' && activeTab !== 'team' && activeTab !== 'notifications' && activeTab !== 'search-settings' && activeTab !== 'api' && activeTab !== 'byok') && (
                  <div className="flex flex-col items-center justify-center h-[60vh] text-center">
                     <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6">
                        <Settings2 className="w-6 h-6 text-muted-foreground/30" />
@@ -389,6 +391,225 @@ function NotificationsSettings({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function APISettings() {
+  interface ApiKey {
+    id: string
+    name: string
+    key: string
+    createdAt: string
+    lastUsed: string | null
+  }
+
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([
+    { id: '1', name: 'Production API Key', key: 'sk-outmate-prod-1234567890abcdef1234567890abcdef12345678', createdAt: '2024-01-15', lastUsed: '2024-01-20' },
+    { id: '2', name: 'Development API Key', key: 'sk-outmate-dev-0987654321fedcba0987654321fedcba09876543', createdAt: '2024-01-10', lastUsed: '2024-01-18' },
+  ])
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({
+    '1': false,  // false = hidden (masked)
+    '2': false,  // false = hidden (masked)
+  })
+  const [newKeyName, setNewKeyName] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+
+  const maskKey = (key: string) => {
+    if (!key || key.length <= 8) return key
+    return key.substring(0, 8) + '...' + key.substring(key.length - 4)
+  }
+
+  const toggleKeyVisibility = (keyId: string) => {
+    setShowKeys(prev => ({ ...prev, [keyId]: !prev[keyId] }))
+  }
+
+  const createNewKey = async () => {
+    if (!newKeyName.trim()) {
+      toast.error('Please enter a name for the API key')
+      return
+    }
+
+    setIsCreating(true)
+    try {
+      // Simulate API call to create key
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const newKey = {
+        id: Date.now().toString(),
+        name: newKeyName,
+        key: `sk-outmate-${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`,
+        createdAt: new Date().toISOString().split('T')[0],
+        lastUsed: null
+      }
+      
+      setApiKeys(prev => [newKey, ...prev])
+      // Ensure new key is hidden by default (false = hidden/masked)
+      setShowKeys(prev => ({ ...prev, [newKey.id]: false }))
+      setNewKeyName('')
+      toast.success('API key created successfully')
+    } catch (error) {
+      toast.error('Failed to create API key')
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const deleteKey = async (keyId: string) => {
+    try {
+      // Simulate API call to delete key
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      setApiKeys(prev => prev.filter(key => key.id !== keyId))
+      toast.success('API key deleted successfully')
+    } catch (error) {
+      toast.error('Failed to delete API key')
+    }
+  }
+
+  const copyToClipboard = (key: string) => {
+    navigator.clipboard.writeText(key)
+    toast.success('API key copied to clipboard')
+  }
+
+  return (
+    <div className="space-y-12">
+      <header className="flex items-end justify-between">
+        <div>
+          <h2 className="text-3xl font-black tracking-tighter text-foreground uppercase tracking-widest mb-2">API & Webhooks</h2>
+          <p className="text-sm font-medium text-muted-foreground/60">Manage your Outmate API keys and webhook configurations.</p>
+        </div>
+        <Button 
+          className="h-11 px-8 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl shadow-primary/20"
+          onClick={() => window.open('/integrations/docs/api', '_blank')}
+        >
+          <Code2 className="w-4 h-4 mr-2" />
+          API Documentation
+        </Button>
+      </header>
+
+      {/* API Keys Section */}
+      <div className="space-y-8">
+        <div>
+          <h3 className="text-xl font-black tracking-tight text-foreground uppercase tracking-widest mb-4">API Keys</h3>
+          <p className="text-sm text-muted-foreground mb-6">Create and manage your Outmate API keys for programmatic access.</p>
+          
+          {/* Create New Key */}
+          <Card className="mb-6">
+            <CardContent className="p-6">
+              <div className="flex gap-4">
+                <Input
+                  placeholder="Enter API key name (e.g., Production, Development)"
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button 
+                  onClick={createNewKey}
+                  disabled={isCreating || !newKeyName.trim()}
+                  className="h-10 px-6 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl"
+                >
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Key className="w-4 h-4 mr-2" />
+                      Create New Key
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* API Keys List */}
+          <div className="space-y-4">
+            {apiKeys.map((apiKey) => (
+              <Card key={apiKey.id} className="overflow-hidden">
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h4 className="font-semibold text-foreground mb-1">{apiKey.name}</h4>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <span>Created: {apiKey.createdAt}</span>
+                        {apiKey.lastUsed && <span>Last used: {apiKey.lastUsed}</span>}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => deleteKey(apiKey.id)}
+                      className="text-red-500 hover:text-red-600 hover:border-red-200"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  
+                  <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        {showKeys[apiKey.id] ? apiKey.key : maskKey(apiKey.key)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleKeyVisibility(apiKey.id)}
+                          className="h-8 px-2"
+                        >
+                          {showKeys[apiKey.id] ? (
+                            <>
+                              <EyeOff className="w-4 h-4" />
+                              Hide
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-4 h-4" />
+                              Show
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => copyToClipboard(apiKey.key)}
+                          className="h-8 px-2"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+
+        {/* Webhooks Section */}
+        <div>
+          <h3 className="text-xl font-black tracking-tight text-foreground uppercase tracking-widest mb-4">Webhooks</h3>
+          <p className="text-sm text-muted-foreground mb-6">Configure webhooks to receive real-time events from Outmate.</p>
+          
+          <Card>
+            <CardContent className="p-8">
+              <div className="text-center py-8">
+                <div className="w-16 h-16 rounded-3xl bg-muted/10 border border-border border-dashed flex items-center justify-center mb-6 mx-auto">
+                  <Code2 className="w-6 h-6 text-muted-foreground/30" />
+                </div>
+                <h4 className="text-lg font-black tracking-tight text-foreground mb-2">Webhook Configuration</h4>
+                <p className="text-sm text-muted-foreground mb-6">Configure webhook endpoints to receive real-time notifications</p>
+                <Button variant="outline" className="h-10 px-6 font-black uppercase tracking-widest text-[10px] rounded-xl">
+                  Configure Webhooks
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -33,7 +33,6 @@ import {
   ExternalLink,
   Radar,
   Zap,
-  Database,
   Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -77,11 +76,9 @@ const sections: NavSection[] = [
   {
     label: "Database",
     items: [
-      { name: "Database", href: "/database", icon: Database, badge: "New", badgeColor: "green" },
       { name: "Companies", href: "/leads/companies", icon: Building2 },
       { name: "People", href: "/leads/prospects", icon: Users },
       { name: "History", href: "/leads/history", icon: Clock },
-      
     ],
   },
   {

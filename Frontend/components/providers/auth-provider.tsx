@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useEffect, useRef } from "react"
 import { useRouter, usePathname } from "next/navigation"
+import { toast } from "sonner"
 import { authService } from "@/lib/auth"
 import { useStore } from "@/lib/store"
 
@@ -12,6 +13,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { setUser } = useStore()
   const hasHandledExpiry = useRef(false)
+  const lastConnectionToast = useRef(0)
 
   // Restore auth state from localStorage on mount / path change
   useEffect(() => {
@@ -47,20 +49,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       const finalInit = { ...init, headers }
 
+      const url = typeof input === "string" ? input : (input as Request).url
+      const isApiCall = url.includes("/api/") || url.startsWith(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
+
+      const showConnectionToast = (msg: string) => {
+        const now = Date.now()
+        if (now - lastConnectionToast.current > 5000) {
+          lastConnectionToast.current = now
+          toast.error(msg, { duration: 4000 })
+        }
+      }
+
       let response: Response
       try {
         response = await originalFetch(input, finalInit)
-      } catch (err) {
-        // Re-throw so the caller's own try/catch handles it.  We just don't
-        // want this to surface as an "unhandledRejection" sourced inside the
-        // global fetch patch — the original error already carries the right
-        // stack frame for the caller.
+      } catch (err: any) {
+        // Network failure (offline, DNS, connection refused, timeout) — don't redirect.
+        if (isApiCall) {
+          const msg = !navigator.onLine
+            ? "You're offline. Check your internet connection."
+            : "Connection issue — your network is slow or unstable. Please retry."
+          showConnectionToast(msg)
+        }
         throw err
+      }
+
+      // Handle 503 / 504 — backend slow or DB transient failure. Don't log out.
+      if ((response.status === 503 || response.status === 504) && isApiCall) {
+        showConnectionToast("Connection is slow — the server is taking longer than usual. Please retry.")
+        return response
       }
 
       // Handle 401 — token expired or invalid
       if (response.status === 401 && !hasHandledExpiry.current) {
-        const url = typeof input === "string" ? input : (input as Request).url
         // Don't trigger on auth endpoints (login/signup/etc.) — those 401s are expected
         const isAuthEndpoint = url.includes("/auth/")
         if (!isAuthEndpoint && authService.getToken()) {

@@ -618,7 +618,7 @@ async def sync_watcher(id: str, db: Session = Depends(get_db), _user=Depends(get
             logger.warning("Watcher in-app notification failed (non-fatal): %s", _ne)
 
         if len(recent) > 0:
-            await notify_updates(w, db_w)
+            await notify_updates(w, db_w, db)
 
         db_w.last_synced_at = datetime.now(timezone.utc)
         db.commit(); db.refresh(db_w)
@@ -637,7 +637,7 @@ async def sync_watcher_with_slash(id: str, db: Session = Depends(get_db), _user=
     return await sync_watcher(id, db, _user)
 
 
-async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
+async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None, db: Session = None):
     """Send notifications for new watcher updates."""
     notif = w.get("notificationSettings") or {}
     if db_w:
@@ -672,6 +672,19 @@ async def notify_updates(w: Dict[str, Any], db_w: WatcherModel = None):
 
     if notif.get("slack"):
         webhook_url = notif.get("webhook")
+        if not webhook_url and db_w and db:
+            try:
+                from app.db.models.copilot_preferences import CopilotUserPreferences
+
+                prefs = (
+                    db.query(CopilotUserPreferences)
+                    .filter(CopilotUserPreferences.user_id == db_w.user_id)
+                    .first()
+                )
+                if prefs and prefs.notify_slack:
+                    webhook_url = prefs.slack_webhook_url
+            except Exception as e:
+                logger.debug(f"Slack preference lookup skipped: {e}")
         if webhook_url:
             try:
                 import httpx
@@ -697,4 +710,3 @@ legacy_router.post("/api/watchers/lead")(create_lead_watcher)
 legacy_router.post("/api/watchers/{id}/toggle")(toggle_watcher)
 legacy_router.delete("/api/watchers/{id}")(delete_watcher)
 legacy_router.post("/api/watchers/{id}/sync")(sync_watcher)
-

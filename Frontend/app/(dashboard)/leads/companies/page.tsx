@@ -42,6 +42,7 @@ import type { CompanyData } from "@/components/leads/companies/companies-results
 import { enrichCompany } from "@/lib/services/betterContactService"
 import { savedSearchesApi } from "@/lib/api/saved-searches"
 import { aiAgentsApi, type ResearchResult, type PredictiveScore } from "@/lib/api/ai-agents"
+import { unifiedDataService } from "@/lib/services/unified-data-service"
 import {
   Dialog,
   DialogContent,
@@ -342,21 +343,38 @@ export default function CompaniesPage() {
     setIsLoading(true)
     setHasSearched(true)
     try {
-      const headers = {
-        ...authService.getAuthHeaders(),
-        "Content-Type": "application/json",
-      }
-      const response = await fetch(`${BACKEND_BASE}/api/v1/leads/search/companies`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ filters, options: { limit: 50 } }),
-      })
-      if (!response.ok) throw new Error(`API error: ${response.status}`)
-      const result = await response.json()
-      if (!result.success) throw new Error(result.error?.message || "Search failed")
+      // Use unified data service with Brightdata integration and fallback
+      const result = await unifiedDataService.searchCompaniesWithRetry(filters, {
+        useBrightdata: true,
+        enableFallback: true,
+        timeout: 15000 // 15 seconds timeout
+      }, 2) // 2 retries
 
-      const rawCompanies = result.data?.companies || []
-      setCompanies(filterMegaCorps(mapCompanyResults(rawCompanies), filters))
+      // Transform data to match expected format
+      const transformedCompanies = result.data.map(company => ({
+        id: company.id,
+        name: company.name,
+        domain: company.domain,
+        description: company.description,
+        industry: company.industry,
+        size: company.size,
+        location: company.location,
+        founded: company.founded,
+        website: company.website,
+        linkedin: company.linkedin,
+        funding: company.funding,
+        revenue: company.revenue,
+        // Add any other necessary field mappings
+      }))
+
+      setCompanies(filterMegaCorps(mapCompanyResults(transformedCompanies), filters))
+      
+      // Show data source info to user
+      if (result.source === 'brightdata') {
+        console.log('✅ Companies data from Brightdata dataset')
+      } else {
+        console.log('🔄 Companies data from fallback API')
+      }
     } catch (err: any) {
       toast.error(err.message || "Search failed")
     } finally {
@@ -378,21 +396,38 @@ export default function CompaniesPage() {
     setHasSearched(true)
     setCompanies([])
     try {
-      const headers = {
-        ...authService.getAuthHeaders(),
-        "Content-Type": "application/json",
-      }
-      const response = await fetch(`${BACKEND_BASE}/api/v1/leads/search/companies`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ filters, options: { limit: 50 } }),
-      })
-      if (!response.ok) throw new Error(`Search failed: ${response.status}`)
-      const result = await response.json()
-      if (!result.success) throw new Error(result.error?.message || "Search failed")
+      // Use unified data service with Brightdata integration and fallback
+      const result = await unifiedDataService.searchCompaniesWithRetry(filters, {
+        useBrightdata: true,
+        enableFallback: true,
+        timeout: 15000 // 15 seconds timeout
+      }, 2) // 2 retries
 
-      const rawCompanies = result.data?.companies || []
-      setCompanies(filterMegaCorps(mapCompanyResults(rawCompanies), filters))
+      // Transform data to match expected format
+      const transformedCompanies = result.data.map(company => ({
+        id: company.id,
+        name: company.name,
+        domain: company.domain,
+        description: company.description,
+        industry: company.industry,
+        size: company.size,
+        location: company.location,
+        founded: company.founded,
+        website: company.website,
+        linkedin: company.linkedin,
+        funding: company.funding,
+        revenue: company.revenue,
+        // Add any other necessary field mappings
+      }))
+
+      setCompanies(filterMegaCorps(mapCompanyResults(transformedCompanies), filters))
+      
+      // Show data source info to user
+      if (result.source === 'brightdata') {
+        toast.success('AI Search completed using Brightdata dataset')
+      } else {
+        toast.info('AI Search completed using fallback API')
+      }
     } catch (e: any) {
       toast.error(e.message || "AI Search failed")
     } finally {

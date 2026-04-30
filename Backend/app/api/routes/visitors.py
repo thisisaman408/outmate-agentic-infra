@@ -413,13 +413,20 @@ async def track_visitor(request: Request):
             "source_site": site_config.domain or "",
         }
 
-        queued_via = "celery"
-        try:
-            process_visitor_task.delay(str(site_config.org_id), payload)
-        except Exception as e:
-            logger.warning("Celery unavailable, processing inline: %s", e)
+        # In dev/single-process deployments (no Celery worker), process inline so
+        # visits actually persist instead of piling up in the broker queue forever.
+        # Production sets VISITOR_TRACKING_INLINE=False and runs a separate worker.
+        if settings.VISITOR_TRACKING_INLINE:
             queued_via = "inline"
             asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
+        else:
+            queued_via = "celery"
+            try:
+                process_visitor_task.delay(str(site_config.org_id), payload)
+            except Exception as e:
+                logger.warning("Celery unavailable, processing inline: %s", e)
+                queued_via = "inline"
+                asyncio.create_task(_process_visitor_data(str(site_config.org_id), payload))
 
         # Update real-time active visitor counter (Redis sorted set, 30-min window)
         try:

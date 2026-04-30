@@ -6,15 +6,18 @@ so no ALTER TABLE on the users table is needed.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
-from uuid import uuid4
+from urllib.parse import urlencode
+from uuid import UUID
 
 import httpx
-from sqlalchemy import text
 from sqlalchemy.orm import Session
+import jwt
 
 from app.core.config import settings
+from app.db.models.integration import Integration, UserIntegration
+from app.services.integration_engine.credential_vault import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +28,14 @@ OUTLOOK_API_BASE = "https://graph.microsoft.com/v1.0"
 INTEGRATION_TYPE = "outlook"
 
 OUTLOOK_SCOPES = [
+    "openid",
+    "profile",
+    "email",
+    "offline_access",
     "User.Read",
     "Mail.Read",
     "Mail.ReadWrite",
     "Mail.Send",
-    "Mail.ReadBasic",
 ]
 
 
@@ -40,6 +46,10 @@ class OutlookService:
     @staticmethod
     def is_available() -> bool:
         return bool(settings.OUTLOOK_CLIENT_ID and settings.OUTLOOK_CLIENT_SECRET)
+
+    @staticmethod
+    def _user_uuid(user_id):
+        return user_id if isinstance(user_id, UUID) else UUID(str(user_id))
 
     def is_connected(self, user) -> Dict[str, Any]:
         """Check if a user has connected their Outlook account."""
@@ -53,6 +63,25 @@ class OutlookService:
             }
         return {"connected": False, "email": None, "connected_at": None}
 
+    @staticmethod
+    def build_state(user_id) -> str:
+        payload = {
+            "uid": str(user_id),
+            "provider": INTEGRATION_TYPE,
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        }
+        return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+    @staticmethod
+    def verify_state(state: str) -> Optional[str]:
+        try:
+            payload = jwt.decode(state, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+            if payload.get("provider") != INTEGRATION_TYPE:
+                return None
+            return payload.get("uid")
+        except Exception:
+            return None
+
     @classmethod
     def get_auth_url(cls, state: str = "") -> str:
         params = {
@@ -61,11 +90,11 @@ class OutlookService:
             "redirect_uri": settings.OUTLOOK_REDIRECT_URI,
             "scope": " ".join(OUTLOOK_SCOPES),
             "response_mode": "query",
+            "prompt": "select_account",
         }
         if state:
             params["state"] = state
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{OUTLOOK_AUTH_URL}?{query}"
+        return f"{OUTLOOK_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> Dict[str, Any]:
         data: Dict[str, str] = {
@@ -74,49 +103,64 @@ class OutlookService:
             "client_secret": settings.OUTLOOK_CLIENT_SECRET,
             "redirect_uri": settings.OUTLOOK_REDIRECT_URI,
             "code": code,
+            "scope": " ".join(OUTLOOK_SCOPES),
         }
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(OUTLOOK_TOKEN_URL, data=data)
             resp.raise_for_status()
             return resp.json()
 
-    def store_tokens(self, user_id, token_data: Dict[str, Any]) -> None:
+    async def fetch_profile(self, access_token: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{OUTLOOK_API_BASE}/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def store_tokens(self, user_id, token_data: Dict[str, Any]) -> None:
         """Store Outlook tokens in user_integrations table."""
         if not self.db:
             raise RuntimeError("db session required")
+
+        profile = {}
+        if token_data.get("access_token"):
+            try:
+                profile = await self.fetch_profile(token_data["access_token"])
+            except Exception as exc:
+                logger.warning("Outlook profile fetch failed: %s", exc)
 
         creds = {
             "access_token": token_data.get("access_token"),
             "refresh_token": token_data.get("refresh_token"),
             "expires_in": token_data.get("expires_in"),
+            "scope": token_data.get("scope"),
+            "email": profile.get("mail") or profile.get("userPrincipalName"),
         }
 
+        integration = self._get_catalog_integration()
         row = self._get_integration_row(user_id)
+        encrypted = encrypt_credentials(creds)
+        now = datetime.now(timezone.utc)
         if row:
-            self.db.execute(
-                text(
-                    "UPDATE user_integrations SET "
-                    "credentials_encrypted = :creds, status = 'connected', "
-                    "connected_at = :now, updated_at = :now "
-                    "WHERE id = :row_id"
-                ),
-                {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
-            )
+            row["model"].credentials_encrypted = encrypted
+            row["model"].status = "connected"
+            row["model"].error_message = None
+            row["model"].config = {"type": INTEGRATION_TYPE}
+            row["model"].extra_data = {"provider": "outlook", "email": creds.get("email")}
+            row["model"].connected_at = now
         else:
-            self.db.execute(
-                text(
-                    "INSERT INTO user_integrations "
-                    "(id, user_id, status, credentials_encrypted, config, metadata, connected_at, created_at, updated_at) "
-                    "VALUES (:id, :user_id, 'connected', :creds, :config, :meta, :now, :now, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "user_id": str(user_id),
-                    "creds": json.dumps(creds),
-                    "config": json.dumps({"type": INTEGRATION_TYPE}),
-                    "meta": json.dumps({"provider": "outlook"}),
-                    "now": datetime.now(timezone.utc),
-                },
+            self.db.add(
+                UserIntegration(
+                    user_id=self._user_uuid(user_id),
+                    integration_id=integration.id,
+                    status="connected",
+                    credentials_encrypted=encrypted,
+                    config={"type": INTEGRATION_TYPE},
+                    extra_data={"provider": "outlook", "email": creds.get("email")},
+                    connected_at=now,
+                )
             )
         self.db.commit()
 
@@ -124,14 +168,11 @@ class OutlookService:
         """Remove Outlook tokens."""
         if not self.db:
             return
-        self.db.execute(
-            text(
-                "UPDATE user_integrations SET status = 'disconnected', "
-                "credentials_encrypted = NULL, updated_at = :now "
-                "WHERE user_id = :uid AND config->>'type' = :itype"
-            ),
-            {"uid": str(user_id), "itype": INTEGRATION_TYPE, "now": datetime.now(timezone.utc)},
-        )
+        row = self._get_integration_row(user_id)
+        if row:
+            row["model"].status = "disconnected"
+            row["model"].credentials_encrypted = None
+            row["model"].error_message = None
         self.db.commit()
 
     async def refresh_token(self, user_id) -> Optional[str]:
@@ -152,23 +193,18 @@ class OutlookService:
                         "client_id": settings.OUTLOOK_CLIENT_ID,
                         "client_secret": settings.OUTLOOK_CLIENT_SECRET,
                         "refresh_token": refresh,
+                        "scope": " ".join(OUTLOOK_SCOPES),
                     },
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                creds["access_token"] = data["access_token"]
-                if data.get("refresh_token"):
-                    creds["refresh_token"] = data["refresh_token"]
-                if self.db:
-                    self.db.execute(
-                        text(
-                            "UPDATE user_integrations SET credentials_encrypted = :creds, updated_at = :now "
-                            "WHERE id = :row_id"
-                        ),
-                        {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
-                    )
-                    self.db.commit()
-                return data["access_token"]
+            resp.raise_for_status()
+            data = resp.json()
+            creds["access_token"] = data["access_token"]
+            if data.get("refresh_token"):
+                creds["refresh_token"] = data["refresh_token"]
+            if self.db:
+                row["model"].credentials_encrypted = encrypt_credentials(creds)
+                self.db.commit()
+            return data["access_token"]
         except Exception as exc:
             logger.warning("Outlook token refresh failed: %s", exc)
             return None
@@ -248,75 +284,84 @@ class OutlookService:
 
     # ── API Key Support ─────────────────────────────────────────────────────
 
-    def store_api_key(self, user_id, api_key: str, description: str = "") -> None:
-        """Store Outlook API key with description in user_integrations table."""
-        if not self.db:
-            raise RuntimeError("db session required")
+    async def get_profile(self, user_id) -> Dict[str, Any]:
+        token = self._get_access_token(user_id)
+        if not token:
+            token = await self.refresh_token(user_id)
+        if not token:
+            raise RuntimeError("Outlook not connected")
+        return await self.fetch_profile(token)
 
-        # Get existing row to preserve credentials if they exist
-        row = self._get_integration_row(user_id)
-        existing_creds = row.get("credentials") or {} if row else {}
+    async def get_folders(self, user_id) -> Dict[str, Any]:
+        token = self._get_access_token(user_id)
+        if not token:
+            token = await self.refresh_token(user_id)
+        if not token:
+            raise RuntimeError("Outlook not connected")
 
-        # Update or add API key
-        existing_creds["api_key"] = api_key
-        existing_creds["description"] = description
-        existing_creds["auth_type"] = "api_key"
-
-        if row:
-            self.db.execute(
-                text(
-                    "UPDATE user_integrations SET "
-                    "credentials_encrypted = :creds, status = 'connected', "
-                    "connected_at = :now, updated_at = :now "
-                    "WHERE id = :row_id"
-                ),
-                {"creds": json.dumps(existing_creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{OUTLOOK_API_BASE}/me/mailFolders",
+                headers={"Authorization": f"Bearer {token}"},
             )
-        else:
-            self.db.execute(
-                text(
-                    "INSERT INTO user_integrations "
-                    "(id, user_id, status, credentials_encrypted, config, metadata, connected_at, created_at, updated_at) "
-                    "VALUES (:id, :user_id, 'connected', :creds, :config, :meta, :now, :now, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "user_id": str(user_id),
-                    "creds": json.dumps(existing_creds),
-                    "config": json.dumps({"type": INTEGRATION_TYPE}),
-                    "meta": json.dumps({"provider": "outlook", "auth_type": "api_key"}),
-                    "now": datetime.now(timezone.utc),
-                },
-            )
-        self.db.commit()
+            if resp.status_code == 401:
+                token = await self.refresh_token(user_id)
+                if not token:
+                    raise RuntimeError("Outlook token expired")
+                resp = await client.get(
+                    f"{OUTLOOK_API_BASE}/me/mailFolders",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            resp.raise_for_status()
+            return resp.json()
 
     # ── Internal ─────────────────────────────────────────────────────
+
+    def _get_catalog_integration(self) -> Integration:
+        integration = self.db.query(Integration).filter(Integration.slug == INTEGRATION_TYPE).first()
+        if not integration:
+            integration = Integration(
+                slug=INTEGRATION_TYPE,
+                name="Outlook / Office 365",
+                category="email",
+                short_description="Send and read mailbox data through Microsoft Graph delegated OAuth",
+                auth_type="oauth2",
+                is_active=True,
+                is_coming_soon=False,
+                credit_cost="Free",
+            )
+            self.db.add(integration)
+            self.db.flush()
+        return integration
 
     def _get_integration_row(self, user_id) -> Optional[Dict[str, Any]]:
         """Fetch the Outlook integration row from user_integrations."""
         if not self.db:
             return None
-        result = self.db.execute(
-            text(
-                "SELECT id, user_id, status, credentials_encrypted, config, metadata, connected_at "
-                "FROM user_integrations "
-                "WHERE user_id = :uid AND config->>'type' = :itype "
-                "LIMIT 1"
-            ),
-            {"uid": str(user_id), "itype": INTEGRATION_TYPE},
+        integration = self._get_catalog_integration()
+        model = (
+            self.db.query(UserIntegration)
+            .filter(
+                UserIntegration.user_id == self._user_uuid(user_id),
+                UserIntegration.integration_id == integration.id,
+            )
+            .first()
         )
-        row = result.mappings().first()
-        if not row:
+        if not model:
             return None
         creds = {}
-        if row.get("credentials_encrypted"):
+        if model.credentials_encrypted:
             try:
-                creds = json.loads(row["credentials_encrypted"]) if isinstance(row["credentials_encrypted"], str) else row["credentials_encrypted"]
-            except (json.JSONDecodeError, TypeError):
-                pass
+                creds = decrypt_credentials(model.credentials_encrypted)
+            except Exception:
+                try:
+                    creds = json.loads(model.credentials_encrypted)
+                except (json.JSONDecodeError, TypeError):
+                    pass
         return {
-            "id": str(row["id"]),
-            "status": row["status"],
+            "id": str(model.id),
+            "model": model,
+            "status": model.status,
             "credentials": creds,
-            "connected_at": row.get("connected_at"),
+            "connected_at": model.connected_at,
         }

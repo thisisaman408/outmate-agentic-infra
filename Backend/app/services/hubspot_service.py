@@ -1,28 +1,23 @@
-"""HubSpot CRM service — OAuth token management + contact/deal creation.
+"""HubSpot CRM service - user-owned OAuth and private app token support."""
 
-Stores tokens in the existing `user_integrations` table (JSONB credentials)
-so no ALTER TABLE on the users table is needed.
-"""
-
-import base64
-import hashlib
 import json
 import logging
-import secrets
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
+from uuid import UUID
 
 import httpx
-from sqlalchemy import text
+import jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.models.integration import Integration, UserIntegration
+from app.services.integration_engine.credential_vault import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger(__name__)
 
-# MCP Auth Apps use mcp-na2.hubspot.com, not app.hubspot.com
-HUBSPOT_AUTH_URL = "https://mcp-na2.hubspot.com/oauth/authorize/user"
+HUBSPOT_AUTH_URL = "https://app.hubspot.com/oauth/authorize"
 HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
 HUBSPOT_API_BASE = "https://api.hubapi.com"
 INTEGRATION_TYPE = "hubspot"
@@ -45,17 +40,40 @@ class HubSpotService:
     def is_available() -> bool:
         return bool(settings.HUBSPOT_CLIENT_ID and settings.HUBSPOT_CLIENT_SECRET)
 
+    @staticmethod
+    def _user_uuid(user_id):
+        return user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+
     def is_connected(self, user) -> Dict[str, Any]:
-        """Check if a user has connected their HubSpot account."""
         row = self._get_integration_row(user.id)
         if row and row["status"] == "connected":
             creds = row.get("credentials") or {}
             return {
                 "connected": True,
                 "portal_id": creds.get("portal_id"),
+                "auth_type": creds.get("auth_type", "oauth"),
                 "connected_at": str(row.get("connected_at", "")),
             }
         return {"connected": False, "portal_id": None, "connected_at": None}
+
+    @staticmethod
+    def build_state(user_id) -> str:
+        payload = {
+            "uid": str(user_id),
+            "provider": INTEGRATION_TYPE,
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        }
+        return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+    @staticmethod
+    def verify_state(state: str) -> Optional[str]:
+        try:
+            payload = jwt.decode(state, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+            if payload.get("provider") != INTEGRATION_TYPE:
+                return None
+            return payload.get("uid")
+        except Exception:
+            return None
 
     @classmethod
     def get_auth_url(cls, state: str = "") -> str:
@@ -63,13 +81,13 @@ class HubSpotService:
             "client_id": settings.HUBSPOT_CLIENT_ID,
             "redirect_uri": settings.HUBSPOT_REDIRECT_URI,
             "scope": " ".join(HUBSPOT_SCOPES),
-            "code_challenge": settings.HUBSPOT_PKCE_CHALLENGE,
-            "code_challenge_method": "S256",
         }
+        if settings.HUBSPOT_PKCE_CHALLENGE:
+            params["code_challenge"] = settings.HUBSPOT_PKCE_CHALLENGE
+            params["code_challenge_method"] = "S256"
         if state:
             params["state"] = state
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{HUBSPOT_AUTH_URL}?{query}"
+        return f"{HUBSPOT_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> Dict[str, Any]:
         data: Dict[str, str] = {
@@ -78,70 +96,65 @@ class HubSpotService:
             "client_secret": settings.HUBSPOT_CLIENT_SECRET,
             "redirect_uri": settings.HUBSPOT_REDIRECT_URI,
             "code": code,
-            "code_verifier": settings.HUBSPOT_PKCE_VERIFIER,
         }
+        if settings.HUBSPOT_PKCE_VERIFIER:
+            data["code_verifier"] = settings.HUBSPOT_PKCE_VERIFIER
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(HUBSPOT_TOKEN_URL, data=data)
             resp.raise_for_status()
             return resp.json()
 
     def store_tokens(self, user_id, token_data: Dict[str, Any]) -> None:
-        """Store HubSpot tokens in user_integrations table."""
         if not self.db:
             raise RuntimeError("db session required")
 
         creds = {
+            "auth_type": "oauth",
             "access_token": token_data.get("access_token"),
             "refresh_token": token_data.get("refresh_token"),
             "portal_id": str(token_data.get("hub_id") or token_data.get("hub-id") or ""),
             "expires_in": token_data.get("expires_in"),
+            "scope": token_data.get("scope"),
         }
 
+        integration = self._get_catalog_integration()
         row = self._get_integration_row(user_id)
+        encrypted = encrypt_credentials(creds)
+        now = datetime.now(timezone.utc)
+
         if row:
-            self.db.execute(
-                text(
-                    "UPDATE user_integrations SET "
-                    "credentials_encrypted = :creds, status = 'connected', "
-                    "connected_at = :now, updated_at = :now "
-                    "WHERE id = :row_id"
-                ),
-                {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
-            )
+            model = row["model"]
+            model.credentials_encrypted = encrypted
+            model.status = "connected"
+            model.error_message = None
+            model.config = {"type": INTEGRATION_TYPE, "auth_type": "oauth"}
+            model.extra_data = {"provider": INTEGRATION_TYPE, "portal_id": creds["portal_id"]}
+            model.connected_at = now
         else:
-            self.db.execute(
-                text(
-                    "INSERT INTO user_integrations "
-                    "(id, user_id, status, credentials_encrypted, config, metadata, connected_at, created_at, updated_at) "
-                    "VALUES (:id, :user_id, 'connected', :creds, :config, :meta, :now, :now, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "user_id": str(user_id),
-                    "creds": json.dumps(creds),
-                    "config": json.dumps({"type": INTEGRATION_TYPE}),
-                    "meta": json.dumps({"provider": "hubspot", "portal_id": creds["portal_id"]}),
-                    "now": datetime.now(timezone.utc),
-                },
+            self.db.add(
+                UserIntegration(
+                    user_id=self._user_uuid(user_id),
+                    integration_id=integration.id,
+                    status="connected",
+                    credentials_encrypted=encrypted,
+                    config={"type": INTEGRATION_TYPE, "auth_type": "oauth"},
+                    extra_data={"provider": INTEGRATION_TYPE, "portal_id": creds["portal_id"]},
+                    connected_at=now,
+                )
             )
         self.db.commit()
 
     def disconnect(self, user_id) -> None:
-        """Remove HubSpot tokens."""
         if not self.db:
             return
-        self.db.execute(
-            text(
-                "UPDATE user_integrations SET status = 'disconnected', "
-                "credentials_encrypted = NULL, updated_at = :now "
-                "WHERE user_id = :uid AND config->>'type' = :itype"
-            ),
-            {"uid": str(user_id), "itype": INTEGRATION_TYPE, "now": datetime.now(timezone.utc)},
-        )
+        row = self._get_integration_row(user_id)
+        if row:
+            row["model"].status = "disconnected"
+            row["model"].credentials_encrypted = None
+            row["model"].error_message = None
         self.db.commit()
 
     async def refresh_token(self, user_id) -> Optional[str]:
-        """Refresh the access token."""
         row = self._get_integration_row(user_id)
         if not row:
             return None
@@ -166,13 +179,7 @@ class HubSpotService:
                 if data.get("refresh_token"):
                     creds["refresh_token"] = data["refresh_token"]
                 if self.db:
-                    self.db.execute(
-                        text(
-                            "UPDATE user_integrations SET credentials_encrypted = :creds, updated_at = :now "
-                            "WHERE id = :row_id"
-                        ),
-                        {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
-                    )
+                    row["model"].credentials_encrypted = encrypt_credentials(creds)
                     self.db.commit()
                 return data["access_token"]
         except Exception as exc:
@@ -183,48 +190,44 @@ class HubSpotService:
         row = self._get_integration_row(user_id)
         if not row:
             return None
-        # Check for OAuth access token first, then API key
         creds = row.get("credentials") or {}
-        if creds.get("access_token"):
-            return creds.get("access_token")
-        return creds.get("api_key")
+        return creds.get("access_token") or creds.get("api_key")
 
     def store_api_key(self, user_id, api_key: str, description: str = "") -> None:
-        """Store HubSpot API key with description in user_integrations table."""
+        """Store the user's own HubSpot private app access token."""
         if not self.db:
             raise RuntimeError("db session required")
 
         creds = {
+            "auth_type": "private_app_token",
             "api_key": api_key,
             "description": description,
         }
 
+        integration = self._get_catalog_integration()
         row = self._get_integration_row(user_id)
+        encrypted = encrypt_credentials(creds)
+        now = datetime.now(timezone.utc)
+
         if row:
-            self.db.execute(
-                text(
-                    "UPDATE user_integrations SET "
-                    "credentials_encrypted = :creds, status = 'connected', "
-                    "connected_at = :now, updated_at = :now "
-                    "WHERE id = :row_id"
-                ),
-                {"creds": json.dumps(creds), "now": datetime.now(timezone.utc), "row_id": row["id"]},
-            )
+            model = row["model"]
+            model.credentials_encrypted = encrypted
+            model.status = "connected"
+            model.error_message = None
+            model.config = {"type": INTEGRATION_TYPE, "auth_type": "private_app_token"}
+            model.extra_data = {"provider": INTEGRATION_TYPE, "auth_type": "private_app_token"}
+            model.connected_at = now
         else:
-            self.db.execute(
-                text(
-                    "INSERT INTO user_integrations "
-                    "(id, user_id, status, credentials_encrypted, config, metadata, connected_at, created_at, updated_at) "
-                    "VALUES (:id, :user_id, 'connected', :creds, :config, :meta, :now, :now, :now)"
-                ),
-                {
-                    "id": str(uuid4()),
-                    "user_id": str(user_id),
-                    "creds": json.dumps(creds),
-                    "config": json.dumps({"type": INTEGRATION_TYPE}),
-                    "meta": json.dumps({"provider": "hubspot", "auth_type": "api_key"}),
-                    "now": datetime.now(timezone.utc),
-                },
+            self.db.add(
+                UserIntegration(
+                    user_id=self._user_uuid(user_id),
+                    integration_id=integration.id,
+                    status="connected",
+                    credentials_encrypted=encrypted,
+                    config={"type": INTEGRATION_TYPE, "auth_type": "private_app_token"},
+                    extra_data={"provider": INTEGRATION_TYPE, "auth_type": "private_app_token"},
+                    connected_at=now,
+                )
             )
         self.db.commit()
 
@@ -232,107 +235,69 @@ class HubSpotService:
         row = self._get_integration_row(user_id)
         if not row:
             raise RuntimeError("HubSpot not connected")
-        
+
         creds = row.get("credentials") or {}
-        auth_type = creds.get("auth_type", "oauth")
-        
-        if auth_type == "api_key" or "api_key" in creds:
-            # Use API key authentication
+        if creds.get("auth_type") in ("api_key", "private_app_token") or "api_key" in creds:
             api_key = creds.get("api_key")
             if not api_key:
-                raise RuntimeError("HubSpot API key not found")
-            
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={"properties": properties},
-                )
-                resp.raise_for_status()
-                return resp.json()
-        else:
-            # Use OAuth authentication
-            token = creds.get("access_token")
-            if not token:
-                token = await self.refresh_token(user_id)
-            if not token:
-                raise RuntimeError("HubSpot not connected")
+                raise RuntimeError("HubSpot private app token not found")
+            return await self._create_contact_with_token(api_key, properties, refresh_user_id=None)
 
-            async with httpx.AsyncClient(timeout=15) as client:
+        token = creds.get("access_token") or await self.refresh_token(user_id)
+        if not token:
+            raise RuntimeError("HubSpot not connected")
+        return await self._create_contact_with_token(token, properties, refresh_user_id=user_id)
+
+    async def _create_contact_with_token(
+        self,
+        token: str,
+        properties: Dict[str, str],
+        refresh_user_id=None,
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"properties": properties},
+            )
+            if resp.status_code == 401 and refresh_user_id is not None:
+                token = await self.refresh_token(refresh_user_id)
+                if not token:
+                    raise RuntimeError("HubSpot token expired")
                 resp = await client.post(
                     f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                     json={"properties": properties},
                 )
-                if resp.status_code == 401:
-                    token = await self.refresh_token(user_id)
-                    if not token:
-                        raise RuntimeError("HubSpot token expired")
-                    resp = await client.post(
-                        f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
-                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                        json={"properties": properties},
-                    )
-                resp.raise_for_status()
-                return resp.json()
+            resp.raise_for_status()
+            return resp.json()
 
     async def search_contact(self, user_id, email: str) -> Optional[Dict[str, Any]]:
         row = self._get_integration_row(user_id)
         if not row:
             return None
-        
-        creds = row.get("credentials") or {}
-        auth_type = creds.get("auth_type", "oauth")
-        
-        if auth_type == "api_key" or "api_key" in creds:
-            # Use API key authentication
-            api_key = creds.get("api_key")
-            if not api_key:
-                return None
-            
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "filterGroups": [{
-                            "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
-                        }]
-                    },
-                )
-                if resp.status_code == 200:
-                    results = resp.json().get("results", [])
-                    return results[0] if results else None
-            return None
-        else:
-            # Use OAuth authentication
-            token = creds.get("access_token")
-            if not token:
-                token = await self.refresh_token(user_id)
-            if not token:
-                return None
 
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={
-                        "filterGroups": [{
-                            "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
-                        }]
-                    },
-                )
-                if resp.status_code == 200:
-                    results = resp.json().get("results", [])
-                    return results[0] if results else None
+        creds = row.get("credentials") or {}
+        token = creds.get("api_key") or creds.get("access_token") or await self.refresh_token(user_id)
+        if not token:
+            return None
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "filterGroups": [{
+                        "filters": [{"propertyName": "email", "operator": "EQ", "value": email}]
+                    }]
+                },
+            )
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                return results[0] if results else None
             return None
 
     async def list_contact_lists(self, user_id, limit: int = 50) -> List[Dict[str, Any]]:
-        """Return all HubSpot contact lists the user can see.
-
-        Uses HubSpot's v3 lists endpoint.  Each result has {listId, name,
-        processingType, additionalProperties}.
-        """
         token = await self._get_or_refresh_token(user_id)
         if not token:
             return []
@@ -351,11 +316,6 @@ class HubSpotService:
     async def list_contacts_in_list(
         self, user_id, list_id: str, limit: int = 200
     ) -> List[Dict[str, Any]]:
-        """Return contacts in a specific HubSpot list.
-
-        Calls GET /crm/v3/lists/{listId}/memberships then fetches contact
-        details in bulk to get phone + company properties.
-        """
         token = await self._get_or_refresh_token(user_id)
         if not token:
             return []
@@ -386,39 +346,56 @@ class HubSpotService:
             return batch_resp.json().get("results", [])
 
     async def _get_or_refresh_token(self, user_id) -> Optional[str]:
-        """Get a valid token, refreshing if the stored one is expired."""
         token = self._get_access_token(user_id)
         if token:
             return token
         return await self.refresh_token(user_id)
 
-    # ── Internal ─────────────────────────────────────────────────────
+    def _get_catalog_integration(self) -> Integration:
+        integration = self.db.query(Integration).filter(Integration.slug == INTEGRATION_TYPE).first()
+        if not integration:
+            integration = Integration(
+                slug=INTEGRATION_TYPE,
+                name="HubSpot",
+                category="crm",
+                short_description="Connect each user's own HubSpot portal for CRM sync",
+                auth_type="oauth2",
+                is_active=True,
+                is_coming_soon=False,
+                credit_cost="Free",
+            )
+            self.db.add(integration)
+            self.db.flush()
+        return integration
 
     def _get_integration_row(self, user_id) -> Optional[Dict[str, Any]]:
-        """Fetch the HubSpot integration row from user_integrations."""
         if not self.db:
             return None
-        result = self.db.execute(
-            text(
-                "SELECT id, user_id, status, credentials_encrypted, config, metadata, connected_at "
-                "FROM user_integrations "
-                "WHERE user_id = :uid AND config->>'type' = :itype "
-                "LIMIT 1"
-            ),
-            {"uid": str(user_id), "itype": INTEGRATION_TYPE},
+        integration = self._get_catalog_integration()
+        model = (
+            self.db.query(UserIntegration)
+            .filter(
+                UserIntegration.user_id == self._user_uuid(user_id),
+                UserIntegration.integration_id == integration.id,
+            )
+            .first()
         )
-        row = result.mappings().first()
-        if not row:
+        if not model:
             return None
+
         creds = {}
-        if row.get("credentials_encrypted"):
+        if model.credentials_encrypted:
             try:
-                creds = json.loads(row["credentials_encrypted"]) if isinstance(row["credentials_encrypted"], str) else row["credentials_encrypted"]
-            except (json.JSONDecodeError, TypeError):
-                pass
+                creds = decrypt_credentials(model.credentials_encrypted)
+            except Exception:
+                try:
+                    creds = json.loads(model.credentials_encrypted)
+                except (json.JSONDecodeError, TypeError):
+                    pass
         return {
-            "id": str(row["id"]),
-            "status": row["status"],
+            "id": str(model.id),
+            "model": model,
+            "status": model.status,
             "credentials": creds,
-            "connected_at": row.get("connected_at"),
+            "connected_at": model.connected_at,
         }

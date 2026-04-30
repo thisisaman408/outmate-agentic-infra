@@ -450,7 +450,11 @@ export const integrationsApi = {
     if (!response.ok) {
       throw new Error("Failed to disconnect Slack")
     }
-    return response.json()
+    const data = await response.json()
+    return {
+      success: data.success ?? true,
+      message: data.message ?? "Slack disconnected successfully",
+    }
   },
 
   // Discord methods

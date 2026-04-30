@@ -480,14 +480,14 @@ async def hubspot_get_auth_url(user: User = Depends(get_current_user)):
     """Get the HubSpot OAuth authorization URL."""
     if not HubSpotService.is_available():
         raise HTTPException(status_code=400, detail="HubSpot integration is not configured")
-    return {"auth_url": HubSpotService.get_auth_url()}
+    return {"auth_url": HubSpotService.get_auth_url(HubSpotService.build_state(user.id))}
 
 @router.get("/outlook/auth-url")
 async def outlook_get_auth_url(user: User = Depends(get_current_user)):
     """Get the Outlook OAuth authorization URL."""
     if not OutlookService.is_available():
         raise HTTPException(status_code=400, detail="Outlook integration is not configured")
-    return {"auth_url": OutlookService.get_auth_url()}
+    return {"auth_url": OutlookService.get_auth_url(OutlookService.build_state(user.id))}
 
 @router.post("/hubspot/callback")
 async def hubspot_callback(
@@ -517,7 +517,7 @@ async def outlook_callback(
     try:
         service = OutlookService(db)
         token_data = await service.exchange_code(code, state)
-        service.store_tokens(user.id, token_data)
+        await service.store_tokens(user.id, token_data)
         return {"success": True, "message": "Outlook connected successfully"}
     except Exception as e:
         logger.error(f"Outlook callback error: {e}")
@@ -763,21 +763,11 @@ async def outlook_store_api_key(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Store Outlook API key with description."""
-    try:
-        service = OutlookService(db)
-        service.store_api_key(user.id, api_key, description)
-
-        # Update user integrations status
-        ints = user.integrations or {}
-        ints["outlook"] = {"connected": True, "skipped": False}
-        user.integrations = ints
-        db.commit()
-
-        return {"success": True, "message": "Outlook API key connected successfully"}
-    except Exception as e:
-        logger.error(f"Outlook API key error: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to connect Outlook API key: {str(e)}")
+    """Outlook uses Microsoft delegated OAuth, not pasted Graph tokens."""
+    raise HTTPException(
+        status_code=400,
+        detail="Outlook / Office 365 must be connected with Microsoft OAuth so each user authorizes their own mailbox.",
+    )
 
 # ── Add to CRM Endpoints ─────────────────────────────────────
 
@@ -888,6 +878,32 @@ async def outlook_get_emails(
         logger.error(f"Outlook get emails error: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to get emails: {str(e)}")
 
+@router.get("/outlook/profile")
+async def outlook_get_profile(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get the connected Microsoft Graph profile."""
+    try:
+        service = OutlookService(db)
+        return await service.get_profile(user.id)
+    except Exception as e:
+        logger.error(f"Outlook profile error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to get Outlook profile: {str(e)}")
+
+@router.get("/outlook/folders")
+async def outlook_get_folders(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get the connected mailbox folders."""
+    try:
+        service = OutlookService(db)
+        return await service.get_folders(user.id)
+    except Exception as e:
+        logger.error(f"Outlook folders error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to get Outlook folders: {str(e)}")
+
 # ── Slack OAuth ─────────────────────────────────────────────
 
 @router.get("/slack/auth-url")
@@ -933,6 +949,38 @@ async def slack_disconnect(
         ints = user.integrations or {}
         ints["slack"] = {"connected": False, "skipped": False}
         user.integrations = ints
+
+        # Also disconnect the marketplace Slack webhook integration. The
+        # Integrations page connects Slack through the v2 catalog, while this
+        # legacy route still owns the exact /slack/disconnect path.
+        try:
+            from app.db.models.integration import Integration, UserIntegration
+            from app.db.models.copilot_preferences import CopilotUserPreferences
+
+            integration = db.query(Integration).filter(Integration.slug == "slack").first()
+            if integration:
+                user_conn = (
+                    db.query(UserIntegration)
+                    .filter(
+                        UserIntegration.user_id == user.id,
+                        UserIntegration.integration_id == integration.id,
+                    )
+                    .first()
+                )
+                if user_conn:
+                    db.delete(user_conn)
+
+            prefs = (
+                db.query(CopilotUserPreferences)
+                .filter(CopilotUserPreferences.user_id == user.id)
+                .first()
+            )
+            if prefs:
+                prefs.slack_webhook_url = None
+                prefs.notify_slack = False
+        except Exception as cleanup_error:
+            logger.warning("Slack marketplace cleanup failed: %s", cleanup_error)
+
         db.commit()
 
         return {"success": True, "message": "Slack disconnected successfully"}

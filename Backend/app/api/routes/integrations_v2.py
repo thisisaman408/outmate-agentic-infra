@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from starlette.responses import RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse
 
 from app.api.deps.auth import get_current_user
 from app.core.config import settings
@@ -30,6 +30,8 @@ from app.db.models.copilot_preferences import CopilotUserPreferences
 from app.services.integration_engine.registry import IntegrationRegistry
 from app.services.integration_engine.credential_vault import encrypt_credentials
 from app.services.crm_oauth_service import CrmOAuthService
+from app.services.hubspot_service import HubSpotService
+from app.services.outlook_service import OutlookService
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +389,69 @@ async def oauth_callback(
 
     frontend_base = settings.APP_WEBHOOK_URL
     return RedirectResponse(url=f"{frontend_base}/integrations?oauth=success&provider={slug}")
+
+
+@public_router.get("/outlook/callback")
+async def outlook_oauth_callback(
+    code: str,
+    state: str,
+    db: Session = Depends(get_db),
+):
+    """Public Microsoft OAuth callback for Outlook / Office 365."""
+    user_id = OutlookService.verify_state(state)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid Outlook OAuth state")
+
+    service = OutlookService(db)
+    try:
+        token_data = await service.exchange_code(code, state)
+        await service.store_tokens(user_id, token_data)
+    except Exception as exc:
+        logger.error("Outlook OAuth callback failed: %s", exc)
+        return HTMLResponse(
+            "<script>window.opener?.postMessage({type:'outmate-oauth',provider:'outlook',status:'error'}, '*'); window.close();</script>"
+            "<p>Outlook connection failed. You can close this window.</p>"
+        )
+
+    return HTMLResponse(
+        "<script>window.opener?.postMessage({type:'outmate-oauth',provider:'outlook',status:'success'}, '*'); window.close();</script>"
+        "<p>Outlook connected. You can close this window.</p>"
+    )
+
+
+@public_router.get("/hubspot/callback")
+async def hubspot_oauth_callback(
+    code: str,
+    state: str,
+    db: Session = Depends(get_db),
+):
+    """Public HubSpot OAuth callback for users connecting their own portal."""
+    user_id = HubSpotService.verify_state(state)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid HubSpot OAuth state")
+
+    service = HubSpotService(db)
+    try:
+        token_data = await service.exchange_code(code, state)
+        service.store_tokens(user_id, token_data)
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            ints = user.integrations or {}
+            ints["hubspot"] = {"connected": True, "skipped": False}
+            user.integrations = ints
+            db.commit()
+    except Exception as exc:
+        logger.error("HubSpot OAuth callback failed: %s", exc)
+        return HTMLResponse(
+            "<script>window.opener?.postMessage({type:'outmate-oauth',provider:'hubspot',status:'error'}, '*'); window.close();</script>"
+            "<p>HubSpot connection failed. You can close this window.</p>"
+        )
+
+    return HTMLResponse(
+        "<script>window.opener?.postMessage({type:'outmate-oauth',provider:'hubspot',status:'success'}, '*'); window.close();</script>"
+        "<p>HubSpot connected. You can close this window.</p>"
+    )
 
 
 @router.get("/{slug}/status")

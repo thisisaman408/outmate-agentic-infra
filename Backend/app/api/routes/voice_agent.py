@@ -551,9 +551,38 @@ async def _run_crm_followup(
     # 4. Slack alert for booked contacts
     if crm.get("slack_booked_alert") and call_result.get("call_status") == "registered":
         try:
-            from app.core.redis import RedisManager
-            # Post to Slack via webhook (if configured in user integrations)
-            logger.info(f"Slack alert: {req.prospect_name} booked via voice call")
+            from app.db.models.copilot_preferences import CopilotUserPreferences
+            from app.services.copilot.notification_service import NotificationService
+
+            prefs = (
+                db.query(CopilotUserPreferences)
+                .filter(CopilotUserPreferences.user_id == user.id)
+                .first()
+            )
+            if not prefs or not prefs.notify_slack or not prefs.slack_webhook_url:
+                logger.info("Slack booked-call alert skipped: Slack is not connected for user %s", user.id)
+                return
+
+            notifier = NotificationService()
+            notifier.send_slack_blocks(
+                webhook_url=prefs.slack_webhook_url,
+                text=f"Voice Agent booked a meeting with {req.prospect_name}",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"*Voice Agent booked a meeting*\n"
+                                f"*Prospect:* {req.prospect_name}\n"
+                                f"*Company:* {req.prospect_company or 'Unknown'}\n"
+                                f"*Objective:* {req.call_objective}"
+                            ),
+                        },
+                    }
+                ],
+            )
+            logger.info("Slack booked-call alert sent for %s", req.prospect_name)
         except Exception as e:
             logger.debug(f"Slack alert skipped: {e}")
 

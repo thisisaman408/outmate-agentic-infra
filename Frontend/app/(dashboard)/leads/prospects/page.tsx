@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { searchProspects, type ProspectProfile, type ProspectSearchFilters } from "@/lib/services/prospectService"
+import { unifiedDataService } from "@/lib/services/unified-data-service"
 import { toast } from "sonner"
 import { Separator } from "@/components/ui/separator"
 import { ProspectsResultsTable } from "@/components/leads/prospects/prospects-results-table"
@@ -718,9 +719,19 @@ export default function PeoplePage() {
         recently_changed_jobs: activeSignals["Job change signal"] ? true : undefined,
         limit: 50,
       }
-      const res = await searchProspects(filters)
-      // Map backend response to match frontend interface
-      const mappedProfiles = res.profiles.map((p: any) => {
+
+      // Use unified data service with Brightdata integration and fallback
+      console.log('🔍 Starting search with filters:', filters)
+      const result = await unifiedDataService.searchPeopleWithRetry(filters, {
+        useBrightdata: true,
+        enableFallback: true,
+        timeout: 15000 // 15 seconds timeout
+      }, 2) // 2 retries
+      console.log('📊 Search result:', result)
+      console.log('📊 Raw data sample:', result.data?.slice(0, 2))
+
+      // Transform data to match expected format
+      const mappedProfiles = result.data.map((p: any) => {
         // Parse location string into components
         const locationParts = (p.location || '').split(',').map((part: string) => part.trim())
         const locationDetails = {
@@ -730,20 +741,20 @@ export default function PeoplePage() {
           continent: '',
         }
 
-        // Transform employer array to current_employers
-        const currentEmployers = Array.isArray(p.employer) ? p.employer.map((e: any) => ({
-          name: e.company_name || e.name || '',
-          company_name: e.company_name || e.name || '',
-          title: e.title || '',
-          linkedin_id: e.company_linkedin_id || '',
-          company_id: e.company_linkedin_id || '',
-          company_linkedin_id: e.company_linkedin_id || '',
+        // Create current employer from company field
+        const currentEmployers = p.company ? [{
+          name: p.company,
+          company_name: p.company,
+          title: p.title || '',
+          linkedin_id: '',
+          company_id: 0,
+          company_linkedin_id: '',
           company_website_domain: '',
-          position_id: e.position_id || 0,
-          description: e.description || '',
-          location: e.location || '',
-          start_date: e.start_date || '',
-          end_date: e.end_date,
+          position_id: 0,
+          description: '',
+          location: p.location || '',
+          start_date: '',
+          end_date: undefined,
           employer_is_default: true,
           seniority_level: '',
           function_category: '',
@@ -760,18 +771,49 @@ export default function PeoplePage() {
           company_website: '',
           company_linkedin_profile_url: '',
           business_email_verified: false,
-        })) : []
+        }] : []
 
         return {
-          ...p,
-          current_employers: currentEmployers,
-          past_employers: [], // Backend doesn't provide past employers in this response
-          location_details: p.location_details || locationDetails,
+          person_id: p.id || 0,
+          name: p.name || '',
+          first_name: p.firstName || '',
+          last_name: p.lastName || '',
           region: p.location || locationDetails.country || '',
-          years_of_experience: '', // Backend doesn't provide this field
+          region_address_components: [],
+          headline: p.title || '',
+          summary: p.summary || '',
+          skills: p.skills || [],
+          languages: [],
+          linkedin_profile_url: p.linkedin || '',
+          Social_profile_url: '',
+          flagship_profile_url: '',
+          emails: p.email ? [p.email] : [],
+          profile_picture_url: '',
+          profile_picture_permalink: '',
+          twitter_handle: '',
+          num_of_connections: 0,
+          education_background: [],
+          honors: [],
+          certifications: [],
+          current_employers: currentEmployers,
+          past_employers: [],
+          last_updated: new Date().toISOString(),
+          recently_changed_jobs: false,
+          years_of_experience: p.experience || '',
           years_of_experience_raw: 0,
+          all_employers: currentEmployers,
+          updated_at: new Date().toISOString(),
+          location_details: locationDetails,
+          // Additional fields for card display
+          id: p.id,
+          title: p.title,
+          company: p.company,
+          location: p.location,
+          email: p.email,
+          phone: p.phone,
         }
       })
+
       console.log('Prospect search results sample:', mappedProfiles.slice(0, 2).map(p => ({
         name: p.name,
         current_employers: p.current_employers,
@@ -780,15 +822,23 @@ export default function PeoplePage() {
         years_of_experience: p.years_of_experience,
         years_of_experience_raw: p.years_of_experience_raw,
       })))
+
       setProspects(mappedProfiles)
-      setTotalCount(res.total_count)
+      setTotalCount(result.total)
       // Calculate new count (prospects with recent job changes)
       const newProspects = mappedProfiles.filter(p => p.recently_changed_jobs).length
       setNewCount(newProspects)
       // TODO: Fetch actual saved searches count from API
       setSavedCount(0) // Placeholder until saved searches API is implemented
       // Persist for profile page
-      try { localStorage.setItem("prospect_search_results", JSON.stringify(res.profiles)) } catch {}
+      try { localStorage.setItem("prospect_search_results", JSON.stringify(result.data)) } catch {}
+      
+      // Show data source info to user
+      if (result.source === 'brightdata') {
+        toast.success('People search completed using Brightdata dataset')
+      } else {
+        toast.info('People search completed using fallback API')
+      }
     } catch (err) {
       toast.error("Failed to fetch prospects")
     } finally {
@@ -799,7 +849,7 @@ export default function PeoplePage() {
   const exampleChips = ["VP Sales · Series A SaaS · EU", "CRO at recently funded fintech", "Head of Growth · dev tools · US", "GTM leaders who changed jobs last 30 days", "RevOps leads using HubSpot · 100–500 emp.", "Founders at AI SaaS · raised last 6 months"]
 
   return (
-    <div className="flex h-full overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Filter Sidebar */}
       <aside className="w-[280px] min-w-[280px] h-full flex flex-col bg-card border-r border-border">
         {/* Quick Search */}
@@ -1137,8 +1187,8 @@ export default function PeoplePage() {
 
         {/* NLP Search Land */}
         {view === "nlp" && (
-          <div className="flex-1 flex flex-col items-center justify-center px-8 bg-gradient-to-b from-background to-muted/10">
-            <div className="w-full max-w-[720px] -mt-20 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-background to-muted/10">
+            <div className="w-full max-w-[720px] text-center">
                             <h1 className="text-3xl font-black tracking-tighter text-foreground mb-4">
                 Use Outmate AI to find the right people.
               </h1>
@@ -1203,7 +1253,7 @@ export default function PeoplePage() {
         {view === "results" && (
           <div className="flex-1 flex flex-col min-w-0 bg-background">
             {/* Search Header */}
-            <div className="px-6 py-4 border-b border-border">
+            <div className="py-4 border-b border-border">
               <div className="flex items-center gap-4 mb-4">
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/40" strokeWidth={2} />
@@ -1275,7 +1325,7 @@ export default function PeoplePage() {
             <div className="flex-1 overflow-y-auto p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {prospects.slice(0, 9).map((prospect, index) => (
-                  <div key={prospect.id || index} className="bg-card border border-border rounded-xl p-4 hover:shadow-lg transition-shadow">
+                  <div key={prospect.person_id || index} className="bg-card border border-border rounded-xl p-4 hover:shadow-lg transition-shadow">
                     {/* Header */}
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -1284,7 +1334,7 @@ export default function PeoplePage() {
                         </div>
                         <div>
                           <h3 className="font-bold text-sm text-foreground">{prospect.name || 'John Doe'}</h3>
-                          <p className="text-xs text-muted-foreground">{prospect.title || 'VP of Sales'}</p>
+                          <p className="text-xs text-muted-foreground">{prospect.headline || 'VP of Sales'}</p>
                         </div>
                       </div>
                       <button className="w-6 h-6 rounded-full hover:bg-muted/50 flex items-center justify-center transition-colors">
@@ -1295,13 +1345,13 @@ export default function PeoplePage() {
                     {/* Company Info */}
                     <div className="flex items-center gap-2 mb-3">
                       <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span className="text-sm font-medium text-foreground">{prospect.company || 'Tech Corp'}</span>
+                      <span className="text-sm font-medium text-foreground">{prospect.current_employers?.[0]?.name || 'Tech Corp'}</span>
                     </div>
 
                     {/* Location */}
                     <div className="flex items-center gap-2 mb-4">
                       <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">{prospect.location || 'San Francisco, CA'}</span>
+                      <span className="text-sm text-muted-foreground">{prospect.region || prospect.location_details?.city || 'San Francisco, CA'}</span>
                     </div>
 
                     {/* Contact Actions */}
