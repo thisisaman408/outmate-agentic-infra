@@ -679,11 +679,22 @@ export default function OnboardingPage() {
                       <div className="space-y-4">
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                            {selectedCRM === 'slack' ? 'Webhook URL' : 'API Key / Access Token'}
+                            {selectedCRM === 'slack' ? 'Webhook URL' : 
+                             selectedCRM === 'hubspot' ? 'HubSpot Private App Access Token' : 
+                             'API Key / Access Token'}
                           </label>
+                          {selectedCRM === 'hubspot' && (
+                            <p className="text-[11px] text-slate-500 font-medium mb-2">
+                              Go to Settings → Integrations → Private Apps to create your token.
+                            </p>
+                          )}
                           <Input
-                            placeholder={selectedCRM === 'slack' ? "https://hooks.slack.com/services/..." : "Enter your key..."}
-                            type={selectedCRM === 'slack' ? "text" : "password"}
+                            placeholder={
+                              selectedCRM === 'slack' ? "https://hooks.slack.com/services/..." : 
+                              selectedCRM === 'hubspot' ? "Paste your HubSpot private app access" :
+                              "Enter your key..."
+                            }
+                            type={selectedCRM === 'slack' || selectedCRM === 'hubspot' ? "text" : "password"}
                             value={crmValue}
                             onChange={(e) => setCrmValue(e.target.value)}
                             className="h-11 border-gray-200 bg-white font-bold text-sm"
