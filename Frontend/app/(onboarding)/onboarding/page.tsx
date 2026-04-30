@@ -467,28 +467,11 @@ export default function OnboardingPage() {
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                     <span className="text-[11px] font-black text-slate-600 uppercase tracking-widest">Live Listener Active</span>
                   </div>
-
-                  <button
-                    onClick={() => {
-                      setVisitorState('demo');
-                      setFirstVisitor({
-                        company: "DeepMind Technologies",
-                        domain: "deepmind.com",
-                        industry: "Artificial Intelligence",
-                        intent_score: 0.95,
-                        full_name: "Demis Hassabis",
-                        job_title: "CEO & Founder"
-                      });
-                    }}
-                    className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest transition-all"
-                  >
-                    Don't want to wait? Skip to demo lead →
-                  </button>
                 </div>
               </motion.div>
             )}
 
-            {(visitorState === 'found' || visitorState === 'demo') && firstVisitor && (
+            {visitorState === 'found' && firstVisitor && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -499,7 +482,7 @@ export default function OnboardingPage() {
                     <Trophy className="h-4 w-4 text-green-600" />
                     <span className="text-xs font-black text-green-700 uppercase tracking-wider">First Lead Captured</span>
                   </div>
-                  <h3 className="text-2xl font-black text-[#111827]">{visitorState === 'demo' ? "We found a high-intent visitor for you" : "Boom! We caught someone."}</h3>
+                  <h3 className="text-2xl font-black text-[#111827]">Boom! We caught someone.</h3>
                 </div>
 
                 <div className="bg-white border-2 border-indigo-50 rounded-[2rem] p-8 shadow-2xl shadow-indigo-100/50 relative overflow-hidden group">
