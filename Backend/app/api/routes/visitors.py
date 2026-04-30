@@ -849,32 +849,6 @@ async def get_first_success_visitor(current_user: User = Depends(get_current_use
                 
         return {"status": "success", "visitor": visitor}
 
-    # Demo Fallback: If user has been in onboarding for > 15 mins, return a realistic demo card
-    # (Checking user created_at vs now)
-    now = datetime.now(timezone.utc)
-    user_age = (now - current_user.created_at.replace(tzinfo=timezone.utc)).total_seconds()
-    
-    if user_age > 900: # 15 minutes
-        return {
-            "status": "demo",
-            "visitor": {
-                "id": "demo-1",
-                "company": "DeepMind Technologies",
-                "domain": "deepmind.com",
-                "full_name": "Demis Hassabis",
-                "job_title": "CEO & Founder",
-                "email": "demis@deepmind.com",
-                "intent_score": 0.95,
-                "created_at": now.isoformat(),
-                "geo": {"city": "London", "country": "UK"},
-                "industry": "Artificial Intelligence",
-                "employee_count_range": "1001-5000",
-                "source_site": "deepmind.com",
-                "matched": True,
-                "is_demo": True
-            }
-        }
-
     return {"status": "waiting"}
 
 

@@ -243,6 +243,29 @@ async def connect_integration(
             
         # Fallback to manual API Key if provided by user to bypass OAuth (for free tiers)
         if body.api_key:
+            # --- HubSpot Validation ---
+            if slug == "hubspot":
+                import httpx
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        # Test the token by fetching 1 contact
+                        resp = await client.get(
+                            "https://api.hubapi.com/crm/v3/objects/contacts",
+                            headers={"Authorization": f"Bearer {body.api_key}"},
+                            params={"limit": 1}
+                        )
+                        if resp.status_code != 200:
+                            logger.warning(f"HubSpot token validation failed: {resp.status_code} - {resp.text}")
+                            raise HTTPException(
+                                status_code=400, 
+                                detail="Invalid HubSpot Private App Token. Please check the token and permissions (scopes) in HubSpot."
+                            )
+                        logger.info(f"HubSpot token validated successfully for user {user.id}")
+                except httpx.RequestError as exc:
+                    logger.error(f"HubSpot connection error during validation: {exc}")
+                    raise HTTPException(status_code=502, detail="Could not reach HubSpot API to validate token")
+            # --- End Validation ---
+
             encrypted = encrypt_credentials({"access_token": body.api_key})
             if existing:
                 existing.credentials_encrypted = encrypted
