@@ -350,28 +350,22 @@ async def track_visitor(request: Request):
 
         intent_score = _compute_intent_score(url)
 
-        # Redis deduplication (skip for identified visitors)
+        # Redis deduplication (skip for identified visitors).
+        # Keyed on (org, fingerprint-or-ip, url) so a page reload on the same
+        # URL within the dedupe window collapses, but navigation to a different
+        # URL or a reload after the window register as new visits.
         if not email:
             try:
                 dedupe_seconds = settings.VISITOR_DEDUPE_SECONDS
                 if dedupe_seconds > 0:
                     redis_client = RedisManager.get_client()
                     if redis_client is not None:
-                        domain = urlparse(url).netloc
                         fp = data.get("fp")
-                        # Use fingerprint when available (handles shared NAT/VPN).
-                        # Fingerprint dedup window is longer (4h) since fp is more
-                        # precise than IP — same person, different pages = dedup.
-                        if fp:
-                            fp_key = f"visits:{site_config.org_id}:fp:{fp}"
-                            if await redis_client.get(fp_key):
-                                return {"status": "deduplicated"}
-                            await redis_client.setex(fp_key, dedupe_seconds * 4, "1")
-                        else:
-                            dedupe_key = f"visits:{site_config.org_id}:{ip}:{domain}"
-                            if await redis_client.get(dedupe_key):
-                                return {"status": "deduplicated"}
-                            await redis_client.setex(dedupe_key, dedupe_seconds, "1")
+                        identity_token = fp or ip
+                        dedupe_key = f"visits:{site_config.org_id}:{identity_token}:{url}"
+                        if await redis_client.get(dedupe_key):
+                            return {"status": "deduplicated"}
+                        await redis_client.setex(dedupe_key, dedupe_seconds, "1")
             except Exception as e:
                 logger.warning("Redis deduplication failed: %s", e)
 
