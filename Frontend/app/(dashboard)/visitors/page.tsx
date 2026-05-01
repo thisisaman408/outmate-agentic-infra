@@ -313,6 +313,9 @@ export default function VisitorsPage() {
   const [revealedContacts, setRevealedContacts] = useState<Set<string>>(new Set())
   const [trackingOpen, setTrackingOpen] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(false)
+  const [slackWebhook, setSlackWebhook] = useState("")
+  const [otherWebhooks, setOtherWebhooks] = useState<string[]>([])
+  const [savingWebhook, setSavingWebhook] = useState(false)
 
   // Core Data State
   const [visits, setVisits] = useState<Visit[]>([])
@@ -352,6 +355,44 @@ export default function VisitorsPage() {
       if (res.ok) setAnalytics(await res.json())
     } catch { } finally { setAnalyticsLoading(false) }
   }, [])
+
+  const loadWebhooks = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
+      if (!res.ok) return
+      const cfg = await res.json()
+      const urls: string[] = Array.isArray(cfg.webhook_urls) ? cfg.webhook_urls : []
+      const slack = urls.find((u) => u.includes("hooks.slack.com")) || ""
+      setSlackWebhook(slack)
+      setOtherWebhooks(urls.filter((u) => !u.includes("hooks.slack.com")))
+    } catch { }
+  }, [])
+
+  const saveSlackWebhook = useCallback(async () => {
+    setSavingWebhook(true)
+    try {
+      const trimmed = slackWebhook.trim()
+      if (trimmed && !trimmed.startsWith("https://hooks.slack.com/")) {
+        toast.error("Enter a valid Slack incoming webhook URL (https://hooks.slack.com/services/...)")
+        return
+      }
+      const next = trimmed ? [trimmed, ...otherWebhooks] : [...otherWebhooks]
+      const res = await fetch(`${API}/site-config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ webhook_urls: next }),
+      })
+      if (res.ok) {
+        toast.success(trimmed ? "Slack notifications enabled" : "Slack notifications disabled")
+      } else {
+        toast.error("Failed to save webhook")
+      }
+    } catch (err: any) {
+      toast.error(`Save failed: ${err?.message ?? "unknown"}`)
+    } finally {
+      setSavingWebhook(false)
+    }
+  }, [slackWebhook, otherWebhooks])
 
   useEffect(() => {
     setMounted(true)
@@ -1099,7 +1140,13 @@ export default function VisitorsPage() {
       </Dialog>
 
       {/* Alert Rules Dialog */}
-      <Dialog open={alertsOpen} onOpenChange={setAlertsOpen}>
+      <Dialog
+        open={alertsOpen}
+        onOpenChange={(o) => {
+          setAlertsOpen(o)
+          if (o) loadWebhooks()
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Alert Rules</DialogTitle>
@@ -1124,7 +1171,29 @@ export default function VisitorsPage() {
               </div>
             ))}
           </div>
-          <p className="text-[10px] text-muted-foreground text-center">Alert delivery via email &middot; Slack coming soon</p>
+
+          <Separator className="my-2" />
+
+          <div className="space-y-2">
+            <p className="text-xs font-bold">Slack webhook</p>
+            <p className="text-[10px] text-muted-foreground">
+              Paste your Slack incoming webhook URL. Every new visit will post to that channel.
+            </p>
+            <Input
+              value={slackWebhook}
+              onChange={(e) => setSlackWebhook(e.target.value)}
+              placeholder="https://hooks.slack.com/services/T.../B.../xxx"
+              className="text-xs"
+            />
+            <div className="flex justify-end">
+              <Button size="sm" onClick={saveSlackWebhook} disabled={savingWebhook} className="h-7 text-[11px]">
+                {savingWebhook ? "Saving..." : slackWebhook ? "Save" : "Disable"}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Need one? In Slack → Apps → search “Incoming Webhooks” → add to a channel → copy the URL.
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

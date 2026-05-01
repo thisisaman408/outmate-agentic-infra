@@ -891,9 +891,10 @@ async def _process_visitor_data(org_id: str, data: Dict[str, Any]):
         # Real-time SSE publish (best-effort)
         await _publish_visit_event(org_id=str(new_visit.org_id), visit=new_visit)
 
-        # Webhooks for matched visits
-        if new_visit.matched:
-            await _enqueue_webhooks(db, new_visit)
+        # Webhooks: fire for every visit so Slack subscribers see all traffic.
+        # Slack URLs are auto-detected and rendered as a chat message; generic
+        # webhook URLs still receive the JSON event payload.
+        await _enqueue_webhooks(db, new_visit)
 
     except Exception as e:
         logger.error("Error processing visitor data: %s", e)
@@ -1146,16 +1147,69 @@ async def _publish_visit_event(org_id: str, visit: Visit) -> None:
 
 # ── Webhook delivery (with Celery retry) ─────────────────────────────────────
 
+def _build_slack_payload(visit: Visit) -> dict:
+    """Render a visit as a Slack Block Kit message."""
+    res = visit.resolution or {}
+    exp = res.get("explorium") or {}
+    geo = res.get("geo") or {}
+    company = exp.get("company_name") or res.get("company_name") or "Unknown company"
+    industry = exp.get("industry") or exp.get("linkedin_industry_category") or ""
+    person_name = res.get("full_name") or " ".join(
+        x for x in [res.get("first_name"), res.get("last_name")] if x
+    ).strip()
+    person_email = res.get("email") or ""
+    person_title = res.get("job_title") or ""
+    location = ", ".join(x for x in [geo.get("city"), geo.get("country")] if x)
+    intent = res.get("icp_score") or res.get("intent_score") or visit.intent_score or 0
+    try:
+        intent_pct = int(round(float(intent) * 100)) if float(intent) <= 1 else int(intent)
+    except Exception:
+        intent_pct = 0
+
+    header = f"🌐 New visit: {company}"
+    if person_name:
+        header = f"🌐 {person_name} from {company}"
+
+    fields = []
+    if person_title:
+        fields.append({"type": "mrkdwn", "text": f"*Title*\n{person_title}"})
+    if industry:
+        fields.append({"type": "mrkdwn", "text": f"*Industry*\n{industry}"})
+    if location:
+        fields.append({"type": "mrkdwn", "text": f"*Location*\n{location}"})
+    if person_email:
+        fields.append({"type": "mrkdwn", "text": f"*Email*\n{person_email}"})
+    fields.append({"type": "mrkdwn", "text": f"*Intent*\n{intent_pct}%"})
+    fields.append({"type": "mrkdwn", "text": f"*Page*\n<{visit.url}|{visit.url}>"})
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": header[:150]}},
+        {"type": "section", "fields": fields[:10]},
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": f"IP `{visit.ip}` · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"}
+            ],
+        },
+    ]
+    return {"text": header, "blocks": blocks}
+
+
 async def _enqueue_webhooks(db, visit: Visit) -> None:
     """
-    Create Alert records and enqueue Celery tasks for each webhook URL.
-    Each webhook runs independently with its own retry lifecycle.
+    Deliver webhooks for a visit. Slack URLs (hooks.slack.com) get a Block Kit
+    message; everything else gets the generic JSON event payload.
+
+    Delivery is inline (httpx) by default — Celery is only used when explicitly
+    enabled via VISITOR_TRACKING_INLINE=False, since the production deployment
+    does not run a Celery worker.
     """
+    from app.core.config import settings as _settings
     site_config = db.query(SiteConfig).filter(SiteConfig.org_id == visit.org_id).first()
     if not site_config or not site_config.webhook_urls:
         return
 
-    payload = {
+    generic_payload = {
         "event": "visitor_identified",
         "visit_id": str(visit.id),
         "ip": str(visit.ip),
@@ -1163,13 +1217,17 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
         "resolution": visit.resolution,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    slack_payload = _build_slack_payload(visit)
+    inline_mode = getattr(_settings, "VISITOR_TRACKING_INLINE", True)
 
     for webhook_url in site_config.webhook_urls:
-        # Create a pending Alert record before dispatching
+        is_slack = "hooks.slack.com" in (webhook_url or "")
+        payload = slack_payload if is_slack else generic_payload
+
         alert = Alert(
             id=uuid.uuid4(),
             visit_id=visit.id,
-            webhook_type="general",
+            webhook_type="slack" if is_slack else "general",
             status="pending",
             payload=payload,
         )
@@ -1177,32 +1235,51 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
         db.commit()
 
         webhook_secret = site_config.webhook_secret or ""
-        try:
-            # Dispatch as Celery task (async, with retry)
-            deliver_webhook.delay(
-                webhook_url=webhook_url,
-                payload=payload,
-                visit_id=str(visit.id),
-                alert_id=str(alert.id),
-                webhook_secret=webhook_secret,
-            )
-        except Exception as e:
-            # Celery unavailable — attempt synchronous delivery
-            logger.warning("Celery unavailable for webhook, trying synchronous: %s", e)
+
+        if inline_mode:
+            # Send right now from the API process — required in production
+            # because no Celery worker is running.
             try:
                 import json as _json
                 body_bytes = _json.dumps(payload, separators=(",", ":")).encode()
                 headers = {"Content-Type": "application/json"}
-                if webhook_secret:
+                if webhook_secret and not is_slack:
                     sig = hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
                     headers["X-Outmate-Signature"] = f"sha256={sig}"
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(webhook_url, content=body_bytes, headers=headers)
                 alert.status = "success" if resp.status_code < 300 else "failed"
+                if resp.status_code >= 300:
+                    logger.warning("Webhook %s returned %d: %s", webhook_url, resp.status_code, resp.text[:200])
             except Exception as ex:
-                logger.error("Synchronous webhook delivery failed: %s", ex)
+                logger.error("Inline webhook delivery failed (%s): %s", webhook_url, ex)
                 alert.status = "error"
             db.commit()
+        else:
+            try:
+                deliver_webhook.delay(
+                    webhook_url=webhook_url,
+                    payload=payload,
+                    visit_id=str(visit.id),
+                    alert_id=str(alert.id),
+                    webhook_secret="" if is_slack else webhook_secret,
+                )
+            except Exception as e:
+                logger.warning("Celery unavailable for webhook, falling back to inline: %s", e)
+                try:
+                    import json as _json
+                    body_bytes = _json.dumps(payload, separators=(",", ":")).encode()
+                    headers = {"Content-Type": "application/json"}
+                    if webhook_secret and not is_slack:
+                        sig = hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+                        headers["X-Outmate-Signature"] = f"sha256={sig}"
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.post(webhook_url, content=body_bytes, headers=headers)
+                    alert.status = "success" if resp.status_code < 300 else "failed"
+                except Exception as ex:
+                    logger.error("Synchronous webhook delivery failed: %s", ex)
+                    alert.status = "error"
+                db.commit()
 
 
 # ── Legacy synchronous trigger (kept for backwards compat) ───────────────────
