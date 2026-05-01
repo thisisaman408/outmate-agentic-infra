@@ -360,18 +360,89 @@ export default function VisitorsPage() {
 
     // SSE Stream
     const streamUrl = `${API_BASE}/api/v1/visitors/stream?token=${encodeURIComponent(localStorage.getItem("outmate_auth_token") || "")}`
-    const es = new EventSource(streamUrl)
-    es.onmessage = (evt) => {
+    let es: EventSource | null = null
+    let retryCount = 0
+    const MAX_RETRIES = 5
+    
+    const connectStream = () => {
       try {
-        const msg = JSON.parse(evt.data)
-        if (msg?.type === "visit_created" && msg?.visit) {
-          const v = msg.visit as Visit
-          setVisits(prev => [v, ...prev].slice(0, 200))
-          setTimeout(fetchData, 3000) // Full refresh after enrichment
+        // Check if token is valid
+        const token = localStorage.getItem("outmate_auth_token")
+        if (!token) {
+          console.error("No auth token found")
+          return
         }
-      } catch { }
+        
+        es = new EventSource(streamUrl)
+        
+        es.onopen = () => {
+          console.log("SSE stream connected")
+          retryCount = 0 // Reset retry count on successful connection
+        }
+        
+        es.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data)
+            if (msg?.type === "visit_created" && msg?.visit) {
+              const v = msg.visit as Visit
+              setVisits(prev => [v, ...prev].slice(0, 200))
+              setTimeout(fetchData, 3000) // Full refresh after enrichment
+            }
+          } catch { }
+        }
+        
+        es.onerror = (error) => {
+          console.error("SSE stream error:", error)
+          console.error("Stream URL:", streamUrl)
+          console.error("Retry count:", retryCount)
+          
+          // Close and reconnect after delay
+          if (es) {
+            es.close()
+            es = null
+          }
+          
+          retryCount++
+          
+          // Stop retrying after max attempts
+          if (retryCount >= MAX_RETRIES) {
+            console.error("Max retries reached, falling back to polling only")
+            // Fallback to polling every 30 seconds
+            setInterval(fetchData, 30000)
+            return
+          }
+          
+          // Fallback to polling if SSE fails repeatedly
+          setTimeout(() => {
+            connectStream()
+            // Also do a manual fetch as backup
+            fetchData()
+          }, 5000)
+        }
+        
+        es.onclose = () => {
+          console.log("SSE stream closed")
+          if (es) {
+            es.close()
+            es = null
+          }
+          // Attempt to reconnect after 3 seconds
+          setTimeout(connectStream, 3000)
+        }
+      } catch (error) {
+        console.error("Failed to create SSE connection:", error)
+        setTimeout(connectStream, 5000) // Retry after 5 seconds
+      }
     }
-    return () => es.close()
+    
+    connectStream()
+    
+    return () => {
+      if (es) {
+        es.close()
+        es = null
+      }
+    }
   }, [])
 
   // ── COMPUTED DATA ──────────────────────────────────────────────

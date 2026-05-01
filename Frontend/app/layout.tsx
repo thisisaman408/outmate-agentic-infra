@@ -1,8 +1,8 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Plus_Jakarta_Sans, Inter } from "next/font/google"
-import Script from "next/script"
 import "./globals.css"
+import { TrackingPixel } from "@/components/tracking-pixel"
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -32,26 +32,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const pixelKey = process.env.NEXT_PUBLIC_PIXEL_KEY
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://dev.outmate.ai"
-
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <head>
-        {/* Visitor tracking pixel — only rendered when NEXT_PUBLIC_PIXEL_KEY is set */}
-        {pixelKey && (
-          <Script
-            src={`${apiUrl}/api/v1/visitors/pixel.js`}
-            data-pixel-key={pixelKey}
-            strategy="afterInteractive"
-          />
-        )}
-      </head>
       <body
         className={`${plusJakarta.variable} ${inter.variable} font-sans antialiased`}
         suppressHydrationWarning
       >
         <AuthProvider>{children}</AuthProvider>
+        <TrackingPixel />
         <Toaster />
       </body>
     </html>
