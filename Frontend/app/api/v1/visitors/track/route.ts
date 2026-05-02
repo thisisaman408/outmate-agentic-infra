@@ -32,7 +32,11 @@ function extractRealIp(request: NextRequest): string {
 
 function corsHeaders(origin: string | null) {
     return {
+        // Echo the origin so we can return Allow-Credentials: true. Wildcard
+        // is illegal alongside credentials per the CORS spec, and sendBeacon
+        // always sends credentialed requests cross-origin.
         "Access-Control-Allow-Origin": origin || "*",
+        "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Pixel-Key",
         "Access-Control-Max-Age": "86400",
