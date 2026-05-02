@@ -1147,6 +1147,64 @@ async def _publish_visit_event(org_id: str, visit: Visit) -> None:
 
 # ── Webhook delivery (with Celery retry) ─────────────────────────────────────
 
+def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
+    """Return (subject, html, text) for a visit notification email."""
+    res = visit.resolution or {}
+    exp = res.get("explorium") or {}
+    geo = res.get("geo") or {}
+    company = exp.get("company_name") or res.get("company_name") or "Unknown company"
+    industry = exp.get("industry") or exp.get("linkedin_industry_category") or ""
+    person_name = res.get("full_name") or " ".join(
+        x for x in [res.get("first_name"), res.get("last_name")] if x
+    ).strip()
+    person_email = res.get("email") or ""
+    person_title = res.get("job_title") or ""
+    location = ", ".join(x for x in [geo.get("city"), geo.get("country")] if x)
+    intent = res.get("icp_score") or res.get("intent_score") or visit.intent_score or 0
+    try:
+        intent_pct = int(round(float(intent) * 100)) if float(intent) <= 1 else int(intent)
+    except Exception:
+        intent_pct = 0
+
+    headline = f"{person_name} from {company}" if person_name else f"Visit from {company}"
+    subject = f"🌐 New visit: {headline}"
+
+    rows = [
+        ("Person", person_name or "—"),
+        ("Title", person_title or "—"),
+        ("Email", person_email or "—"),
+        ("Company", company),
+        ("Industry", industry or "—"),
+        ("Location", location or "—"),
+        ("Page", visit.url or "—"),
+        ("Intent", f"{intent_pct}%"),
+        ("IP", str(visit.ip) if visit.ip else "—"),
+        ("Time", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")),
+    ]
+
+    html_rows = "".join(
+        f'<tr><td style="padding:6px 12px;color:#666;font-size:12px;border-bottom:1px solid #eee">{k}</td>'
+        f'<td style="padding:6px 12px;font-size:13px;border-bottom:1px solid #eee">{v}</td></tr>'
+        for k, v in rows
+    )
+    html = f"""
+    <html><body style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px">
+      <h2 style="margin:0 0 16px 0;font-size:18px">{subject}</h2>
+      <table style="border-collapse:collapse;width:100%;border:1px solid #eee;border-radius:6px">{html_rows}</table>
+      <p style="margin-top:16px;font-size:11px;color:#999">Sent by Outmate visitor tracking.</p>
+    </body></html>
+    """
+    text = "\n".join(f"{k}: {v}" for k, v in rows)
+    return subject, html, text
+
+
+def _send_visit_email(visit: Visit, to_email: str) -> None:
+    """Send a visitor notification email via the shared NotificationService."""
+    from app.services.copilot.notification_service import NotificationService
+    subject, html, text = _format_visit_for_email(visit)
+    NotificationService()._send_email(to=to_email, subject=subject, html=html, text=text)
+
+
 def _build_slack_payload(visit: Visit) -> dict:
     """Render a visit as a Slack Block Kit message."""
     res = visit.resolution or {}
@@ -1206,7 +1264,24 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
     """
     from app.core.config import settings as _settings
     site_config = db.query(SiteConfig).filter(SiteConfig.org_id == visit.org_id).first()
-    if not site_config or not site_config.webhook_urls:
+    if not site_config:
+        return
+
+    # Pull alert email + email opt-in from icp_filters JSONB. Fall back to
+    # the org owner's user email when no override is set.
+    icp = (site_config.icp_filters or {})
+    alert_email_optin = bool(icp.get("alert_email_enabled", False))
+    alert_email_addr = icp.get("alert_email") or ""
+    if alert_email_optin and not alert_email_addr:
+        try:
+            from app.db.models.user import User as _User
+            owner = db.query(_User).filter(_User.id == site_config.org_id).first()
+            alert_email_addr = (owner.email if owner else "") or ""
+        except Exception as e:
+            logger.warning("Could not resolve owner email: %s", e)
+
+    has_webhooks = bool(site_config.webhook_urls)
+    if not has_webhooks and not (alert_email_optin and alert_email_addr):
         return
 
     generic_payload = {
@@ -1219,6 +1294,16 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
     }
     slack_payload = _build_slack_payload(visit)
     inline_mode = getattr(_settings, "VISITOR_TRACKING_INLINE", True)
+
+    # Email delivery (best-effort, non-blocking on failure)
+    if alert_email_optin and alert_email_addr:
+        try:
+            _send_visit_email(visit, alert_email_addr)
+        except Exception as e:
+            logger.error("Visit email delivery failed: %s", e)
+
+    if not has_webhooks:
+        return
 
     for webhook_url in site_config.webhook_urls:
         is_slack = "hooks.slack.com" in (webhook_url or "")

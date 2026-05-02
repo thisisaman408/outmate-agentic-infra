@@ -316,6 +316,9 @@ export default function VisitorsPage() {
   const [slackWebhook, setSlackWebhook] = useState("")
   const [otherWebhooks, setOtherWebhooks] = useState<string[]>([])
   const [savingWebhook, setSavingWebhook] = useState(false)
+  const [emailAlertEnabled, setEmailAlertEnabled] = useState(false)
+  const [emailAlertAddress, setEmailAlertAddress] = useState("")
+  const [icpFilters, setIcpFilters] = useState<Record<string, any>>({})
 
   // Core Data State
   const [visits, setVisits] = useState<Visit[]>([])
@@ -356,7 +359,7 @@ export default function VisitorsPage() {
     } catch { } finally { setAnalyticsLoading(false) }
   }, [])
 
-  const loadWebhooks = useCallback(async () => {
+  const loadAlertSettings = useCallback(async () => {
     try {
       const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
       if (!res.ok) return
@@ -365,10 +368,14 @@ export default function VisitorsPage() {
       const slack = urls.find((u) => u.includes("hooks.slack.com")) || ""
       setSlackWebhook(slack)
       setOtherWebhooks(urls.filter((u) => !u.includes("hooks.slack.com")))
+      const filters = (cfg.icp_filters && typeof cfg.icp_filters === "object") ? cfg.icp_filters : {}
+      setIcpFilters(filters)
+      setEmailAlertEnabled(Boolean(filters.alert_email_enabled))
+      setEmailAlertAddress(typeof filters.alert_email === "string" ? filters.alert_email : "")
     } catch { }
   }, [])
 
-  const saveSlackWebhook = useCallback(async () => {
+  const saveAlertSettings = useCallback(async () => {
     setSavingWebhook(true)
     try {
       const trimmed = slackWebhook.trim()
@@ -376,23 +383,34 @@ export default function VisitorsPage() {
         toast.error("Enter a valid Slack incoming webhook URL (https://hooks.slack.com/services/...)")
         return
       }
-      const next = trimmed ? [trimmed, ...otherWebhooks] : [...otherWebhooks]
+      const trimmedEmail = emailAlertAddress.trim()
+      if (emailAlertEnabled && trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        toast.error("Enter a valid email address")
+        return
+      }
+      const nextUrls = trimmed ? [trimmed, ...otherWebhooks] : [...otherWebhooks]
+      const nextFilters = {
+        ...icpFilters,
+        alert_email_enabled: emailAlertEnabled,
+        alert_email: trimmedEmail,
+      }
       const res = await fetch(`${API}/site-config`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ webhook_urls: next }),
+        body: JSON.stringify({ webhook_urls: nextUrls, icp_filters: nextFilters }),
       })
       if (res.ok) {
-        toast.success(trimmed ? "Slack notifications enabled" : "Slack notifications disabled")
+        toast.success("Alert settings saved")
+        setIcpFilters(nextFilters)
       } else {
-        toast.error("Failed to save webhook")
+        toast.error("Failed to save settings")
       }
     } catch (err: any) {
       toast.error(`Save failed: ${err?.message ?? "unknown"}`)
     } finally {
       setSavingWebhook(false)
     }
-  }, [slackWebhook, otherWebhooks])
+  }, [slackWebhook, otherWebhooks, emailAlertEnabled, emailAlertAddress, icpFilters])
 
   useEffect(() => {
     setMounted(true)
@@ -1144,7 +1162,7 @@ export default function VisitorsPage() {
         open={alertsOpen}
         onOpenChange={(o) => {
           setAlertsOpen(o)
-          if (o) loadWebhooks()
+          if (o) loadAlertSettings()
         }}
       >
         <DialogContent className="max-w-md">
@@ -1174,24 +1192,51 @@ export default function VisitorsPage() {
 
           <Separator className="my-2" />
 
-          <div className="space-y-2">
-            <p className="text-xs font-bold">Slack webhook</p>
-            <p className="text-[10px] text-muted-foreground">
-              Paste your Slack incoming webhook URL. Every new visit will post to that channel.
-            </p>
-            <Input
-              value={slackWebhook}
-              onChange={(e) => setSlackWebhook(e.target.value)}
-              placeholder="https://hooks.slack.com/services/T.../B.../xxx"
-              className="text-xs"
-            />
-            <div className="flex justify-end">
-              <Button size="sm" onClick={saveSlackWebhook} disabled={savingWebhook} className="h-7 text-[11px]">
-                {savingWebhook ? "Saving..." : slackWebhook ? "Save" : "Disable"}
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <p className="text-xs font-bold">Slack webhook</p>
+              <p className="text-[10px] text-muted-foreground">
+                Paste your Slack incoming webhook URL. Every new visit will post to that channel.
+              </p>
+              <Input
+                value={slackWebhook}
+                onChange={(e) => setSlackWebhook(e.target.value)}
+                placeholder="https://hooks.slack.com/services/T.../B.../xxx"
+                className="text-xs"
+              />
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">Email alerts</p>
+                <label className="flex items-center gap-2 text-[10px] text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={emailAlertEnabled}
+                    onChange={(e) => setEmailAlertEnabled(e.target.checked)}
+                  />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Get an email for every new visit. Leave empty to use your account email.
+              </p>
+              <Input
+                value={emailAlertAddress}
+                onChange={(e) => setEmailAlertAddress(e.target.value)}
+                placeholder="alerts@yourcompany.com"
+                className="text-xs"
+                disabled={!emailAlertEnabled}
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button size="sm" onClick={saveAlertSettings} disabled={savingWebhook} className="h-7 text-[11px]">
+                {savingWebhook ? "Saving..." : "Save"}
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Need one? In Slack → Apps → search “Incoming Webhooks” → add to a channel → copy the URL.
+              Need a Slack URL? Slack → Apps → search “Incoming Webhooks” → add to a channel → copy the URL.
             </p>
           </div>
         </DialogContent>

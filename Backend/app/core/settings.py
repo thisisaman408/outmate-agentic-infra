@@ -396,8 +396,8 @@ class Settings(BaseSettings):
 
     # Visitor Tracking
     VISITOR_DEDUPE_SECONDS: int = Field(
-        15,
-        description="Visitor deduplication window in seconds. Short window suppresses sendBeacon+fetch races but lets every page reload register as a new visit."
+        2,
+        description="Visitor deduplication window in seconds. Just enough to suppress the sendBeacon+fetch race in pixel.js — every reload registers as a new visit."
     )
     VISITOR_TRACKING_INLINE: bool = Field(
         True,
