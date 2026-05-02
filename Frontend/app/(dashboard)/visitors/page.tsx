@@ -161,6 +161,89 @@ function getIcpScore(visit: Visit): number {
   return Math.min(score, 100)
 }
 
+// Department classification from job_title (Sales / Finance / Product / Executive / Marketing / Engineering / Other).
+function inferDepartment(jobTitle?: string | null): string {
+  if (!jobTitle) return "Unknown"
+  const t = jobTitle.toLowerCase()
+  if (/(ceo|cto|cfo|coo|cmo|chief|founder|president|owner|partner|board)/.test(t)) return "Executive"
+  if (/(sale|account exec|business development|bdr|sdr|revenue|ae\b)/.test(t)) return "Sales"
+  if (/(finance|accountant|controller|treasur|cfo|audit)/.test(t)) return "Finance"
+  if (/(product|pm\b|po\b|product manager|product owner)/.test(t)) return "Product"
+  if (/(market|growth|brand|content|seo|demand)/.test(t)) return "Marketing"
+  if (/(engineer|developer|architect|devops|sre|software|coder)/.test(t)) return "Engineering"
+  if (/(operation|ops|project|program)/.test(t)) return "Operations"
+  if (/(hr|people|talent|recruit)/.test(t)) return "HR"
+  return "Other"
+}
+
+const DEPARTMENT_COLOR: Record<string, string> = {
+  Sales: "#10B981",
+  Finance: "#F59E0B",
+  Product: "#8B5CF6",
+  Executive: "#EF4444",
+  Marketing: "#EC4899",
+  Engineering: "#3B82F6",
+  Operations: "#6366F1",
+  HR: "#14B8A6",
+  Other: "#9CA3AF",
+  Unknown: "#9CA3AF",
+}
+
+// Persona = seniority bucket inferred from job_title.
+function inferPersona(jobTitle?: string | null): string {
+  if (!jobTitle) return "Unknown"
+  const t = jobTitle.toLowerCase()
+  if (/(ceo|cto|cfo|coo|cmo|chief|founder|president|owner)/.test(t)) return "C-Suite"
+  if (/(\bvp\b|vice president|head of|svp)/.test(t)) return "VP"
+  if (/(director)/.test(t)) return "Director"
+  if (/(manager|lead|principal)/.test(t)) return "Manager"
+  if (/(senior|sr\.|staff)/.test(t)) return "Senior IC"
+  if (/(intern|junior|jr\.|associate)/.test(t)) return "Junior"
+  return "IC"
+}
+
+// Buying stage from intent score + page path keywords.
+function inferBuyingStage(intentScore: number, pagePath?: string | null): string {
+  const path = (pagePath || "").toLowerCase()
+  if (/(pricing|demo|trial|signup|sign-up|book|contact|checkout|buy)/.test(path)) return "Decision"
+  if (/(case-stud|customers|comparison|vs-|review|integration)/.test(path)) return "Evaluation"
+  if (/(blog|guide|resources|docs|how-to|what-is)/.test(path)) return "Awareness"
+  if (intentScore >= 0.7) return "Decision"
+  if (intentScore >= 0.4) return "Consideration"
+  return "Awareness"
+}
+
+const STAGE_COLOR: Record<string, string> = {
+  Awareness: "#9CA3AF",
+  Consideration: "#3B82F6",
+  Evaluation: "#8B5CF6",
+  Decision: "#EF4444",
+}
+
+// Engagement bucket from session count + intent.
+function inferEngagement(sessionCount: number, intentScore: number): { label: string; color: string } {
+  if (sessionCount >= 5 || intentScore >= 0.8) return { label: "High", color: "#EF4444" }
+  if (sessionCount >= 2 || intentScore >= 0.5) return { label: "Medium", color: "#F59E0B" }
+  return { label: "Low", color: "#9CA3AF" }
+}
+
+// Role prediction: short human-readable label combining persona + dept + stage signals.
+function predictRole(jobTitle: string | null | undefined, intentScore: number, pagePath: string | null | undefined): string {
+  const persona = inferPersona(jobTitle)
+  const dept = inferDepartment(jobTitle)
+  if (jobTitle) return `${persona} · ${dept}`
+  const stage = inferBuyingStage(intentScore, pagePath)
+  if (intentScore >= 0.7) return `Likely buyer · ${stage}`
+  if (intentScore >= 0.4) return `Likely researcher · ${stage}`
+  return `Likely browser · ${stage}`
+}
+
+function formatLocation(geo: any): string {
+  if (!geo) return "—"
+  const parts = [geo.city, geo.region, geo.country].filter(Boolean)
+  return parts.length ? parts.join(", ") : "—"
+}
+
 function extractVisitData(visit: Visit) {
   const geo = visit.geo || visit.resolution?.geo ||
     ((visit.headquarters_city || visit.headquarters_country)
@@ -183,7 +266,13 @@ function extractVisitData(visit: Visit) {
   let pagePath = visit.url
   try { pagePath = new URL(visit.url).pathname } catch { }
 
-  return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, logoUrl, techStack, industry, intent, icpScore, pagePath }
+  const persona = inferPersona(jobTitle)
+  const department = inferDepartment(jobTitle)
+  const buyingStage = inferBuyingStage(visit.intent_score, pagePath)
+  const rolePrediction = predictRole(jobTitle, visit.intent_score, pagePath)
+  const locationLabel = formatLocation(geo)
+
+  return { geo, company, email, phone, fullName, linkedinUrl, jobTitle, category, logoUrl, techStack, industry, intent, icpScore, pagePath, persona, department, buyingStage, rolePrediction, locationLabel }
 }
 
 function groupByCompany(visits: Visit[]) {
@@ -848,12 +937,12 @@ export default function VisitorsPage() {
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">
                     {activeTab === "companies" ? (
-                      ["Company", "ICP Score", "Intent", "Visits", "Last Seen", "Industry", ""].map(h => (
-                        <th key={h} className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{h}</th>
+                      ["Company", "ICP Score", "Intent", "Engagement", "Visits", "Location", "Last Seen", "Industry", ""].map(h => (
+                        <th key={h} className="px-4 py-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{h}</th>
                       ))
                     ) : (
-                      ["Person", "Account", "ICP Score", "Intent", "Last seen", "Outreach", ""].map(h => (
-                        <th key={h} className="px-6 py-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{h}</th>
+                      ["Person", "Account", "Persona", "Dept", "Buying Stage", "Intent", "Engagement", "IP", "Location", "Time", ""].map(h => (
+                        <th key={h} className="px-3 py-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{h}</th>
                       ))
                     )}
                   </tr>
@@ -862,16 +951,19 @@ export default function VisitorsPage() {
                   {isLoading ? (
                     [1,2,3,4,5,6].map(i => <tr key={i} className="h-16 animate-pulse" />)
                   ) : activeTab === "companies" ? (
-                    companyGroups.map(c => (
-                      <tr 
-                        key={c.id} 
+                    companyGroups.map(c => {
+                      const firstD = extractVisitData(c.visits[0])
+                      const eng = inferEngagement(c.visits.length, c.totalIntent)
+                      return (
+                      <tr
+                        key={c.id}
                         onClick={() => setSelectedId(c.id)}
                         className={cn(
                           "group hover:bg-muted/30 transition-colors cursor-pointer",
                           selectedId === c.id && "bg-primary/5"
                         )}
                       >
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-xl border border-border bg-card flex items-center justify-center text-xs font-bold shrink-0">
                                {c.logoUrl ? <img src={c.logoUrl} alt={c.name} className="w-6 h-6 object-contain" /> : c.name.charAt(0).toUpperCase()}
@@ -882,12 +974,19 @@ export default function VisitorsPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4"><MiniProgressBar value={c.icpScore} /></td>
-                        <td className="px-6 py-4"><IntentBadge intent={c.intent.label} /></td>
-                        <td className="px-6 py-4 text-[11px] font-bold text-foreground">{c.visits.length} sessions</td>
-                        <td className="px-6 py-4 text-[10px] text-muted-foreground font-medium">{formatTime(c.lastSeen)}</td>
-                        <td className="px-6 py-4 text-[10px] text-muted-foreground font-medium italic">{c.industry}</td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 py-4"><MiniProgressBar value={c.icpScore} /></td>
+                        <td className="px-4 py-4"><IntentBadge intent={c.intent.label} /></td>
+                        <td className="px-4 py-4">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eng.color }} />
+                            <span className="text-[10px] font-bold" style={{ color: eng.color }}>{eng.label}</span>
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-[11px] font-bold text-foreground">{c.visits.length}</td>
+                        <td className="px-4 py-4 text-[10px] text-muted-foreground font-medium truncate max-w-[140px]">{firstD.locationLabel}</td>
+                        <td className="px-4 py-4 text-[10px] text-muted-foreground font-medium">{formatTime(c.lastSeen)}</td>
+                        <td className="px-4 py-4 text-[10px] text-muted-foreground font-medium italic truncate max-w-[120px]">{c.industry}</td>
+                        <td className="px-4 py-4 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               title="Open in Copilot"
@@ -906,38 +1005,66 @@ export default function VisitorsPage() {
                           </div>
                         </td>
                       </tr>
-                    ))
+                    )})
                   ) : (
                     filteredVisits.map(v => {
                       const d = extractVisitData(v)
+                      const sessionsForThis = visits.filter(x =>
+                        (x.company && d.company && x.company === d.company) ||
+                        (!x.company && !d.company && x.ip === v.ip)
+                      ).length
+                      const eng = inferEngagement(sessionsForThis, v.intent_score)
+                      const stageColor = STAGE_COLOR[d.buyingStage] || "#9CA3AF"
+                      const deptColor = DEPARTMENT_COLOR[d.department] || "#9CA3AF"
                       return (
-                        <tr 
-                          key={v.id} 
+                        <tr
+                          key={v.id}
                           onClick={() => setSelectedId(v.id)}
                           className={cn(
                             "group hover:bg-muted/30 transition-colors cursor-pointer",
                             selectedId === v.id && "bg-primary/5"
                           )}
                         >
-                          <td className="px-6 py-4">
+                          <td className="px-3 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
                                  {d.fullName?.charAt(0).toUpperCase() || "U"}
                               </div>
                               <div className="min-w-0">
-                                <div className="text-[13px] font-bold text-foreground truncate">{d.fullName || "Unresolved Person"}</div>
-                                <div className="text-[10px] text-muted-foreground font-medium truncate">{d.jobTitle || "Verified Visitor"}</div>
+                                <div className="text-[12px] font-bold text-foreground truncate max-w-[140px]">{d.fullName || "Unresolved"}</div>
+                                <div className="text-[10px] text-muted-foreground font-medium truncate max-w-[140px]">{d.jobTitle || "Verified Visitor"}</div>
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-[11px] font-bold text-muted-foreground">{d.company || v.domain || "Unknown"}</td>
-                          <td className="px-6 py-4"><MiniProgressBar value={d.icpScore} /></td>
-                          <td className="px-6 py-4"><IntentBadge intent={d.intent.label} /></td>
-                          <td className="px-6 py-4 text-[10px] text-muted-foreground font-medium">{formatTime(v.created_at)}</td>
-                          <td className="px-6 py-4">
-                            <Badge variant="outline" className="text-[9px] font-bold border-border bg-muted/30">Not Contacted</Badge>
+                          <td className="px-3 py-4 text-[11px] font-bold text-muted-foreground truncate max-w-[120px]">{d.company || v.domain || "Unknown"}</td>
+                          <td className="px-3 py-4 text-[10px] font-bold text-foreground">{d.persona}</td>
+                          <td className="px-3 py-4">
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold"
+                              style={{ backgroundColor: `${deptColor}1A`, color: deptColor }}
+                            >
+                              {d.department}
+                            </span>
                           </td>
-                          <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-4">
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold"
+                              style={{ backgroundColor: `${stageColor}1A`, color: stageColor }}
+                            >
+                              {d.buyingStage}
+                            </span>
+                          </td>
+                          <td className="px-3 py-4"><IntentBadge intent={d.intent.label} /></td>
+                          <td className="px-3 py-4">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: eng.color }} />
+                              <span className="text-[10px] font-bold" style={{ color: eng.color }}>{eng.label}</span>
+                            </span>
+                          </td>
+                          <td className="px-3 py-4 text-[10px] font-mono text-muted-foreground truncate max-w-[110px]">{v.ip || "—"}</td>
+                          <td className="px-3 py-4 text-[10px] text-muted-foreground font-medium truncate max-w-[140px]">{d.locationLabel}</td>
+                          <td className="px-3 py-4 text-[10px] text-muted-foreground font-medium whitespace-nowrap">{formatTime(v.created_at)}</td>
+                          <td className="px-3 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -991,7 +1118,14 @@ export default function VisitorsPage() {
               <div className="text-[13px] font-bold text-foreground">Select a visitor</div>
               <div className="text-[11px] text-muted-foreground mt-1 font-medium leading-relaxed">Click any row to view full session details, enrichment data, and account intelligence.</div>
             </div>
-          ) : (
+          ) : (() => {
+            const panelVisit: Visit = (selectedGroup ? selectedGroup.visits[0] : selectedVisit!) as Visit
+            const panelData = extractVisitData(panelVisit)
+            const panelSessions = selectedGroup ? selectedGroup.visits.length : 1
+            const panelEng = inferEngagement(panelSessions, panelVisit.intent_score)
+            const stageColor = STAGE_COLOR[panelData.buyingStage] || "#9CA3AF"
+            const deptColor = DEPARTMENT_COLOR[panelData.department] || "#9CA3AF"
+            return (
             <div className="p-6 space-y-6">
               {/* Header */}
               <div className="flex items-center justify-between">
@@ -1078,6 +1212,123 @@ export default function VisitorsPage() {
                 </div>
               </div>
 
+               {/* Visitor Intelligence — derived from intent + fingerprint + page signals */}
+               <div className="space-y-3">
+                <h3 className="text-[11px] font-black text-muted-foreground/40 uppercase tracking-widest">Visitor Intelligence</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-card rounded-xl p-3 border border-border/50">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">Persona</div>
+                    <div className="text-[12px] font-black text-foreground">{panelData.persona}</div>
+                  </div>
+                  <div className="bg-card rounded-xl p-3 border border-border/50">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">Department</div>
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold"
+                      style={{ backgroundColor: `${deptColor}1A`, color: deptColor }}
+                    >
+                      {panelData.department}
+                    </span>
+                  </div>
+                  <div className="bg-card rounded-xl p-3 border border-border/50">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">Buying Stage</div>
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold"
+                      style={{ backgroundColor: `${stageColor}1A`, color: stageColor }}
+                    >
+                      {panelData.buyingStage}
+                    </span>
+                  </div>
+                  <div className="bg-card rounded-xl p-3 border border-border/50">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">Engagement</div>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: panelEng.color }} />
+                      <span className="text-[11px] font-bold" style={{ color: panelEng.color }}>{panelEng.label}</span>
+                    </span>
+                  </div>
+                </div>
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Target className="w-3 h-3 text-primary" />
+                    <span className="text-[9px] font-black text-primary uppercase tracking-widest">Role Prediction</span>
+                  </div>
+                  <p className="text-[12px] font-bold text-foreground leading-snug">{panelData.rolePrediction}</p>
+                  <p className="text-[10px] text-muted-foreground font-medium mt-1">
+                    Inferred from {panelData.jobTitle ? "title + " : ""}intent score, page path, and fingerprint signals.
+                  </p>
+                </div>
+              </div>
+
+              {/* Enrichment Details */}
+              <div className="space-y-3">
+                <h3 className="text-[11px] font-black text-muted-foreground/40 uppercase tracking-widest">Enrichment</h3>
+                <div className="bg-card border border-border rounded-xl divide-y divide-border">
+                  {[
+                    { label: "Industry", value: panelData.industry, icon: Building2 },
+                    { label: "Company", value: panelData.company, icon: Building2 },
+                    { label: "Job Title", value: panelData.jobTitle, icon: Users },
+                    { label: "Location", value: panelData.locationLabel !== "—" ? panelData.locationLabel : null, icon: MapPin },
+                    { label: "IP Address", value: panelVisit.ip, icon: Globe, mono: true },
+                    {
+                      label: "Employees",
+                      value: panelVisit.employee_count_exact
+                        ? String(panelVisit.employee_count_exact)
+                        : panelVisit.employee_count_range,
+                      icon: Users,
+                    },
+                    { label: "Revenue", value: panelVisit.revenue_range, icon: BarChart3 },
+                    { label: "Funding", value: panelVisit.funding_stage, icon: Coins },
+                    {
+                      label: "HQ",
+                      value: [panelVisit.headquarters_city, panelVisit.headquarters_country].filter(Boolean).join(", ") || null,
+                      icon: MapPin,
+                    },
+                    { label: "Domain", value: panelVisit.domain, icon: Globe },
+                    {
+                      label: "Source Site",
+                      value: panelVisit.source_site,
+                      icon: GitBranch,
+                    },
+                  ].map((row, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3">
+                      <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                        <row.icon className="w-3 h-3 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest leading-none mb-1">{row.label}</div>
+                        {row.value ? (
+                          <div className={cn(
+                            "text-[12px] font-bold text-foreground truncate",
+                            row.mono && "font-mono text-[11px]"
+                          )}>{row.value}</div>
+                        ) : (
+                          <span className="text-[11px] font-bold text-muted-foreground/40 italic">Not enriched</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {panelData.techStack && panelData.techStack.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-3">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-2">Tech Stack</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {panelData.techStack.slice(0, 12).map((t: string, i: number) => (
+                        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] font-bold text-foreground">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {panelVisit.description && (
+                  <div className="bg-card border border-border rounded-xl p-3">
+                    <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mb-1">Description</div>
+                    <p className="text-[11px] font-medium text-foreground leading-relaxed">{panelVisit.description}</p>
+                  </div>
+                )}
+              </div>
+
                {/* Recent Session Log */}
                <div className="space-y-3">
                 <h3 className="text-[11px] font-black text-muted-foreground/40 uppercase tracking-widest">Recent Activity</h3>
@@ -1117,7 +1368,8 @@ export default function VisitorsPage() {
                   </Button>
                </div>
             </div>
-          )}
+            )
+          })()}
         </div>
       </div>
       
