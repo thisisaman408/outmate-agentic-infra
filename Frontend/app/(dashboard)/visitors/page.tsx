@@ -401,6 +401,7 @@ export default function VisitorsPage() {
   const [selectedPeopleIds, setSelectedPeopleIds] = useState<string[]>([])
   const [revealedContacts, setRevealedContacts] = useState<Set<string>>(new Set())
   const [trackingOpen, setTrackingOpen] = useState(false)
+  const [pixelKey, setPixelKey] = useState<string>("")
   const [alertsOpen, setAlertsOpen] = useState(false)
   const [slackWebhook, setSlackWebhook] = useState("")
   const [otherWebhooks, setOtherWebhooks] = useState<string[]>([])
@@ -444,6 +445,24 @@ export default function VisitorsPage() {
       setIsLoading(false)
     }
   }
+
+  const loadPixelKey = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
+      if (!res.ok) {
+        console.warn("site-config fetch failed:", res.status)
+        return
+      }
+      const cfg = await res.json()
+      if (cfg?.pixel_key) {
+        setPixelKey(String(cfg.pixel_key))
+      } else {
+        console.warn("site-config returned without pixel_key", cfg)
+      }
+    } catch (err) {
+      console.warn("loadPixelKey error", err)
+    }
+  }, [])
 
   const fetchAnalytics = useCallback(async (h: PeriodHours) => {
     setAnalyticsLoading(true)
@@ -551,6 +570,7 @@ export default function VisitorsPage() {
     setMounted(true)
     fetchData()
     fetchAnalytics(period)
+    loadPixelKey()
 
     // SSE Stream
     const streamUrl = `${API_BASE}/api/v1/visitors/stream?token=${encodeURIComponent(localStorage.getItem("outmate_auth_token") || "")}`
@@ -1427,7 +1447,13 @@ export default function VisitorsPage() {
       />
 
       {/* Tracking Script Dialog */}
-      <Dialog open={trackingOpen} onOpenChange={setTrackingOpen}>
+      <Dialog
+        open={trackingOpen}
+        onOpenChange={(o) => {
+          setTrackingOpen(o)
+          if (o) loadPixelKey()
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Install Tracking Script</DialogTitle>
@@ -1436,14 +1462,16 @@ export default function VisitorsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="bg-muted rounded-lg p-4 font-mono text-[11px] leading-relaxed relative">
-            <pre className="whitespace-pre-wrap break-all">{`<!-- Outmate.ai Tracking -->\n<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${user?.id || "YOUR_KEY"}"\n  async\n></script>`}</pre>
+            <pre className="whitespace-pre-wrap break-all">{`<!-- Outmate.ai Tracking -->\n<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey || "YOUR_PIXEL_KEY"}"\n  async\n></script>`}</pre>
             <Button
               size="sm"
               variant="outline"
               className="absolute top-2 right-2 h-7 text-[10px] font-bold gap-1"
+              disabled={!pixelKey}
               onClick={() => {
+                if (!pixelKey) return
                 navigator.clipboard.writeText(
-                  `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${user?.id || "YOUR_KEY"}" async></script>`
+                  `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>`
                 )
                 toast.success("Tracking script copied to clipboard")
               }}

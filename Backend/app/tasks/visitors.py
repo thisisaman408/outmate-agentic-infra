@@ -1178,7 +1178,6 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
         ("Location", location or "—"),
         ("Page", visit.url or "—"),
         ("Intent", f"{intent_pct}%"),
-        ("IP", str(visit.ip) if visit.ip else "—"),
         ("Time", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")),
     ]
 
