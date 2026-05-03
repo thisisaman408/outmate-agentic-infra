@@ -408,6 +408,11 @@ export default function VisitorsPage() {
   const [emailAlertEnabled, setEmailAlertEnabled] = useState(false)
   const [emailAlertAddress, setEmailAlertAddress] = useState("")
   const [icpFilters, setIcpFilters] = useState<Record<string, any>>({})
+  const [hubspotEnabled, setHubspotEnabled] = useState(false)
+  const [instantlyEnabled, setInstantlyEnabled] = useState(false)
+  const [instantlyCampaignId, setInstantlyCampaignId] = useState("")
+  const [extraWebhookUrls, setExtraWebhookUrls] = useState<string[]>([])
+  const [integrationStatus, setIntegrationStatus] = useState<Record<string, boolean>>({})
 
   // Core Data State
   const [visits, setVisits] = useState<Visit[]>([])
@@ -450,17 +455,40 @@ export default function VisitorsPage() {
 
   const loadAlertSettings = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/site-config`, { headers: getAuthHeaders() })
-      if (!res.ok) return
-      const cfg = await res.json()
+      const [cfgRes, integrationsRes] = await Promise.all([
+        fetch(`${API}/site-config`, { headers: getAuthHeaders() }),
+        fetch(`/api/v1/integrations`, { headers: getAuthHeaders() }).catch(() => null),
+      ])
+      if (!cfgRes.ok) return
+      const cfg = await cfgRes.json()
       const urls: string[] = Array.isArray(cfg.webhook_urls) ? cfg.webhook_urls : []
       const slack = urls.find((u) => u.includes("hooks.slack.com")) || ""
       setSlackWebhook(slack)
-      setOtherWebhooks(urls.filter((u) => !u.includes("hooks.slack.com")))
+      // Webhooks the user pasted as Make/n8n/custom destinations (everything that isn't Slack)
+      const nonSlack = urls.filter((u) => !u.includes("hooks.slack.com"))
+      setExtraWebhookUrls(nonSlack)
+      setOtherWebhooks(nonSlack)
       const filters = (cfg.icp_filters && typeof cfg.icp_filters === "object") ? cfg.icp_filters : {}
       setIcpFilters(filters)
       setEmailAlertEnabled(Boolean(filters.alert_email_enabled))
       setEmailAlertAddress(typeof filters.alert_email === "string" ? filters.alert_email : "")
+      setHubspotEnabled(Boolean(filters.alerts_hubspot_enabled))
+      setInstantlyEnabled(Boolean(filters.alerts_instantly_enabled))
+      setInstantlyCampaignId(typeof filters.alerts_instantly_campaign_id === "string" ? filters.alerts_instantly_campaign_id : "")
+
+      // Build {hubspot, instantly, ...} → connected map from /api/v1/integrations
+      if (integrationsRes && integrationsRes.ok) {
+        const data = await integrationsRes.json().catch(() => null)
+        const list: any[] = Array.isArray(data) ? data : (data?.integrations || data?.items || [])
+        const map: Record<string, boolean> = {}
+        for (const item of list) {
+          const slug = String(item.slug || item.integration_slug || item.name || "").toLowerCase()
+          const status = String(item.status || item.user_status || "").toLowerCase()
+          const isConnected = Boolean(item.connected) || status === "connected" || status === "active"
+          if (slug) map[slug] = isConnected
+        }
+        setIntegrationStatus(map)
+      }
     } catch { }
   }, [])
 
@@ -477,11 +505,28 @@ export default function VisitorsPage() {
         toast.error("Enter a valid email address")
         return
       }
-      const nextUrls = trimmed ? [trimmed, ...otherWebhooks] : [...otherWebhooks]
+      const cleanedExtras = extraWebhookUrls
+        .map((u) => u.trim())
+        .filter(Boolean)
+        .filter((u) => /^https?:\/\//i.test(u))
+      for (const u of cleanedExtras) {
+        if (u.includes("hooks.slack.com")) {
+          toast.error("Use the Slack field above for Slack webhook URLs")
+          return
+        }
+      }
+      if (instantlyEnabled && !instantlyCampaignId.trim()) {
+        toast.error("Enter your Instantly campaign ID, or disable Instantly alerts")
+        return
+      }
+      const nextUrls = [...(trimmed ? [trimmed] : []), ...cleanedExtras]
       const nextFilters = {
         ...icpFilters,
         alert_email_enabled: emailAlertEnabled,
         alert_email: trimmedEmail,
+        alerts_hubspot_enabled: hubspotEnabled,
+        alerts_instantly_enabled: instantlyEnabled,
+        alerts_instantly_campaign_id: instantlyCampaignId.trim(),
       }
       const res = await fetch(`${API}/site-config`, {
         method: "POST",
@@ -491,6 +536,7 @@ export default function VisitorsPage() {
       if (res.ok) {
         toast.success("Alert settings saved")
         setIcpFilters(nextFilters)
+        setOtherWebhooks(cleanedExtras)
       } else {
         toast.error("Failed to save settings")
       }
@@ -499,7 +545,7 @@ export default function VisitorsPage() {
     } finally {
       setSavingWebhook(false)
     }
-  }, [slackWebhook, otherWebhooks, emailAlertEnabled, emailAlertAddress, icpFilters])
+  }, [slackWebhook, extraWebhookUrls, emailAlertEnabled, emailAlertAddress, icpFilters, hubspotEnabled, instantlyEnabled, instantlyCampaignId])
 
   useEffect(() => {
     setMounted(true)
@@ -1417,11 +1463,11 @@ export default function VisitorsPage() {
           if (o) loadAlertSettings()
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Alert Rules</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Get notified when high-intent visitors match your ICP.
+              Get notified when high-intent visitors match your ICP. Pick any subset of channels — they all fire on every identified visit.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1482,7 +1528,119 @@ export default function VisitorsPage() {
               />
             </div>
 
-            <div className="flex justify-end pt-1">
+            {/* HubSpot */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">HubSpot CRM</p>
+                <label className={cn(
+                  "flex items-center gap-2 text-[10px] cursor-pointer",
+                  !integrationStatus.hubspot && "text-muted-foreground/40 cursor-not-allowed"
+                )}>
+                  <input
+                    type="checkbox"
+                    checked={hubspotEnabled}
+                    disabled={!integrationStatus.hubspot}
+                    onChange={(e) => setHubspotEnabled(e.target.checked)}
+                  />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Identified visitors with an email are pushed as HubSpot contacts (with intent score + visit URL custom properties).
+              </p>
+              {!integrationStatus.hubspot && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/integrations")}
+                  className="text-[10px] font-bold text-primary hover:underline"
+                >
+                  Connect HubSpot in Integrations →
+                </button>
+              )}
+            </div>
+
+            {/* Instantly */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">Instantly</p>
+                <label className={cn(
+                  "flex items-center gap-2 text-[10px] cursor-pointer",
+                  !integrationStatus.instantly && "text-muted-foreground/40 cursor-not-allowed"
+                )}>
+                  <input
+                    type="checkbox"
+                    checked={instantlyEnabled}
+                    disabled={!integrationStatus.instantly}
+                    onChange={(e) => setInstantlyEnabled(e.target.checked)}
+                  />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Identified visitors with an email are added as leads to the Instantly campaign below.
+              </p>
+              <Input
+                value={instantlyCampaignId}
+                onChange={(e) => setInstantlyCampaignId(e.target.value)}
+                placeholder="Instantly campaign ID"
+                className="text-xs"
+                disabled={!integrationStatus.instantly || !instantlyEnabled}
+              />
+              {!integrationStatus.instantly && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/integrations")}
+                  className="text-[10px] font-bold text-primary hover:underline"
+                >
+                  Connect Instantly in Integrations →
+                </button>
+              )}
+            </div>
+
+            {/* Make.com / n8n / custom webhooks */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">Make.com · n8n · Custom webhooks</p>
+                <button
+                  type="button"
+                  onClick={() => setExtraWebhookUrls([...extraWebhookUrls, ""])}
+                  className="text-[10px] font-bold text-primary hover:underline"
+                >
+                  + Add URL
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Any HTTPS webhook URL receives a generic JSON payload per visit. Make and n8n URLs are auto-detected and tagged in the payload.
+              </p>
+              {extraWebhookUrls.length === 0 ? (
+                <p className="text-[10px] text-muted-foreground/60 italic">No custom webhooks configured.</p>
+              ) : (
+                extraWebhookUrls.map((u, i) => (
+                  <div key={i} className="flex items-center gap-1">
+                    <Input
+                      value={u}
+                      onChange={(e) => {
+                        const next = [...extraWebhookUrls]
+                        next[i] = e.target.value
+                        setExtraWebhookUrls(next)
+                      }}
+                      placeholder="https://hook.us2.make.com/... or https://your.n8n.cloud/webhook/..."
+                      className="text-xs flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setExtraWebhookUrls(extraWebhookUrls.filter((_, j) => j !== i))}
+                      className="p-1 text-muted-foreground hover:text-destructive"
+                      title="Remove"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
               <Button size="sm" onClick={saveAlertSettings} disabled={savingWebhook} className="h-7 text-[11px]">
                 {savingWebhook ? "Saving..." : "Save"}
               </Button>

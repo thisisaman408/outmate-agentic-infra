@@ -1205,64 +1205,408 @@ def _send_visit_email(visit: Visit, to_email: str) -> None:
     NotificationService()._send_email(to=to_email, subject=subject, html=html, text=text)
 
 
+def _mask_email(email: str) -> str:
+    """Mask email for compliance: 'parikshit@amazon.com' -> '****@****'."""
+    if not email or "@" not in email:
+        return "****"
+    return "****@****"
+
+
+def _intent_emoji(intent_pct: int) -> str:
+    if intent_pct >= 70:
+        return "🔥"
+    if intent_pct >= 40:
+        return "⚡"
+    return "👀"
+
+
+def _icp_emoji(score: int) -> str:
+    if score >= 80:
+        return "🎯"
+    if score >= 60:
+        return "✅"
+    if score >= 40:
+        return "🟡"
+    return "⚪"
+
+
+# ISO-3166 country name → flag emoji. Covers the long tail; falls back to 🌐.
+_COUNTRY_FLAGS: dict[str, str] = {
+    "united states": "🇺🇸", "usa": "🇺🇸", "us": "🇺🇸",
+    "united kingdom": "🇬🇧", "uk": "🇬🇧", "great britain": "🇬🇧",
+    "india": "🇮🇳", "canada": "🇨🇦", "germany": "🇩🇪", "france": "🇫🇷",
+    "australia": "🇦🇺", "japan": "🇯🇵", "china": "🇨🇳", "brazil": "🇧🇷",
+    "spain": "🇪🇸", "italy": "🇮🇹", "mexico": "🇲🇽", "netherlands": "🇳🇱",
+    "singapore": "🇸🇬", "ireland": "🇮🇪", "sweden": "🇸🇪", "norway": "🇳🇴",
+    "denmark": "🇩🇰", "finland": "🇫🇮", "switzerland": "🇨🇭", "austria": "🇦🇹",
+    "belgium": "🇧🇪", "poland": "🇵🇱", "portugal": "🇵🇹", "russia": "🇷🇺",
+    "south korea": "🇰🇷", "korea": "🇰🇷", "indonesia": "🇮🇩", "thailand": "🇹🇭",
+    "philippines": "🇵🇭", "vietnam": "🇻🇳", "malaysia": "🇲🇾", "new zealand": "🇳🇿",
+    "south africa": "🇿🇦", "uae": "🇦🇪", "united arab emirates": "🇦🇪",
+    "saudi arabia": "🇸🇦", "israel": "🇮🇱", "turkey": "🇹🇷", "argentina": "🇦🇷",
+    "chile": "🇨🇱", "colombia": "🇨🇴", "peru": "🇵🇪", "egypt": "🇪🇬",
+    "nigeria": "🇳🇬", "kenya": "🇰🇪", "pakistan": "🇵🇰", "bangladesh": "🇧🇩",
+    "ukraine": "🇺🇦", "czech republic": "🇨🇿", "greece": "🇬🇷", "hungary": "🇭🇺",
+    "romania": "🇷🇴",
+}
+
+
+def _country_flag(country: str | None) -> str:
+    """Country name → flag emoji. Tries ISO alpha-2 codes first, then a name table."""
+    if not country:
+        return ""
+    raw = country.strip()
+    # 2-letter ISO codes get composed from regional indicator symbols
+    if len(raw) == 2 and raw.isalpha():
+        try:
+            return chr(0x1F1E6 + (ord(raw.upper()[0]) - ord("A"))) + chr(
+                0x1F1E6 + (ord(raw.upper()[1]) - ord("A"))
+            )
+        except Exception:
+            return ""
+    return _COUNTRY_FLAGS.get(raw.lower(), "")
+
+
 def _build_slack_payload(visit: Visit) -> dict:
-    """Render a visit as a Slack Block Kit message."""
+    """Render a visit as a Slack Block Kit message — RB2B-style layout.
+
+    Two modes:
+      • person-resolved → header "<Person> from <Company>", person photo, person LinkedIn
+      • company-only    → header "Visit from <Company>", company logo, company LinkedIn
+
+    Always shows: ICP score, intent %, country flag, page URL, timestamp,
+    "More Details" deep link, and a company "About" block with website,
+    industry, employees, revenue, funding, HQ.
+    """
     res = visit.resolution or {}
     exp = res.get("explorium") or {}
+    person = res.get("person") or {}
     geo = res.get("geo") or {}
-    company = exp.get("company_name") or res.get("company_name") or "Unknown company"
-    industry = exp.get("industry") or exp.get("linkedin_industry_category") or ""
-    person_name = res.get("full_name") or " ".join(
-        x for x in [res.get("first_name"), res.get("last_name")] if x
-    ).strip()
-    person_email = res.get("email") or ""
-    person_title = res.get("job_title") or ""
-    location = ", ".join(x for x in [geo.get("city"), geo.get("country")] if x)
-    intent = res.get("icp_score") or res.get("intent_score") or visit.intent_score or 0
+    if not isinstance(geo, dict):
+        geo = {}
+
+    # ── Person
+    person_name = (
+        res.get("full_name")
+        or person.get("full_name")
+        or person.get("name")
+        or " ".join(x for x in [res.get("first_name"), res.get("last_name")] if x).strip()
+    )
+    person_title = (
+        res.get("job_title")
+        or res.get("title")
+        or person.get("job_title")
+        or person.get("title")
+        or ""
+    )
+    person_email = (
+        res.get("email")
+        or res.get("work_email")
+        or person.get("email")
+        or person.get("work_email")
+        or ""
+    )
+    person_linkedin = (
+        res.get("linkedin_url")
+        or res.get("linkedin")
+        or person.get("linkedin_url")
+        or person.get("linkedin")
+        or ""
+    )
+    person_photo = (
+        res.get("photo_url")
+        or res.get("profile_picture")
+        or res.get("avatar_url")
+        or person.get("photo_url")
+        or person.get("profile_picture")
+        or exp.get("profile_picture")
+        or ""
+    )
+
+    # ── Company
+    company = (
+        exp.get("company_name")
+        or res.get("company_name")
+        or res.get("company")
+        or "Unknown company"
+    )
+    domain = res.get("domain") or exp.get("domain") or ""
+    company_website = (
+        exp.get("website")
+        or exp.get("company_website")
+        or res.get("website")
+        or domain
+        or ""
+    )
+    if company_website and not company_website.startswith("http"):
+        company_website = f"https://{company_website}"
+    company_linkedin = (
+        exp.get("linkedin_url")
+        or res.get("company_linkedin_url")
+        or exp.get("company_linkedin_url")
+        or ""
+    )
+    company_logo = (
+        res.get("logo_url")
+        or exp.get("logo_url")
+        or (f"https://logo.clearbit.com/{domain}" if domain else "")
+    )
+    industry = (
+        exp.get("industry")
+        or exp.get("linkedin_industry_category")
+        or res.get("industry")
+        or ""
+    )
+    employee_count = (
+        exp.get("employee_count_range")
+        or exp.get("employees_range")
+        or res.get("employee_count_range")
+        or (str(exp.get("employee_count_exact")) if exp.get("employee_count_exact") else "")
+        or ""
+    )
+    revenue = (
+        exp.get("revenue_range")
+        or exp.get("annual_revenue_range")
+        or res.get("revenue_range")
+        or ""
+    )
+    funding_stage = (
+        exp.get("funding_stage")
+        or res.get("funding_stage")
+        or exp.get("last_funding_stage")
+        or ""
+    )
+    hq_city = exp.get("headquarters_city") or res.get("headquarters_city") or ""
+    hq_country = exp.get("headquarters_country") or res.get("headquarters_country") or ""
+    hq = ", ".join(x for x in [hq_city, hq_country] if x)
+
+    # ── Geo / intent / icp
+    visitor_country = geo.get("country") or ""
+    flag = _country_flag(visitor_country)
+    location = ", ".join(x for x in [geo.get("city"), geo.get("region"), visitor_country] if x)
+
+    intent = res.get("intent_score") if res.get("intent_score") is not None else visit.intent_score
     try:
-        intent_pct = int(round(float(intent) * 100)) if float(intent) <= 1 else int(intent)
+        intent_val = float(intent or 0)
+        intent_pct = int(round(intent_val * 100)) if intent_val <= 1 else int(intent_val)
     except Exception:
         intent_pct = 0
+    if intent_pct >= 70:
+        intent_label = "Hot"
+    elif intent_pct >= 40:
+        intent_label = "Warm"
+    else:
+        intent_label = "Cold"
 
-    header = f"🌐 New visit: {company}"
-    if person_name:
-        header = f"🌐 {person_name} from {company}"
+    icp = res.get("icp_score")
+    try:
+        icp_val = float(icp) if icp is not None else None
+        icp_pct: int | None = (
+            int(round(icp_val * 100)) if icp_val is not None and icp_val <= 1 else (int(icp_val) if icp_val is not None else None)
+        )
+    except Exception:
+        icp_pct = None
 
-    fields = []
-    if person_title:
-        fields.append({"type": "mrkdwn", "text": f"*Title*\n{person_title}"})
-    if industry:
-        fields.append({"type": "mrkdwn", "text": f"*Industry*\n{industry}"})
-    if location:
-        fields.append({"type": "mrkdwn", "text": f"*Location*\n{location}"})
-    if person_email:
-        fields.append({"type": "mrkdwn", "text": f"*Email*\n{person_email}"})
-    fields.append({"type": "mrkdwn", "text": f"*Intent*\n{intent_pct}%"})
-    fields.append({"type": "mrkdwn", "text": f"*Page*\n<{visit.url}|{visit.url}>"})
+    # ── Timestamp like "May 01, 2026 at 06:54PM UTC"
+    ts = datetime.now(timezone.utc)
+    when_str = ts.strftime("%b %d, %Y at %I:%M%p UTC").replace(" 0", " ")
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": header[:150]}},
-        {"type": "section", "fields": fields[:10]},
-        {
-            "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": f"IP `{visit.ip}` · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"}
-            ],
-        },
+    is_person = bool(person_name)
+
+    # ── Header
+    if is_person:
+        header_text = f"{person_name} from {company}"
+    else:
+        header_text = f"Visit from {company}"
+
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": header_text[:150]}},
     ]
-    return {"text": header, "blocks": blocks}
+
+    # ── Score row: ICP · Intent · Country flag
+    score_parts = [f"{_intent_emoji(intent_pct)} *Intent:* {intent_pct}% ({intent_label})"]
+    if icp_pct is not None:
+        score_parts.insert(0, f"{_icp_emoji(icp_pct)} *ICP:* {icp_pct}/100")
+    if flag and visitor_country:
+        score_parts.append(f"{flag} {visitor_country}")
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "  ·  ".join(score_parts)}]})
+
+    # ── Intent Signals row (top page, dwell, scroll, return, page count)
+    behavioral = res.get("behavioral") or {}
+    signals = behavioral.get("signals") or []
+    if signals:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "  ·  ".join(signals)}],
+            }
+        )
+
+    # ── Tavily "why now" context (best-effort, populated upstream)
+    tavily = res.get("tavily") or {}
+    if tavily.get("title") and tavily.get("url"):
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"🔎 *Recent:* <{tavily['url']}|{tavily['title']}>",
+                    }
+                ],
+            }
+        )
+
+    # ── Main details section (person OR company-anchored)
+    detail_lines: list[str] = []
+    if is_person:
+        detail_lines.append(f"*Name:* {person_name}")
+        if person_title:
+            detail_lines.append(f"*Title:* {person_title}")
+        detail_lines.append(f"*Company:* {company}")
+        if person_email:
+            detail_lines.append(f"*Email:* {_mask_email(person_email)}")
+        if person_linkedin:
+            detail_lines.append(f"*LinkedIn:* <{person_linkedin}|{person_linkedin}>")
+        if location:
+            loc_text = f"{flag} {location}" if flag else location
+            detail_lines.append(f"*Location:* {loc_text}")
+    else:
+        # Company-only visitor — surface company website + LinkedIn here
+        detail_lines.append(f"*Company:* {company}")
+        if industry:
+            detail_lines.append(f"*Industry:* {industry}")
+        if company_website:
+            detail_lines.append(f"*Website:* <{company_website}|{company_website}>")
+        if company_linkedin:
+            detail_lines.append(f"*LinkedIn:* <{company_linkedin}|{company_linkedin}>")
+        if location:
+            loc_text = f"{flag} {location}" if flag else location
+            detail_lines.append(f"*Visiting from:* {loc_text}")
+
+    detail_section: dict = {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "\n".join(detail_lines)},
+    }
+    accessory_image = person_photo if is_person else company_logo
+    if accessory_image:
+        detail_section["accessory"] = {
+            "type": "image",
+            "image_url": accessory_image,
+            "alt_text": (person_name or company)[:100],
+        }
+    blocks.append(detail_section)
+
+    # ── First identified visiting line
+    blocks.append(
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"First identified visiting <{visit.url}|{visit.url}> on *{when_str}*",
+            },
+        }
+    )
+
+    # ── Action buttons
+    action_elements: list[dict] = []
+    if is_person and person_linkedin:
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Connect on LinkedIn  :linkedin:", "emoji": True},
+                "url": person_linkedin,
+            }
+        )
+    elif company_linkedin:
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "View on LinkedIn  :linkedin:", "emoji": True},
+                "url": company_linkedin,
+            }
+        )
+    if company_website:
+        action_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Visit Website  🌐", "emoji": True},
+                "url": company_website,
+            }
+        )
+    try:
+        from app.core.config import settings as _settings_for_url
+
+        app_url = (
+            getattr(_settings_for_url, "FRONTEND_URL", None)
+            or getattr(_settings_for_url, "APP_URL", None)
+            or "https://app.outmate.ai"
+        )
+    except Exception:
+        app_url = "https://app.outmate.ai"
+    action_elements.append(
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "More Details", "emoji": True},
+            "url": f"{app_url.rstrip('/')}/visitors?visit={visit.id}",
+            "style": "primary",
+        }
+    )
+    blocks.append({"type": "actions", "elements": action_elements[:5]})
+
+    blocks.append({"type": "divider"})
+
+    # ── About <Company> header
+    about_link = company_linkedin or company_website
+    if about_link:
+        about_text = f"*About <{about_link}|{company}>*"
+    else:
+        about_text = f"*About {company}*"
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": about_text}})
+
+    # ── Company facts (2-column field block)
+    company_fields: list[dict] = []
+    if company_website:
+        company_fields.append(
+            {"type": "mrkdwn", "text": f"*Website:*\n<{company_website}|{company_website}>"}
+        )
+    if employee_count:
+        company_fields.append({"type": "mrkdwn", "text": f"*Est. Employees:*\n{employee_count}"})
+    if industry:
+        company_fields.append({"type": "mrkdwn", "text": f"*Industry:*\n{industry}"})
+    if revenue:
+        company_fields.append({"type": "mrkdwn", "text": f"*Est. Revenue:*\n{revenue}"})
+    if funding_stage:
+        company_fields.append({"type": "mrkdwn", "text": f"*Funding Stage:*\n{funding_stage}"})
+    if hq:
+        hq_flag = _country_flag(hq_country)
+        hq_disp = f"{hq_flag} {hq}" if hq_flag else hq
+        company_fields.append({"type": "mrkdwn", "text": f"*HQ:*\n{hq_disp}"})
+    if company_fields:
+        blocks.append({"type": "section", "fields": company_fields[:10]})
+
+    return {"text": header_text, "blocks": blocks}
 
 
 async def _enqueue_webhooks(db, visit: Visit) -> None:
     """
-    Deliver webhooks for a visit. Slack URLs (hooks.slack.com) get a Block Kit
-    message; everything else gets the generic JSON event payload.
+    Deliver alerts for a visit across all configured destinations:
+
+      • Slack (any URL containing hooks.slack.com)         — Block Kit payload
+      • Make.com (hook.*.make.com / integromat.com)        — generic JSON, kind="make"
+      • n8n (*.n8n.cloud / urls containing n8n)            — generic JSON, kind="n8n"
+      • any other webhook URL                              — current generic JSON
+      • Email (when icp_filters.alert_email_enabled)       — SMTP via NotificationService
+      • HubSpot (when icp_filters.alerts_hubspot_enabled)  — HubSpotService.create_contact
+      • Instantly (when alerts_instantly_enabled)          — Instantly /lead/add API
 
     Delivery is inline (httpx) by default — Celery is only used when explicitly
     enabled via VISITOR_TRACKING_INLINE=False, since the production deployment
     does not run a Celery worker.
     """
     from app.core.config import settings as _settings
+    from app.services import visitor_alerts as _va
+
     site_config = db.query(SiteConfig).filter(SiteConfig.org_id == visit.org_id).first()
     if not site_config:
         return
@@ -1272,6 +1616,11 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
     icp = (site_config.icp_filters or {})
     alert_email_optin = bool(icp.get("alert_email_enabled", False))
     alert_email_addr = icp.get("alert_email") or ""
+    hubspot_enabled = bool(icp.get("alerts_hubspot_enabled", False))
+    instantly_enabled = bool(icp.get("alerts_instantly_enabled", False))
+    instantly_campaign = icp.get("alerts_instantly_campaign_id") or ""
+
+    owner_user_id = site_config.org_id  # org_id == owning user.id today
     if alert_email_optin and not alert_email_addr:
         try:
             from app.db.models.user import User as _User
@@ -1281,8 +1630,36 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
             logger.warning("Could not resolve owner email: %s", e)
 
     has_webhooks = bool(site_config.webhook_urls)
-    if not has_webhooks and not (alert_email_optin and alert_email_addr):
+    has_other_destinations = (
+        (alert_email_optin and alert_email_addr)
+        or hubspot_enabled
+        or instantly_enabled
+    )
+    if not has_webhooks and not has_other_destinations:
         return
+
+    # Best-effort Tavily lookup before building the Slack payload so the
+    # "🔎 Recent" line can render. Cached on visit.resolution["tavily"].
+    try:
+        tavily_ctx = await _va.fetch_tavily_context(visit)
+        if tavily_ctx:
+            res_dict = visit.resolution or {}
+            res_dict["tavily"] = tavily_ctx
+            visit.resolution = res_dict
+    except Exception as e:
+        logger.warning("Tavily context skipped: %s", e)
+
+    # Stash intent signals on resolution so the Slack builder can render them
+    # without needing a live db handle.
+    try:
+        signals = _va.build_intent_signals(visit, db)
+        if signals:
+            res_dict = visit.resolution or {}
+            res_dict.setdefault("behavioral", {})
+            res_dict["behavioral"]["signals"] = signals
+            visit.resolution = res_dict
+    except Exception as e:
+        logger.warning("Intent signals skipped: %s", e)
 
     generic_payload = {
         "event": "visitor_identified",
@@ -1294,51 +1671,68 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
     }
     slack_payload = _build_slack_payload(visit)
     inline_mode = getattr(_settings, "VISITOR_TRACKING_INLINE", True)
+    webhook_secret = site_config.webhook_secret or ""
 
-    # Email delivery (best-effort, non-blocking on failure)
+    # ── Email delivery ──
     if alert_email_optin and alert_email_addr:
         try:
             _send_visit_email(visit, alert_email_addr)
         except Exception as e:
             logger.error("Visit email delivery failed: %s", e)
 
+    # ── HubSpot delivery ──
+    if hubspot_enabled:
+        try:
+            status = await _va.deliver_hubspot(db, owner_user_id, visit)
+            _va.write_alert(db, visit, "hubspot", status, {"properties": "see HubSpot"})
+        except Exception as e:
+            logger.error("HubSpot delivery exception: %s", e)
+            _va.write_alert(db, visit, "hubspot", "error", {"error": str(e)[:300]})
+
+    # ── Instantly delivery ──
+    if instantly_enabled and instantly_campaign:
+        try:
+            status = await _va.deliver_instantly(
+                db, owner_user_id, visit, instantly_campaign
+            )
+            _va.write_alert(
+                db, visit, "instantly", status, {"campaign_id": instantly_campaign}
+            )
+        except Exception as e:
+            logger.error("Instantly delivery exception: %s", e)
+            _va.write_alert(db, visit, "instantly", "error", {"error": str(e)[:300]})
+
     if not has_webhooks:
         return
 
     for webhook_url in site_config.webhook_urls:
-        is_slack = "hooks.slack.com" in (webhook_url or "")
-        payload = slack_payload if is_slack else generic_payload
+        kind = _va.classify_webhook(webhook_url)
+        if kind == "slack":
+            payload = slack_payload
+        elif kind in ("make", "n8n"):
+            payload = _va.build_make_n8n_payload(visit, kind)
+        else:
+            payload = generic_payload
 
         alert = Alert(
             id=uuid.uuid4(),
             visit_id=visit.id,
-            webhook_type="slack" if is_slack else "general",
+            webhook_type=kind,
             status="pending",
             payload=payload,
         )
         db.add(alert)
         db.commit()
 
-        webhook_secret = site_config.webhook_secret or ""
+        # Slack and Make/n8n webhooks should NOT be HMAC-signed — those
+        # platforms reject custom headers. Only sign generic webhooks.
+        sign = kind == "general"
 
         if inline_mode:
-            # Send right now from the API process — required in production
-            # because no Celery worker is running.
-            try:
-                import json as _json
-                body_bytes = _json.dumps(payload, separators=(",", ":")).encode()
-                headers = {"Content-Type": "application/json"}
-                if webhook_secret and not is_slack:
-                    sig = hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
-                    headers["X-Outmate-Signature"] = f"sha256={sig}"
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(webhook_url, content=body_bytes, headers=headers)
-                alert.status = "success" if resp.status_code < 300 else "failed"
-                if resp.status_code >= 300:
-                    logger.warning("Webhook %s returned %d: %s", webhook_url, resp.status_code, resp.text[:200])
-            except Exception as ex:
-                logger.error("Inline webhook delivery failed (%s): %s", webhook_url, ex)
-                alert.status = "error"
+            status = await _va.deliver_generic_webhook(
+                webhook_url, payload, webhook_secret, sign=sign
+            )
+            alert.status = status
             db.commit()
         else:
             try:
@@ -1347,23 +1741,16 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
                     payload=payload,
                     visit_id=str(visit.id),
                     alert_id=str(alert.id),
-                    webhook_secret="" if is_slack else webhook_secret,
+                    webhook_secret=webhook_secret if sign else "",
                 )
             except Exception as e:
-                logger.warning("Celery unavailable for webhook, falling back to inline: %s", e)
-                try:
-                    import json as _json
-                    body_bytes = _json.dumps(payload, separators=(",", ":")).encode()
-                    headers = {"Content-Type": "application/json"}
-                    if webhook_secret and not is_slack:
-                        sig = hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
-                        headers["X-Outmate-Signature"] = f"sha256={sig}"
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        resp = await client.post(webhook_url, content=body_bytes, headers=headers)
-                    alert.status = "success" if resp.status_code < 300 else "failed"
-                except Exception as ex:
-                    logger.error("Synchronous webhook delivery failed: %s", ex)
-                    alert.status = "error"
+                logger.warning(
+                    "Celery unavailable for webhook, falling back to inline: %s", e
+                )
+                status = await _va.deliver_generic_webhook(
+                    webhook_url, payload, webhook_secret, sign=sign
+                )
+                alert.status = status
                 db.commit()
 
 
