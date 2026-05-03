@@ -170,6 +170,7 @@ async def send_first_visitor_alert(to_email: str, company_name: str, domain: str
                 server.starttls(context=context)
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.sendmail(from_email, to_email, msg.as_string())
+        logger.info(f"First visitor alert email sent successfully to {to_email} for {company_name}")
         return True
     except Exception as exc:
         logger.error(f"Failed to send first visitor email: {exc}")

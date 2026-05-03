@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -244,6 +245,29 @@ async def connect_integration(
             
         # Fallback to manual API Key if provided by user to bypass OAuth (for free tiers)
         if body.api_key:
+            # --- HubSpot Validation ---
+            if slug == "hubspot":
+                import httpx
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        # Test the token by fetching 1 contact
+                        resp = await client.get(
+                            "https://api.hubapi.com/crm/v3/objects/contacts",
+                            headers={"Authorization": f"Bearer {body.api_key}"},
+                            params={"limit": 1}
+                        )
+                        if resp.status_code != 200:
+                            logger.warning(f"HubSpot token validation failed: {resp.status_code} - {resp.text}")
+                            raise HTTPException(
+                                status_code=400, 
+                                detail="Invalid HubSpot Private App Token. Please check the token and permissions (scopes) in HubSpot."
+                            )
+                        logger.info(f"HubSpot token validated successfully for user {user.id}")
+                except httpx.RequestError as exc:
+                    logger.error(f"HubSpot connection error during validation: {exc}")
+                    raise HTTPException(status_code=502, detail="Could not reach HubSpot API to validate token")
+            # --- End Validation ---
+
             encrypted = encrypt_credentials({"access_token": body.api_key})
             if existing:
                 existing.credentials_encrypted = encrypted
@@ -516,6 +540,34 @@ async def test_integration(
 
     if not user_conn:
         return {"success": False, "message": "Integration is not connected"}
+
+    # ── Slack Webhook Test ──────────────────────────────────────────
+    if slug == "slack" and integration.auth_type == "webhook":
+        from app.services.integration_engine.credential_vault import decrypt_credentials
+        import httpx
+        
+        try:
+            creds = decrypt_credentials(user_conn.credentials_encrypted)
+            webhook_url = creds.get("webhook_url")
+            if not webhook_url:
+                return {"success": False, "message": "Slack webhook URL not found in credentials"}
+            
+            payload = {
+                "text": "🚀 *Outmate.ai Connection Test*\n\nYour Slack integration is successfully connected and ready to receive real-time lead alerts! \n\n_Sent at: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "_"
+            }
+            
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(webhook_url, json=payload)
+                resp.raise_for_status()
+                
+            return {
+                "success": True, 
+                "message": "Test message sent to Slack successfully!",
+                "last_synced_at": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Slack test failed: {str(e)}")
+            return {"success": False, "message": f"Slack test failed: {str(e)}"}
 
     # In future, this would call connector.validate_credentials()
     return {

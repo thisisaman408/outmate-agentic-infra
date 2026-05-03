@@ -141,16 +141,25 @@ export const authService = {
 
   getMe: async (): Promise<User> => {
     const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
-    const response = await fetch(`${API_URL}/me`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
+    let response: Response
+    try {
+      response = await fetch(`${API_URL}/me`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+    } catch (networkErr) {
+      // Backend is unreachable — do NOT clear localStorage, just throw
+      throw new Error("Network error")
+    }
 
     if (!response.ok) {
-      localStorage.removeItem(AUTH_KEY)
-      localStorage.removeItem(USER_KEY)
+      if (response.status === 401) {
+        // Real auth failure — clear the session
+        localStorage.removeItem(AUTH_KEY)
+        localStorage.removeItem(USER_KEY)
+      }
       throw new Error("Session expired")
     }
 
@@ -204,7 +213,7 @@ export const authService = {
     completed?: boolean
     website_url?: string
     user_role?: string
-    onboarding_data?: string
+    onboarding_data?: any
     icp_config?: Record<string, unknown>
   }): Promise<{ success: boolean; user: User }> => {
     const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
@@ -225,5 +234,62 @@ export const authService = {
     const result = await response.json()
     localStorage.setItem(USER_KEY, JSON.stringify(result.user))
     return result
+  },
+
+  getIntegrationAuthUrl: async (slug: string): Promise<{ auth_url: string }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const endpoint = slug === "gmail" ? "/api/v1/auth/google/auth-url" : `/api/v1/integrations/oauth/${slug}/start`
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!response.ok) throw new Error("Failed to get auth URL")
+    return response.json()
+  },
+
+  connectIntegration: async (slug: string, apiKey: string, config: any = {}): Promise<any> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const response = await fetch(`/api/v1/integrations/${slug}/connect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ api_key: apiKey, config }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Failed to connect integration")
+    }
+    return response.json()
+  },
+
+  testIntegration: async (slug: string): Promise<any> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const response = await fetch(`/api/v1/integrations/${slug}/test`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Test failed")
+    }
+    return response.json()
+  },
+
+  getSiteConfig: async (): Promise<{ pixel_key: string }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem(AUTH_KEY) : null
+    const response = await fetch(`/api/v1/visitors/site-config`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!response.ok) throw new Error("Failed to fetch site config")
+    return response.json()
   },
 }

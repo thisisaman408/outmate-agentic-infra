@@ -310,9 +310,9 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
         logger.warning("Login rejected — incorrect password — email=%s", body.email)
         raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
 
-    # Returning users who never went through onboarding: auto-complete it
-    if not user.onboarding_completed and user.last_login_at:
-        user.onboarding_completed = True
+    # NOTE: Do NOT auto-complete onboarding here.
+    # The frontend gates all non-onboarding routes behind onboarding_completed.
+    # Silently setting this to True would skip the onboarding flow for new users.
 
     user.last_login_at = datetime.utcnow()
     try:
@@ -385,9 +385,8 @@ async def google_auth(request: Request, body: GoogleAuthRequest, db: Session = D
             user.is_email_verified = True
         if not user.terms_accepted_at and body.terms_accepted:
             user.terms_accepted_at = datetime.utcnow()
-        # Returning users: auto-complete onboarding
-        if not user.onboarding_completed and user.last_login_at:
-            user.onboarding_completed = True
+        # NOTE: Do NOT auto-complete onboarding here.
+        # The frontend gates all non-onboarding routes behind onboarding_completed.
         user.last_login_at = datetime.utcnow()
         db.commit()
     else:
@@ -699,9 +698,8 @@ async def google_oauth_callback(
                     user.is_email_verified = True
                 if not user.terms_accepted_at and terms_accepted:
                     user.terms_accepted_at = datetime.utcnow()
-                # Returning users: auto-complete onboarding
-                if not user.onboarding_completed and user.last_login_at:
-                    user.onboarding_completed = True
+                # NOTE: Do NOT auto-complete onboarding here.
+                # The frontend gates all non-onboarding routes behind onboarding_completed.
                 user.gmail_access_token = access_token
                 if refresh_token:
                     user.gmail_refresh_token = refresh_token

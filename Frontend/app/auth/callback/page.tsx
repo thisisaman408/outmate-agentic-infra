@@ -36,7 +36,12 @@ function AuthCallbackContent() {
 
       setUser(userData)
 
-      router.replace("/dashboard")
+      // Route based on onboarding status
+      if (userData.onboarding_completed) {
+        router.replace("/dashboard")
+      } else {
+        router.replace("/onboarding")
+      }
     } catch {
       router.replace("/auth/login")
     }
