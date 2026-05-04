@@ -1178,7 +1178,7 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
         ("Location", location or "—"),
         ("Page", visit.url or "—"),
         ("Intent", f"{intent_pct}%"),
-        ("Time", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")),
+        ("Time", datetime.now(timezone.utc).strftime("%a, %b %d, %Y · %I:%M %p UTC").replace(" 0", " ")),
     ]
 
     html_rows = "".join(

@@ -6,6 +6,7 @@ from app.db.deps import get_db
 from sqlalchemy.orm import Session
 import httpx
 import logging
+from datetime import datetime, timezone
 from app.services.hubspot_service import HubSpotService
 from app.services.salesforce_service import SalesforceService
 from app.services.zoho_crm_service import ZohoCRMService
@@ -367,7 +368,32 @@ async def get_status(user: User = Depends(get_current_user)):
         "outreach": {
             "name": "Outreach (Instantly/Smartlead)",
             "connected": bool(ints.get("outreach", {}).get("connected")),
+            "service": ints.get("outreach", {}).get("service"),
             "skipped": ints.get("outreach", {}).get("skipped", False),
+            "priority": "recommended"
+        },
+        "instantly": {
+            "name": "Instantly",
+            "connected": (
+                bool(ints.get("instantly", {}).get("connected"))
+                or (
+                    ints.get("outreach", {}).get("service") == "instantly"
+                    and bool(ints.get("outreach", {}).get("connected"))
+                )
+            ),
+            "skipped": ints.get("instantly", {}).get("skipped", False),
+            "priority": "recommended"
+        },
+        "smartlead": {
+            "name": "Smartlead",
+            "connected": (
+                bool(ints.get("smartlead", {}).get("connected"))
+                or (
+                    ints.get("outreach", {}).get("service") == "smartlead"
+                    and bool(ints.get("outreach", {}).get("connected"))
+                )
+            ),
+            "skipped": ints.get("smartlead", {}).get("skipped", False),
             "priority": "recommended"
         }
     }
@@ -391,10 +417,11 @@ async def test_outreach(
     
     # Placeholders for real API endpoints if they differ
     if service == "instantly":
-        # Instantly V1 verify endpoint
-        url = "https://api.instantly.ai/1.0/account/list"
-        params = {"api_key": api_key}
-        headers = {}
+        # Instantly V2 verify endpoint — V1 was deprecated in 2024 and now
+        # returns 404. V2 uses bearer auth and a /api/v2/accounts list call.
+        url = "https://api.instantly.ai/api/v2/accounts"
+        params = {"limit": 1}
+        headers = {"Authorization": f"Bearer {api_key}"}
     elif service == "smartlead":
         # Smartlead V1 verify endpoint
         url = "https://smartlead.ai/api/v1/email-accounts/stats"
@@ -414,12 +441,47 @@ async def test_outreach(
                 ints["outreach"] = {
                     "service": service,
                     "connected": True,
-                    "connected_at": str(httpx.datetime.datetime.now()),
+                    "connected_at": datetime.now(timezone.utc).isoformat(),
                     "skipped": False
                 }
                 # We store the mask of the key for safety or the whole key if needed for functionality
-                ints["outreach_api_key"] = api_key 
+                ints["outreach_api_key"] = api_key
                 user.integrations = ints
+
+                # Also upsert the v2 UserIntegration row so the catalog (and
+                # downstream visitor-alert delivery) can find this credential.
+                try:
+                    from app.db.models.integration import Integration, UserIntegration
+                    from app.services.integration_engine.credential_vault import encrypt_credentials
+                    integration = (
+                        db.query(Integration).filter(Integration.slug == service).first()
+                    )
+                    if integration:
+                        ui = (
+                            db.query(UserIntegration)
+                            .filter(
+                                UserIntegration.user_id == user.id,
+                                UserIntegration.integration_id == integration.id,
+                            )
+                            .first()
+                        )
+                        encrypted = encrypt_credentials({"api_key": api_key})
+                        if ui:
+                            ui.credentials_encrypted = encrypted
+                            ui.status = "connected"
+                            ui.connected_at = datetime.now(timezone.utc)
+                            ui.error_message = None
+                        else:
+                            db.add(UserIntegration(
+                                user_id=user.id,
+                                integration_id=integration.id,
+                                credentials_encrypted=encrypted,
+                                status="connected",
+                                connected_at=datetime.now(timezone.utc),
+                            ))
+                except Exception as e:
+                    logger.warning(f"Failed to upsert UserIntegration for {service}: {e}")
+
                 db.commit()
                 return {"success": True, "message": f"Successfully connected to {service.capitalize()}"}
             

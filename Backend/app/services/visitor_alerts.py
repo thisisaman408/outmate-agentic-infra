@@ -253,7 +253,7 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
 
 # ── Instantly delivery ──────────────────────────────────────────────────────
 
-INSTANTLY_API_URL = "https://api.instantly.ai/api/v1/lead/add"
+INSTANTLY_API_URL = "https://api.instantly.ai/api/v2/leads"
 
 
 async def deliver_instantly(db, user_id, visit: Visit, campaign_id: str) -> str:
@@ -269,40 +269,49 @@ async def deliver_instantly(db, user_id, visit: Visit, campaign_id: str) -> str:
         logger.error("Instantly imports unavailable: %s", e)
         return "error"
 
+    api_key = ""
     try:
         integration = (
             db.query(Integration).filter(Integration.slug == "instantly").first()
         )
-        if not integration:
-            return "skipped"
-        ui = (
-            db.query(UserIntegration)
-            .filter(
-                UserIntegration.user_id == user_id,
-                UserIntegration.integration_id == integration.id,
+        if integration:
+            ui = (
+                db.query(UserIntegration)
+                .filter(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.integration_id == integration.id,
+                )
+                .first()
             )
-            .first()
-        )
-        if not ui or not ui.credentials_encrypted:
-            return "skipped"
+            if ui and ui.credentials_encrypted:
+                creds: dict = {}
+                try:
+                    creds = decrypt_credentials(ui.credentials_encrypted) or {}
+                except Exception:
+                    try:
+                        creds = json.loads(ui.credentials_encrypted)
+                    except Exception:
+                        creds = {}
+                api_key = creds.get("api_key") or creds.get("instantly_api_key") or ""
 
-        creds: dict = {}
-        try:
-            creds = decrypt_credentials(ui.credentials_encrypted) or {}
-        except Exception:
+        # Legacy fallback — older flow stored the key on User.integrations
+        if not api_key:
             try:
-                creds = json.loads(ui.credentials_encrypted)
+                from app.db.models.user import User as _User
+                u = db.query(_User).filter(_User.id == user_id).first()
+                legacy = (u.integrations if u else {}) or {}
+                if (legacy.get("outreach") or {}).get("service") == "instantly":
+                    api_key = legacy.get("outreach_api_key") or ""
             except Exception:
-                creds = {}
+                pass
 
-        api_key = creds.get("api_key") or creds.get("instantly_api_key")
         if not api_key:
             logger.warning("Instantly API key missing for user %s", user_id)
-            return "error"
+            return "skipped"
 
+        # Instantly V2 schema — bearer auth, single lead-create endpoint.
         body = {
-            "api_key": api_key,
-            "campaign_id": campaign_id,
+            "campaign": campaign_id,
             "email": contact["email"],
             "first_name": contact["first_name"] or "",
             "last_name": contact["last_name"] or "",
@@ -317,9 +326,10 @@ async def deliver_instantly(db, user_id, visit: Visit, campaign_id: str) -> str:
                 "intent_score": str(visit.intent_score or 0),
             },
         }
+        headers = {"Authorization": f"Bearer {api_key}"}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(INSTANTLY_API_URL, json=body)
+            resp = await client.post(INSTANTLY_API_URL, json=body, headers=headers)
         if resp.status_code < 300:
             return "success"
         logger.warning(

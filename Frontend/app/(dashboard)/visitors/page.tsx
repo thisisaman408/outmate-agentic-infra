@@ -474,9 +474,10 @@ export default function VisitorsPage() {
 
   const loadAlertSettings = useCallback(async () => {
     try {
-      const [cfgRes, integrationsRes] = await Promise.all([
+      const [cfgRes, integrationsRes, legacyStatusRes] = await Promise.all([
         fetch(`${API}/site-config`, { headers: getAuthHeaders() }),
-        fetch(`/api/v1/integrations`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`/api/v1/integrations/catalog`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`/api/v1/integrations/status`, { headers: getAuthHeaders() }).catch(() => null),
       ])
       if (!cfgRes.ok) return
       const cfg = await cfgRes.json()
@@ -495,19 +496,45 @@ export default function VisitorsPage() {
       setInstantlyEnabled(Boolean(filters.alerts_instantly_enabled))
       setInstantlyCampaignId(typeof filters.alerts_instantly_campaign_id === "string" ? filters.alerts_instantly_campaign_id : "")
 
-      // Build {hubspot, instantly, ...} → connected map from /api/v1/integrations
+      // Build {hubspot, instantly, ...} → connected map from /catalog
+      const map: Record<string, boolean> = {}
       if (integrationsRes && integrationsRes.ok) {
         const data = await integrationsRes.json().catch(() => null)
         const list: any[] = Array.isArray(data) ? data : (data?.integrations || data?.items || [])
-        const map: Record<string, boolean> = {}
         for (const item of list) {
           const slug = String(item.slug || item.integration_slug || item.name || "").toLowerCase()
-          const status = String(item.status || item.user_status || "").toLowerCase()
-          const isConnected = Boolean(item.connected) || status === "connected" || status === "active"
+          // v2 catalog uses connection_status: "connected" | "not_connected" | "built_in" | ...
+          const status = String(item.connection_status || item.status || item.user_status || "").toLowerCase()
+          const isConnected = Boolean(item.connected) || status === "connected" || status === "active" || status === "built_in"
           if (slug) map[slug] = isConnected
         }
-        setIntegrationStatus(map)
       }
+      // Fallback: legacy /status endpoint reads from User.integrations JSONB.
+      // Covers users who connected via the old test/outreach flow before the
+      // upsert-into-UserIntegration fix landed.
+      if (legacyStatusRes && legacyStatusRes.ok) {
+        const data = await legacyStatusRes.json().catch(() => null)
+        const ints = (data && data.integrations) || {}
+        // /status now exposes both an explicit `instantly` block and a legacy
+        // `outreach{service,connected}` block. Use whichever is connected.
+        if (ints.instantly?.connected) map.instantly = true
+        if (ints.smartlead?.connected) map.smartlead = true
+        const outreach = ints.outreach || {}
+        if (outreach.connected) {
+          if (outreach.service === "instantly") map.instantly = true
+          else if (outreach.service === "smartlead") map.smartlead = true
+          else {
+            // Service field absent — light up both so the user can pick.
+            map.instantly = map.instantly || true
+            map.smartlead = map.smartlead || true
+          }
+        }
+        for (const slug of ["hubspot", "salesforce", "zoho", "outlook", "gmail"]) {
+          if (ints[slug]?.connected) map[slug] = true
+        }
+      }
+      console.log("[Visitors] integration status map:", map)
+      setIntegrationStatus(map)
     } catch { }
   }, [])
 
@@ -1559,15 +1586,16 @@ export default function VisitorsPage() {
             {/* HubSpot */}
             <div className="space-y-2 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold">HubSpot CRM</p>
-                <label className={cn(
-                  "flex items-center gap-2 text-[10px] cursor-pointer",
-                  !integrationStatus.hubspot && "text-muted-foreground/40 cursor-not-allowed"
-                )}>
+                <p className="text-xs font-bold">
+                  HubSpot CRM
+                  {integrationStatus.hubspot && (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-600">● Connected</span>
+                  )}
+                </p>
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={hubspotEnabled}
-                    disabled={!integrationStatus.hubspot}
                     onChange={(e) => setHubspotEnabled(e.target.checked)}
                   />
                   Enabled
@@ -1590,15 +1618,16 @@ export default function VisitorsPage() {
             {/* Instantly */}
             <div className="space-y-2 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold">Instantly</p>
-                <label className={cn(
-                  "flex items-center gap-2 text-[10px] cursor-pointer",
-                  !integrationStatus.instantly && "text-muted-foreground/40 cursor-not-allowed"
-                )}>
+                <p className="text-xs font-bold">
+                  Instantly
+                  {integrationStatus.instantly && (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-600">● Connected</span>
+                  )}
+                </p>
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={instantlyEnabled}
-                    disabled={!integrationStatus.instantly}
                     onChange={(e) => setInstantlyEnabled(e.target.checked)}
                   />
                   Enabled
@@ -1612,7 +1641,7 @@ export default function VisitorsPage() {
                 onChange={(e) => setInstantlyCampaignId(e.target.value)}
                 placeholder="Instantly campaign ID"
                 className="text-xs"
-                disabled={!integrationStatus.instantly || !instantlyEnabled}
+                disabled={!instantlyEnabled}
               />
               {!integrationStatus.instantly && (
                 <button
