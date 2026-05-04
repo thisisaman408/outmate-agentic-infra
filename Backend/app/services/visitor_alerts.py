@@ -33,34 +33,106 @@ logger = logging.getLogger(__name__)
 # ── Helpers shared across destinations ──────────────────────────────────────
 
 def _extract_contact(visit: Visit) -> dict[str, Any]:
-    """Flatten the most useful fields from visit.resolution into a dict."""
+    """Flatten the most useful fields from visit.resolution into a dict.
+
+    Fields are pulled from many possible locations because different
+    enrichment providers (Explorium, ContactOut, Hunter, Apollo) write to
+    different keys.
+    """
     res = visit.resolution or {}
     person = res.get("person") or {}
     exp = res.get("explorium") or {}
+    contactout = res.get("contactout") or {}
+    apollo = res.get("apollo") or {}
+    hunter = res.get("hunter") or {}
+    enrichment = res.get("enrichment") or {}
+    company_obj = res.get("company") if isinstance(res.get("company"), dict) else {}
     geo = res.get("geo") or {}
 
-    full_name = (
-        res.get("full_name")
-        or person.get("full_name")
-        or person.get("name")
-        or " ".join(x for x in [res.get("first_name"), res.get("last_name")] if x).strip()
+    def _first(*vals: Any) -> str:
+        for v in vals:
+            if v:
+                return str(v)
+        return ""
+
+    full_name = _first(
+        res.get("full_name"),
+        person.get("full_name"), person.get("name"),
+        contactout.get("full_name"), apollo.get("name"),
+        " ".join(x for x in [res.get("first_name"), res.get("last_name")] if x).strip(),
     )
     first, _, last = (full_name or "").partition(" ")
 
+    email = _first(
+        res.get("email"),
+        person.get("email"), person.get("work_email"), person.get("personal_email"),
+        contactout.get("email"), apollo.get("email"), hunter.get("email"),
+        enrichment.get("email"),
+        # ContactOut/Hunter sometimes return a list of emails
+        (contactout.get("emails") or [None])[0] if isinstance(contactout.get("emails"), list) else None,
+        (hunter.get("emails") or [None])[0] if isinstance(hunter.get("emails"), list) else None,
+    )
+
+    company_name = _first(
+        # Top-level
+        res.get("company_name"), res.get("company") if isinstance(res.get("company"), str) else None,
+        # Explorium / Apollo / ContactOut
+        exp.get("company_name"), exp.get("name"),
+        apollo.get("organization", {}).get("name") if isinstance(apollo.get("organization"), dict) else None,
+        contactout.get("company"), contactout.get("company_name"),
+        # Person sub-object
+        person.get("company"), person.get("company_name"),
+        person.get("current_company"),
+        (person.get("organization") or {}).get("name") if isinstance(person.get("organization"), dict) else None,
+        # Nested company object
+        company_obj.get("name"),
+    )
+
+    domain = _first(
+        res.get("domain"),
+        exp.get("domain"), exp.get("website_domain"),
+        apollo.get("organization", {}).get("primary_domain") if isinstance(apollo.get("organization"), dict) else None,
+        contactout.get("domain"),
+        company_obj.get("domain"),
+        person.get("company_domain"),
+    )
+
+    website = _first(
+        exp.get("website"), exp.get("company_website"),
+        res.get("website"),
+        company_obj.get("website"),
+        f"https://{domain}" if domain else "",
+    )
+
+    industry = _first(
+        exp.get("industry"), exp.get("linkedin_industry_category"),
+        res.get("industry"),
+        apollo.get("organization", {}).get("industry") if isinstance(apollo.get("organization"), dict) else None,
+        company_obj.get("industry"),
+    )
+
     return {
         "full_name": full_name,
-        "first_name": res.get("first_name") or person.get("first_name") or first,
-        "last_name": res.get("last_name") or person.get("last_name") or last,
-        "email": res.get("email") or person.get("email") or "",
-        "phone": res.get("phone") or person.get("phone") or "",
-        "title": res.get("job_title") or res.get("title") or person.get("job_title") or "",
-        "linkedin": res.get("linkedin_url") or person.get("linkedin_url") or "",
-        "company": exp.get("company_name") or res.get("company_name") or res.get("company") or "",
-        "domain": res.get("domain") or exp.get("domain") or "",
-        "website": exp.get("website") or res.get("website") or "",
-        "industry": exp.get("industry") or res.get("industry") or "",
-        "city": geo.get("city") or "",
-        "country": geo.get("country") or "",
+        "first_name": _first(res.get("first_name"), person.get("first_name"), first),
+        "last_name": _first(res.get("last_name"), person.get("last_name"), last),
+        "email": email,
+        "phone": _first(res.get("phone"), person.get("phone"), contactout.get("phone")),
+        "title": _first(
+            res.get("job_title"), res.get("title"),
+            person.get("job_title"), person.get("title"),
+            contactout.get("title"), apollo.get("title"),
+        ),
+        "linkedin": _first(
+            res.get("linkedin_url"),
+            person.get("linkedin_url"), person.get("linkedin"),
+            contactout.get("linkedin_url"),
+        ),
+        "company": company_name,
+        "domain": domain,
+        "website": website,
+        "industry": industry,
+        "city": _first(geo.get("city"), exp.get("city")),
+        "country": _first(geo.get("country"), exp.get("country")),
     }
 
 
@@ -259,7 +331,15 @@ INSTANTLY_API_URL = "https://api.instantly.ai/api/v2/leads"
 async def deliver_instantly(db, user_id, visit: Visit, campaign_id: str) -> str:
     """Add the visitor as a lead to an Instantly campaign."""
     contact = _extract_contact(visit)
-    if not contact["email"] or not campaign_id:
+    if not campaign_id:
+        logger.info("Instantly skipped: no campaign_id configured")
+        return "skipped"
+    if not contact["email"]:
+        logger.info(
+            "Instantly skipped for visit %s: no email resolved (Instantly /v2/leads "
+            "requires an email — anonymous visits cannot be pushed)",
+            visit.id,
+        )
         return "skipped"
 
     try:
@@ -331,12 +411,17 @@ async def deliver_instantly(db, user_id, visit: Visit, campaign_id: str) -> str:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(INSTANTLY_API_URL, json=body, headers=headers)
         if resp.status_code < 300:
+            logger.info(
+                "Instantly: lead added — campaign=%s email=%s status=%d",
+                campaign_id, contact["email"], resp.status_code,
+            )
             return "success"
         logger.warning(
-            "Instantly returned %d for %s: %s",
+            "Instantly returned %d for %s (campaign=%s): %s",
             resp.status_code,
             contact["email"],
-            resp.text[:200],
+            campaign_id,
+            resp.text[:300],
         )
         return "failed"
     except Exception as e:

@@ -1152,13 +1152,27 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
     res = visit.resolution or {}
     exp = res.get("explorium") or {}
     geo = res.get("geo") or {}
-    company = exp.get("company_name") or res.get("company_name") or "Unknown company"
-    industry = exp.get("industry") or exp.get("linkedin_industry_category") or ""
+
+    # Person
     person_name = res.get("full_name") or " ".join(
         x for x in [res.get("first_name"), res.get("last_name")] if x
     ).strip()
     person_email = res.get("email") or ""
     person_title = res.get("job_title") or ""
+    person_linkedin = res.get("linkedin_url") or (res.get("person") or {}).get("linkedin_url") or ""
+
+    # Company
+    company = exp.get("company_name") or res.get("company_name") or res.get("company") or "Unknown company"
+    industry = exp.get("industry") or exp.get("linkedin_industry_category") or res.get("industry") or ""
+    company_website = exp.get("website") or res.get("website") or ""
+    company_domain = res.get("domain") or exp.get("domain") or ""
+    company_size = exp.get("employees") or exp.get("employee_count") or exp.get("size") or ""
+    company_revenue = exp.get("revenue") or exp.get("annual_revenue") or ""
+    company_funding = exp.get("funding_stage") or exp.get("last_funding_stage") or ""
+    company_hq = exp.get("hq_country") or exp.get("country") or ""
+    company_linkedin = exp.get("linkedin_url") or exp.get("linkedin") or ""
+
+    # Visit context
     location = ", ".join(x for x in [geo.get("city"), geo.get("country")] if x)
     intent = res.get("icp_score") or res.get("intent_score") or visit.intent_score or 0
     try:
@@ -1169,31 +1183,90 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
     headline = f"{person_name} from {company}" if person_name else f"Visit from {company}"
     subject = f"🌐 New visit: {headline}"
 
-    rows = [
-        ("Person", person_name or "—"),
-        ("Title", person_title or "—"),
-        ("Email", person_email or "—"),
-        ("Company", company),
-        ("Industry", industry or "—"),
+    def _link(url: str, text: str = "") -> str:
+        if not url:
+            return "—"
+        href = url if url.startswith("http") else f"https://{url}"
+        return f'<a href="{href}" style="color:#2563eb;text-decoration:none">{text or url}</a>'
+
+    person_section = []
+    if person_name or person_email or person_title:
+        person_section = [
+            ("Person", person_name or "—"),
+            ("Title", person_title or "—"),
+            ("Email", _link(f"mailto:{person_email}", person_email) if person_email else "—"),
+        ]
+        if person_linkedin:
+            person_section.append(("LinkedIn", _link(person_linkedin, "View profile")))
+
+    company_section = [("Company", company)]
+    if industry:
+        company_section.append(("Industry", industry))
+    if company_website or company_domain:
+        url = company_website or f"https://{company_domain}"
+        company_section.append(("Website", _link(url, company_domain or company_website)))
+    if company_linkedin:
+        company_section.append(("Company LinkedIn", _link(company_linkedin, "View profile")))
+    if company_size:
+        company_section.append(("Employees", str(company_size)))
+    if company_revenue:
+        company_section.append(("Revenue", str(company_revenue)))
+    if company_funding:
+        company_section.append(("Funding stage", str(company_funding)))
+    if company_hq:
+        company_section.append(("HQ", str(company_hq)))
+
+    visit_section = [
         ("Location", location or "—"),
-        ("Page", visit.url or "—"),
+        ("Page", _link(visit.url or "", visit.url or "—") if visit.url else "—"),
         ("Intent", f"{intent_pct}%"),
         ("Time", datetime.now(timezone.utc).strftime("%a, %b %d, %Y · %I:%M %p UTC").replace(" 0", " ")),
     ]
 
-    html_rows = "".join(
-        f'<tr><td style="padding:6px 12px;color:#666;font-size:12px;border-bottom:1px solid #eee">{k}</td>'
-        f'<td style="padding:6px 12px;font-size:13px;border-bottom:1px solid #eee">{v}</td></tr>'
-        for k, v in rows
-    )
+    sections = [
+        ("Person", person_section),
+        ("Company", company_section),
+        ("Visit", visit_section),
+    ]
+
+    def _section_html(title: str, items: list) -> str:
+        if not items:
+            return ""
+        rows_html = "".join(
+            f'<tr><td style="padding:6px 12px;color:#666;font-size:12px;border-bottom:1px solid #f1f1f1;width:35%">{k}</td>'
+            f'<td style="padding:6px 12px;font-size:13px;border-bottom:1px solid #f1f1f1">{v}</td></tr>'
+            for k, v in items
+        )
+        return (
+            f'<tr><td colspan="2" style="padding:14px 12px 6px 12px;font-size:11px;'
+            f'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:#999">'
+            f'{title}</td></tr>{rows_html}'
+        )
+
+    body_rows = "".join(_section_html(t, items) for t, items in sections)
     html = f"""
-    <html><body style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px">
-      <h2 style="margin:0 0 16px 0;font-size:18px">{subject}</h2>
-      <table style="border-collapse:collapse;width:100%;border:1px solid #eee;border-radius:6px">{html_rows}</table>
+    <html><body style="font-family:system-ui,sans-serif;max-width:600px;margin:auto;padding:24px;background:#fafafa">
+      <h2 style="margin:0 0 16px 0;font-size:18px;color:#111">{subject}</h2>
+      <table style="border-collapse:collapse;width:100%;background:#fff;border:1px solid #eee;border-radius:8px;overflow:hidden">
+        {body_rows}
+      </table>
       <p style="margin-top:16px;font-size:11px;color:#999">Sent by Outmate visitor tracking.</p>
     </body></html>
     """
-    text = "\n".join(f"{k}: {v}" for k, v in rows)
+
+    # Plain-text version: flat key/value list across all sections
+    text_rows = []
+    for t, items in sections:
+        if not items:
+            continue
+        text_rows.append(f"\n[{t.upper()}]")
+        for k, v in items:
+            # Strip HTML for the plain-text variant
+            import re as _re
+            v_plain = _re.sub(r"<[^>]+>", "", str(v))
+            text_rows.append(f"{k}: {v_plain}")
+    text = "\n".join(text_rows).strip()
+
     return subject, html, text
 
 
