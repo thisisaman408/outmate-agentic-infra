@@ -924,7 +924,37 @@ class VisitorEnricher:
                 if resolution.get("domain"):
                     await self._step_contactout_dm(resolution)
 
+                # ── STEP 4.5: Person → Company bridge ────────────────────────
+                # If person enrichment landed (name/linkedin/title) but no
+                # company name made it onto resolution, scrape it out of the
+                # nested person sub-objects so Explorium has something to look
+                # up. Critical when the user signed up with a personal email
+                # (gmail/yahoo) — domain alone won't work.
+                if not resolution.get("company"):
+                    person_obj = resolution.get("person") or {}
+                    contactout = resolution.get("contactout") or {}
+                    apollo = resolution.get("apollo") or {}
+                    candidate = (
+                        person_obj.get("current_company")
+                        or person_obj.get("company")
+                        or person_obj.get("company_name")
+                        or (person_obj.get("organization") or {}).get("name")
+                        or contactout.get("company")
+                        or contactout.get("company_name")
+                        or (apollo.get("organization") or {}).get("name")
+                    )
+                    if candidate:
+                        resolution["company"] = candidate
+                        logger.info(
+                            "[Enrichment] Person→Company bridge: derived company='%s' "
+                            "from person enrichment (no domain)",
+                            candidate,
+                        )
+
                 # ── STEP 5: Explorium firmographics ──────────────────────────
+                # Fires whenever domain OR company name is known — so a
+                # personal-email visitor whose company name we got from
+                # LinkedIn/Apollo still gets full firmographics.
                 await self._step_explorium(resolution)
 
                 # ── STEP 5b: Hunter.io — domain → leads (if no person yet) ──

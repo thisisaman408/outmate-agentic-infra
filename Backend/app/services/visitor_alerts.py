@@ -314,12 +314,27 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
     try:
         svc = HubSpotService(db)
         await svc.create_contact(user_id, properties)
+        logger.info("HubSpot: contact created — email=%s company=%s", contact["email"], contact["company"] or "-")
         return "success"
     except Exception as e:
         msg = str(e)
         if "Contact already exists" in msg or "already exists" in msg.lower() or "409" in msg:
-            return "success"  # treat dedup as success — contact is in HubSpot
-        logger.error("HubSpot delivery failed for %s: %s", contact["email"], e)
+            logger.info("HubSpot: contact already exists — email=%s (treated as success)", contact["email"])
+            return "success"
+        # Surface the HTTP response body so the actual HubSpot error reaches the log.
+        status_code = None
+        body = None
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            try:
+                status_code = resp.status_code
+                body = (resp.text or "")[:400]
+            except Exception:
+                pass
+        logger.error(
+            "HubSpot delivery failed for %s: status=%s body=%s err=%s props=%s",
+            contact["email"], status_code, body, e, list(properties.keys()),
+        )
         return "error"
 
 
