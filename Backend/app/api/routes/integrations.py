@@ -818,13 +818,31 @@ async def hubspot_test_contact(
         )
 
     body_text = (resp.text or "")[:1000]
+    # Also probe the token against /account-info to identify the portal_id
+    # the token actually belongs to — useful when a user has multiple HubSpot
+    # accounts (sandbox vs production) and pasted the wrong one.
+    portal_info: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client2:
+            r2 = await client2.get(
+                f"{HUBSPOT_API_BASE}/account-info/v3/details",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            portal_info = {"status": r2.status_code, "body": (r2.text or "")[:300]}
+    except Exception as e:
+        portal_info = {"error": str(e)[:200]}
+
     return {
         "ok": resp.status_code in (200, 201),
         "status_code": resp.status_code,
         "body": body_text,
         "test_email": test_email,
         "auth_type": creds.get("auth_type") or ("api_key" if creds.get("api_key") else "oauth"),
-        "token_prefix": (token or "")[:6] + "…" if token else None,
+        "token_prefix": (token or "")[:8] + "…" if token else None,
+        "token_suffix": "…" + (token or "")[-4:] if token else None,
+        "token_length": len(token or ""),
+        "token_has_whitespace": bool(token and (token != token.strip())),
+        "account_info_probe": portal_info,
     }
 
 

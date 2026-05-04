@@ -198,6 +198,11 @@ class HubSpotService:
         if not self.db:
             raise RuntimeError("db session required")
 
+        # HubSpot Private App Tokens often arrive with stray whitespace from
+        # copy/paste (trailing newline, leading space). Strip aggressively
+        # so the bearer header doesn't get an invalid value.
+        api_key = (api_key or "").strip().strip('"').strip("'")
+
         creds = {
             "auth_type": "private_app_token",
             "api_key": api_key,
