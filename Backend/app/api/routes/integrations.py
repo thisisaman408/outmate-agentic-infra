@@ -770,6 +770,64 @@ async def hubspot_store_api_key(
         logger.error(f"HubSpot API key error: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to connect HubSpot API key: {str(e)}")
 
+@router.post("/hubspot/test-contact")
+async def hubspot_test_contact(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Diagnostic: create a real HubSpot contact using the user's stored
+    Private App Token (or OAuth token). Returns the HubSpot HTTP status
+    and response body verbatim so failures can be diagnosed without
+    backend logs in production.
+    """
+    import time
+    import httpx
+    from app.services.hubspot_service import HubSpotService, HUBSPOT_API_BASE
+
+    svc = HubSpotService(db)
+    row = svc._get_integration_row(user.id)
+    if not row:
+        return {"ok": False, "stage": "lookup", "error": "HubSpot integration not connected"}
+
+    creds = row.get("credentials") or {}
+    token = creds.get("api_key") or creds.get("access_token")
+    if not token:
+        return {
+            "ok": False,
+            "stage": "lookup",
+            "error": "No api_key or access_token in stored credentials",
+            "auth_type": creds.get("auth_type"),
+            "creds_keys": list(creds.keys()),
+        }
+
+    test_email = f"outmate-test-{int(time.time())}@outmate.test"
+    properties = {
+        "email": test_email,
+        "firstname": "Outmate",
+        "lastname": "Test",
+        "company": "Outmate Diagnostic",
+        "hs_lead_status": "NEW",
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"properties": properties},
+        )
+
+    body_text = (resp.text or "")[:1000]
+    return {
+        "ok": resp.status_code in (200, 201),
+        "status_code": resp.status_code,
+        "body": body_text,
+        "test_email": test_email,
+        "auth_type": creds.get("auth_type") or ("api_key" if creds.get("api_key") else "oauth"),
+        "token_prefix": (token or "")[:6] + "…" if token else None,
+    }
+
+
 @router.post("/salesforce/api-key")
 async def salesforce_store_api_key(
     api_key: str = Body(..., embed=True),

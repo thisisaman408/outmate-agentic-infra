@@ -277,10 +277,22 @@ async def fetch_tavily_context(visit: Visit) -> Optional[dict]:
 async def deliver_hubspot(db, user_id, visit: Visit) -> str:
     """
     Push the visitor as a HubSpot contact via the existing HubSpotService.
-    Returns "success" / "skipped" / "error".
+    Returns "success" / "skipped" / "error". Also stores the most recent
+    HubSpot HTTP response on `visit.resolution["_hubspot_debug"]` so prod
+    failures can be diagnosed without server logs.
     """
+    def _stash(payload: dict) -> None:
+        try:
+            res = visit.resolution or {}
+            res["_hubspot_debug"] = payload
+            visit.resolution = res
+            db.commit()
+        except Exception:
+            pass
+
     contact = _extract_contact(visit)
     if not contact["email"]:
+        _stash({"stage": "skipped", "reason": "no email resolved"})
         return "skipped"
 
     try:
@@ -324,6 +336,7 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
             "HubSpot: contact created — email=%s company=%s",
             contact["email"], contact["company"] or "-",
         )
+        _stash({"stage": "created", "email": contact["email"]})
         return "success"
     except Exception as e:
         msg = str(e)
@@ -332,6 +345,7 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
                 "HubSpot: contact already exists — email=%s (treated as success)",
                 contact["email"],
             )
+            _stash({"stage": "already_exists", "email": contact["email"]})
             return "success"
 
         # Surface the HTTP response body so the actual HubSpot error reaches the log.
@@ -392,6 +406,14 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
             "HubSpot delivery failed for %s: status=%s body=%s err=%s props=%s",
             contact["email"], status_code, body, e, list(properties.keys()),
         )
+        _stash({
+            "stage": "failed",
+            "email": contact["email"],
+            "status_code": status_code,
+            "body": body,
+            "error": str(e)[:300],
+            "props_sent": list(properties.keys()),
+        })
         return "error"
 
 
