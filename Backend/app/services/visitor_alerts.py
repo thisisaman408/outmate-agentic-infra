@@ -295,6 +295,11 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
     except Exception:
         intent_pct = 0
 
+    # Only standard HubSpot contact properties — custom props like
+    # outmate_intent_score must exist on the portal or HubSpot rejects the
+    # entire create with a 400 ("Property does not exist"). We stash extras
+    # into the standard `notes` via a separate engagement instead, but keep
+    # the create itself bullet-proof.
     properties: dict[str, str] = {
         "email": contact["email"],
         "firstname": contact["first_name"] or "",
@@ -306,31 +311,83 @@ async def deliver_hubspot(db, user_id, visit: Visit) -> str:
         "city": contact["city"] or "",
         "country": contact["country"] or "",
         "hs_lead_status": "NEW",
-        "outmate_intent_score": str(intent_pct),
-        "outmate_visit_url": visit.url or "",
     }
     properties = {k: v for k, v in properties.items() if v}
 
-    try:
+    async def _try_create(props: dict[str, str]):
         svc = HubSpotService(db)
-        await svc.create_contact(user_id, properties)
-        logger.info("HubSpot: contact created — email=%s company=%s", contact["email"], contact["company"] or "-")
+        return await svc.create_contact(user_id, props)
+
+    try:
+        await _try_create(properties)
+        logger.info(
+            "HubSpot: contact created — email=%s company=%s",
+            contact["email"], contact["company"] or "-",
+        )
         return "success"
     except Exception as e:
         msg = str(e)
         if "Contact already exists" in msg or "already exists" in msg.lower() or "409" in msg:
-            logger.info("HubSpot: contact already exists — email=%s (treated as success)", contact["email"])
+            logger.info(
+                "HubSpot: contact already exists — email=%s (treated as success)",
+                contact["email"],
+            )
             return "success"
+
         # Surface the HTTP response body so the actual HubSpot error reaches the log.
         status_code = None
-        body = None
+        body = ""
         resp = getattr(e, "response", None)
         if resp is not None:
             try:
                 status_code = resp.status_code
-                body = (resp.text or "")[:400]
+                body = (resp.text or "")[:600]
             except Exception:
                 pass
+
+        # Auto-recover: HubSpot 400 with "Property X does not exist" → strip
+        # the unknown property and retry once with email-only as last resort.
+        if status_code == 400 and body:
+            bad_props: list[str] = []
+            for prop_name in list(properties.keys()):
+                # HubSpot error body lists "Property \"<name>\" does not exist"
+                if f'"{prop_name}"' in body and "does not exist" in body:
+                    bad_props.append(prop_name)
+            if bad_props:
+                cleaned = {k: v for k, v in properties.items() if k not in bad_props}
+                logger.warning(
+                    "HubSpot rejected props %s — retrying without them (email=%s)",
+                    bad_props, contact["email"],
+                )
+                try:
+                    await _try_create(cleaned)
+                    logger.info(
+                        "HubSpot: contact created on retry — email=%s",
+                        contact["email"],
+                    )
+                    return "success"
+                except Exception as e2:
+                    msg2 = str(e2)
+                    if "already exists" in msg2.lower() or "409" in msg2:
+                        return "success"
+                    # Last-ditch: email-only payload
+                    try:
+                        await _try_create({"email": contact["email"], "hs_lead_status": "NEW"})
+                        logger.info(
+                            "HubSpot: contact created on minimal retry — email=%s",
+                            contact["email"],
+                        )
+                        return "success"
+                    except Exception as e3:
+                        msg3 = str(e3)
+                        if "already exists" in msg3.lower() or "409" in msg3:
+                            return "success"
+                        logger.error(
+                            "HubSpot minimal retry also failed for %s: %s",
+                            contact["email"], e3,
+                        )
+                        return "error"
+
         logger.error(
             "HubSpot delivery failed for %s: status=%s body=%s err=%s props=%s",
             contact["email"], status_code, body, e, list(properties.keys()),
