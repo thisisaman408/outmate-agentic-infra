@@ -231,11 +231,12 @@ export function CompaniesResultsTable({
   enrichCache = {},
   enrichingRows = {},
   waterfallAttempts = {},
+  revealedEmail = {},
+  revealedPhone = {},
   onSelectionChange,
+}: Props) {
   const router = useRouter()
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set())
-  const [revealedEmail, setRevealedEmail] = useState<Record<string, string>>(revealedEmail ?? {})
-  const [revealedPhone, setRevealedPhone] = useState<Record<string, string>>(revealedPhone ?? {})
 
   const handleSelectCompany = (companyId: string) => {
     const newSelected = new Set(selectedCompanies)

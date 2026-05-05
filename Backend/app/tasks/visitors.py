@@ -1691,6 +1691,13 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
     hubspot_enabled = bool(icp.get("alerts_hubspot_enabled", False))
     instantly_enabled = bool(icp.get("alerts_instantly_enabled", False))
     instantly_campaign = icp.get("alerts_instantly_campaign_id") or ""
+    salesforce_enabled = bool(icp.get("alerts_salesforce_enabled", False))
+    salesoft_enabled = bool(icp.get("alerts_salesoft_enabled", False))
+    salesoft_cadence = icp.get("alerts_salesoft_cadence_id") or ""
+    smartlead_enabled = bool(icp.get("alerts_smartlead_enabled", False))
+    smartlead_campaign = icp.get("alerts_smartlead_campaign_id") or ""
+    teams_webhook_url = icp.get("alerts_teams_webhook_url") or ""
+    zapier_webhook_url = icp.get("alerts_zapier_webhook_url") or ""
 
     owner_user_id = site_config.org_id  # org_id == owning user.id today
     if alert_email_optin and not alert_email_addr:
@@ -1706,6 +1713,11 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
         (alert_email_optin and alert_email_addr)
         or hubspot_enabled
         or instantly_enabled
+        or salesforce_enabled
+        or salesoft_enabled
+        or smartlead_enabled
+        or bool(teams_webhook_url)
+        or bool(zapier_webhook_url)
     )
     if not has_webhooks and not has_other_destinations:
         return
@@ -1773,6 +1785,51 @@ async def _enqueue_webhooks(db, visit: Visit) -> None:
         except Exception as e:
             logger.error("Instantly delivery exception: %s", e)
             _va.write_alert(db, visit, "instantly", "error", {"error": str(e)[:300]})
+
+    # ── Salesforce delivery ──
+    if salesforce_enabled:
+        try:
+            status = await _va.deliver_salesforce(db, owner_user_id, visit)
+            _va.write_alert(db, visit, "salesforce", status, {})
+        except Exception as e:
+            logger.error("Salesforce delivery exception: %s", e)
+            _va.write_alert(db, visit, "salesforce", "error", {"error": str(e)[:300]})
+
+    # ── Salesloft delivery ──
+    if salesoft_enabled:
+        try:
+            status = await _va.deliver_salesoft(db, owner_user_id, visit, salesoft_cadence)
+            _va.write_alert(db, visit, "salesloft", status, {"cadence_id": salesoft_cadence})
+        except Exception as e:
+            logger.error("Salesloft delivery exception: %s", e)
+            _va.write_alert(db, visit, "salesloft", "error", {"error": str(e)[:300]})
+
+    # ── Smartlead delivery ──
+    if smartlead_enabled and smartlead_campaign:
+        try:
+            status = await _va.deliver_smartlead(db, owner_user_id, visit, smartlead_campaign)
+            _va.write_alert(db, visit, "smartlead", status, {"campaign_id": smartlead_campaign})
+        except Exception as e:
+            logger.error("Smartlead delivery exception: %s", e)
+            _va.write_alert(db, visit, "smartlead", "error", {"error": str(e)[:300]})
+
+    # ── Teams incoming webhook ──
+    if teams_webhook_url:
+        try:
+            status = await _va.deliver_teams_webhook(teams_webhook_url, visit)
+            _va.write_alert(db, visit, "teams", status, {"url": teams_webhook_url[:80]})
+        except Exception as e:
+            logger.error("Teams webhook delivery exception: %s", e)
+            _va.write_alert(db, visit, "teams", "error", {"error": str(e)[:300]})
+
+    # ── Zapier catch-hook ──
+    if zapier_webhook_url:
+        try:
+            status = await _va.deliver_zapier(zapier_webhook_url, visit)
+            _va.write_alert(db, visit, "zapier", status, {"url": zapier_webhook_url[:80]})
+        except Exception as e:
+            logger.error("Zapier delivery exception: %s", e)
+            _va.write_alert(db, visit, "zapier", "error", {"error": str(e)[:300]})
 
     if not has_webhooks:
         return

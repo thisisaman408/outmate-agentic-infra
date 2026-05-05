@@ -412,6 +412,14 @@ export default function VisitorsPage() {
   const [hubspotEnabled, setHubspotEnabled] = useState(false)
   const [instantlyEnabled, setInstantlyEnabled] = useState(false)
   const [instantlyCampaignId, setInstantlyCampaignId] = useState("")
+  // New integrations
+  const [salesforceEnabled, setSalesforceEnabled] = useState(false)
+  const [salesoftEnabled, setSalesoftEnabled] = useState(false)
+  const [salesoftCadenceId, setSalesoftCadenceId] = useState("")
+  const [smartleadEnabled, setSmartleadEnabled] = useState(false)
+  const [smartleadCampaignId, setSmartleadCampaignId] = useState("")
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("")
+  const [zapierWebhookUrl, setZapierWebhookUrl] = useState("")
   const [extraWebhookUrls, setExtraWebhookUrls] = useState<string[]>([])
   const [integrationStatus, setIntegrationStatus] = useState<Record<string, boolean>>({})
 
@@ -495,6 +503,13 @@ export default function VisitorsPage() {
       setHubspotEnabled(Boolean(filters.alerts_hubspot_enabled))
       setInstantlyEnabled(Boolean(filters.alerts_instantly_enabled))
       setInstantlyCampaignId(typeof filters.alerts_instantly_campaign_id === "string" ? filters.alerts_instantly_campaign_id : "")
+      setSalesforceEnabled(Boolean(filters.alerts_salesforce_enabled))
+      setSalesoftEnabled(Boolean(filters.alerts_salesoft_enabled))
+      setSalesoftCadenceId(typeof filters.alerts_salesoft_cadence_id === "string" ? filters.alerts_salesoft_cadence_id : "")
+      setSmartleadEnabled(Boolean(filters.alerts_smartlead_enabled))
+      setSmartleadCampaignId(typeof filters.alerts_smartlead_campaign_id === "string" ? filters.alerts_smartlead_campaign_id : "")
+      setTeamsWebhookUrl(typeof filters.alerts_teams_webhook_url === "string" ? filters.alerts_teams_webhook_url : "")
+      setZapierWebhookUrl(typeof filters.alerts_zapier_webhook_url === "string" ? filters.alerts_zapier_webhook_url : "")
 
       // Build {hubspot, instantly, ...} → connected map from /catalog
       const map: Record<string, boolean> = {}
@@ -519,6 +534,8 @@ export default function VisitorsPage() {
         // `outreach{service,connected}` block. Use whichever is connected.
         if (ints.instantly?.connected) map.instantly = true
         if (ints.smartlead?.connected) map.smartlead = true
+        if (ints.salesloft?.connected) map.salesloft = true
+        if (ints.teams?.connected) map.teams = true
         const outreach = ints.outreach || {}
         if (outreach.connected) {
           if (outreach.service === "instantly") map.instantly = true
@@ -529,7 +546,7 @@ export default function VisitorsPage() {
             map.smartlead = map.smartlead || true
           }
         }
-        for (const slug of ["hubspot", "salesforce", "zoho", "outlook", "gmail"]) {
+        for (const slug of ["hubspot", "salesforce", "zoho", "outlook", "gmail", "salesloft", "smartlead", "teams", "zapier"]) {
           if (ints[slug]?.connected) map[slug] = true
         }
       }
@@ -573,6 +590,13 @@ export default function VisitorsPage() {
         alerts_hubspot_enabled: hubspotEnabled,
         alerts_instantly_enabled: instantlyEnabled,
         alerts_instantly_campaign_id: instantlyCampaignId.trim(),
+        alerts_salesforce_enabled: salesforceEnabled,
+        alerts_salesoft_enabled: salesoftEnabled,
+        alerts_salesoft_cadence_id: salesoftCadenceId.trim(),
+        alerts_smartlead_enabled: smartleadEnabled,
+        alerts_smartlead_campaign_id: smartleadCampaignId.trim(),
+        alerts_teams_webhook_url: teamsWebhookUrl.trim(),
+        alerts_zapier_webhook_url: zapierWebhookUrl.trim(),
       }
       const res = await fetch(`${API}/site-config`, {
         method: "POST",
@@ -591,7 +615,7 @@ export default function VisitorsPage() {
     } finally {
       setSavingWebhook(false)
     }
-  }, [slackWebhook, extraWebhookUrls, emailAlertEnabled, emailAlertAddress, icpFilters, hubspotEnabled, instantlyEnabled, instantlyCampaignId])
+  }, [slackWebhook, extraWebhookUrls, emailAlertEnabled, emailAlertAddress, icpFilters, hubspotEnabled, instantlyEnabled, instantlyCampaignId, salesforceEnabled, salesoftEnabled, salesoftCadenceId, smartleadEnabled, smartleadCampaignId, teamsWebhookUrl, zapierWebhookUrl])
 
   useEffect(() => {
     setMounted(true)
@@ -1654,10 +1678,130 @@ export default function VisitorsPage() {
               )}
             </div>
 
-            {/* Make.com / n8n / custom webhooks */}
+            {/* Salesforce */}
             <div className="space-y-2 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold">Make.com · n8n · Custom webhooks</p>
+                <p className="text-xs font-bold">
+                  Salesforce CRM
+                  {integrationStatus.salesforce && (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-600">● Connected</span>
+                  )}
+                </p>
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
+                  <input type="checkbox" checked={salesforceEnabled} onChange={(e) => setSalesforceEnabled(e.target.checked)} />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Identified visitors with an email are pushed as Salesforce Leads (with intent score, page URL, and company details).
+              </p>
+              {!integrationStatus.salesforce && (
+                <button type="button" onClick={() => router.push("/integrations")} className="text-[10px] font-bold text-primary hover:underline">
+                  Connect Salesforce in Integrations →
+                </button>
+              )}
+            </div>
+
+            {/* Salesloft */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">
+                  Salesloft
+                  {integrationStatus.salesloft && (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-600">● Connected</span>
+                  )}
+                </p>
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
+                  <input type="checkbox" checked={salesoftEnabled} onChange={(e) => setSalesoftEnabled(e.target.checked)} />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Identified visitors are created as Salesloft People and optionally enrolled into a Cadence.
+              </p>
+              <Input
+                value={salesoftCadenceId}
+                onChange={(e) => setSalesoftCadenceId(e.target.value)}
+                placeholder="Salesloft Cadence ID (optional)"
+                className="text-xs"
+                disabled={!salesoftEnabled}
+              />
+              {!integrationStatus.salesloft && (
+                <button type="button" onClick={() => router.push("/integrations")} className="text-[10px] font-bold text-primary hover:underline">
+                  Connect Salesloft in Integrations →
+                </button>
+              )}
+            </div>
+
+            {/* Smartlead */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">
+                  Smartlead
+                  {integrationStatus.smartlead && (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-600">● Connected</span>
+                  )}
+                </p>
+                <label className="flex items-center gap-2 text-[10px] cursor-pointer">
+                  <input type="checkbox" checked={smartleadEnabled} onChange={(e) => setSmartleadEnabled(e.target.checked)} />
+                  Enabled
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Identified visitors with an email are added as leads to the Smartlead campaign below.
+              </p>
+              <Input
+                value={smartleadCampaignId}
+                onChange={(e) => setSmartleadCampaignId(e.target.value)}
+                placeholder="Smartlead campaign ID"
+                className="text-xs"
+                disabled={!smartleadEnabled}
+              />
+              {!integrationStatus.smartlead && (
+                <button type="button" onClick={() => router.push("/integrations")} className="text-[10px] font-bold text-primary hover:underline">
+                  Connect Smartlead in Integrations →
+                </button>
+              )}
+            </div>
+
+            {/* Microsoft Teams */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <p className="text-xs font-bold">Microsoft Teams</p>
+              <p className="text-[10px] text-muted-foreground">
+                Paste your Teams channel Incoming Webhook URL. Each identified visit sends a rich Adaptive Card with intent, contact, and page details.
+              </p>
+              <Input
+                value={teamsWebhookUrl}
+                onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                placeholder="https://outlook.office.com/webhook/..."
+                className="text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground/60">
+                Teams → Apps → search "Incoming Webhook" → configure → copy the URL.
+              </p>
+            </div>
+
+            {/* Zapier */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <p className="text-xs font-bold">Zapier</p>
+              <p className="text-[10px] text-muted-foreground">
+                Paste your Zapier Catch Hook URL. Every identified visit triggers your Zap with full visitor data (contact, intent, company, page).
+              </p>
+              <Input
+                value={zapierWebhookUrl}
+                onChange={(e) => setZapierWebhookUrl(e.target.value)}
+                placeholder="https://hooks.zapier.com/hooks/catch/..."
+                className="text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground/60">
+                Zapier → Create Zap → Trigger: Webhooks by Zapier → Catch Hook → copy URL here.
+              </p>
+            </div>
+
+            {/* Make.com / n8n / Generic webhooks */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">Make.com · n8n · Generic Webhooks</p>
                 <button
                   type="button"
                   onClick={() => setExtraWebhookUrls([...extraWebhookUrls, ""])}
@@ -1667,7 +1811,7 @@ export default function VisitorsPage() {
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Any HTTPS webhook URL receives a generic JSON payload per visit. Make and n8n URLs are auto-detected and tagged in the payload.
+                Any HTTPS webhook URL receives a JSON payload per visit. Make and n8n URLs are auto-detected and tagged.
               </p>
               {extraWebhookUrls.length === 0 ? (
                 <p className="text-[10px] text-muted-foreground/60 italic">No custom webhooks configured.</p>
