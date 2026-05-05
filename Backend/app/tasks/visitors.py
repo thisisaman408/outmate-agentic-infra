@@ -1180,8 +1180,59 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
     except Exception:
         intent_pct = 0
 
-    headline = f"{person_name} from {company}" if person_name else f"Visit from {company}"
-    subject = f"🌐 New visit: {headline}"
+    # Extract the high-level page name (Pricing / Demo / Docs / Blog / Trial /
+    # Home) from the visit URL so the email subject + headline call out exactly
+    # which page the visitor landed on.
+    def _page_label(raw_url: str) -> str:
+        if not raw_url:
+            return ""
+        try:
+            from urllib.parse import urlparse as _urlparse
+            path = (_urlparse(raw_url).path or "/").lower()
+        except Exception:
+            return ""
+        if path in ("", "/"):
+            return "Home"
+        slug = path.strip("/").split("/")[0]
+        keyword_map = {
+            "pricing": "Pricing", "price": "Pricing", "plans": "Pricing",
+            "demo": "Demo", "book-demo": "Demo", "request-demo": "Demo",
+            "trial": "Free Trial", "signup": "Sign Up", "register": "Sign Up",
+            "login": "Login",
+            "docs": "Docs", "documentation": "Docs", "api": "API Docs",
+            "blog": "Blog", "case-studies": "Case Study", "case-study": "Case Study",
+            "customers": "Customers", "about": "About",
+            "contact": "Contact",
+            "features": "Features", "product": "Product",
+            "integrations": "Integrations",
+            "careers": "Careers", "jobs": "Careers",
+        }
+        for keyword, label in keyword_map.items():
+            if keyword in slug:
+                return label
+        return slug.replace("-", " ").replace("_", " ").title()[:40]
+
+    page_label = _page_label(visit.url or "")
+
+    # Subject + headline now lead with the page name so the recipient sees
+    # "Pricing visit from Acme Corp" at a glance.
+    if person_name:
+        if page_label:
+            headline = f"{person_name} from {company} viewed {page_label}"
+            subject = f"🎯 {page_label} visit: {person_name} from {company}"
+        else:
+            headline = f"{person_name} from {company}"
+            subject = f"🌐 New visit: {headline}"
+    else:
+        if page_label and company != "Unknown company":
+            headline = f"{page_label} visit detected for {company}"
+            subject = f"🎯 {page_label} visit: {company}"
+        elif page_label:
+            headline = f"{page_label} visit detected"
+            subject = f"🎯 New {page_label} visit"
+        else:
+            headline = f"Visit from {company}"
+            subject = f"🌐 New visit: {headline}"
 
     def _link(url: str, text: str = "") -> str:
         if not url:
@@ -1216,9 +1267,12 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
     if company_hq:
         company_section.append(("HQ", str(company_hq)))
 
-    visit_section = [
+    visit_section = []
+    if page_label:
+        visit_section.append(("Page detected", page_label))
+    visit_section += [
         ("Location", location or "—"),
-        ("Page", _link(visit.url or "", visit.url or "—") if visit.url else "—"),
+        ("URL", _link(visit.url or "", visit.url or "—") if visit.url else "—"),
         ("Intent", f"{intent_pct}%"),
         ("Time", datetime.now(timezone.utc).strftime("%a, %b %d, %Y · %I:%M %p UTC").replace(" 0", " ")),
     ]
@@ -1244,9 +1298,30 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
         )
 
     body_rows = "".join(_section_html(t, items) for t, items in sections)
+
+    # Top callout that summarises which page was visited and for which company,
+    # so the recipient sees the headline before scrolling the details table.
+    if page_label and company and company != "Unknown company":
+        callout = (
+            f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;'
+            f'padding:14px 16px;margin:0 0 16px 0;font-size:13px;color:#1e3a8a">'
+            f'<strong>{page_label}</strong> visit detected for <strong>{company}</strong>'
+            f'</div>'
+        )
+    elif page_label:
+        callout = (
+            f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;'
+            f'padding:14px 16px;margin:0 0 16px 0;font-size:13px;color:#1e3a8a">'
+            f'<strong>{page_label}</strong> visit detected'
+            f'</div>'
+        )
+    else:
+        callout = ""
+
     html = f"""
     <html><body style="font-family:system-ui,sans-serif;max-width:600px;margin:auto;padding:24px;background:#fafafa">
-      <h2 style="margin:0 0 16px 0;font-size:18px;color:#111">{subject}</h2>
+      <h2 style="margin:0 0 12px 0;font-size:18px;color:#111">{subject}</h2>
+      {callout}
       <table style="border-collapse:collapse;width:100%;background:#fff;border:1px solid #eee;border-radius:8px;overflow:hidden">
         {body_rows}
       </table>

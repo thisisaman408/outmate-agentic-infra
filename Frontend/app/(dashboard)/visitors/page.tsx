@@ -402,6 +402,10 @@ export default function VisitorsPage() {
   const [revealedContacts, setRevealedContacts] = useState<Set<string>>(new Set())
   const [trackingOpen, setTrackingOpen] = useState(false)
   const [pixelKey, setPixelKey] = useState<string>("")
+  const [siteDomain, setSiteDomain] = useState<string>("")
+  const [siteDomainInput, setSiteDomainInput] = useState<string>("")
+  const [savingDomain, setSavingDomain] = useState(false)
+  const [domainError, setDomainError] = useState<string>("")
   const [alertsOpen, setAlertsOpen] = useState(false)
   const [slackWebhook, setSlackWebhook] = useState("")
   const [otherWebhooks, setOtherWebhooks] = useState<string[]>([])
@@ -467,10 +471,60 @@ export default function VisitorsPage() {
       } else {
         console.warn("site-config returned without pixel_key", cfg)
       }
+      const dom = (cfg?.domain || "").toString().trim()
+      setSiteDomain(dom)
+      setSiteDomainInput(dom)
     } catch (err) {
       console.warn("loadPixelKey error", err)
     }
   }, [])
+
+  function _normalizeDomain(raw: string): string | null {
+    const v = (raw || "").trim()
+    if (!v) return null
+    // Accept full URLs or bare domains
+    let host = v
+    try {
+      const hasProto = /^https?:\/\//i.test(v)
+      const u = new URL(hasProto ? v : `https://${v}`)
+      host = u.hostname
+    } catch {
+      return null
+    }
+    host = host.toLowerCase().replace(/^www\./, "")
+    // Minimal sanity check: must have a dot and a TLD-ish suffix
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null
+    return host
+  }
+
+  const saveSiteDomain = useCallback(async () => {
+    setDomainError("")
+    const normalized = _normalizeDomain(siteDomainInput)
+    if (!normalized) {
+      setDomainError("Enter a valid website (e.g. example.com or https://example.com)")
+      return
+    }
+    setSavingDomain(true)
+    try {
+      const res = await fetch(`${API}/site-config`, {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: normalized }),
+      })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "")
+        setDomainError(`Could not save (${res.status}). ${txt.slice(0, 120)}`)
+        return
+      }
+      setSiteDomain(normalized)
+      setSiteDomainInput(normalized)
+      toast.success(`Tracking enabled for ${normalized}`)
+    } catch (err: any) {
+      setDomainError(err?.message || "Network error")
+    } finally {
+      setSavingDomain(false)
+    }
+  }, [siteDomainInput])
 
   const fetchAnalytics = useCallback(async (h: PeriodHours) => {
     setAnalyticsLoading(true)
@@ -1509,28 +1563,77 @@ export default function VisitorsPage() {
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Install Tracking Script</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Add this snippet before the closing <code>&lt;/head&gt;</code> tag on every page you want to track.
+              {siteDomain
+                ? <>Add this snippet before the closing <code>&lt;/head&gt;</code> tag on every page of <span className="font-semibold">{siteDomain}</span>.</>
+                : <>Enter your website to generate the tracking snippet.</>}
             </DialogDescription>
           </DialogHeader>
-          <div className="bg-muted rounded-lg p-4 font-mono text-[11px] leading-relaxed relative">
-            <pre className="whitespace-pre-wrap break-all">{`<!-- Outmate.ai Tracking -->\n<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey || "YOUR_PIXEL_KEY"}"\n  async\n></script>`}</pre>
-            <Button
-              size="sm"
-              variant="outline"
-              className="absolute top-2 right-2 h-7 text-[10px] font-bold gap-1"
-              disabled={!pixelKey}
-              onClick={() => {
-                if (!pixelKey) return
-                navigator.clipboard.writeText(
-                  `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>`
-                )
-                toast.success("Tracking script copied to clipboard")
-              }}
-            >
-              <Check className="w-3 h-3" /> Copy
-            </Button>
+
+          {/* Step 1 — Website URL */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Your website
+            </label>
+            <div className="flex gap-2">
+              <Input
+                value={siteDomainInput}
+                onChange={(e) => { setSiteDomainInput(e.target.value); setDomainError("") }}
+                onKeyDown={(e) => { if (e.key === "Enter") saveSiteDomain() }}
+                placeholder="https://example.com"
+                className="text-xs"
+                autoFocus={!siteDomain}
+              />
+              <Button
+                size="sm"
+                onClick={saveSiteDomain}
+                disabled={savingDomain || !siteDomainInput.trim() || _normalizeDomain(siteDomainInput) === siteDomain}
+                className="text-[11px] font-bold whitespace-nowrap"
+              >
+                {savingDomain ? "Saving…" : siteDomain ? "Update" : "Continue"}
+              </Button>
+            </div>
+            {domainError && (
+              <p className="text-[10px] text-red-500">{domainError}</p>
+            )}
+            {siteDomain && _normalizeDomain(siteDomainInput) === siteDomain && (
+              <p className="text-[10px] text-emerald-600">✓ Saved as <span className="font-semibold">{siteDomain}</span></p>
+            )}
           </div>
-          <p className="text-[10px] text-muted-foreground">Script v2.1 &middot; Loads async &middot; &lt;2 KB gzipped</p>
+
+          {/* Step 2 — Snippet (only after domain is saved) */}
+          {siteDomain ? (
+            <>
+              <Separator className="my-1" />
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Tracking snippet
+                </label>
+                <div className="bg-muted rounded-lg p-4 font-mono text-[11px] leading-relaxed relative">
+                  <pre className="whitespace-pre-wrap break-all">{`<!-- Outmate.ai Tracking -->\n<script\n  src="${PIXEL_HOST}/api/v1/visitors/pixel.js"\n  data-pixel-key="${pixelKey || "YOUR_PIXEL_KEY"}"\n  async\n></script>`}</pre>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="absolute top-2 right-2 h-7 text-[10px] font-bold gap-1"
+                    disabled={!pixelKey}
+                    onClick={() => {
+                      if (!pixelKey) return
+                      navigator.clipboard.writeText(
+                        `<script src="${PIXEL_HOST}/api/v1/visitors/pixel.js" data-pixel-key="${pixelKey}" async></script>`
+                      )
+                      toast.success("Tracking script copied to clipboard")
+                    }}
+                  >
+                    <Check className="w-3 h-3" /> Copy
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Script v2.1 &middot; Loads async &middot; &lt;2 KB gzipped</p>
+              </div>
+            </>
+          ) : (
+            <div className="text-center text-[11px] text-muted-foreground py-4 border border-dashed rounded-lg">
+              The tracking snippet will appear here once you save your website.
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
