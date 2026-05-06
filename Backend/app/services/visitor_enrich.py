@@ -372,6 +372,7 @@ class VisitorEnricher:
         self.explorium = ExploriumService()
         self.bettercontact = BetterContactService()
         self.contactout = ContactOutService()
+        self.apollo_api_key = getattr(settings, "APOLLO_API_KEY", "") or ""
         self._isp_allowlist: list = []
         self._fp: Optional[str] = None  # browser fingerprint for cross-org identity
         # Shared HTTP client for this enrichment run
@@ -379,12 +380,13 @@ class VisitorEnricher:
 
         logger.info(
             "[VisitorEnricher] APIs: IPINFO=%s, ENRICH_SO=%s, EXPLORIUM=%s, "
-            "BETTERCONTACT=%s, CONTACTOUT=%s",
+            "BETTERCONTACT=%s, CONTACTOUT=%s, APOLLO=%s",
             bool(self.ipinfo_client),
             bool(self.enrich_api_key),
             bool(self.explorium.api_key),
             bool(self.bettercontact.api_key),
             bool(self.contactout.api_key),
+            bool(self.apollo_api_key),
         )
 
     def _set_person_identification(
@@ -957,8 +959,18 @@ class VisitorEnricher:
                 # LinkedIn/Apollo still gets full firmographics.
                 await self._step_explorium(resolution)
 
+                # ── STEP 5a: Apollo — organization + decision makers ─────────
+                # Fires for any domain (anonymous IP-only path included).
+                # Supplements firmographics + adds people when other providers
+                # came up empty.
+                await self._step_apollo_org(resolution)
+
                 # ── STEP 5b: Hunter.io — domain → leads (if no person yet) ──
                 await self._step_hunter_io(resolution)
+
+                # ── STEP 5b2: BetterContact — domain → decision-maker contact
+                # Runs on the anonymous IP-only path too (no email needed).
+                await self._step_bettercontact_domain(resolution)
 
                 # ── STEP 5c: Clearbit company — additional firmographic fallback
                 await self._step_clearbit_company(resolution)
@@ -1846,6 +1858,178 @@ class VisitorEnricher:
     # Used as an additional company-level fallback when Explorium and Enrich.so
     # return nothing.
     # ─────────────────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 5a: Apollo.io — organization enrich + decision makers
+    # Free tier supports /v1/organizations/enrich (domain → firmographics)
+    # and /v1/mixed_people/search (domain → people).
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_apollo_org(self, resolution: Dict[str, Any]) -> None:
+        if not self.apollo_api_key:
+            return
+        domain = resolution.get("domain")
+        if not domain:
+            return
+        if resolution.get("apollo"):
+            return
+        logger.info("[Enrichment] Step 5a: Apollo org enrich for %s", domain)
+        try:
+            org_resp = await self.http.get(
+                "https://api.apollo.io/v1/organizations/enrich",
+                params={"api_key": self.apollo_api_key, "domain": domain},
+                headers={"Cache-Control": "no-cache"},
+            )
+            org_data: Dict[str, Any] = {}
+            if org_resp.status_code == 200:
+                org_data = (org_resp.json() or {}).get("organization") or {}
+            else:
+                logger.info(
+                    "[Enrichment] Step 5a: Apollo org HTTP %d for %s",
+                    org_resp.status_code, domain,
+                )
+
+            # Decision-maker search — best-effort
+            people: list = []
+            try:
+                people_resp = await self.http.post(
+                    "https://api.apollo.io/v1/mixed_people/search",
+                    headers={"Content-Type": "application/json", "Cache-Control": "no-cache"},
+                    json={
+                        "api_key": self.apollo_api_key,
+                        "q_organization_domains": domain,
+                        "page": 1,
+                        "per_page": 5,
+                        "person_seniorities": [
+                            "owner", "founder", "c_suite", "partner",
+                            "vp", "director", "manager",
+                        ],
+                    },
+                )
+                if people_resp.status_code == 200:
+                    people = (people_resp.json() or {}).get("people") or []
+            except Exception as e:
+                logger.warning("[Enrichment] Step 5a: Apollo people failed: %s", e)
+
+            if not org_data and not people:
+                return
+
+            apollo_block: Dict[str, Any] = {}
+            if org_data:
+                apollo_block["organization"] = {
+                    "name": org_data.get("name"),
+                    "domain": org_data.get("primary_domain") or org_data.get("website_url"),
+                    "industry": org_data.get("industry"),
+                    "estimated_num_employees": org_data.get("estimated_num_employees"),
+                    "annual_revenue": org_data.get("annual_revenue"),
+                    "founded_year": org_data.get("founded_year"),
+                    "linkedin_url": org_data.get("linkedin_url"),
+                    "logo_url": org_data.get("logo_url"),
+                    "city": org_data.get("city"),
+                    "country": org_data.get("country"),
+                    "short_description": org_data.get("short_description"),
+                    "technologies": [
+                        t.get("name") for t in (org_data.get("current_technologies") or [])[:15]
+                        if isinstance(t, dict) and t.get("name")
+                    ],
+                }
+                if not resolution.get("company") and org_data.get("name"):
+                    resolution["company"] = org_data["name"]
+                if not resolution.get("logo_url") and org_data.get("logo_url"):
+                    resolution["logo_url"] = org_data["logo_url"]
+
+            if people:
+                apollo_block["people"] = [
+                    {
+                        "full_name": p.get("name") or (
+                            f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or None
+                        ),
+                        "job_title": p.get("title") or p.get("headline"),
+                        "linkedin_url": p.get("linkedin_url"),
+                        "email": p.get("email"),
+                        "seniority": p.get("seniority"),
+                        "city": p.get("city"),
+                        "country": p.get("country"),
+                    }
+                    for p in people[:5]
+                ]
+                # Also surface as decision makers if none yet
+                if not resolution.get("decision_makers"):
+                    resolution["decision_makers"] = [
+                        {
+                            "full_name": e["full_name"],
+                            "job_title": e["job_title"],
+                            "linkedin_url": e["linkedin_url"],
+                            "email": e["email"],
+                        }
+                        for e in apollo_block["people"] if e.get("full_name")
+                    ]
+
+            resolution["apollo"] = apollo_block
+            resolution["_sources"].append("apollo")
+            resolution["confidence"] = max(resolution.get("confidence", 0), 0.7)
+            logger.info(
+                "[Enrichment] Step 5a success: org=%s, people=%d",
+                (apollo_block.get("organization") or {}).get("name"),
+                len(apollo_block.get("people") or []),
+            )
+        except Exception as e:
+            logger.warning("[Enrichment] Step 5a: Apollo failed: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 5b2: BetterContact — domain-only path (no email captured yet)
+    # Uses lead_finder to surface a single decision-maker contact.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _step_bettercontact_domain(self, resolution: Dict[str, Any]) -> None:
+        if not self.bettercontact.api_key:
+            return
+        if resolution.get("email"):
+            return  # email path already covered by Step 3b
+        domain = resolution.get("domain")
+        company = resolution.get("company")
+        if not domain and not company:
+            return
+        if resolution.get("bettercontact"):
+            return
+        # Skip noisy ISP/cloud domains — they'd burn the BetterContact quota
+        if company and is_isp_or_cloud(company, self._isp_allowlist):
+            return
+        logger.info(
+            "[Enrichment] Step 5b2: BetterContact domain enrich (domain=%s, company=%s)",
+            domain, company,
+        )
+        try:
+            bc = await self.bettercontact.enrich_company(
+                company_name=company or "",
+                company_domain=domain or "",
+            )
+            if not bc.get("success"):
+                return
+            resolution["bettercontact"] = {
+                "full_name": bc.get("full_name"),
+                "job_title": bc.get("job_title"),
+                "email": bc.get("email"),
+                "phone": bc.get("phone"),
+                "linkedin_url": bc.get("linkedin_url"),
+                "company": bc.get("company") or company,
+            }
+            # Promote to a decision-maker entry if none yet
+            if not resolution.get("decision_makers") and bc.get("full_name"):
+                resolution["decision_makers"] = [{
+                    "full_name": bc.get("full_name"),
+                    "job_title": bc.get("job_title"),
+                    "linkedin_url": bc.get("linkedin_url"),
+                    "email": bc.get("email"),
+                }]
+            resolution["_sources"].append("bettercontact_domain")
+            resolution["confidence"] = max(resolution.get("confidence", 0), 0.7)
+            logger.info(
+                "[Enrichment] Step 5b2 success: %s @ %s",
+                bc.get("full_name"), domain,
+            )
+        except Exception as e:
+            logger.warning("[Enrichment] Step 5b2: BetterContact domain failed: %s", e)
 
     async def _step_clearbit_company(self, resolution: Dict[str, Any]) -> None:
         clearbit_key = getattr(settings, "CLEARBIT_API_KEY", None)

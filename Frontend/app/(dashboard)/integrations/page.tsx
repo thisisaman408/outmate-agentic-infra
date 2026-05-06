@@ -1261,6 +1261,17 @@ export default function IntegrationsPage() {
                           </p>
                         </div>
                       )}
+                      {selected.id === "salesforce" && (
+                        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2">
+                          <p className="text-[11px] font-bold leading-relaxed text-muted-foreground">
+                            Connect your own Salesforce org. Pick either method:
+                          </p>
+                          <ul className="text-[11px] leading-relaxed text-muted-foreground space-y-1 list-disc list-inside">
+                            <li><strong>OAuth</strong> — sign in with your Salesforce account and grant Outmate permission. Works with any edition (Essentials, Professional, Enterprise, Unlimited).</li>
+                            <li><strong>Access Token</strong> — paste an OAuth access token from a Connected App in your Salesforce Setup, plus your Instance URL (e.g. <code>https://yourcompany.my.salesforce.com</code>). Use this if your admin restricts third-party OAuth.</li>
+                          </ul>
+                        </div>
+                      )}
                       {/* Auth Method Toggle */}
                       <div className="flex gap-2 p-1 bg-muted/20 rounded-lg">
                         <button
@@ -1285,7 +1296,11 @@ export default function IntegrationsPage() {
                                 : "text-muted-foreground hover:text-foreground"
                             )}
                           >
-                            {selected.id === "hubspot" ? "Private App Token" : "API Key"}
+                            {selected.id === "hubspot"
+                              ? "Private App Token"
+                              : selected.id === "salesforce"
+                              ? "Access Token"
+                              : "API Key"}
                           </button>
                         )}
                       </div>
@@ -1308,14 +1323,31 @@ export default function IntegrationsPage() {
                       ) : (
                         <div className="space-y-3">
                           <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">{selected.id === "hubspot" ? "Private App Token" : "API Key"}</label>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+                              {selected.id === "hubspot"
+                                ? "Private App Token"
+                                : selected.id === "salesforce"
+                                ? "Access Token"
+                                : "API Key"}
+                            </label>
                             <Input
                               type="password"
                               value={crmApiKey}
                               onChange={(e) => setCrmApiKey(e.target.value)}
-                              placeholder={selected.id === "hubspot" ? "Paste your HubSpot private app access token" : "Enter your API key"}
+                              placeholder={
+                                selected.id === "hubspot"
+                                  ? "Paste your HubSpot private app access token"
+                                  : selected.id === "salesforce"
+                                  ? "Paste your Salesforce OAuth access token"
+                                  : "Enter your API key"
+                              }
                               className="h-10 text-xs"
                             />
+                            {selected.id === "salesforce" && (
+                              <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                                Generate from Salesforce Setup → App Manager → New Connected App → enable OAuth → use the access token issued to that app.
+                              </p>
+                            )}
                           </div>
                           <div className="space-y-2">
                             <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Description (Optional)</label>
@@ -1328,13 +1360,16 @@ export default function IntegrationsPage() {
                           </div>
                           {selected.id === "salesforce" && (
                             <div className="space-y-2">
-                              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Instance URL (Optional)</label>
+                              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Instance URL <span className="text-rose-500">*</span></label>
                               <Input
                                 value={crmInstanceUrl}
                                 onChange={(e) => setCrmInstanceUrl(e.target.value)}
-                                placeholder="https://your-instance.salesforce.com"
+                                placeholder="https://yourcompany.my.salesforce.com"
                                 className="h-10 text-xs"
                               />
+                              <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                                Required. Find it under Salesforce Setup → Company Information → "My Domain". All API calls go to this URL.
+                              </p>
                             </div>
                           )}
                           {selected.id === "zoho_crm" && (
@@ -1350,7 +1385,11 @@ export default function IntegrationsPage() {
                           )}
                           <Button
                             onClick={() => handleStoreApiKey(selected.id)}
-                            disabled={savingApiKey || !crmApiKey}
+                            disabled={
+                              savingApiKey
+                              || !crmApiKey
+                              || (selected.id === "salesforce" && !crmInstanceUrl.trim())
+                            }
                             className="w-full h-11 bg-primary text-primary-foreground font-black uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20"
                           >
                             {savingApiKey ? (

@@ -1318,8 +1318,17 @@ def _format_visit_for_email(visit: Visit) -> tuple[str, str, str]:
     else:
         callout = ""
 
+    logo_url = "https://app.outmate.ai/image.png"
+    header = (
+        f'<div style="text-align:center;margin:0 0 20px 0">'
+        f'<img src="{logo_url}" alt="Outmate" '
+        f'style="height:48px;width:auto;border-radius:8px" />'
+        f'</div>'
+    )
+
     html = f"""
     <html><body style="font-family:system-ui,sans-serif;max-width:600px;margin:auto;padding:24px;background:#fafafa">
+      {header}
       <h2 style="margin:0 0 12px 0;font-size:18px;color:#111">{subject}</h2>
       {callout}
       <table style="border-collapse:collapse;width:100%;background:#fff;border:1px solid #eee;border-radius:8px;overflow:hidden">
