@@ -251,7 +251,10 @@ async def cancel_build(
         # Job not found
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except JobQueueNotFoundError as exc:
-        await logger.aerror(f"Job not found: {job_id}. Error: {exc!s}")
+        # Common, expected case: the run already completed by the time the
+        # client posted the cancel. Demoted from error → debug so it doesn't
+        # masquerade as a real failure in logs.
+        await logger.adebug(f"Cancel for already-finished job {job_id}: {exc!s}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job not found: {exc!s}") from exc
     except Exception as exc:
         # Any other unexpected error

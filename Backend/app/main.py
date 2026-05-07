@@ -62,6 +62,7 @@ from app.api.routes import dashboard
 from app.api.routes import events_routes
 from app.api.routes import database_finder
 from app.api.routes import outmate_agentic
+from app.api.routes import agentic_billing
 from app.api.routes import social_listening
 from app.api.routes import voice_agent
 from app.api.routes import voice_campaigns
@@ -247,6 +248,10 @@ app.include_router(companies.router, dependencies=auth_dependencies)
 logger.info("Companies router registered")
 
 app.include_router(auth.router)
+# Agentic billing receives system-token-authenticated POSTs from :7860, NOT
+# from end users — so it's deliberately registered without `auth_dependencies`
+# (the system-token check inside the route handles this).
+app.include_router(agentic_billing.router)
 logger.info("Auth router registered")
 
 app.include_router(leads.router, prefix="/api/v1/leads", tags=["leads"], dependencies=auth_dependencies)

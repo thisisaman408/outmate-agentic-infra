@@ -273,6 +273,35 @@ setup_devcontainer: ## set up the development container
 	make build_frontend
 	uv run outmate --frontend-path src/frontend/build
 
+# ---------------------------------------------------------------------------
+# Full-stack dev: runs Outmate Backend (:8000), Outmate Frontend (:3000),
+# and the agentic infra / Langflow (:7860) all together.
+# Single Ctrl+C cleans them all up.
+#
+# Usage:
+#   make dev                       # all three services
+#   make dev OUTMATE_BACKEND=0     # skip the Outmate Backend
+#   make dev OUTMATE_FRONTEND=0    # skip the Next.js frontend
+#   make dev AGENTIC=0             # skip the agentic infra
+# ---------------------------------------------------------------------------
+OUTMATE_BACKEND ?= 1
+OUTMATE_FRONTEND ?= 1
+AGENTIC ?= 1
+
+dev: ## run Outmate Backend + Outmate Frontend + Agentic infra together
+	@echo "Starting full Outmate stack…"
+	@trap 'echo; echo "Shutting down…"; kill 0' INT TERM EXIT; \
+	if [ "$(OUTMATE_BACKEND)" = "1" ]; then \
+		(cd Backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload 2>&1 | sed 's/^/[outmate-backend] /') & \
+	fi; \
+	if [ "$(OUTMATE_FRONTEND)" = "1" ]; then \
+		(cd Frontend && npm run dev 2>&1 | sed 's/^/[outmate-frontend] /') & \
+	fi; \
+	if [ "$(AGENTIC)" = "1" ]; then \
+		(uv run outmate run --frontend-path $(path) --host $(host) --port $(port) --no-open-browser 2>&1 | sed 's/^/[agentic] /') & \
+	fi; \
+	wait
+
 setup_env: ## set up the environment
 	@sh ./scripts/setup/setup_env.sh
 

@@ -26,6 +26,19 @@ const HIDDEN_FIELDS = new Set([
   "tools",
   "input_value",
   "model",
+  // Langflow tool-mode injection — deprecated, never useful to edit at run time.
+  "agent_description",
+  "description",
+  // Chat-IO plumbing the canvas auto-fills.
+  "session_id",
+  "sender",
+  "sender_name",
+  "sender_type",
+  "store_messages",
+  "should_store_message",
+  "data_template",
+  "files",
+  "context_id",
   "_frontend_node_flow_id",
   "_frontend_node_folder_id",
   "_frontend_node_id",
@@ -92,6 +105,12 @@ export default function InputSidebar({ agent, onRun, isRunning }: InputSidebarPr
     return init;
   });
   const [showFilters, setShowFilters] = useState(false);
+
+  // No pre-flight — SecretStr fields backed by global variables don't surface
+  // a `value` we can introspect (the template carries `load_from_db=true` and
+  // resolves at run time on the backend). Trust the user's config; if it's
+  // broken, the backend will surface a real error and PlayPanel renders it.
+  const handleRunClick = () => onRun(values);
 
   // Sync if template values change externally (e.g., user edits node)
   useEffect(() => {
@@ -170,7 +189,7 @@ export default function InputSidebar({ agent, onRun, isRunning }: InputSidebarPr
         <motion.button
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.97 }}
-          onClick={() => onRun(values)}
+          onClick={handleRunClick}
           disabled={isRunning}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-md transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
         >

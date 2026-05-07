@@ -4,6 +4,7 @@ from .deployment import Deployment
 from .deployment_provider_account import DeploymentProviderAccount
 from .file import File
 from .flow import Flow
+from .flow_schedule import FlowSchedule, ScheduleType
 from .flow_version import FlowVersion
 from .folder import Folder
 from .jobs import Job
@@ -19,10 +20,12 @@ __all__ = [
     "DeploymentProviderAccount",
     "File",
     "Flow",
+    "FlowSchedule",
     "FlowVersion",
     "Folder",
     "Job",
     "MessageTable",
+    "ScheduleType",
     "SSOConfig",
     "SSOUserProfile",
     "SpanTable",

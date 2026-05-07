@@ -1,0 +1,1 @@
+import{bY as e}from"./index-J6I4iQE7.js";const a=[["path",{d:"M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z",key:"q3az6g"}],["path",{d:"M8 15h5",key:"vxg57a"}],["path",{d:"M8 11h5a2 2 0 1 0 0-4h-3v10",key:"1usi5u"}]],s=e("receipt-russian-ruble",a);export{a as __iconNode,s as default};

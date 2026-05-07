@@ -70,6 +70,29 @@ class Settings(BaseSettings):
         description="JWT access token expiry in minutes (default: 24h = 1440 min)"
     )
 
+    # SSO bridge with the agentic stack (:7860). Both backends sign+verify
+    # short-lived bridge JWTs with this shared HS256 secret. When unset, the
+    # bridge endpoint returns 503 and the agentic stack falls back to its
+    # legacy AUTO_LOGIN behavior.
+    OUTMATE_BRIDGE_SECRET: Optional[str] = Field(
+        default=None,
+        description=(
+            "Shared HS256 secret used to sign/verify bridge JWTs handed off "
+            "to the agentic backend (`:7860`). Must match `OUTMATE_BRIDGE_SECRET` "
+            "(== `outmate_BRIDGE_SECRET`) on the agentic process. Min 32 chars."
+        ),
+    )
+
+    # Where the agentic stack lives. The bridge endpoint redirects through
+    # this base. Default works for local dev; override for staging/prod.
+    OUTMATE_AGENTIC_BASE_URL: str = Field(
+        default="http://localhost:7860",
+        description=(
+            "Base URL of the agentic Langflow process. Used by the bridge to "
+            "redirect logged-in users to flows."
+        ),
+    )
+
     # API Keys - Core Services
     CRUSTDATA_API_KEY: str = Field(
         ...,

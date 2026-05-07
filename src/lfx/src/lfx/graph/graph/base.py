@@ -254,6 +254,13 @@ class Graph:
         return graph_dict
 
     def add_nodes_and_edges(self, nodes: list[NodeData], edges: list[EdgeData]) -> None:
+        # Outmate's pipeline canvas writes bare ``{id, source, target}`` edges
+        # without the ReactFlow ``data.sourceHandle``/``data.targetHandle``
+        # envelope that Edge() / build_edge() / cycle_vertices expect. Upgrade
+        # them in-place by synthesizing the envelope from the source vertex's
+        # first output and the target vertex's first matching input. This
+        # keeps ALL downstream graph machinery working unchanged.
+        edges = self._normalize_bare_edges(nodes, edges)
         self._vertices = nodes
         self._edges = edges
         self.raw_graph_data = {"nodes": nodes, "edges": edges}
@@ -268,6 +275,126 @@ class Graph:
         self._vertices = self._graph_data["nodes"]
         self._edges = self._graph_data["edges"]
         self.initialize()
+
+    @staticmethod
+    def _normalize_bare_edges(nodes: list[NodeData], edges: list[EdgeData]) -> list[EdgeData]:
+        """Upgrade ``{id, source, target}`` edges to the full data-envelope shape.
+
+        ReactFlow / Langflow expects each edge to carry a
+        ``data.sourceHandle`` and ``data.targetHandle`` describing the exact
+        port being connected. Outmate's pipeline canvas creates simpler edges
+        without this envelope; rebuilding them here means every flow built in
+        either canvas runs through the same Graph machinery.
+        """
+        if not edges:
+            return edges
+        node_by_id: dict[str, NodeData] = {}
+        for node in nodes:
+            node_id = node.get("id") if isinstance(node, dict) else None
+            if isinstance(node_id, str):
+                node_by_id[node_id] = node
+
+        normalized: list[EdgeData] = []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                normalized.append(edge)
+                continue
+            data = edge.get("data")
+            if (
+                isinstance(data, dict)
+                and isinstance(data.get("sourceHandle"), dict)
+                and isinstance(data.get("targetHandle"), dict)
+            ):
+                normalized.append(edge)
+                continue
+            source_id = edge.get("source")
+            target_id = edge.get("target")
+            source_node = node_by_id.get(source_id) if isinstance(source_id, str) else None
+            target_node = node_by_id.get(target_id) if isinstance(target_id, str) else None
+            if source_node is None or target_node is None:
+                normalized.append(edge)
+                continue
+            try:
+                source_handle = Graph._synthesize_source_handle(source_node)
+                target_handle = Graph._synthesize_target_handle(target_node, source_handle.get("output_types") or [])
+            except (KeyError, TypeError, IndexError):
+                # Couldn't infer — leave the edge alone; Edge() will surface the
+                # underlying schema problem instead of us masking it.
+                normalized.append(edge)
+                continue
+            new_edge = dict(edge)
+            new_edge["data"] = {"sourceHandle": source_handle, "targetHandle": target_handle}
+            normalized.append(cast("EdgeData", new_edge))
+        return normalized
+
+    @staticmethod
+    def _synthesize_source_handle(source_node: NodeData) -> dict:
+        node_data = source_node.get("data") or {}
+        node_inner = node_data.get("node") or {}
+        outputs = node_inner.get("outputs") or []
+        if not outputs:
+            msg = f"Source node {source_node.get('id')} has no outputs"
+            raise KeyError(msg)
+        first = outputs[0]
+        return {
+            "id": source_node.get("id"),
+            "name": first.get("name"),
+            "dataType": node_data.get("type") or node_data.get("id", "").split("-")[0],
+            "output_types": list(first.get("types") or []),
+        }
+
+    @staticmethod
+    def _synthesize_target_handle(target_node: NodeData, source_output_types: list[str]) -> dict:
+        node_data = target_node.get("data") or {}
+        node_inner = node_data.get("node") or {}
+        template = node_inner.get("template") or {}
+
+        def _accepts(field: dict | None) -> bool:
+            if not isinstance(field, dict):
+                return False
+            input_types = field.get("input_types") or []
+            return bool(source_output_types) and any(t in input_types for t in source_output_types)
+
+        chosen_name: str | None = None
+        chosen_field: dict | None = None
+
+        # 1) Langflow convention: components expose a primary `input_value` port.
+        #    If it accepts the source's output type, prefer it.
+        primary = template.get("input_value")
+        if _accepts(primary):
+            chosen_name, chosen_field = "input_value", primary
+        # 2) Common alternates seen across stock components.
+        if chosen_field is None:
+            for fallback in ("text", "message", "input", "tools", "data"):
+                field = template.get(fallback)
+                if _accepts(field):
+                    chosen_name, chosen_field = fallback, field
+                    break
+        # 3) First field whose declared types overlap the source output types.
+        if chosen_field is None:
+            for name, field in template.items():
+                if not isinstance(field, dict) or name.startswith("_") or name == "code":
+                    continue
+                if _accepts(field):
+                    chosen_name, chosen_field = name, field
+                    break
+        # 4) Last resort: first non-internal field with any input_types at all.
+        if chosen_field is None:
+            for name, field in template.items():
+                if not isinstance(field, dict) or name.startswith("_") or name == "code":
+                    continue
+                if field.get("input_types"):
+                    chosen_name, chosen_field = name, field
+                    break
+        if chosen_field is None:
+            msg = f"Target node {target_node.get('id')} has no compatible input"
+            raise KeyError(msg)
+        return {
+            "id": target_node.get("id"),
+            "fieldName": chosen_name,
+            "type": chosen_field.get("type") or "str",
+            "inputTypes": list(chosen_field.get("input_types") or []),
+        }
 
     def add_component(self, component: Component, component_id: str | None = None) -> str:
         component_id = component_id or component.get_id()
@@ -506,10 +633,33 @@ class Graph:
         # Wait for thread to complete
         thread.join()
 
+    @staticmethod
+    def _edge_endpoints(edge: dict) -> tuple[str, str]:
+        """Return (source_id, target_id) for an edge regardless of shape.
+
+        Langflow's ReactFlow edges carry handle metadata under
+        ``edge["data"]["sourceHandle"]["id"]`` / ``targetHandle.id``. Outmate's
+        pipeline canvas emits bare ``{id, source, target}`` edges with no
+        ``data`` envelope. For successor/predecessor maps and cycle detection
+        we only need consistent vertex identifiers, so fall back to the
+        vertex-level ``source``/``target`` when the handle envelope is absent.
+        """
+        data = edge.get("data") if isinstance(edge, dict) else None
+        if isinstance(data, dict):
+            source_handle = data.get("sourceHandle")
+            target_handle = data.get("targetHandle")
+            if (
+                isinstance(source_handle, dict)
+                and isinstance(target_handle, dict)
+                and source_handle.get("id")
+                and target_handle.get("id")
+            ):
+                return source_handle["id"], target_handle["id"]
+        return edge.get("source", ""), edge.get("target", "")
+
     def _add_edge(self, edge: EdgeData) -> None:
         self.add_edge(edge)
-        source_id = edge["data"]["sourceHandle"]["id"]
-        target_id = edge["data"]["targetHandle"]["id"]
+        source_id, target_id = self._edge_endpoints(edge)
         self.predecessor_map[target_id].append(source_id)
         self.successor_map[source_id].append(target_id)
         self.in_degree_map[target_id] += 1
@@ -1168,8 +1318,42 @@ class Graph:
         try:
             vertices = payload["nodes"]
             edges = payload["edges"]
+            # Defensive: drop any vertex that was saved without the inner
+            # `data` envelope (we've seen pipeline-canvas saves occasionally
+            # land malformed nodes from autosave races; skipping them is
+            # better than crashing the whole graph build with a bare
+            # `KeyError('data')`).
+            cleaned_vertices = []
+            for v in vertices or []:
+                if not isinstance(v, dict):
+                    logger.warning(
+                        "Dropping non-dict vertex from payload: %r", v,
+                    )
+                    continue
+                if "id" not in v:
+                    logger.warning(
+                        "Dropping vertex with no id from payload: %r", v,
+                    )
+                    continue
+                if not isinstance(v.get("data"), dict) or "type" not in v["data"]:
+                    logger.warning(
+                        "Dropping malformed vertex %s (missing data.type): %r",
+                        v.get("id"),
+                        list(v.keys()),
+                    )
+                    continue
+                cleaned_vertices.append(v)
+            # Drop any edge that references a vertex we just dropped.
+            valid_ids = {v["id"] for v in cleaned_vertices}
+            cleaned_edges = [
+                e
+                for e in (edges or [])
+                if isinstance(e, dict)
+                and e.get("source") in valid_ids
+                and e.get("target") in valid_ids
+            ]
             graph = cls(flow_id=flow_id, flow_name=flow_name, user_id=user_id, context=context)
-            graph.add_nodes_and_edges(vertices, edges)
+            graph.add_nodes_and_edges(cleaned_vertices, cleaned_edges)
         except KeyError as exc:
             logger.exception(exc)
             if "nodes" not in payload and "edges" not in payload:
@@ -1336,7 +1520,7 @@ class Graph:
         Returns:
             list[tuple[str, str]]: List of (source_id, target_id) tuples representing graph edges.
         """
-        return [(e["data"]["sourceHandle"]["id"], e["data"]["targetHandle"]["id"]) for e in self._edges]
+        return [self._edge_endpoints(e) for e in self._edges]
 
     def _set_cache_if_listen_notify_components(self) -> None:
         """Disables caching for all vertices if Listen/Notify components are present.
@@ -2032,7 +2216,7 @@ class Graph:
                 self._cycles = []
             else:
                 entry_vertex = self._start.get_id()
-                edges = [(e["data"]["sourceHandle"]["id"], e["data"]["targetHandle"]["id"]) for e in self._edges]
+                edges = [self._edge_endpoints(e) for e in self._edges]
                 self._cycles = find_all_cycle_edges(entry_vertex, edges)
         return self._cycles
 

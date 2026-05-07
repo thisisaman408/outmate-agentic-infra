@@ -14,6 +14,7 @@ interface IPatchUpdateFlow {
   endpoint_name?: string | null | undefined;
   locked?: boolean | null | undefined;
   access_type?: "PUBLIC" | "PRIVATE" | "PROTECTED";
+  workflow_metadata?: Record<string, any> | null;
 }
 
 export const usePatchUpdateFlow: useMutationFunctionType<

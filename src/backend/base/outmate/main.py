@@ -318,6 +318,14 @@ def get_lifespan(*, fix_migration=False, version=None):
             await start_streamable_http_manager()
             await start_project_task_group()
 
+            # Start the in-process FlowScheduler tick loop.
+            try:
+                from outmate.services.flow_scheduler import start_flow_scheduler
+
+                await start_flow_scheduler()
+            except Exception as exc:  # noqa: BLE001
+                await logger.awarning(f"Failed to start flow scheduler: {exc}")
+
             yield
         except asyncio.CancelledError:
             await logger.adebug("Lifespan received cancellation signal")
@@ -328,6 +336,15 @@ def get_lifespan(*, fix_migration=False, version=None):
                 await log_exception_to_telemetry(exc, "lifespan")
             raise
         finally:
+            # Stop FlowScheduler before MCP cleanup so its in-flight tick
+            # doesn't try to use a torn-down session.
+            try:
+                from outmate.services.flow_scheduler import stop_flow_scheduler
+
+                await stop_flow_scheduler()
+            except Exception as exc:  # noqa: BLE001
+                await logger.awarning(f"Failed to stop flow scheduler: {exc}")
+
             # CRITICAL: Cleanup MCP sessions FIRST, before any other shutdown logic.
             # This ensures MCP subprocesses are killed even if shutdown is interrupted.
             await cleanup_mcp_sessions()

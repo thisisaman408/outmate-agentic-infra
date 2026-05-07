@@ -155,7 +155,7 @@ async def get_flow_events_response(
             return Response(content="", media_type="application/x-ndjson")  # Return empty response instead of error
 
     except JobQueueNotFoundError as exc:
-        await logger.aerror(f"Job not found: {job_id}. Error: {exc!s}")
+        await logger.adebug(f"Cancel for already-finished job {job_id}: {exc!s}")
         raise HTTPException(status_code=404, detail=f"Job not found: {exc!s}") from exc
     except Exception as exc:
         if isinstance(exc, HTTPException):
@@ -253,8 +253,16 @@ async def generate_flow_events(
 
             if "stream or streaming set to True" in str(exc):
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-            await logger.aexception("Error checking build status: " + str(exc))
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            # Include full traceback inline so structured-log shippers don't
+            # swallow it (plain `aexception` emits the trace as a separate
+            # field which some log frontends drop).
+            import traceback as _tb
+
+            tb_text = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+            await logger.aerror(
+                "Error checking build status: %s\n%s", str(exc) or repr(exc), tb_text,
+            )
+            raise HTTPException(status_code=500, detail=str(exc) or repr(exc)) from exc
         return first_layer, vertices_to_run, graph
 
     async def log_telemetry(
@@ -265,6 +273,7 @@ async def generate_flow_events(
         success: bool,
         error_message: str | None = None,
     ):
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
         background_tasks.add_task(
             telemetry_service.log_package_playground,
             PlaygroundPayload(
@@ -275,6 +284,25 @@ async def generate_flow_events(
                 playground_run_id=run_id,
             ),
         )
+        # Billing hook: tell the main Outmate backend this run finished so
+        # it can deduct credits and append to the audit ledger. Fire-and-
+        # forget — the billing client swallows network errors so a billing
+        # blip never breaks the user's run.
+        try:
+            from outmate.services.billing_client import record_agentic_run
+
+            background_tasks.add_task(
+                record_agentic_run,
+                user_id=str(current_user.id),
+                flow_id=str(flow_id),
+                run_id=run_id,
+                success=success,
+                duration_ms=elapsed_ms,
+                error_message=str(error_message) if error_message else None,
+            )
+        except Exception:  # noqa: BLE001
+            # Imports / kwargs mismatch shouldn't kill telemetry — log later.
+            pass
 
     async def create_graph(fresh_session, flow_id_str: str, flow_name: str | None) -> Graph:
         if inputs is not None and getattr(inputs, "session", None) is not None:
@@ -357,18 +385,32 @@ async def generate_flow_events(
 
             result_data_response.message = artifacts
 
-            # Log the vertex build
-            if not vertex.will_stream and log_builds:
-                background_tasks.add_task(
-                    log_vertex_build,
-                    flow_id=flow_id_str,
-                    vertex_id=vertex_id,
-                    valid=valid,
-                    params=params,
-                    data=result_data_response,
-                    artifacts=artifacts,
+            # Log the vertex build. We persist for both streaming and
+            # non-streaming vertices — by the time we reach this point the
+            # vertex's stream has already finished, so the data is final.
+            #
+            # IMPORTANT: don't use FastAPI's BackgroundTasks here. The flow
+            # build runs inside a job queue *after* the original HTTP
+            # response (carrying the job_id) has been sent, which means
+            # the request-scoped BackgroundTasks instance has already been
+            # drained — any tasks we'd add to it would silently no-op.
+            # That's why the Outcome tab was always empty for streaming
+            # agents. Use asyncio.create_task so the work actually runs.
+            if log_builds:
+                asyncio.create_task(
+                    log_vertex_build(
+                        flow_id=flow_id_str,
+                        vertex_id=vertex_id,
+                        valid=valid,
+                        params=params,
+                        data=result_data_response,
+                        artifacts=artifacts,
+                    )
                 )
-            else:
+            if vertex.will_stream:
+                # Keep the cache update that the streaming branch used to
+                # do — graph state needs to live in the chat-service cache
+                # for downstream vertex builds in the same run.
                 await chat_service.set_cache(flow_id_str, graph)
 
             timedelta = time.perf_counter() - start_time

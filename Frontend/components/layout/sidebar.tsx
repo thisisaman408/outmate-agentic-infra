@@ -32,6 +32,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
+import { agenticBridgeUrl } from "@/lib/agentic-bridge"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -44,14 +45,24 @@ type NavItem = {
   children?: { name: string; href: string; icon?: any }[]
 }
 
-// The agentic infra canvas is intentionally NOT publicly reachable in
-// production — it lives on the internal Container Apps network and is only
-// callable by outmate-api via a service-account key.  We only show the
-// "AI Agents Infra" sidebar link in environments where a public canvas URL
-// has been explicitly provided via NEXT_PUBLIC_AGENTIC_URL.
-const AGENTIC_INFRA_URL =
-  process.env.NEXT_PUBLIC_AGENTIC_URL ||
-  (process.env.NODE_ENV === "production" ? "" : "http://localhost:7860")
+// Cross-stack SSO bridge.
+//
+// The agentic canvas (:7860) lives on a separate FastAPI process with its
+// own user table; we don't want to ask users to log in twice. The main
+// Outmate API exposes `/api/v1/auth/agentic-bridge` which validates the
+// caller's session, mints a 60-second bridge JWT, and 302s to the agentic
+// stack's `/api/v1/auth/bridge` — which mints the agentic `access_token_lf`
+// cookie for the same UUID and redirects to `next`.
+//
+// CRITICAL: top-level browser navigations cannot attach an
+// `Authorization: Bearer` header. The `agenticBridgeUrl()` helper reads
+// the JWT out of localStorage and tacks it onto the URL as `?auth=<jwt>`.
+// That call has to happen at CLICK time (so localStorage is reachable),
+// NOT at module load time — building the URL eagerly would have an empty
+// auth param on the very first SSR pass and break the bridge.
+const SHOW_AGENTIC_LINK =
+  !!(process.env.NEXT_PUBLIC_AGENTIC_URL ||
+     process.env.NODE_ENV !== "production")
 
 const navItems: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -88,9 +99,12 @@ const navItems: NavItem[] = [
   { name: "AI Agents", href: "/ai-agents", icon: Bot },
   { name: "Social Agent", href: "/social-agent", icon: Radar, badge: "New" },
   { name: "Voice AI Agent", href: "/voice-agent", icon: Phone, badge: "AI" },
-  // Only render the canvas link when a URL is configured (dev only by default).
-  ...(AGENTIC_INFRA_URL
-    ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
+  // Only render the canvas link when allowed for this environment. The
+  // href is a sentinel ("#agentic") because the real URL must be built at
+  // click time — `agenticBridgeUrl()` reads the JWT from localStorage,
+  // which is unavailable during SSR / module load.
+  ...(SHOW_AGENTIC_LINK
+    ? [{ name: "AI Agents Infra", href: "#agentic", icon: Cpu, external: true } as NavItem]
     : []),
   { name: "Integrations", href: "/integrations", icon: Plug },
   { name: "Settings", href: "/settings", icon: Settings },
@@ -243,7 +257,20 @@ export function Sidebar() {
                     </AnimatePresence>
                   </>
                 ) : item.external ? (
-                  <a href={item.href}>
+                  <a
+                    href={item.href === "#agentic" ? "#" : item.href}
+                    onClick={(e) => {
+                      // The agentic-infra entry uses the bridge helper at
+                      // click time so the JWT is read from localStorage
+                      // and attached as `?auth=<jwt>`. A static href can't
+                      // do this — top-level navigations don't carry the
+                      // Authorization header.
+                      if (item.href === "#agentic") {
+                        e.preventDefault()
+                        window.location.href = agenticBridgeUrl("/all")
+                      }
+                    }}
+                  >
                     <div
                       className={cn(
                         "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 relative group",

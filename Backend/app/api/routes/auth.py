@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.hash import pbkdf2_sha256
@@ -148,6 +148,123 @@ def create_access_token(user: User) -> str:
         "jti": str(uuid.uuid4()),
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+
+
+# ---------------------------------------------------------------------------
+# Cross-stack SSO bridge → agentic backend (:7860)
+# ---------------------------------------------------------------------------
+#
+# The agentic stack runs as a separate FastAPI process with its own user
+# table. To avoid asking the user to log in twice, we mint a short-lived
+# (60 s) JWT signed with the shared `OUTMATE_BRIDGE_SECRET` and redirect to
+# the agentic side's `/api/v1/auth/bridge` endpoint, which validates the
+# token, mints its own `access_token_lf` cookie for the same UUID, and
+# redirects to the requested flow URL.
+#
+# The bridge JWT is intentionally a different token type (`outmate_bridge`)
+# from the main backend's normal access JWT — that way a leaked main JWT
+# can't be used to authenticate against the agentic stack and vice versa.
+
+_BRIDGE_TOKEN_TYPE = "outmate_bridge"
+
+
+def _create_bridge_token(user: User) -> str:
+    """Mint a 60-second JWT consumed by the agentic stack's `/auth/bridge`."""
+    if not settings.OUTMATE_BRIDGE_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "OUTMATE_BRIDGE_SECRET is not configured on the main backend. "
+                "Set it in the environment to enable the agentic SSO bridge."
+            ),
+        )
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "name": user.full_name,
+        "type": _BRIDGE_TOKEN_TYPE,
+        "exp": datetime.utcnow() + timedelta(seconds=60),
+        "iat": datetime.utcnow(),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.OUTMATE_BRIDGE_SECRET, algorithm="HS256")
+
+
+@router.get("/agentic-bridge")
+def agentic_bridge(
+    request: Request,
+    next: str = "/all",
+    auth: Optional[str] = None,
+    db: Session = Depends(get_db),
+    redis=Depends(get_redis),
+):
+    """Hand the logged-in user off to the agentic stack.
+
+    Browser navigations (top-level <a href> / window.location.href) cannot
+    attach an `Authorization: Bearer` header, so we accept the main-stack
+    JWT via TWO paths and pick whichever is present:
+
+      1. Standard `Authorization: Bearer <jwt>` header (used by fetch()
+         callers that want a JSON response).
+      2. `?auth=<jwt>` query param (used by the frontend helper for
+         top-level navigations — the token sits in the URL only for the
+         ~1 redirect hop and never gets persisted server-side).
+
+    Frontend usage (`Frontend/lib/agentic-bridge.ts`):
+        window.location.href = agenticBridgeUrl(`/flow/${flowId}`);
+
+    Behavior on success:
+        1. Validate the main-stack JWT (header or query).
+        2. Mint a short-lived bridge JWT { sub, email, name,
+           type: 'outmate_bridge', exp: now+60s }.
+        3. 302 to `${OUTMATE_AGENTIC_BASE_URL}/api/v1/auth/bridge?token=…&next=…`.
+        4. Agentic side auto-provisions an agentic User keyed by the
+           SAME UUID on first hit, sets `access_token_lf` cookie, redirects
+           to `next`.
+    """
+    # Sanitize `next` so a logged-in user can't be redirected to an
+    # attacker-controlled host. Only relative paths permitted.
+    if not next.startswith("/"):
+        next = "/all"
+
+    # Try the Authorization header first; fall back to the query param.
+    raw_token: Optional[str] = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header.split(" ", 1)[1].strip()
+    if not raw_token and auth:
+        raw_token = auth
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bridge requires either `Authorization: Bearer <jwt>` or `?auth=<jwt>`.",
+        )
+
+    # Validate the same way `get_current_user` does (HS256 + JWT_SECRET).
+    try:
+        payload = jwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=401, detail="Token expired") from exc
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid authentication token") from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token payload invalid")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    bridge_token = _create_bridge_token(user)
+
+    base = settings.OUTMATE_AGENTIC_BASE_URL.rstrip("/")
+    target = (
+        f"{base}/api/v1/auth/bridge"
+        f"?token={quote_plus(bridge_token)}&next={quote_plus(next)}"
+    )
+    return RedirectResponse(url=target, status_code=302)
 
 
 def user_response(user: User) -> dict:
