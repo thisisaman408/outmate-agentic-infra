@@ -95,8 +95,32 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
     icon = "search"
     name = "ProspectResearchAgent"
 
+    # Render order in the side panel: keys → prospect inputs → behavior.
+    # Anything not listed here is appended at the bottom.
+    field_order = [
+        # 1. Provider + API keys (top — set these first)
+        "model",
+        "api_key",
+        "tavily_api_key",
+        "apollo_api_key",
+        "hunter_api_key",
+        # 2. Prospect inputs (what the agent works on)
+        "prospect_name",
+        "company_name",
+        "prospect_role",
+        "additional_context",
+        # 3. Agent behavior (advanced tuning)
+        "system_prompt",
+        "input_value",
+        "max_iterations",
+        "tools",
+        # Hidden / advanced niceties
+        "handle_parsing_errors",
+        "verbose",
+        "chat_history",
+    ]
+
     inputs = [
-        *LCToolsAgentComponent.get_base_inputs(),
         ModelInput(
             name="model",
             display_name="Language Model",
@@ -106,31 +130,28 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
         ),
         SecretStrInput(
             name="api_key",
-            display_name="API Key",
-            info="Model Provider API key",
+            display_name="Model Provider API Key",
+            info="API key for the selected model provider (OpenAI / Anthropic / etc.). Required.",
             real_time_refresh=True,
-            advanced=True,
+            required=True,
         ),
         SecretStrInput(
             name="tavily_api_key",
-            display_name="Tavily API Key",
-            info="Tavily key — AI-powered web search for company research. Get it at tavily.com.",
+            display_name="Tavily API Key (optional)",
+            info="Enables AI-powered web search for company research. Get it at tavily.com.",
             required=False,
-            advanced=True,
         ),
         SecretStrInput(
             name="apollo_api_key",
-            display_name="Apollo API Key",
-            info="Apollo.io key — enables people search and company enrichment. Get it at app.apollo.io → Settings → API Keys.",
+            display_name="Apollo API Key (optional)",
+            info="Enables people search + company enrichment. Get it at app.apollo.io → Settings → API Keys.",
             required=False,
-            advanced=True,
         ),
         SecretStrInput(
             name="hunter_api_key",
-            display_name="Hunter API Key",
-            info="Hunter.io key — finds emails by company domain. Get it at hunter.io/api-keys.",
+            display_name="Hunter API Key (optional)",
+            info="Finds emails by company domain. Get it at hunter.io/api-keys.",
             required=False,
-            advanced=True,
         ),
         MessageTextInput(
             name="prospect_name",
@@ -148,22 +169,21 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
         ),
         MessageTextInput(
             name="prospect_role",
-            display_name="Prospect Role (Optional)",
-            info="Known job title or role, if available",
+            display_name="Prospect Role (optional)",
+            info="Known job title or role, if available.",
             required=False,
             tool_mode=True,
         ),
         MultilineInput(
             name="additional_context",
-            display_name="Additional Context (Optional)",
+            display_name="Additional Context (optional)",
             info="Any extra info: LinkedIn URL, recent news, industry vertical, etc.",
             required=False,
-            advanced=True,
         ),
         MultilineInput(
             name="system_prompt",
             display_name="Agent Instructions",
-            info="System prompt that guides the agent's research behavior. Uses {prospect_name}, {company_name}, {prospect_role}, {additional_context} variables.",
+            info="System prompt that guides the agent. Uses {prospect_name}, {company_name}, {prospect_role}, {additional_context} variables.",
             value=DEFAULT_SYSTEM_PROMPT,
             advanced=True,
         ),
@@ -174,6 +194,7 @@ class ProspectResearchAgentComponent(LCToolsAgentComponent):
             advanced=True,
             info="Chat history for multi-turn conversations.",
         ),
+        *LCToolsAgentComponent.get_base_inputs(),
     ]
 
     outputs = [

@@ -480,12 +480,56 @@ async def update_flow(
 
         update_data = flow.model_dump(exclude_unset=True, exclude_none=True)
 
-        # Specifically handle endpoint_name when it's explicitly set to null or empty string
+        # === DEBUG LOGS for save persistence investigation ===
+        _incoming_data = update_data.get("data") or {}
+        _incoming_nodes = _incoming_data.get("nodes") if isinstance(_incoming_data, dict) else None
+        _incoming_edges = _incoming_data.get("edges") if isinstance(_incoming_data, dict) else None
+        _db_data = db_flow.data if isinstance(db_flow.data, dict) else {}
+        _db_edges = _db_data.get("edges")
+        logger.info(
+            "[FLOW_PATCH] flow=%s fields_set=%s incoming_nodes=%s incoming_edges=%s db_edges=%s endpoint_in=%r endpoint_db=%r",
+            flow_id,
+            sorted(flow.model_fields_set),
+            len(_incoming_nodes) if isinstance(_incoming_nodes, list) else "absent",
+            len(_incoming_edges) if isinstance(_incoming_edges, list) else "absent",
+            len(_db_edges) if isinstance(_db_edges, list) else "absent",
+            flow.endpoint_name,
+            db_flow.endpoint_name,
+        )
+
+        # Specifically handle endpoint_name when it's explicitly set to null or empty string.
+        # Distinguish a real pause request (PATCH with only endpoint_name) from a routine
+        # save (PATCH that also includes `data`/`name`) — the latter must not deactivate
+        # the flow just because the client's React state has a stale null endpoint_name.
+        is_full_save = "data" in flow.model_fields_set or "name" in flow.model_fields_set
         if flow.endpoint_name is None or flow.endpoint_name == "":
-            update_data["endpoint_name"] = None
+            if is_full_save and db_flow.endpoint_name:
+                update_data.pop("endpoint_name", None)
+                logger.info("[FLOW_PATCH] preserved endpoint_name=%r (full-save guard)", db_flow.endpoint_name)
+            else:
+                update_data["endpoint_name"] = None
 
         if settings_service.settings.remove_api_keys:
             update_data = remove_api_keys(update_data)
+
+        # Guard against autosave clobbering edges with [] when React state is stale.
+        # If incoming data has nodes but no edges, and the stored flow already has
+        # edges, treat the incoming edges as untrusted and preserve the stored ones.
+        incoming_data = update_data.get("data")
+        if (
+            isinstance(incoming_data, dict)
+            and isinstance(incoming_data.get("nodes"), list)
+            and len(incoming_data["nodes"]) > 1
+            and incoming_data.get("edges") == []
+            and isinstance(db_flow.data, dict)
+            and isinstance(db_flow.data.get("edges"), list)
+            and len(db_flow.data["edges"]) > 0
+        ):
+            logger.info(
+                "[FLOW_PATCH] preserved %d edges from DB (incoming had empty edges)",
+                len(db_flow.data["edges"]),
+            )
+            incoming_data["edges"] = db_flow.data["edges"]
 
         for key, value in update_data.items():
             setattr(db_flow, key, value)

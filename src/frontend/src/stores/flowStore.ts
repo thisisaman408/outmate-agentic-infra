@@ -61,6 +61,65 @@ import { filterSingletonComponent } from "./helpers/filter-singleton-component";
 import { useTweaksStore } from "./tweaksStore";
 import { useTypesStore } from "./typesStore";
 
+/**
+ * Pre-clean a flow's edges before they hit Langflow's `cleanEdges`. Some
+ * historical saves contain a JSON envelope on `sourceHandle` like
+ * `{"label":"true"}` (added by the pipeline canvas's branch-wiring UX). That
+ * envelope is valid JSON but lacks the Langflow handle schema — `cleanEdges`
+ * walks it expecting `fieldName/dataType/...` and crashes on null.
+ *
+ * For each such edge we lift the label onto `edge.data.branchLabel` (a
+ * free-form ReactFlow field Langflow's loader does NOT introspect) and clear
+ * the bad sourceHandle. Edges with plain non-JSON string handles are dropped
+ * entirely — those would also crash `JSON.parse` downstream.
+ */
+function preCleanLegacyEdges(rawEdges: any[]): any[] {
+  if (!Array.isArray(rawEdges)) return [];
+  const looksLikeLangflowHandle = (parsed: any): boolean =>
+    parsed != null &&
+    typeof parsed === "object" &&
+    ("fieldName" in parsed ||
+      "name" in parsed ||
+      "dataType" in parsed ||
+      "output_types" in parsed ||
+      "inputTypes" in parsed);
+
+  const out: any[] = [];
+  for (const e of rawEdges) {
+    let next = e;
+    let drop = false;
+    for (const side of ["sourceHandle", "targetHandle"] as const) {
+      const h = next?.[side];
+      if (h == null || h === "") continue;
+      if (typeof h !== "string") continue;
+      const trimmed = h.trim();
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+        drop = true;
+        break;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        drop = true;
+        break;
+      }
+      if (looksLikeLangflowHandle(parsed)) continue;
+      if (side === "sourceHandle" && typeof parsed?.label === "string") {
+        next = {
+          ...next,
+          data: { ...(next.data ?? {}), branchLabel: parsed.label },
+          sourceHandle: null,
+        };
+      } else {
+        next = { ...next, [side]: null };
+      }
+    }
+    if (!drop) out.push(next);
+  }
+  return out;
+}
+
 // this is our useStore hook that we can use in our components to get parts of the store and call actions
 const useFlowStore = create<FlowStoreType>((set, get) => ({
   playgroundPage: false,
@@ -131,7 +190,7 @@ const useFlowStore = create<FlowStoreType>((set, get) => ({
     set({ isBuilding: false });
     get().revertBuiltStatusFromBuilding();
     useAlertStore.getState().setErrorData({
-      title: "Build stopped",
+      title: "Agent stopped",
     });
   },
   isPending: true,
@@ -220,8 +279,45 @@ const useFlowStore = create<FlowStoreType>((set, get) => ({
   },
   resetFlow: (flow) => {
     const nodes = flow?.data?.nodes ?? [];
-    const edges = flow?.data?.edges ?? [];
+    const rawEdges = flow?.data?.edges ?? [];
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] resetFlow ENTRY", {
+      flowId: flow?.id,
+      nodeCount: nodes.length,
+      rawEdgeCount: rawEdges.length,
+      rawEdges: rawEdges.map((e: any) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      })),
+    });
+    // Pre-clean: migrate / strip malformed handles BEFORE Langflow's
+    // cleanEdges walks them. Without this, edges saved by the pipeline
+    // canvas's branch-wiring UX (legacy {"label":"true"} envelope) crash
+    // cleanEdges with null.fieldName.
+    const edges = preCleanLegacyEdges(rawEdges);
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] resetFlow AFTER preCleanLegacyEdges", {
+      flowId: flow?.id,
+      edgeCount: edges.length,
+    });
     const { edges: newEdges, brokenEdges } = cleanEdges(nodes, edges);
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] resetFlow AFTER cleanEdges", {
+      flowId: flow?.id,
+      newEdgeCount: newEdges.length,
+      brokenEdgeCount: brokenEdges.length,
+      newEdges: newEdges.map((e: any) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      })),
+      flowDataEdgeCountAfter: flow?.data?.edges?.length ?? "no-data",
+    });
 
     if (brokenEdges.length > 0) {
       useAlertStore.getState().setErrorData({

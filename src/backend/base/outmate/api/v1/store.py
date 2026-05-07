@@ -143,12 +143,10 @@ async def download_component(
 
 @router.get("/tags", response_model=list[TagResponse])
 async def get_tags():
-    try:
-        return await get_store_service().get_tags()
-    except CustomError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # Outmate doesn't ship the upstream Langflow Hub. The frontend still pings
+    # this on bootstrap (refetchOnWindowFocus); returning [] immediately keeps
+    # page-load snappy instead of waiting on api.outmate.store to time out.
+    return []
 
 
 @router.get("/users/likes", response_model=list[UsersLikesResponse])

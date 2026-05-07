@@ -42,7 +42,7 @@ export default function DashboardView({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col gap-4 p-6"
+      className="flex flex-col gap-4 p-6 min-w-0 break-words [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_code]:whitespace-pre-wrap [&_code]:break-words"
     >
       {/* Header */}
       <div className="flex items-center justify-between">

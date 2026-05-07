@@ -68,6 +68,24 @@ class AuthSettings(BaseSettings):
         ),
     )
 
+    # SSO bridge — shared HS256 secret with the main Outmate backend
+    # (`Backend/app`). When set, this enables /api/v1/auth/bridge which
+    # accepts a JWT signed with this secret and mints the agentic side's
+    # normal `access_token_lf` cookie for the corresponding user. The
+    # agentic User row is auto-provisioned with `id == main_user_id` on
+    # first bridge so the two backends share user IDs.
+    #
+    # Declared BEFORE AUTO_LOGIN so the AUTO_LOGIN validator can read its
+    # value from `info.data` and force AUTO_LOGIN off when set.
+    BRIDGE_SECRET: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Shared HS256 secret used to validate cross-stack 'bridge' JWTs "
+            "minted by the main Outmate backend. When unset (dev), the bridge "
+            "endpoint is disabled and AUTO_LOGIN remains the only auth path."
+        ),
+    )
+
     AUTO_LOGIN: bool = Field(
         default=True,  # TODO: Set to False in v2.0
         description=(
@@ -138,6 +156,37 @@ class AuthSettings(BaseSettings):
     def reset_credentials(self) -> None:
         # Preserve the configured username but scrub the password from memory to avoid plaintext exposure.
         self.SUPERUSER_PASSWORD = SecretStr("")
+
+    @field_validator("AUTO_LOGIN", mode="before")
+    @classmethod
+    def disable_auto_login_when_bridge_configured(cls, value, info):
+        """When the SSO bridge is wired up, AUTO_LOGIN MUST be off.
+
+        AUTO_LOGIN issues an `access_token_lf` cookie for the shared
+        superuser on every request lacking auth. With the bridge active,
+        we want any logged-in user to come through `/api/v1/auth/bridge`
+        and be authenticated as themselves — never as the shared
+        superuser. So as soon as `BRIDGE_SECRET` is configured, force
+        AUTO_LOGIN off regardless of what the user passed in.
+        """
+        # `info.data` reflects already-validated fields. Pydantic v2 runs
+        # validators in declaration order, so BRIDGE_SECRET is processed
+        # before AUTO_LOGIN (declaration order in this class).
+        bridge_secret = info.data.get("BRIDGE_SECRET")
+        if bridge_secret:
+            secret_value = (
+                bridge_secret.get_secret_value()
+                if hasattr(bridge_secret, "get_secret_value")
+                else str(bridge_secret)
+            )
+            if secret_value:
+                if value:
+                    logger.info(
+                        "BRIDGE_SECRET is set — forcing AUTO_LOGIN=False "
+                        "so the shared superuser is not auto-authenticated.",
+                    )
+                return False
+        return value
 
     # If autologin is true, then we need to set the credentials to
     # the default values

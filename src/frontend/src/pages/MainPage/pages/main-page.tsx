@@ -1,22 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
-import SideBarFoldersButtonsComponent from "@/components/core/folderSidebarComponent/components/sideBarFolderButtons";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { useDeleteFolders } from "@/controllers/API/queries/folders";
-import CustomEmptyPageCommunity from "@/customization/components/custom-empty-page";
 import CustomLoader from "@/customization/components/custom-loader";
 import { useCustomNavigate } from "@/customization/hooks/use-custom-navigate";
 import useAlertStore from "@/stores/alertStore";
 import useFlowsManagerStore from "@/stores/flowsManagerStore";
 import { useFolderStore } from "@/stores/foldersStore";
 import ModalsComponent from "../components/modalsComponent";
-import EmptyPageCommunity from "./empty-page";
 
 export default function CollectionPage(): JSX.Element {
   const [openModal, setOpenModal] = useState(false);
   const [openDeleteFolderModal, setOpenDeleteFolderModal] = useState(false);
-  const setFolderToEdit = useFolderStore((state) => state.setFolderToEdit);
   const navigate = useCustomNavigate();
   const flows = useFlowsManagerStore((state) => state.flows);
   const examples = useFlowsManagerStore((state) => state.examples);
@@ -55,36 +51,13 @@ export default function CollectionPage(): JSX.Element {
   };
 
   return (
-    <SidebarProvider width="280px">
-      {flows &&
-        examples &&
-        folders &&
-        ((flows?.length !== examples?.length && folders?.length > 0) ||
-          folders?.length > 1) && (
-          <SideBarFoldersButtonsComponent
-            handleChangeFolder={(id: string) => {
-              navigate(`all/folder/${id}`);
-            }}
-            handleDeleteFolder={(item) => {
-              setFolderToEdit(item);
-              setOpenDeleteFolderModal(true);
-            }}
-            handleFilesClick={() => {
-              navigate("assets");
-            }}
-          />
-        )}
+    <SidebarProvider width="0px">
       <main className="flex h-full w-full overflow-hidden">
         {flows && examples && folders ? (
           <div
-            className={`relative mx-auto flex h-full w-full flex-col overflow-hidden`}
+            className={`relative flex h-full w-full flex-col overflow-hidden`}
           >
-            {(flows?.length !== examples?.length && folders?.length > 0) ||
-            folders?.length > 1 ? (
-              <Outlet />
-            ) : (
-              <CustomEmptyPageCommunity setOpenModal={setOpenModal} />
-            )}
+            <Outlet />
           </div>
         ) : (
           <div className="flex h-full w-full items-center justify-center">
