@@ -4,6 +4,8 @@
 **/.venv/
 **/env/
 **/.env
+**/.env.local
+**/.env.*.local
 
 # Node / Next.js
 **/node_modules/
@@ -11,20 +13,76 @@
 **/out/
 **/.vercel/
 **/.DS_Store
+**/*.tsbuildinfo
+**/dev.log
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
 
 # OS / Local
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Secrets / credentials
 *firebase-adminsdk*.json
 *-serviceaccount.json
 *.pem
 *.key
+.secrets.baseline
 
 # Claude Code local settings
 .claude/
 
+# Aider local state
+.aider*
+.aider.tags.cache.v4/
+.aider.chat.history.md
+.aider.input.history
+
+# Composio local state
+.composio.lock
+
 # Celery runtime state
 celerybeat-schedule*
+
+# Editor / scratch files
+**/*.bak
+**/tmp_*.py
+**/tmp_*.ps1
+**/tmp_*.js
+**/tmp_*.ts
+**/tmp_file.py
+**/fix_localhost.js
+**/test_frontend_logic.js
+**/next_function.js
+**/db_check_urls.py
+**/test_match.py
+**/test_gtm_integrations.py
+**/probe_industry*.py
+**/diag_*.py
+should
+
+# Build artifacts
+**/dist/
+**/build/
+test-results/
+
+# Coverage / profiling
+**/.coverage
+**/htmlcov/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Big binary scratch artifacts that snuck in
+*.jpeg
+*.jpg
+*.png
+!Frontend/public/**
+!Backend/app/static/**
+
+# Lockfile noise — pick one PM, exclude others (leave package-lock.json by default)
+**/pnpm-lock.yaml
