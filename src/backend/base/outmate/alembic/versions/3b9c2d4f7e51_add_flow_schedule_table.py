@@ -51,7 +51,6 @@ def upgrade() -> None:
             _uuid_type(bind),
             sa.ForeignKey("flow.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         ),
         sa.Column(
             "schedule_type",
