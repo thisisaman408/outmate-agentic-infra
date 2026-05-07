@@ -1,0 +1,1 @@
+import{bY as t}from"./index-J6I4iQE7.js";const r=[["path",{d:"M11 6 8 9",key:"7zt14w"}],["path",{d:"m16 7-8 8",key:"tkgtvu"}],["rect",{x:"4",y:"2",width:"16",height:"20",rx:"2",key:"1uxh74"}]],a=t("mirror-rectangular",r);export{r as __iconNode,a as default};

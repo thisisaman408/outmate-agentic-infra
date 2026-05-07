@@ -23,7 +23,33 @@ const useApplyFlowToCanvas = () => {
       // Clone so processFlows' in-place mutations don't corrupt the caller's data.
       const clonedFlow = cloneDeep(flow);
       const hadNodes = (clonedFlow.data?.nodes?.length ?? 0) > 0;
+      // eslint-disable-next-line no-console
+      console.log("[FLOW_LOAD] applyFlowToCanvas BEFORE processFlows", {
+        flowId: clonedFlow.id,
+        nodeCount: clonedFlow.data?.nodes?.length ?? 0,
+        edgeCount: clonedFlow.data?.edges?.length ?? 0,
+        edges: (clonedFlow.data?.edges ?? []).map((e: any) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        })),
+      });
       processFlows([clonedFlow]);
+      // eslint-disable-next-line no-console
+      console.log("[FLOW_LOAD] applyFlowToCanvas AFTER processFlows", {
+        flowId: clonedFlow.id,
+        nodeCount: clonedFlow.data?.nodes?.length ?? 0,
+        edgeCount: clonedFlow.data?.edges?.length ?? 0,
+        edges: (clonedFlow.data?.edges ?? []).map((e: any) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        })),
+      });
       if (hadNodes && !clonedFlow.data?.nodes?.length) {
         throw new Error(
           "useApplyFlowToCanvas: processFlows destroyed all nodes — aborting to prevent canvas wipe",

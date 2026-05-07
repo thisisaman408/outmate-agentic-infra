@@ -12,8 +12,14 @@ from fastapi import HTTPException, status
 from lfx.log.logger import logger
 from pydantic import BaseModel, ValidationInfo, field_serializer, field_validator
 from sqlalchemy import Enum as SQLEnum
+from sqlalchemy import JSON as SAJSON
 from sqlalchemy import Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+
+# Use JSONB on Postgres (indexable / queryable), generic JSON elsewhere.
+# This keeps dev (SQLite) running without losing prod (Postgres) capabilities.
+_FLOW_METADATA_TYPE = SAJSON().with_variant(JSONB(), "postgresql")
 
 from outmate.schema.data import Data
 
@@ -39,6 +45,15 @@ class FlowBase(SQLModel):
     icon_bg_color: str | None = Field(default=None, nullable=True)
     gradient: str | None = Field(default=None, nullable=True)
     data: dict | None = Field(default=None, nullable=True)
+    # Structured workflow settings used by the redesigned editor
+    # (timezone, business_hours_only, skip_weekends, etc.).
+    # Named workflow_metadata (not "metadata") to avoid clashing with
+    # SQLAlchemy/SQLModel's reserved `metadata` attribute on the Base class.
+    # Storage type is JSONB on Postgres, generic JSON on SQLite (dev).
+    workflow_metadata: dict | None = Field(
+        default=None,
+        sa_column=Column("workflow_metadata", _FLOW_METADATA_TYPE, nullable=True),
+    )
     is_component: bool | None = Field(default=False, nullable=True)
     updated_at: datetime | None = Field(default_factory=lambda: datetime.now(timezone.utc), nullable=True)
     webhook: bool | None = Field(default=False, nullable=True, description="Can be used on the webhook endpoint")
@@ -264,6 +279,7 @@ class FlowUpdate(SQLModel):
     action_name: str | None = None
     action_description: str | None = None
     access_type: AccessTypeEnum | None = None
+    workflow_metadata: dict | None = None
     fs_path: str | None = None
 
     @field_validator("endpoint_name")

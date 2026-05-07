@@ -34,6 +34,20 @@ export type FlowType = {
   public?: boolean;
   access_type?: "PUBLIC" | "PRIVATE" | "PROTECTED";
   mcp_enabled?: boolean;
+  workflow_metadata?: WorkflowMetadata | null;
+};
+
+export type WorkflowMetadata = {
+  timezone?: string;
+  business_hours_only?: boolean;
+  skip_weekends?: boolean;
+  max_runs_per_record?: "Unlimited" | "1" | "3" | "5";
+  re_enrollment_rule?: "Once" | "Once per 30 days" | "Always";
+  notify_owner_on_exit?: boolean;
+  slack_alerts?: boolean;
+  email_notifications?: boolean;
+  error_alerts?: boolean;
+  target_object?: "People" | "Companies";
 };
 
 export type GenericNodeType = Node<NodeDataType, "genericNode">;

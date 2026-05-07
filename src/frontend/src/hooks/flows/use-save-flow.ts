@@ -25,9 +25,38 @@ const useSaveFlow = () => {
       setSaveLoading(true);
 
       const flowData = currentFlow?.data;
-      const nodes = useFlowStore.getState().nodes;
+      const storeNodes = useFlowStore.getState().nodes;
       const edges = useFlowStore.getState().edges;
       const reactFlowInstance = useFlowStore.getState().reactFlowInstance;
+
+      // Merge: take ReactFlow's nodes (positions, type-edits) but keep
+      // pipeline-canvas-only state from `currentFlow.data.nodes` —
+      // specifically `data.node.metadata.toolNodeIds`. The pipeline canvas
+      // writes tool attachments straight into currentFlow.data and never
+      // syncs them into the ReactFlow store, so a naive take-from-store
+      // here clobbers the attachment when Save fires.
+      const cNodesById = new Map<string, any>();
+      for (const cn of (flowData?.nodes ?? []) as any[]) {
+        cNodesById.set(cn.id, cn);
+      }
+      const nodes = storeNodes.map((n: any) => {
+        const cn = cNodesById.get(n.id);
+        const cMeta = cn?.data?.node?.metadata;
+        if (!cMeta) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            node: {
+              ...(n.data?.node ?? {}),
+              metadata: {
+                ...(n.data?.node?.metadata ?? {}),
+                ...cMeta,
+              },
+            },
+          },
+        };
+      });
 
       return new Promise<void>((resolve, reject) => {
         if (currentFlow) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useBlocker, useParams } from "react-router-dom";
+import { useBlocker, useParams, useSearchParams } from "react-router-dom";
 import { FlowPageSlidingContainerContent } from "@/components/core/playgroundComponent/sliding-container/components/flow-page-sliding-container";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import {
@@ -28,6 +28,33 @@ import {
 } from "./components/flowSidebarComponent";
 import Page from "./components/PageComponent";
 import { FlowInsightsContent } from "./components/TraceComponent/FlowInsightsContent";
+import CopilotTab from "./components/copilotTab";
+import OutcomeTab from "./components/outcomeTab";
+import PipelineCanvas from "./components/pipelineCanvas";
+import SettingsTab from "./components/settingsTab";
+import WorkflowEditorChrome, {
+  useEditorTab,
+} from "./components/workflowEditorChrome";
+
+function FlowPageSidebarGate({
+  isLoading,
+  view,
+}: {
+  isLoading: boolean;
+  view?: boolean;
+}): JSX.Element | null {
+  const { tab } = useEditorTab();
+  const isAdvanced =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("advanced") === "1";
+  if (view) return null;
+  // On the new pipeline canvas, the legacy FlowSidebar is hidden — the
+  // PipelineCanvas renders its own BuildSidebar. Show the legacy one only
+  // when the user explicitly requests advanced mode.
+  if (tab !== "workflow") return null;
+  if (!isAdvanced) return null;
+  return <FlowSidebarComponent isLoading={isLoading} />;
+}
 
 function FlowPageMainContent({
   flowId,
@@ -38,6 +65,30 @@ function FlowPageMainContent({
 }): JSX.Element {
   const { activeSection } = useSidebar();
   const showTraces = ENABLE_NEW_SIDEBAR && activeSection === "traces";
+  const { tab } = useEditorTab();
+
+  // Non-Workflow tabs render their own page bodies (no canvas).
+  if (tab === "outcome") {
+    return (
+      <div className="flex h-full w-full flex-col overflow-hidden">
+        <OutcomeTab flowId={flowId ?? ""} />
+      </div>
+    );
+  }
+  if (tab === "settings") {
+    return (
+      <div className="flex h-full w-full flex-col overflow-hidden">
+        <SettingsTab flowId={flowId ?? ""} />
+      </div>
+    );
+  }
+  if (tab === "copilot") {
+    return (
+      <div className="flex h-full w-full flex-col overflow-hidden">
+        <CopilotTab />
+      </div>
+    );
+  }
 
   if (showTraces) {
     return (
@@ -54,11 +105,20 @@ function FlowPageMainContent({
     );
   }
 
-  return <Page setIsLoading={setIsLoading} />;
+  // Workflow tab: pipeline canvas by default, legacy free-form editor with ?advanced=1.
+  const isAdvanced =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("advanced") === "1";
+  if (isAdvanced) {
+    return <Page setIsLoading={setIsLoading} />;
+  }
+  return <PipelineCanvas flowId={flowId ?? ""} />;
 }
 
 export default function FlowPage({ view }: { view?: boolean }): JSX.Element {
   const types = useTypesStore((state) => state.types);
+  const [searchParams] = useSearchParams();
+  const isAdvancedMode = searchParams.get("advanced") === "1";
 
   useGetTypes({
     enabled: Object.keys(types).length <= 0,
@@ -187,13 +247,25 @@ export default function FlowPage({ view }: { view?: boolean }): JSX.Element {
 
   useEffect(() => {
     if (blocker.state === "blocked") {
-      if (isBuilding) {
+      // If the workflow is launched (`endpoint_name` set), the user has
+      // explicitly asked it to run autonomously — leaving the flow editor
+      // page should NOT abort an in-flight run. We just let navigation
+      // proceed; the build keeps running on the backend.
+      const isWorkflowLaunched = !!currentSavedFlow?.endpoint_name;
+
+      if (isBuilding && !isWorkflowLaunched) {
+        // Draft / unlaunched flow: kill the run so it doesn't keep
+        // consuming credits in the background. (Original Langflow safety
+        // behavior.)
         stopBuilding();
       } else if (!changesNotSaved) {
         blocker.proceed && blocker.proceed();
+      } else if (isBuilding && isWorkflowLaunched) {
+        // Run survives the navigation — just let the user leave.
+        blocker.proceed && blocker.proceed();
       }
     }
-  }, [blocker.state, isBuilding]);
+  }, [blocker.state, isBuilding, currentSavedFlow?.endpoint_name]);
 
   const getFlowToAddToCanvas = async (id: string) => {
     const flow = await getFlow({ id });
@@ -275,37 +347,39 @@ export default function FlowPage({ view }: { view?: boolean }): JSX.Element {
       >
         <div className="flow-page-positioning">
           {currentFlow && (
-            <div className="flex h-full overflow-hidden">
-              <SidebarProvider
-                width="17.5rem"
-                defaultOpen={!isMobile}
-                segmentedSidebar={ENABLE_NEW_SIDEBAR}
-              >
-                <FlowSearchProvider>
-                  {!view && <FlowSidebarComponent isLoading={isLoading} />}
-                  <main
-                    className={cn(
-                      "flex flex-1 min-w-0 overflow-hidden transition-all duration-300",
-                      isSlidingContainerOpen &&
-                        !isFullscreen &&
-                        "rounded-xl m-2 mr-0",
-                    )}
-                  >
-                    <div className="h-full w-full">
-                      <FlowPageMainContent
-                        flowId={id}
-                        setIsLoading={setIsLoading}
-                      />
-                    </div>
-                  </main>
-                </FlowSearchProvider>
-              </SidebarProvider>
-              <SimpleSidebar resizable={!isFullscreen} className="h-full">
-                <FlowPageSlidingContainerContent
-                  isFullscreen={isFullscreen}
-                  setIsFullscreen={setIsFullscreen}
-                />
-              </SimpleSidebar>
+            <div className="flex h-full flex-col overflow-hidden">
+              <WorkflowEditorChrome flowId={id ?? ""} onSave={handleSave} />
+              <div className="flex flex-1 overflow-hidden">
+                <SidebarProvider
+                  width="17.5rem"
+                  defaultOpen={!isMobile}
+                  segmentedSidebar={ENABLE_NEW_SIDEBAR}
+                >
+                  <FlowSearchProvider>
+                    <main
+                      className={cn(
+                        "flex flex-1 min-w-0 overflow-hidden transition-all duration-300",
+                        isSlidingContainerOpen &&
+                          !isFullscreen &&
+                          "rounded-xl m-2 mr-0",
+                      )}
+                    >
+                      <div className="h-full w-full">
+                        <FlowPageMainContent
+                          flowId={id}
+                          setIsLoading={setIsLoading}
+                        />
+                      </div>
+                    </main>
+                  </FlowSearchProvider>
+                </SidebarProvider>
+                <SimpleSidebar resizable={!isFullscreen} className="h-full">
+                  <FlowPageSlidingContainerContent
+                    isFullscreen={isFullscreen}
+                    setIsFullscreen={setIsFullscreen}
+                  />
+                </SimpleSidebar>
+              </div>
             </div>
           )}
         </div>

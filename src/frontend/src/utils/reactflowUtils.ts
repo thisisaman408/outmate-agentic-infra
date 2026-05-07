@@ -626,13 +626,24 @@ export function validateNode(node: AllNodeType, edges: Edge[]): Array<string> {
       (template[t].value === undefined ||
         template[t].value === null ||
         template[t].value === "") &&
-      !edges.some(
-        (edge) =>
-          (scapeJSONParse(edge.targetHandle!) as targetHandleType).fieldName ===
-          t &&
-          (scapeJSONParse(edge.targetHandle!) as targetHandleType).id ===
-          node.id,
-      )
+      !edges.some((edge) => {
+        // Pipeline-canvas edges intentionally carry no handles
+        // (`{id, source, target}` only). They aren't tied to a specific
+        // template field — the convention is simply "the upstream node
+        // feeds whatever required input this node has". Treat any handle-
+        // less edge into this node as fulfilling its required inputs;
+        // otherwise validateNode rejects perfectly valid pipelines like
+        // ChatInput → Agent → ChatOutput with "missing Inputs".
+        if (!edge.targetHandle || typeof edge.targetHandle !== "string") {
+          return edge.target === node.id;
+        }
+        try {
+          const parsed = scapeJSONParse(edge.targetHandle) as targetHandleType;
+          return parsed.fieldName === t && parsed.id === node.id;
+        } catch {
+          return edge.target === node.id;
+        }
+      })
     ) {
       errors.push(
         `${displayName || type} is missing ${getFieldTitle(template, t)}.`,
@@ -693,7 +704,19 @@ export function validateEdge(
   nodes: AllNodeType[],
   edges: EdgeType[],
 ): Array<string> {
-  const targetHandleObject: targetHandleType = scapeJSONParse(e.targetHandle!);
+  // Pipeline-canvas edges have no handles. Skip the loop-validity check —
+  // that's only relevant for edges with proper Langflow handle metadata
+  // (output_types etc.). Calling scapeJSONParse(undefined) here crashes the
+  // entire build with "Cannot read properties of undefined (reading 'replace')".
+  if (!e.targetHandle || typeof e.targetHandle !== "string") {
+    return [];
+  }
+  let targetHandleObject: targetHandleType;
+  try {
+    targetHandleObject = scapeJSONParse(e.targetHandle) as targetHandleType;
+  } catch {
+    return [];
+  }
 
   const loop = hasLoop(e, nodes, edges);
   if (targetHandleObject.output_types && !loop) {
@@ -727,12 +750,25 @@ function hasLoop(
         (e) => e.source === node.id && e.target === outgoer.id,
       );
       if (outgoer.id === source) {
-        const sourceHandleObject = scapeJSONParse(
-          firstEdge?.sourceHandle ?? edge?.sourceHandle ?? "",
-        );
-        const targetHandleObject: targetHandleType = scapeJSONParse(
-          e.targetHandle!,
-        );
+        // Pipeline-canvas edges have no handles. Without JSON-encoded
+        // sourceHandle/targetHandle the scapeJSONParse below would crash
+        // ("Cannot read properties of undefined (reading 'replace')") and
+        // tear down the whole build path. For these edges we can't compute
+        // loop-vs-cycle distinction at all — return false (= no loop).
+        const sh = firstEdge?.sourceHandle ?? edge?.sourceHandle ?? "";
+        if (!e.targetHandle || typeof e.targetHandle !== "string" || !sh) {
+          return false;
+        }
+        let sourceHandleObject: any;
+        let targetHandleObject: targetHandleType;
+        try {
+          sourceHandleObject = scapeJSONParse(sh);
+          targetHandleObject = scapeJSONParse(
+            e.targetHandle,
+          ) as targetHandleType;
+        } catch {
+          return false;
+        }
 
         // For loop inputs, compare by name and id instead of full stringified comparison
         // This handles the case where loop inputs have additional loop_types in output_types
@@ -762,9 +798,12 @@ function hasLoop(
 export function updateEdges(edges: EdgeType[]) {
   if (edges)
     edges.forEach((edge) => {
-      const _targetHandleObject: targetHandleType = scapeJSONParse(
-        edge.targetHandle!,
-      );
+      // Pipeline-canvas edges have no handles by design - skip handle parsing.
+      if (edge.targetHandle) {
+        const _targetHandleObject: targetHandleType = scapeJSONParse(
+          edge.targetHandle,
+        );
+      }
       edge.className = "";
     });
 }
@@ -814,6 +853,13 @@ export function updateEdgesHandleIds({
 }: updateEdgesHandleIdsType): EdgeType[] {
   const newEdges = cloneDeep(edges);
   newEdges.forEach((edge) => {
+    // Pipeline-canvas edges intentionally have no handles - they wire by
+    // source/target only. Don't try to migrate them to JSON-encoded handles
+    // because the lookup below crashes on undefined and `scapedJSONStringfy(undefined)`
+    // produces a broken handle that later trips `scapeJSONParse(undefined)`.
+    if (!edge.sourceHandle && !edge.targetHandle) {
+      return;
+    }
     const sourceNodeId = edge.source;
     const targetNodeId = edge.target;
     const sourceNode = nodes.find((node) => node.id === sourceNodeId);
@@ -1556,12 +1602,48 @@ export function updateEdgesIds(
 
 export function processFlowEdges(flow: FlowType) {
   if (!flow.data || !flow.data.edges) return;
+  // [FLOW_LOAD] log entry into processFlowEdges
+  // eslint-disable-next-line no-console
+  console.log("[FLOW_LOAD] processFlowEdges ENTRY", {
+    flowId: flow.id,
+    edgeCount: flow.data.edges.length,
+    edges: flow.data.edges.map((e: any) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+      hasDataSourceHandle: !!e.data?.sourceHandle,
+    })),
+    needsEscapedIds: checkEdgeWithoutEscapedHandleIds(flow.data.edges),
+    hasOldHandles: checkOldEdgesHandles(flow.data.edges),
+  });
   if (checkEdgeWithoutEscapedHandleIds(flow.data.edges)) {
     const newEdges = addEscapedHandleIdsToEdges({ edges: flow.data.edges });
     flow.data.edges = newEdges;
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] processFlowEdges → addEscapedHandleIdsToEdges branch", {
+      newEdgeCount: newEdges.length,
+    });
   } else if (checkOldEdgesHandles(flow.data.edges)) {
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] processFlowEdges → updateEdgesHandleIds branch (DANGER for pipeline edges)");
     const newEdges = updateEdgesHandleIds(flow.data);
     flow.data.edges = newEdges;
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] processFlowEdges AFTER updateEdgesHandleIds", {
+      newEdgeCount: newEdges.length,
+      newEdges: newEdges.map((e: any) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      })),
+    });
+  } else {
+    // eslint-disable-next-line no-console
+    console.log("[FLOW_LOAD] processFlowEdges → no-op branch (edges left unchanged)");
   }
 }
 
@@ -2089,12 +2171,19 @@ export function updateGlobalVariables(
     | undefined,
   globalVariablesEntries: string[] | undefined,
 ) {
+  // Guard against running before the variables-list query has resolved.
+  // Without this, an empty/undefined entries list looks like "the variable
+  // was deleted" and silently wipes the user's saved load_from_db field
+  // value — then the unavailableFields auto-attach below resurrects a
+  // *different* variable for the same display_name, which the user reads
+  // as "my selection randomly reverted to the old one".
+  const hasEntries = Array.isArray(globalVariablesEntries) && globalVariablesEntries.length > 0;
   if (node && node.template) {
     Object.keys(node.template).forEach((field) => {
       if (
-        globalVariablesEntries &&
+        hasEntries &&
         node!.template[field].load_from_db &&
-        !globalVariablesEntries.includes(node!.template[field].value)
+        !globalVariablesEntries!.includes(node!.template[field].value)
       ) {
         node!.template[field].value = "";
         node!.template[field].load_from_db = false;

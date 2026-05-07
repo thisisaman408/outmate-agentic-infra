@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import ForwardedIconComponent from "@/components/common/genericIconComponent";
+import useAlertStore from "@/stores/alertStore";
 import useFlowStore from "@/stores/flowStore";
 import type { AgentNodeInfo } from "./hooks/useAgentDetection";
 import { usePlayState } from "./hooks/usePlayState";
@@ -32,21 +34,50 @@ export default function PlayPanel({
   const flowPool = useFlowStore((s) => s.flowPool);
   const nodes = useFlowStore((s) => s.nodes);
   const setNodes = useFlowStore((s) => s.setNodes);
+  const setErrorData = useAlertStore((s) => s.setErrorData);
+  const queryClient = useQueryClient();
+
+  // Whenever a run transitions to "dashboard" (i.e. completes — successfully
+  // OR with the no-output fallback), refetch the Outcome tab's runs so the
+  // freshly-completed run appears as a structured row immediately, no manual
+  // Refresh click required.
+  useEffect(() => {
+    if (state === "dashboard") {
+      queryClient.invalidateQueries({ queryKey: ["useGetAgenticRunsQuery"] });
+    }
+  }, [state, queryClient]);
   const [viewMode, setViewMode] = useState<ViewMode>("play");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const runStartTimeRef = useRef(0);
   // Track the flowPool length at the time of starting a run, so we only look at NEW entries
   const poolLengthAtStartRef = useRef(0);
 
-  // Watch flowPool directly for the agent node's output.
+  // Watch flowPool directly for the agent node's output. Also check any
+  // ChatOutput nodes in the same flow — for chained pipelines (Chat Input →
+  // Agent → Chat Output) the user-visible reply lands on the ChatOutput
+  // node, not the agent itself.
   useEffect(() => {
     if (state !== "running") return;
 
-    const agentPool = flowPool[agent.nodeId];
-    if (!agentPool || agentPool.length === 0) return;
+    const candidateIds = [agent.nodeId, ...nodes
+      .filter((n: any) => n?.data?.type === "ChatOutput")
+      .map((n: any) => n.id)];
+
+    let agentPool: any[] | undefined;
+    let chosenId = agent.nodeId;
+    for (const id of candidateIds) {
+      const p = flowPool[id];
+      if (p && p.length > 0) {
+        agentPool = p;
+        chosenId = id;
+        break;
+      }
+    }
+    if (!agentPool) return;
 
     // Only look at entries that appeared AFTER the run started
-    if (agentPool.length <= poolLengthAtStartRef.current) return;
+    if (chosenId === agent.nodeId && agentPool.length <= poolLengthAtStartRef.current)
+      return;
 
     const lastEntry = agentPool[agentPool.length - 1];
     // The output is at: data.outputs.response.message (can be a string or object with .text/.data.text)
@@ -92,7 +123,35 @@ export default function PlayPanel({
         }
       }
     }
-  }, [state, flowPool, agent.nodeId, finishRun]);
+  }, [state, flowPool, agent.nodeId, finishRun, nodes]);
+
+  // Build-completion fallback: when buildFlow finishes (isBuilding → false)
+  // but no usable output was detected in the pool, surface "no output" so
+  // the user isn't stuck on a spinning Running… forever.
+  const isBuilding = useFlowStore((s) => s.isBuilding);
+  const wasBuildingRef = useRef(false);
+  useEffect(() => {
+    const wasBuilding = wasBuildingRef.current;
+    wasBuildingRef.current = isBuilding;
+    if (state !== "running") return;
+    if (!wasBuilding || isBuilding) return;
+    // Build just transitioned from running → done. Give the watcher one more
+    // tick to fire (in case the final pool update hasn't propagated yet),
+    // then if we're still in "running", finish with a no-output explanation.
+    const timer = setTimeout(() => {
+      if (state === "running") {
+        finishRun(
+          "**Run finished but produced no detectable output.**\n\n" +
+            "This usually means the agent's final node didn't emit a message — " +
+            "most often because the LLM call failed (missing/invalid API key) " +
+            "or the agent was missing a required input.\n\n" +
+            "Open the agent node on the canvas and double-check Model + " +
+            "Model Provider API Key, then try again.",
+        );
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [isBuilding, state, finishRun]);
 
   const syncInputsToNode = useCallback(
     (inputValues: Record<string, any>) => {
@@ -135,10 +194,18 @@ export default function PlayPanel({
         await sendMessage({ inputValue: inputText });
       } catch (err) {
         console.error("Agent run failed:", err);
-        finishRun(`Error: ${err}`);
+        const detail =
+          (err as any)?.response?.data?.detail ??
+          (err as any)?.message ??
+          String(err);
+        setErrorData({
+          title: "Agent run failed",
+          list: [String(detail)],
+        });
+        finishRun(`**Agent run failed**\n\n${detail}`);
       }
     },
-    [syncInputsToNode, startRun, sendMessage, finishRun, agent.nodeId],
+    [syncInputsToNode, startRun, sendMessage, finishRun, agent.nodeId, setErrorData],
   );
 
   // Chat follow-up: re-enter "running" state so the flowPool watcher picks
@@ -195,54 +262,68 @@ export default function PlayPanel({
       </div>
 
       <div className={viewMode === "play" ? "flex flex-1 overflow-hidden" : "hidden"}>
-        {!isFullscreen && (
-          <div className="w-72 shrink-0 border-r border-border/40 overflow-y-auto custom-scroll bg-muted/5">
-            <InputSidebar agent={agent} onRun={handleRun} isRunning={state === "running"} />
+        {/* While the agent has not been run, the form takes the entire Play
+            panel — there's no separate "welcome" pane on the right. The
+            divided two-pane layout only kicks in for `running` (live progress)
+            and `dashboard` (results), where the right pane has real content. */}
+        {state === "form" && (
+          <div className="flex-1 overflow-y-auto custom-scroll">
+            <InputSidebar
+              agent={agent}
+              onRun={handleRun}
+              isRunning={false}
+            />
           </div>
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden relative">
-          {state === "dashboard" && (
-            <button onClick={() => setIsFullscreen(!isFullscreen)} className="absolute top-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-border/40 bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground transition-all">
-              {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            </button>
-          )}
+        {state !== "form" && (
+          <>
+            {/* During running / dashboard the form sidebar is hidden — the
+                results pane takes the full Play panel width. The user can
+                hit "Re-run" in the dashboard header to come back to the
+                form. (Previously a 288px form column hung on the left,
+                which the user found redundant.) */}
 
-          {state === "form" && (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center flex flex-col items-center gap-4 max-w-md px-6">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                  <ForwardedIconComponent name={agent.icon} className="h-7 w-7 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold">{agent.displayName}</h3>
-                  {agent.description ? (
-                    <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{agent.description}</p>
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+              {state === "dashboard" && (
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="absolute top-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-border/40 bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground transition-all"
+                >
+                  {isFullscreen ? (
+                    <Minimize2 className="h-3.5 w-3.5" />
                   ) : (
-                    <p className="text-sm text-muted-foreground mt-1">Fill in inputs and click Run Agent</p>
+                    <Maximize2 className="h-3.5 w-3.5" />
                   )}
+                </button>
+              )}
+
+              {state === "running" && (
+                <div className="flex-1 overflow-y-auto custom-scroll">
+                  <ProgressView
+                    agent={agent}
+                    startTime={runStartTimeRef.current}
+                  />
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {state === "running" && (
-            <div className="flex-1 overflow-y-auto custom-scroll">
-              <ProgressView agent={agent} startTime={runStartTimeRef.current} />
+              {state === "dashboard" && (
+                <>
+                  <div className="flex-1 overflow-y-auto custom-scroll">
+                    <DashboardView
+                      agent={agent}
+                      output={agentOutput}
+                      onRerun={reset}
+                    />
+                  </div>
+                  <div className="shrink-0 border-t border-border/40 p-3">
+                    <ChatFollowUp sendMessage={handleChatFollowUp} />
+                  </div>
+                </>
+              )}
             </div>
-          )}
-
-          {state === "dashboard" && (
-            <>
-              <div className="flex-1 overflow-y-auto custom-scroll">
-                <DashboardView agent={agent} output={agentOutput} onRerun={reset} />
-              </div>
-              <div className="shrink-0 border-t border-border/40 p-3">
-                <ChatFollowUp sendMessage={handleChatFollowUp} />
-              </div>
-            </>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

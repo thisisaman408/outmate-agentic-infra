@@ -33,6 +33,107 @@ DEFAULT_TOOLS_DESCRIPTION = "A helpful assistant with access to the following to
 DEFAULT_AGENT_NAME = "Agent ({tools_names})"
 
 
+# (provider name shown to the user, regex matching the provider's auth-failure
+# string). Order matters: the first match wins. Patterns are case-insensitive.
+_AUTH_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("Groq", re.compile(r"groq\.AuthenticationError|api\.groq\.com.*401|invalid_api_key.*groq", re.IGNORECASE)),
+    ("OpenAI", re.compile(r"openai\.AuthenticationError|api\.openai\.com.*401|incorrect api key provided", re.IGNORECASE)),
+    ("Anthropic", re.compile(r"anthropic\.AuthenticationError|api\.anthropic\.com.*401|invalid x-api-key", re.IGNORECASE)),
+    ("Google", re.compile(r"google.*api[\s_-]?key|google.*authentication", re.IGNORECASE)),
+    ("OpenRouter", re.compile(r"openrouter.*401|openrouter.*invalid api key", re.IGNORECASE)),
+    # Generic catch-all for "401 + invalid API key" wording (must be last).
+    ("Model provider", re.compile(r"401.*invalid[_\s-]*api[_\s-]*key|invalid[_\s-]*api[_\s-]*key.*401", re.IGNORECASE)),
+)
+
+
+def _provider_from_model_value(model_value: object) -> str | None:
+    """Best-effort extraction of the provider name from the agent's `model` field.
+
+    The component stores the user's model selection as either a list of dicts
+    (modern multi-provider picker) or a string. We look for a `provider` key in
+    the first dict if present.
+    """
+    if isinstance(model_value, list) and model_value:
+        first = model_value[0]
+        if isinstance(first, dict):
+            provider = first.get("provider") or first.get("category")
+            if isinstance(provider, str) and provider.strip():
+                return provider.strip()
+    return None
+
+
+_TOOLCALL_FORMAT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Groq raises this when a small model emits a malformed tool call.
+    re.compile(r"failed to call a function\.\s*please adjust your prompt", re.IGNORECASE),
+    re.compile(r"failed_generation", re.IGNORECASE),
+    re.compile(r"tool[_ ]?call.*malformed|malformed tool[_ ]?call", re.IGNORECASE),
+)
+
+
+def _model_name_from_model_value(model_value: object) -> str | None:
+    if isinstance(model_value, list) and model_value:
+        first = model_value[0]
+        if isinstance(first, dict):
+            n = first.get("name") or first.get("model") or first.get("display_name")
+            if isinstance(n, str) and n.strip():
+                return n.strip()
+    return None
+
+
+def _format_auth_failure(error_msg: str, model_value: object | None = None) -> str | None:
+    """Translate a known provider failure into an actionable instruction.
+
+    Catches two distinct categories:
+      1. Auth failures (401 / invalid API key) — points the user at the
+         specific Inspector field they need to fix.
+      2. Tool-call format failures (Groq's `failed_generation`) — those
+         almost always mean the chosen model is too small to handle the
+         agent's tool schema; suggest a larger model.
+
+    Returns a markdown string the user can act on, or None if the error
+    doesn't match (in which case the caller falls back to the raw error).
+    """
+    if not error_msg:
+        return None
+    # Tool-call format failures first — they look superficially like LLM
+    # errors but the fix is "pick a bigger model", not "fix the API key".
+    for pattern in _TOOLCALL_FORMAT_PATTERNS:
+        if pattern.search(error_msg):
+            named_provider = _provider_from_model_value(model_value) or "the LLM provider"
+            current_model = _model_name_from_model_value(model_value) or "the selected model"
+            return (
+                f"**Tool-calling failed — the model is too small for this agent.**\n\n"
+                f"The agent's tool calls completed, but `{current_model}` "
+                f"({named_provider}) couldn't format a follow-up tool invocation. "
+                f"This is almost always a model-capability issue, not a prompt issue.\n\n"
+                f"To fix:\n"
+                f"1. Open this agent's Inspector → **Language Model** field\n"
+                f"2. Pick a larger / more capable model. Recommended:\n"
+                f"   - **Groq:** `llama-3.3-70b-versatile` or `openai/gpt-oss-120b`\n"
+                f"   - **OpenAI:** `gpt-4o` or `gpt-4o-mini`\n"
+                f"   - **Anthropic:** `claude-sonnet-4-6`\n"
+                f"3. Click **Save**, then **Re-run**\n\n"
+                f"_The data the agent already collected via tools is preserved — "
+                f"only the final synthesis step needs the bigger model._"
+            )
+    for provider, pattern in _AUTH_ERROR_PATTERNS:
+        if pattern.search(error_msg):
+            # Prefer the model's declared provider over the regex-derived name
+            # when available — it's friendlier ("Groq" vs "Model provider").
+            named_provider = _provider_from_model_value(model_value) or provider
+            return (
+                f"**Missing or invalid {named_provider} API key.**\n\n"
+                f"The agent's tool calls completed, but the LLM call failed because the "
+                f"`API Key` field for **{named_provider}** is empty or invalid.\n\n"
+                f"To fix:\n"
+                f"1. Open this agent's Inspector → **API Key** field\n"
+                f"2. Paste your real {named_provider} API key (replace the placeholder text if there is one)\n"
+                f"3. Click **Save**, then **Re-run**\n\n"
+                f"_If you don't have a {named_provider} key yet, you can get one from the provider's dashboard._"
+            )
+    return None
+
+
 class LCAgentComponent(Component):
     trace_type = "agent"
     _base_inputs: list[InputTypes] = [
@@ -294,13 +395,17 @@ class LCAgentComponent(Component):
         except ExceptionWithMessageError as e:
             logger.error(f"ExceptionWithMessageError: {e}")
             error_msg = str(e.message) if hasattr(e, "message") else str(e)
-            # Return a message with the error instead of deleting everything
+            # If the underlying failure is "no/invalid API key", surface an
+            # actionable instruction naming the provider and the field the
+            # user needs to fill, instead of the raw provider JSON.
+            friendly = _format_auth_failure(error_msg, getattr(self, "model", None))
+            text = friendly or (
+                f"**Agent encountered an error:** {error_msg[:300]}\n\n"
+                "The tool calls above completed successfully — expand them to see the data collected. "
+                "To get the full synthesized report, use a model with higher token limits."
+            )
             error_result = await Message.create(
-                text=(
-                    f"**Agent encountered an error:** {error_msg[:300]}\n\n"
-                    "The tool calls above completed successfully — expand them to see the data collected. "
-                    "To get the full synthesized report, use a model with higher token limits."
-                ),
+                text=text,
                 sender=MESSAGE_SENDER_AI,
                 sender_name=sender_name,
                 session_id=session_id or uuid.uuid4(),
