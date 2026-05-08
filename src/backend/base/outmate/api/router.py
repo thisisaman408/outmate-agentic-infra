@@ -1,5 +1,7 @@
 # Router for base api
+print("[IMPORT] api/router.py: top of module", flush=True)
 from fastapi import APIRouter
+print("[IMPORT] api/router.py: imported APIRouter, before outmate.api.v1 import", flush=True)
 
 from outmate.api.v1 import (
     api_key_router,
@@ -74,14 +76,20 @@ router_v1.include_router(deployment_router)
 
 # Agentic flow execution - lazy import to avoid circular dependency
 def _include_agentic_router():
+    print("[IMPORT] _include_agentic_router: before agentic.api.router", flush=True)
     from outmate.agentic.api.router import router as agentic_router
+    print("[IMPORT] _include_agentic_router: after agentic.api.router, before agentic.api.runs", flush=True)
     from outmate.agentic.api.runs import router as agentic_runs_router
+    print("[IMPORT] _include_agentic_router: after agentic.api.runs", flush=True)
 
     router_v1.include_router(agentic_router)
     router_v1.include_router(agentic_runs_router)
+    print("[IMPORT] _include_agentic_router: done", flush=True)
 
 
+print("[IMPORT] api/router.py: about to call _include_agentic_router()", flush=True)
 _include_agentic_router()
+print("[IMPORT] api/router.py: bottom of module", flush=True)
 
 router_v2.include_router(files_router_v2)
 router_v2.include_router(mcp_router_v2)
