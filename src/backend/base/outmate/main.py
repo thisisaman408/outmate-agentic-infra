@@ -464,7 +464,9 @@ def get_lifespan(*, fix_migration=False, version=None):
 
 def create_app():
     """Create the FastAPI app and include the router."""
+    print("[CREATE_APP] entered", flush=True)
     from outmate.utils.version import get_version_info
+    print("[CREATE_APP] post-import get_version_info", flush=True)
 
     # Read config from environment variables set by the CLI launcher
     static_files_dir_str = os.environ.get("OUTMATE_STATIC_FILES_DIR")
@@ -472,18 +474,27 @@ def create_app():
     backend_only = os.environ.get("OUTMATE_BACKEND_ONLY", "false").lower() == "true"
 
     __version__ = get_version_info()["version"]
+    print("[CREATE_APP] before configure()", flush=True)
     configure()
+    print("[CREATE_APP] after configure()", flush=True)
+    print("[CREATE_APP] before get_lifespan()", flush=True)
     lifespan = get_lifespan(version=__version__)
+    print("[CREATE_APP] after get_lifespan()", flush=True)
+    print("[CREATE_APP] before FastAPI(...)", flush=True)
     app = FastAPI(
         title="outmate",
         version=__version__,
         lifespan=lifespan,
     )
+    print("[CREATE_APP] after FastAPI(...) — app constructed", flush=True)
     app.add_middleware(
         ContentSizeLimitMiddleware,
     )
+    print("[CREATE_APP] after ContentSizeLimitMiddleware", flush=True)
 
+    print("[CREATE_APP] before setup_sentry(app)", flush=True)
     setup_sentry(app)
+    print("[CREATE_APP] after setup_sentry(app)", flush=True)
 
     settings = get_settings_service().settings
 
