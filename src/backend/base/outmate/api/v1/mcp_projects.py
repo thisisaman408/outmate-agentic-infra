@@ -1432,26 +1432,14 @@ async def init_mcp_servers():
 
             for project in projects:
                 try:
-                    # Auto-enable API key auth for projects without auth settings or with "none" auth
-                    # when AUTO_LOGIN is false
-                    if not settings_service.auth_settings.AUTO_LOGIN:
-                        should_update_to_apikey = False
-
-                        if not project.auth_settings:
-                            # No auth settings at all
-                            should_update_to_apikey = True
-                        # Check if existing auth settings have auth_type "none"
-                        elif project.auth_settings.get("auth_type") == "none":
-                            should_update_to_apikey = True
-
-                        if should_update_to_apikey:
-                            default_auth = {"auth_type": "apikey"}
-                            project.auth_settings = encrypt_auth_settings(default_auth)
-                            session.add(project)
-                            await logger.ainfo(
-                                f"Auto-enabled API key authentication for existing project {project.name} "
-                                f"({project.id}) due to AUTO_LOGIN=false"
-                            )
+                    # Skip the AUTO_LOGIN=False → auto-enable-API-key behavior. We
+                    # authenticate users via SSO bridge cookie (`access_token_lf`),
+                    # not API keys. Forcing apikey on every project breaks the React
+                    # app's bootstrap when it tries to list folders/projects with
+                    # only a cookie session — folders return 401 and the user is
+                    # left with project_id=undefined. Skip this block; rely on the
+                    # cookie-based session for project access.
+                    pass  # noqa: PIE790
 
                     # WARN: If oauth projects exist in the database and the MCP Composer is disabled,
                     # these projects will be reset to "apikey" or "none" authentication, erasing all oauth settings.
