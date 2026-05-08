@@ -95,11 +95,11 @@ async def login_to_get_access_token(
 
 
 @router.get("/auto_login", include_in_schema=False)
-async def auto_login(response: Response, db: DbSession):
+async def auto_login(request: Request, response: Response, db: DbSession):
     auth_settings = get_settings_service().auth_settings
+    auth = get_auth_service()
 
     if auth_settings.AUTO_LOGIN:
-        auth = get_auth_service()
         user_id, tokens = await auth.create_user_longterm_token(db)
         response.set_cookie(
             "access_token_lf",
@@ -133,6 +133,44 @@ async def auto_login(response: Response, db: DbSession):
                 await initialize_agentic_user_variables(user.id, db)
 
         return tokens
+
+    # SSO-via-bridge fallback. AUTO_LOGIN is forced off when OUTMATE_BRIDGE_SECRET
+    # is set; the React app's bootstrap still calls /auto_login expecting tokens.
+    # If the user has a valid access_token_lf cookie (set by /api/v1/auth/bridge),
+    # mint fresh tokens for that user instead of returning 403.
+    cookie_token = request.cookies.get("access_token_lf")
+    if cookie_token:
+        try:
+            user = await auth.get_current_user_from_access_token(cookie_token, db)
+        except Exception:  # noqa: BLE001 — any auth failure → fall through to 403
+            user = None
+        if user is not None:
+            tokens = await auth.create_user_tokens(user.id, db, update_last_login=False)
+            response.set_cookie(
+                "access_token_lf",
+                tokens["access_token"],
+                httponly=auth_settings.ACCESS_HTTPONLY,
+                samesite=auth_settings.ACCESS_SAME_SITE,
+                secure=auth_settings.ACCESS_SECURE,
+                expires=None,
+                domain=auth_settings.COOKIE_DOMAIN,
+            )
+            if user.store_api_key is None:
+                user.store_api_key = ""
+            response.set_cookie(
+                "apikey_tkn_lflw",
+                str(user.store_api_key),
+                httponly=auth_settings.ACCESS_HTTPONLY,
+                samesite=auth_settings.ACCESS_SAME_SITE,
+                secure=auth_settings.ACCESS_SECURE,
+                expires=None,
+                domain=auth_settings.COOKIE_DOMAIN,
+            )
+            if get_settings_service().settings.agentic_experience:
+                from outmate.api.utils.mcp.agentic_mcp import initialize_agentic_user_variables
+
+                await initialize_agentic_user_variables(user.id, db)
+            return tokens
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
