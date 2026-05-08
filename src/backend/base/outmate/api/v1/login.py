@@ -166,6 +166,10 @@ async def auto_login(request: Request, response: Response, db: DbSession):
                 expires=None,
                 domain=auth_settings.COOKIE_DOMAIN,
             )
+            # Ensure the user has a default folder/project. Bridge auto-provisions
+            # only the User row; if this is their first SSO landing, the React app's
+            # /api/v1/projects/{id} call would otherwise hit "undefined" and 422.
+            await get_or_create_default_folder(db, user.id)
             if get_settings_service().settings.agentic_experience:
                 from outmate.api.utils.mcp.agentic_mcp import initialize_agentic_user_variables
 
