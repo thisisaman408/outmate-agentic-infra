@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, ForeignKey
 from sqlalchemy import Enum as SQLEnum
+from sqlalchemy import Uuid as SAUuid
 from sqlmodel import Field, SQLModel
 
 
@@ -20,7 +21,15 @@ class ScheduleType(str, Enum):
 
 
 class FlowScheduleBase(SQLModel):
-    flow_id: UUID = Field(index=True, foreign_key="flow.id")
+    # Match the migration: ondelete=CASCADE so deleting a flow drops its schedules.
+    flow_id: UUID = Field(
+        sa_column=Column(
+            SAUuid,
+            ForeignKey("flow.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
     schedule_type: ScheduleType = Field(
         default=ScheduleType.MANUAL,
         sa_column=Column(
@@ -49,9 +58,19 @@ class FlowScheduleBase(SQLModel):
 
 class FlowSchedule(FlowScheduleBase, table=True):  # type: ignore[call-arg]
     __tablename__ = "flow_schedule"
-    id: UUID = Field(default_factory=uuid4, primary_key=True, unique=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Drop unique=True (primary key already implies uniqueness; alembic was
+    # detecting a redundant UniqueConstraint diff).
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # Match the migration: timezone-aware so Postgres TIMESTAMP(timezone=True)
+    # matches the model's DateTime declaration.
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
 class FlowScheduleCreate(FlowScheduleBase):
