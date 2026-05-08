@@ -1,14 +1,21 @@
+print("[IMPORT] api/v1/__init__.py: top", flush=True)
 from outmate.api.v1.api_key import router as api_key_router
+print("[IMPORT] api/v1/__init__.py: after api_key", flush=True)
 from outmate.api.v1.auth_bridge import router as auth_bridge_router
+print("[IMPORT] api/v1/__init__.py: after auth_bridge", flush=True)
 from outmate.api.v1.chat import router as chat_router
 from outmate.api.v1.deployments import router as deployment_router
 from outmate.api.v1.endpoints import router as endpoints_router
 from outmate.api.v1.files import router as files_router
+print("[IMPORT] api/v1/__init__.py: after files (before flow_schedules)", flush=True)
 from outmate.api.v1.flow_schedules import router as flow_schedules_router
+print("[IMPORT] api/v1/__init__.py: after flow_schedules", flush=True)
 from outmate.api.v1.flow_version import router as flow_version_router
 from outmate.api.v1.flows import router as flows_router
 from outmate.api.v1.folders import router as folders_router
+print("[IMPORT] api/v1/__init__.py: before integrations", flush=True)
 from outmate.api.v1.integrations import router as integrations_router
+print("[IMPORT] api/v1/__init__.py: after integrations", flush=True)
 from outmate.api.v1.knowledge_bases import router as knowledge_bases_router
 from outmate.api.v1.login import router as login_router
 from outmate.api.v1.mcp import router as mcp_router
