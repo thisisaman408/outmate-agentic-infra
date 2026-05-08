@@ -40,6 +40,7 @@ import { useStore } from "@/lib/store"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
+import { agenticBridgeUrl } from "@/lib/agentic-bridge"
 
 type NavItem = {
   name: string
@@ -84,9 +85,13 @@ const sections: NavSection[] = [
   {
     label: "Execution",
     items: [
-      ...(AGENTIC_INFRA_URL
-        ? [{ name: "AI Agents Infra", href: AGENTIC_INFRA_URL, icon: Cpu, external: true } as NavItem]
-        : []),
+      // The "Workflows" entry hands the user off to the agentic stack via
+      // the SSO bridge (`/api/v1/auth/agentic-bridge`) so they don't have
+      // to log in twice. The `#agentic` sentinel href is detected in the
+      // click handler below — top-level navigations can't carry an
+      // Authorization header, so the JWT goes via `?auth=…` set by
+      // `agenticBridgeUrl()`.
+      { name: "Workflows", href: "#agentic", icon: Cpu, external: true } as NavItem,
       { name: "Social Agent", href: "/social-agent", icon: Share2, badge: "New", badgeColor: "green" },
       { name: "Voice AI Agent", href: "/voice-agent", icon: Phone, badge: "AI", badgeColor: "indigo" },
       { name: "Intent Signals", href: "/signals", icon: Radar },
@@ -151,9 +156,15 @@ export function Sidebar() {
         <div className="flex items-center">
           {item.external ? (
             <a
-              href={item.href}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={item.href === "#agentic" ? "#" : item.href}
+              target={item.href === "#agentic" ? undefined : "_blank"}
+              rel={item.href === "#agentic" ? undefined : "noopener noreferrer"}
+              onClick={(e) => {
+                if (item.href === "#agentic") {
+                  e.preventDefault()
+                  window.location.href = agenticBridgeUrl("/all")
+                }
+              }}
               className={cn(
                 "group relative flex-1 flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
                 sidebarCollapsed ? "justify-center px-2 py-2" : `px-3 py-[7px] ${depth > 0 ? "pl-9" : ""}`,

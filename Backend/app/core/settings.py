@@ -454,6 +454,22 @@ class Settings(BaseSettings):
         description="HTTP timeout for synchronous calls to the agentic infra (7 min)",
     )
 
+    # ------------------------------------------------------------------------
+    # Agentic SSO bridge (Workflows sidebar entry).
+    # ------------------------------------------------------------------------
+    # Shared HS256 secret used to mint a 60-second JWT that hands the
+    # already-logged-in main-stack user off to the agentic stack without
+    # asking them to log in again. Must EXACTLY match `OUTMATE_BRIDGE_SECRET`
+    # set on the agentic process (`outmate-agentic`). Min 32 chars.
+    OUTMATE_BRIDGE_SECRET: Optional[str] = Field(
+        None,
+        description=(
+            "Shared HS256 secret for the agentic SSO bridge. Must match the "
+            "value set on the agentic process. Generate via "
+            "`python -c \"import secrets; print(secrets.token_urlsafe(32))\"`."
+        ),
+    )
+
     # ========================================================================
     # RETELL AI — Voice Agent
     # ========================================================================

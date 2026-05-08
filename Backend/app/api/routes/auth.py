@@ -981,3 +981,96 @@ async def update_notifications(
         logger.error("Notifications update error: %s", e)
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update notifications")
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Agentic SSO bridge — Workflows sidebar entry.
+# ───────────────────────────────────────────────────────────────────────────
+# The agentic stack runs as a separate FastAPI process with its own user
+# table. To avoid a second login, we mint a short-lived (60 s) JWT signed
+# with the shared `OUTMATE_BRIDGE_SECRET` and 302 to the agentic side's
+# `/api/v1/auth/bridge` endpoint, which validates the token, mints its own
+# `access_token_lf` cookie for the same UUID (auto-provisioning the agentic
+# User row on first hit), and 302s to the requested path.
+#
+# The bridge JWT is a different token type (`outmate_bridge`) from the
+# normal access JWT — that way a leaked main JWT can't authenticate
+# against the agentic stack and vice versa.
+
+_BRIDGE_TOKEN_TYPE = "outmate_bridge"
+
+
+def _create_bridge_token(user: User) -> str:
+    if not settings.OUTMATE_BRIDGE_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "OUTMATE_BRIDGE_SECRET is not configured on the main backend. "
+                "Set it in the environment to enable the agentic SSO bridge."
+            ),
+        )
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "name": user.full_name,
+        "type": _BRIDGE_TOKEN_TYPE,
+        "exp": datetime.utcnow() + timedelta(seconds=60),
+        "iat": datetime.utcnow(),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.OUTMATE_BRIDGE_SECRET, algorithm="HS256")
+
+
+@router.get("/agentic-bridge")
+def agentic_bridge(
+    request: Request,
+    next: str = "/all",
+    auth: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Hand the logged-in user off to the agentic stack.
+
+    Top-level browser navigations cannot attach an `Authorization: Bearer`
+    header, so the main-stack JWT is accepted via either:
+      1. `Authorization: Bearer <jwt>` header (used by fetch() callers)
+      2. `?auth=<jwt>` query param (used by `Frontend/lib/agentic-bridge.ts`
+         for top-level navigations).
+    """
+    # Sanitize `next` to prevent open-redirect — only relative paths.
+    if not next.startswith("/"):
+        next = "/all"
+
+    raw_token: Optional[str] = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header.split(" ", 1)[1].strip()
+    if not raw_token and auth:
+        raw_token = auth
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Bridge requires either `Authorization: Bearer <jwt>` or `?auth=<jwt>`.",
+        )
+
+    try:
+        payload = jwt.decode(raw_token, settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=401, detail="Token expired") from exc
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid authentication token") from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token payload invalid")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    bridge_token = _create_bridge_token(user)
+    base = settings.AGENTIC_INFRA_URL.rstrip("/")
+    target = (
+        f"{base}/api/v1/auth/bridge"
+        f"?token={quote_plus(bridge_token)}&next={quote_plus(next)}"
+    )
+    return RedirectResponse(url=target, status_code=302)
