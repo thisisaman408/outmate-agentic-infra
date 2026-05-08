@@ -151,9 +151,12 @@ def get_lifespan(*, fix_migration=False, version=None):
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        print("[BOOT] lifespan: entered", flush=True)
         from lfx.interface.components import get_and_cache_all_types_dict
+        print("[BOOT] lifespan: post-import get_and_cache_all_types_dict", flush=True)
 
         configure()
+        print("[BOOT] lifespan: post-configure()", flush=True)
 
         # Startup message
         if version:
@@ -169,34 +172,46 @@ def get_lifespan(*, fix_migration=False, version=None):
             start_time = asyncio.get_event_loop().time()
 
             await logger.adebug("Initializing services")
+            print("[BOOT] lifespan: before initialize_services", flush=True)
             await initialize_services(fix_migration=fix_migration)
+            print("[BOOT] lifespan: after initialize_services", flush=True)
             await logger.adebug(f"Services initialized in {asyncio.get_event_loop().time() - start_time:.2f}s")
 
             current_time = asyncio.get_event_loop().time()
             await logger.adebug("Setting up LLM caching")
+            print("[BOOT] lifespan: before setup_llm_caching", flush=True)
             setup_llm_caching()
+            print("[BOOT] lifespan: after setup_llm_caching", flush=True)
             await logger.adebug(f"LLM caching setup in {asyncio.get_event_loop().time() - current_time:.2f}s")
 
             current_time = asyncio.get_event_loop().time()
             await logger.adebug("Copying profile pictures")
+            print("[BOOT] lifespan: before copy_profile_pictures", flush=True)
             await copy_profile_pictures()
+            print("[BOOT] lifespan: after copy_profile_pictures", flush=True)
             await logger.adebug(f"Profile pictures copied in {asyncio.get_event_loop().time() - current_time:.2f}s")
 
             if get_settings_service().auth_settings.AUTO_LOGIN:
                 current_time = asyncio.get_event_loop().time()
                 await logger.adebug("Initializing default super user")
+                print("[BOOT] lifespan: before AUTO_LOGIN superuser init", flush=True)
                 await initialize_auto_login_default_superuser()
+                print("[BOOT] lifespan: after AUTO_LOGIN superuser init", flush=True)
                 await logger.adebug(
                     f"Default super user initialized in {asyncio.get_event_loop().time() - current_time:.2f}s"
                 )
 
             await logger.adebug("Initializing super user")
+            print("[BOOT] lifespan: before plain superuser init", flush=True)
             await initialize_auto_login_default_superuser()
+            print("[BOOT] lifespan: after plain superuser init", flush=True)
             await logger.adebug(f"Super user initialized in {asyncio.get_event_loop().time() - current_time:.2f}s")
 
             current_time = asyncio.get_event_loop().time()
             await logger.adebug("Loading bundles")
+            print("[BOOT] lifespan: before load_bundles_with_error_handling", flush=True)
             temp_dirs, bundles_components_paths = await load_bundles_with_error_handling()
+            print("[BOOT] lifespan: after load_bundles_with_error_handling", flush=True)
             get_settings_service().settings.components_path.extend(bundles_components_paths)
             await logger.adebug(f"Bundles loaded in {asyncio.get_event_loop().time() - current_time:.2f}s")
 
@@ -306,27 +321,41 @@ def get_lifespan(*, fix_migration=False, version=None):
                     await logger.aerror(f"Error in delayed heavy initialization: {e}")
 
             # Fire off the heavy background initialization immediately and allow the app to actually bind the port
+            print("[BOOT] lifespan: spawning delayed_heavy_init task", flush=True)
             heavy_init_task = asyncio.create_task(delayed_heavy_init())
+            print("[BOOT] lifespan: heavy_init task spawned", flush=True)
 
             # Maintain task reference to prevent garbage collection and cancel on shutdown
             mcp_init_task = heavy_init_task
 
             # v1 and project MCP server context managers
+            print("[BOOT] lifespan: importing mcp / mcp_projects", flush=True)
             from outmate.api.v1.mcp import start_streamable_http_manager
             from outmate.api.v1.mcp_projects import start_project_task_group
+            print("[BOOT] lifespan: imported mcp modules", flush=True)
 
+            print("[BOOT] lifespan: before start_streamable_http_manager", flush=True)
             await start_streamable_http_manager()
+            print("[BOOT] lifespan: after start_streamable_http_manager", flush=True)
+
+            print("[BOOT] lifespan: before start_project_task_group", flush=True)
             await start_project_task_group()
+            print("[BOOT] lifespan: after start_project_task_group", flush=True)
 
             # Start the in-process FlowScheduler tick loop.
+            print("[BOOT] lifespan: before start_flow_scheduler import", flush=True)
             try:
                 from outmate.services.flow_scheduler import start_flow_scheduler
-
+                print("[BOOT] lifespan: flow_scheduler imported, calling start", flush=True)
                 await start_flow_scheduler()
+                print("[BOOT] lifespan: flow_scheduler started", flush=True)
             except Exception as exc:  # noqa: BLE001
+                print(f"[BOOT] lifespan: flow_scheduler FAILED: {exc}", flush=True)
                 await logger.awarning(f"Failed to start flow scheduler: {exc}")
 
+            print("[BOOT] lifespan: about to yield (app becomes ready)", flush=True)
             yield
+            print("[BOOT] lifespan: post-yield (shutdown beginning)", flush=True)
         except asyncio.CancelledError:
             await logger.adebug("Lifespan received cancellation signal")
         except Exception as exc:
